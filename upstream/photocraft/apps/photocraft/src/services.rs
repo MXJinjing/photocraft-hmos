@@ -1,0 +1,349 @@
+//! Native platform services: file dialogs (rfd), filesystem, codecs.
+
+use photocraft_codecs::{ChannelLayout, EncodeOptions, Image, SampleType as CS};
+use photocraft_color::{ColorMode, SampleType};
+use photocraft_doc::{Document, Layer, Size};
+use photocraft_format::RecoveryStore;
+use photocraft_geom::Rect;
+use photocraft_ui_egui::{Recovered, Services};
+use std::cell::RefCell;
+use std::path::{Path, PathBuf};
+use std::rc::Rc;
+use std::sync::Arc;
+
+/// Everything File › Open reads: PhotoCraft and Photoshop documents, flat images, and Photoshop
+/// brushes (.abr) and gradients (.grd), which go to the preset libraries.
+const OPEN_EXTS: &[&str] = &[
+    "pcraft", "psd", "psb", "png", "jpg", "jpeg", "tif", "tiff", "webp", "gif", "bmp", "tga", "ico", "qoi", "exr", "hdr", "pbm", "pgm", "ppm", "pam", "pfm",
+    "dng", "cr2", "cr3", "nef", "nrw", "arw", "pef", "orf", "rw2", "raf", "abr", "grd",
+];
+
+/// File › Save As formats: (filter name, extensions). The filter matching the suggested name's
+/// extension comes first, so a .pcraft document saves as .pcraft by default and everything else
+/// keeps defaulting to Photoshop.
+const SAVE_FILTERS: &[(&str, &[&str])] = &[
+    ("Photoshop", &["psd", "psb"]),
+    ("PhotoCraft", &["pcraft"]),
+    ("PNG", &["png"]),
+    ("JPEG", &["jpg"]),
+    ("TIFF", &["tif"]),
+    ("Targa", &["tga"]),
+    ("OpenEXR", &["exr"]),
+];
+
+/// [`SAVE_FILTERS`] with the one for `suggested`'s extension first.
+fn save_filters(suggested: &str) -> Vec<(&'static str, &'static [&'static str])> {
+    let ext = Path::new(suggested).extension().map(|e| e.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
+    let mut v = SAVE_FILTERS.to_vec();
+    if let Some(i) = v.iter().position(|(_, exts)| exts.contains(&ext.as_str())) {
+        let f = v.remove(i);
+        v.insert(0, f);
+    }
+    v
+}
+
+/// Per-user settings directory: `PHOTOCRAFT_CONFIG_DIR`, else `<exe dir>/PhotoCraftData` in
+/// portable mode, else the platform convention. Everything the app persists lives under it; see
+/// [`crate::app_dirs`].
+pub fn config_dir() -> Option<PathBuf> {
+    crate::app_dirs::config_dir()
+}
+
+pub fn prefs_file() -> Option<PathBuf> {
+    config_dir().map(|d| d.join("preferences.json"))
+}
+
+/// The brush preset store (one file per preset group plus tip bitmaps; see
+/// `photocraft_engine::preset_store`).
+pub fn presets_dir() -> Option<PathBuf> {
+    config_dir().map(|d| d.join("Presets"))
+}
+
+fn recovery_dir() -> Option<PathBuf> {
+    config_dir().map(|d| d.join("Recovery"))
+}
+
+/// Write `bytes` crash-safely (temp file beside the target, fsync, rename, directory fsync; see
+/// [`photocraft_format::atomic`]). Every document write (Save, Save As, Export, Save for Web) and
+/// the preferences go through here, so a failed or interrupted save never destroys the old file.
+fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    photocraft_format::atomic_write(path, bytes).map_err(|e| e.to_string())
+}
+
+type SharedRecovery = Rc<RefCell<Option<RecoveryStore>>>;
+
+/// Run `f` on the recovery store (`Err` without a config directory). The service closures never
+/// call each other, so the store is never borrowed twice.
+fn with_store<R>(store: &SharedRecovery, f: impl FnOnce(&mut RecoveryStore) -> R) -> Result<R, String> {
+    let mut slot = store.try_borrow_mut().map_err(|_| "crash recovery is busy".to_string())?;
+    Ok(f(slot.as_mut().ok_or("no config directory")?))
+}
+
+/// Crash recovery: background incremental .pcraft autosaves into `dir` (`None`: no config
+/// directory, so autosaves fail and nothing is recovered). Recovered documents keep their entries
+/// until a newer autosave replaces them or they're saved or closed (see [`RecoveryStore`]).
+fn recovery_services(dir: Option<PathBuf>) -> Services {
+    let store: SharedRecovery = Rc::new(RefCell::new(dir.map(RecoveryStore::new)));
+    let (s1, s2, s3) = (store.clone(), store.clone(), store.clone());
+    Services {
+        autosave: Some(Box::new(move |doc: &Arc<Document>, revision: u64, path: Option<&str>| {
+            with_store(&s1, |s| s.autosave(doc, revision, path.map(str::to_string)))
+        })),
+        discard_autosave: Some(Box::new(move |id: u64| {
+            let _ = with_store(&s2, |s| s.discard(id));
+        })),
+        recover: Some(Box::new(move || {
+            let found = with_store(&s3, |s| s.recover()).unwrap_or_default();
+            found.into_iter().map(|(e, doc)| Recovered { key: e.info.key, path: e.info.original_path, doc }).collect()
+        })),
+        adopt_autosave: Some(Box::new(move |id: u64, key: &str| {
+            let _ = with_store(&store, |s| s.adopt(id, key));
+        })),
+        ..Default::default()
+    }
+}
+
+pub fn native(automation: Option<photocraft_automation::AuthorizedWorkspace>) -> Services {
+    let clip: Rc<RefCell<Option<arboard::Clipboard>>> = Rc::default();
+    let automation_read = automation.clone().map(|workspace| {
+        Box::new(move |path: &str| {
+            let bytes = workspace.read(path).map_err(|error| error.to_string())?;
+            let name = Path::new(path).file_name().and_then(|name| name.to_str()).unwrap_or(path).to_string();
+            Ok((name, bytes))
+        }) as photocraft_ui_egui::AutomationReadFn
+    });
+    let automation_write = automation.clone().map(|workspace| {
+        Box::new(move |path: &str, bytes: &[u8]| workspace.write(path, bytes).map_err(|error| error.to_string())) as photocraft_ui_egui::AutomationWriteFn
+    });
+    let automation_command = automation.map(|_| {
+        Box::new(|id: &str, params: &serde_json::Value| {
+            photocraft_automation::workspace::authorize_desktop_engine_command(id, params).map_err(|error| error.to_string())
+        }) as photocraft_ui_egui::AutomationCommandFn
+    });
+    Services {
+        import: Some(Box::new(|name: &str, bytes: &[u8]| {
+            crate::crash_guard::guard("Open", || photocraft_io::import(name, bytes).map(|r| (r.document, r.warnings)).map_err(|e| e.to_string()))
+        })),
+        export: Some(Box::new(|doc: &Document, path: &str, settings: &photocraft_ui_egui::ExportSettings| {
+            let mut opts = photocraft_io::ExportOptions::default();
+            if let Some(q) = settings.jpeg_quality {
+                opts.encode.jpeg_quality = q;
+            }
+            crate::crash_guard::guard("Export", || photocraft_io::export(doc, path, &opts).map(|r| (r.bytes, r.warnings)).map_err(|e| e.to_string()))
+        })),
+        pick_open: Some(Box::new(|| {
+            let path = rfd::FileDialog::new().add_filter("All Formats", OPEN_EXTS).add_filter("PhotoCraft", &["pcraft"]).pick_file()?;
+            let bytes = std::fs::read(&path).ok()?;
+            Some((path.to_string_lossy().to_string(), bytes))
+        })),
+        pick_save: Some(Box::new(|suggested: &str| {
+            let p = std::path::Path::new(suggested);
+            let mut d = rfd::FileDialog::new();
+            for (name, exts) in save_filters(suggested) {
+                d = d.add_filter(name, exts);
+            }
+            if let Some(name) = p.file_name() {
+                d = d.set_file_name(name.to_string_lossy());
+            }
+            Some(d.save_file()?.to_string_lossy().to_string())
+        })),
+        write: Some(Box::new(|path: &str, bytes: &[u8]| write_atomic(Path::new(path), bytes))),
+        automation_read,
+        automation_write,
+        automation_command,
+        encode_png: Some(Box::new(|w, h, rgba| {
+            let img = Image::from_u8(w, h, ChannelLayout::Rgba, rgba.to_vec()).map_err(|e| e.to_string())?;
+            photocraft_codecs::encode(&img, photocraft_codecs::Format::Png, &EncodeOptions::default()).map_err(|e| e.to_string())
+        })),
+        inbox: None,
+        open_url: Some(Box::new(|url: &str| open::that(url).map_err(|e| e.to_string()))),
+        clipboard_set_image: Some({
+            let clip = clip.clone();
+            Box::new(move |w: u32, h: u32, px: &[u8]| {
+                let mut slot = clip.try_borrow_mut().map_err(|_| "clipboard is busy".to_string())?;
+                let cb = match slot.as_mut() {
+                    Some(c) => c,
+                    None => slot.insert(arboard::Clipboard::new().map_err(|e| e.to_string())?),
+                };
+                cb.set_image(arboard::ImageData { width: w as usize, height: h as usize, bytes: std::borrow::Cow::Borrowed(px) }).map_err(|e| e.to_string())
+            })
+        }),
+        clipboard_get_image: Some({
+            let clip = clip.clone();
+            Box::new(move || {
+                let mut slot = clip.try_borrow_mut().ok()?;
+                let cb = match slot.as_mut() {
+                    Some(c) => c,
+                    None => slot.insert(arboard::Clipboard::new().ok()?),
+                };
+                let img = cb.get_image().ok()?;
+                Some((img.width as u32, img.height as u32, img.bytes.into_owned()))
+            })
+        }),
+        load_prefs: Some(Box::new(|| std::fs::read_to_string(prefs_file()?).ok())),
+        save_prefs: Some(Box::new(|text: &str| write_atomic(&prefs_file().ok_or("no config directory")?, text.as_bytes()))),
+        append_text: Some(Box::new(|path: &str, text: &str| {
+            use std::io::Write;
+            let mut f = std::fs::OpenOptions::new().create(true).append(true).open(path).map_err(|e| e.to_string())?;
+            f.write_all(text.as_bytes()).map_err(|e| e.to_string())
+        })),
+        // Set by main once the Apple-event handlers are connected (macOS).
+        os_events: None,
+        // Set by main, which starts loading the store before the window opens.
+        preset_store: None,
+        ..recovery_services(recovery_dir())
+    }
+}
+
+/// Flat-image import via photocraft-codecs (kept for reference/tests; the app uses photocraft-io).
+#[allow(dead_code)]
+pub fn import_flat(name: &str, bytes: &[u8]) -> Result<Document, String> {
+    let img = photocraft_codecs::decode(bytes).map_err(|e| e.to_string())?;
+    let (w, h) = (img.width(), img.height());
+    let depth = match img.sample_type() {
+        CS::U8 => SampleType::U8,
+        CS::U16 => SampleType::U16,
+        _ => SampleType::F32,
+    };
+    let gray = matches!(img.layout(), ChannelLayout::Gray | ChannelLayout::GrayA);
+    let cmyk = matches!(img.layout(), ChannelLayout::Cmyk | ChannelLayout::CmykA);
+    let mode = if gray {
+        ColorMode::Grayscale
+    } else if cmyk {
+        ColorMode::Cmyk
+    } else {
+        ColorMode::Rgb
+    };
+    let target = match mode {
+        ColorMode::Grayscale => ChannelLayout::GrayA,
+        ColorMode::Cmyk => ChannelLayout::CmykA,
+        _ => ChannelLayout::Rgba,
+    };
+    let sample = match depth {
+        SampleType::U8 => CS::U8,
+        SampleType::U16 => CS::U16,
+        SampleType::F32 => CS::F32,
+    };
+    let conv = img.convert(target, sample);
+    let stem = std::path::Path::new(name).file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or(name.to_string());
+    let mut doc = Document::new(stem, Size::new(w, h), mode, depth);
+    doc.icc_profile = img.icc.clone().map(std::sync::Arc::new);
+    if let Some((x, _)) = img.meta.dpi {
+        doc.resolution_dpi = x;
+    }
+    let mut layer = Layer::raster("Background", doc.pixel_format());
+    let data = conv.to_normalized();
+    layer.surface_mut().ok_or("new raster layer has no pixels")?.write_region(Rect::from_xywh(0, 0, w, h), &data);
+    doc.layers.push(layer);
+    Ok(doc)
+}
+
+#[allow(dead_code)]
+pub fn export_flat(doc: &Document, path: &str) -> Result<Vec<u8>, String> {
+    let format = photocraft_codecs::from_extension(path).ok_or_else(|| format!("unknown file type for {path}"))?;
+    let buf = photocraft_compose::flatten(doc);
+    let (w, h) = (buf.rect.width(), buf.rect.height());
+    let data: Vec<f32> = buf.px.iter().flat_map(|p| *p).collect();
+    let img = match doc.depth {
+        SampleType::U8 => Image::from_u8(w, h, ChannelLayout::Rgba, buf.to_rgba8().pixels),
+        SampleType::U16 => Image::from_u16(w, h, ChannelLayout::Rgba, &data.iter().map(|v| (v.clamp(0.0, 1.0) * 65535.0 + 0.5) as u16).collect::<Vec<_>>()),
+        SampleType::F32 => Image::from_f32(w, h, ChannelLayout::Rgba, &data),
+    }
+    .map_err(|e| e.to_string())?;
+    let img = match &doc.icc_profile {
+        Some(icc) if doc.mode == ColorMode::Rgb => img.with_icc(Some((**icc).clone())),
+        _ => img,
+    };
+    photocraft_codecs::encode(&img, format, &EncodeOptions::default()).map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use photocraft_engine::Session;
+    use photocraft_format::list_recovery;
+    use photocraft_ui_egui::{PhotocraftApp, prefs_ui};
+    use serde_json::json;
+
+    const RED: [f32; 4] = [1.0, 0.0, 0.0, 1.0];
+    const BLUE: [f32; 4] = [0.0, 0.0, 1.0, 1.0];
+    const GREEN: [f32; 4] = [0.0, 1.0, 0.0, 1.0];
+
+    /// One app launch with crash recovery in `dir` (dropping it is the crash: background writes
+    /// already queued finish, nothing else runs).
+    fn launch(dir: &Path) -> PhotocraftApp {
+        PhotocraftApp::new(Session::new(), recovery_services(Some(dir.to_path_buf())))
+    }
+
+    /// The first pixel of each open document, and whether it's unsaved.
+    fn open_docs(app: &PhotocraftApp) -> Vec<([f32; 4], bool)> {
+        app.session.documents().iter().map(|d| (photocraft_compose::flatten(&d.doc).px.first().copied().unwrap_or_default(), d.is_dirty())).collect()
+    }
+
+    fn index_of(app: &PhotocraftApp, color: [f32; 4]) -> usize {
+        open_docs(app).iter().position(|(c, _)| *c == color).unwrap()
+    }
+
+    fn new_doc(app: &mut PhotocraftApp, color: &str) {
+        app.run("file.new", json!({"width": 4, "height": 4})).unwrap();
+        app.run("edit.fill", json!({"color": color})).unwrap();
+    }
+
+    fn autosave(app: &mut PhotocraftApp, ctx: &egui::Context) {
+        prefs_ui::autosave_now(app);
+        prefs_ui::tick(app, ctx);
+    }
+
+    #[test]
+    fn recovered_documents_survive_a_second_crash_until_saved_or_closed() {
+        let dir = std::env::temp_dir().join(format!("photocraft-recovery-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let ctx = egui::Context::default();
+        // Launch 1: two unsaved documents are autosaved, then the app crashes.
+        {
+            let mut app = launch(&dir);
+            new_doc(&mut app, "#ff0000");
+            new_doc(&mut app, "#0000ff");
+            autosave(&mut app, &ctx);
+        }
+        assert_eq!(list_recovery(&dir).len(), 2);
+        // Launch 2 recovers both and crashes again before its first autosave (#444).
+        {
+            let mut app = launch(&dir);
+            let mut docs = open_docs(&app);
+            docs.sort_by(|a, b| a.0[0].total_cmp(&b.0[0]));
+            assert_eq!(docs, [(BLUE, true), (RED, true)], "recovered and still unsaved");
+            prefs_ui::tick(&mut app, &ctx);
+        }
+        assert_eq!(list_recovery(&dir).len(), 2, "recovering keeps the entries on disk");
+        // Launch 3 has both again; autosaving unchanged documents adds nothing, a new document
+        // (whose id may repeat one from an earlier launch) gets an entry of its own.
+        {
+            let mut app = launch(&dir);
+            assert_eq!(app.session.documents().len(), 2);
+            autosave(&mut app, &ctx);
+            new_doc(&mut app, "#00ff00");
+            autosave(&mut app, &ctx);
+        }
+        assert_eq!(list_recovery(&dir).len(), 3);
+        // Launch 4: closing and saving recovered documents removes their entries, no duplicates.
+        let mut app = launch(&dir);
+        assert_eq!(app.session.documents().len(), 3);
+        let red = index_of(&app, RED);
+        app.run("file.close", json!({"document": red})).unwrap();
+        // Saving marks the revision saved (the file write itself is the save service's job).
+        assert!(app.session.set_active(index_of(&app, BLUE)));
+        let st = app.session.active_mut().unwrap();
+        st.saved_revision = st.revision;
+        prefs_ui::tick(&mut app, &ctx);
+        let left = list_recovery(&dir);
+        assert_eq!(left.len(), 1);
+        assert_eq!(photocraft_compose::flatten(&photocraft_format::recover(&left[0]).unwrap()).px.first().copied(), Some(GREEN));
+        let green = index_of(&app, GREEN);
+        app.run("file.close", json!({"document": green})).unwrap();
+        prefs_ui::tick(&mut app, &ctx);
+        assert!(list_recovery(&dir).is_empty());
+        drop(app);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
