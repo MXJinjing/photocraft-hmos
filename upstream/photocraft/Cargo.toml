@@ -3,6 +3,10 @@ resolver = "3"
 members = ["crates/*", "apps/*", "xtask"]
 default-members = ["crates/*", "apps/photocraft", "apps/photocraft-cli", "xtask"]
 
+# HarmonyOS WebGL compatibility fix, vendored from the verified 30.0.1 crate.
+[patch.crates-io]
+wgpu-hal = { path = "../../third_party/wgpu-hal-30.0.1" }
+
 [workspace.package]
 version = "0.3.0"
 edition = "2024"

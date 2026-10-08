@@ -3,8 +3,13 @@ import { window } from '@kit.ArkUI';
 import { BusinessError } from '@kit.BasicServicesKit';
 
 export default class EntryAbility extends UIAbility {
-  onCreate(_want: Want, _launchParam: AbilityConstant.LaunchParam): void {
+  onCreate(want: Want, _launchParam: AbilityConstant.LaunchParam): void {
+    AppStorage.setOrCreate('photocraftDev', want.parameters?.['photocraft.dev'] === true);
     console.info('PhotoCraft Pad ability created');
+  }
+
+  onNewWant(want: Want): void {
+    AppStorage.setOrCreate('photocraftDev', want.parameters?.['photocraft.dev'] === true);
   }
 
   onWindowStageCreate(windowStage: window.WindowStage): void {
@@ -15,4 +20,3 @@ export default class EntryAbility extends UIAbility {
     });
   }
 }
-

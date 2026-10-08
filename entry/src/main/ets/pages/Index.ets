@@ -3,15 +3,19 @@ import { fileIo, picker } from '@kit.CoreFileKit';
 import { webview } from '@kit.ArkWeb';
 import { BusinessError } from '@kit.BasicServicesKit';
 
-// The page uses one private HTTPS origin so ES modules and WASM have the same origin.
+// Packaged resources use one private HTTPS origin so ES modules and WASM share an origin.
 const SITE_ORIGIN: string = 'https://photocraft.invalid';
 const START_URL: string = SITE_ORIGIN + '/index.html?webgl&cpu';
+// hdc rport maps the device loopback port to Trunk on the development computer.
+const DEV_ORIGIN: string = 'http://127.0.0.1:8765';
+const DEV_URL: string = DEV_ORIGIN + '/index.html?webgl&cpu';
 const SCRIPT_NAME: string = 'photocraft-web-a705b2188e2fccf8.js';
 const WASM_NAME: string = 'photocraft-web-a705b2188e2fccf8_bg.wasm';
 
 @Entry
 @Component
 struct Index {
+  @StorageProp('photocraftDev') private devMode: boolean = false;
   private controller: webview.WebviewController = new webview.WebviewController();
   private downloadDelegate: webview.WebDownloadDelegate = new webview.WebDownloadDelegate();
   private context: common.UIAbilityContext = this.getUIContext().getHostContext() as common.UIAbilityContext;
@@ -37,6 +41,9 @@ struct Index {
   }
 
   private intercept(url: string): WebResourceResponse | null {
+    if (this.devMode && (url === DEV_ORIGIN || url.startsWith(DEV_ORIGIN + '/'))) {
+      return null;
+    }
     // Query strings are intentionally ignored; ?webgl&cpu is selected by the wrapper.
     let pathUrl: string = url.split('?')[0].split('#')[0];
     if (pathUrl === SITE_ORIGIN + '/' || pathUrl === SITE_ORIGIN + '/index.html') {
@@ -62,7 +69,8 @@ struct Index {
   private isExternalWebUrl(url: string): boolean {
     let isWebUrl: boolean = url.startsWith('https://') || url.startsWith('http://');
     let isLocalSite: boolean = url === SITE_ORIGIN || url.startsWith(SITE_ORIGIN + '/');
-    return isWebUrl && !isLocalSite;
+    let isDevSite: boolean = this.devMode && (url === DEV_ORIGIN || url.startsWith(DEV_ORIGIN + '/'));
+    return isWebUrl && !isLocalSite && !isDevSite;
   }
 
   private openExternalUrl(url: string): void {
@@ -182,7 +190,7 @@ struct Index {
 
   build() {
     Stack({ alignContent: Alignment.TopEnd }) {
-      Web({ src: START_URL, controller: this.controller })
+      Web({ src: this.devMode ? DEV_URL : START_URL, controller: this.controller })
         .javaScriptAccess(true)
         .domStorageAccess(true)
         .fileAccess(false)
