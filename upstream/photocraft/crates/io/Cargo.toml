@@ -12,6 +12,8 @@ workspace = true
 [features]
 # Real-file corpus tests (opt-in; `cargo xtask test-corpus`). Fail when the corpus is missing.
 corpus = []
+# HEIC/HEIF decode (forwarded to photocraft-codecs; see its `heif` feature).
+heif = ["photocraft-codecs/heif"]
 
 [dependencies]
 photocraft-geom = { workspace = true }

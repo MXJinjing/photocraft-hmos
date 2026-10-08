@@ -5,6 +5,7 @@
 
 mod corpus;
 mod corpus_pins;
+mod i18n_coverage;
 mod ico;
 mod layers;
 mod perf;
@@ -34,6 +35,7 @@ commands:
                   --local takes corpus/photoshop from the photocraft-corpus authoring clone
   stats [--exact] count tests and lines per crate (--exact: ask the test harness via `-- --list`)
   parity          Photoshop menu parity; rewrites docs/parity.md
+  i18n-coverage   report stable UI translation coverage for registered languages
   perf [--quick] [--update-baseline] [--threshold PCT] [--bench NAME]... [--skip-build] [--reuse]
                   run the release benches, merge them by scenario id into target/perf/results.json,
                   check perf/budgets.toml and perf/baseline.json (non-zero on a broken budget or regression)
@@ -56,6 +58,7 @@ fn main() -> ExitCode {
         Some("test-corpus") => corpus::test_cmd(&rest),
         Some("stats") => stats::run(&root(), rest.contains(&"--exact")),
         Some("parity") => cmd_parity(),
+        Some("i18n-coverage") => i18n_coverage::run(&root()),
         Some("perf") => perf::run(&root(), &rest),
         Some("scorecard") => scorecard::run(&root(), &rest),
         Some("version") => version::run(&root(), &rest),
@@ -149,6 +152,10 @@ fn wasm_set() -> Result<Vec<String>, String> {
         .collect())
 }
 
+/// Optional features that official builds enable and the web app ships, also checked for wasm32:
+/// (package, feature).
+const WASM_FEATURES: &[(&str, &str)] = &[("photocraft-codecs", "heif")];
+
 fn cmd_wasm() -> Result<(), String> {
     let set = wasm_set()?;
     let mut results = Vec::new();
@@ -157,6 +164,12 @@ fn cmd_wasm() -> Result<(), String> {
         c.args(["check", "--target", "wasm32-unknown-unknown", "-p", pkg]);
         let ok = run(c, &format!("cargo check --target wasm32-unknown-unknown -p {pkg}")).is_ok();
         results.push((pkg.clone(), ok));
+    }
+    for (pkg, feature) in WASM_FEATURES {
+        let mut c = cargo();
+        c.args(["check", "--target", "wasm32-unknown-unknown", "-p", pkg, "--features", feature]);
+        let ok = run(c, &format!("cargo check --target wasm32-unknown-unknown -p {pkg} --features {feature}")).is_ok();
+        results.push((format!("{pkg} --features {feature}"), ok));
     }
     println!("\nwasm32-unknown-unknown check:");
     for (p, ok) in &results {

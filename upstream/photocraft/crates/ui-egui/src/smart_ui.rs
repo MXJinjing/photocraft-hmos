@@ -29,7 +29,7 @@ fn filter_label(f: &photocraft_doc::SmartFilter) -> String {
         return format!("{} (kept, not editable)", name.trim_end_matches("...").trim_end_matches('…'));
     }
     photocraft_engine::commands::find(command)
-        .map_or_else(|| command.rsplit('.').next().unwrap_or(command).to_string(), |c| c.label.trim_end_matches('…').to_string())
+        .map_or_else(|| command.rsplit('.').next().unwrap_or(command).to_string(), |c| tl!(c.label).trim_end_matches('…').to_string())
 }
 
 /// Smart Filters header + one row per filter (top filter first, as in Photoshop) under a smart
@@ -60,7 +60,9 @@ pub fn filter_rows(app: &mut PhotocraftApp, ui: &mut egui::Ui, l: &Layer, depth:
             None => sm.filters_enabled,
             Some(i) => sm.smart_filters[i].visible,
         };
-        icons::paint(ui, eye, if shown { "eye" } else { "eye-off" }, 12.0, if shown { t.icon } else { t.text_faint });
+        if shown {
+            icons::paint(ui, eye, "eye", 12.0, t.icon);
+        }
         if eye_resp.clicked() {
             actions.push(match index {
                 None => ("layer.smartFilter.disableSmartFilters".into(), json!({"layer": l.id.0})),
@@ -77,15 +79,23 @@ pub fn filter_rows(app: &mut PhotocraftApp, ui: &mut egui::Ui, l: &Layer, depth:
         if let Some(i) = index
             && resp.double_clicked()
         {
-            open_editor(app, l.id.0, sm, i);
+            open_editor(app, ui.ctx(), l.id.0, sm, i);
         }
     }
 }
 
 /// Re-opens a smart filter's dialog with its recorded parameters; OK runs
 /// `layer.smartFilter.setParams` instead of adding another filter (see `dialogs::confirm`).
-pub fn open_editor(app: &mut PhotocraftApp, layer: u64, sm: &SmartObject, index: usize) {
+pub fn open_editor(app: &mut PhotocraftApp, ctx: &egui::Context, layer: u64, sm: &SmartObject, index: usize) {
     let Some(f) = sm.smart_filters.get(index) else { return };
+    // Camera Raw has its own full-window dialog rather than a generic parameter form.
+    if f.command == photocraft_engine::lens_cmds::RAW {
+        if let Err(e) = crate::camera_raw_ui::open_smart_filter(app, ctx, photocraft_doc::LayerId(layer), index) {
+            app.ui.status = e;
+            app.ui.status_error = true;
+        }
+        return;
+    }
     if !crate::filter_dialog::has_dialog(&f.command) {
         return;
     }

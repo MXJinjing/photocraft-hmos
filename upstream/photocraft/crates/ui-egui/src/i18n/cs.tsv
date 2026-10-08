@@ -37,6 +37,9 @@
 	Open Recent	Otevřít nedávné
 	Clear Recent Files	Vymazat nedávné soubory
 	Close	Zavřít
+	Minimize	Minimalizovat
+	Maximize	Maximalizovat
+	Restore	Obnovit
 	Close All	Zavřít vše
 	Close Others	Zavřít ostatní
 	Save	Uložit
@@ -181,8 +184,13 @@
 	Lab Color	Barvy Lab
 	Multichannel	Vícekanálový
 	8 Bits/Channel	8 bitů/kanál
+	8 bit	8 bitů
+	Integer	Celé číslo
 	16 Bits/Channel	16 bitů/kanál
+	16 bit	16 bitů
 	32 Bits/Channel	32 bitů/kanál
+	32 bit (float)	32 bitů (float)
+	Floating point	Číslo s plovoucí desetinnou čárkou
 	Color Table…	Tabulka barev…
 	Bitmap…	Bitmapa…
 	Duotone…	Dvoutón…
@@ -265,6 +273,7 @@
 	Layer Style	Styl vrstvy
 	Blending Options…	Možnosti prolnutí…
 	Bevel & Emboss…	Úkos a reliéf…
+	Use Global Light	Použít globální světlo
 	Inner Shadow…	Vnitřní stín…
 	Inner Glow…	Vnitřní záře…
 	Satin…	Satén…
@@ -309,6 +318,7 @@
 	Smart Object	Chytrý objekt
 	Convert to Smart Object	Převést na chytrý objekt
 	Convert to Embedded	Převést na vložený
+	Convert to Layers	Převést na vrstvy
 	Convert to Linked…	Převést na propojený…
 	Edit Contents	Upravit obsah
 	Replace Contents…	Nahradit obsah…
@@ -525,6 +535,7 @@
 	Flame…	Plamen…
 	Lens Flare…	Odlesk objektivu…
 	Lighting Effects…	Světelné efekty…
+	Relight…	Přeosvětlení…
 	Picture Frame…	Rám obrazu…
 	Tree…	Strom…
 	Sharpen	Doostření
@@ -572,6 +583,12 @@
 	Fit Artboard on Screen	Přizpůsobit kreslicí plochu obrazovce
 	100%	100 %
 	200%	200 %
+	75%	75 %
+	125%	125 %
+	150%	150 %
+	175%	175 %
+	250%	250 %
+	300%	300 %
 	Print Size	Velikost tisku
 	Pixel Aspect Ratio	Poměr stran pixelu
 	Pixel Aspect Ratio Correction	Korekce poměru stran pixelu
@@ -901,8 +918,6 @@
 	Create new pattern from the selection	Vytvořit nový vzorek z výběru
 	Create new shape from the current path	Vytvořit nový tvar z aktuální cesty
 	Create new snapshot	Vytvořit nový snímek
-	Create new style (from the selected type)	Vytvořit nový styl (z vybraného textu)
-	Create new style from the selected layer	Vytvořit nový styl z vybrané vrstvy
 	Create new tool preset	Vytvořit nové přednastavení nástroje
 	Crop Factor	Crop faktor
 	Ctrl	Ctrl
@@ -963,16 +978,22 @@
 	Divide…	Rozdělit…
 	Document	Dokument
 	Don't Save	Neukládat
+	No	Ne
+	Yes	Ano
 	Done	Hotovo
 	Dots	Tečky
 	Drag a rectangle around the object	Táhněte obdélník kolem objektu
 	Drag on the image to add a constraint; Shift for horizontal/vertical; right-click to delete.	Tažením v obraze přidáte omezení; Shift pro vodorovné/svislé; pravým kliknutím odstraníte.
 	Drag to move the active shape's path or the Work Path	Tažením přesunete cestu aktivního tvaru nebo pracovní cestu
+	Click: select anchor · Drag: move anchor, handle or segment · {shift}-click: add · {alt}-click: whole subpath	Klik: vybrat bod · Tažení: přesunout bod, úchyt nebo segment · {shift}+klik: přidat · {alt}+klik: celá podcesta
 	Draw with the Pen tool (P) or make a work path from a selection.	Kreslete nástrojem pero (P) nebo vytvořte pracovní cestu z výběru.
 	Drop an image or PSD anywhere to open it.	Přetáhněte sem obrázek nebo PSD a otevře se.
+	Native file drag-and-drop is unavailable	Nativní přetahování souborů ve Waylandu není dostupné
+	Native file drag-and-drop is not supported on Wayland yet. Use File › Open, or run PhotoCraft under XWayland with `WAYLAND_DISPLAY= photocraft`.	Nativní přetahování souborů ve Waylandu zatím není podporováno. Použijte Soubor › Otevřít nebo spusťte PhotoCraft v XWayland s `WAYLAND_DISPLAY= photocraft`.
 	Duplicate Layers…	Duplikovat vrstvy…
 	Duplicate style	Duplikovat styl
 	Edit Toolbar…	Upravit panel nástrojů…
+	Use File › Open to open an image.	Obrázek otevřete přes Soubor › Otevřít.
 	Edit in Quick Mask Mode  (Q)	Upravit v režimu rychlé masky  (Q)
 	Edit in Standard Mode  (Q)	Upravit ve standardním režimu  (Q)
 	Effects	Efekty
@@ -1593,6 +1614,7 @@
 	Paint Bucket Tool	Nástroj plechovka barvy
 	Paints from the document's opening state	Maluje ze stavu dokumentu při otevření
 	Path Selection Tool	Nástroj výběr cesty
+	Direct Selection Tool	Nástroj přímý výběr
 	Pattern Overlay	Překrytí vzorkem
 	Pen Pressure	Přítlak pera
 	Pen Tilt	Náklon pera
@@ -1681,6 +1703,8 @@
 	Doc: {flat}/{layered}	Dok.: {flat}/{layered}
 	Scratch: {size}	Odkládací: {size}
 	Untagged {mode}	{mode} bez profilu
+	Invalid {mode} profile	Neplatný profil {mode}
+	Unnamed {mode} profile	Bezejmenný profil {mode}
 	{w} px x {h} px ({ppi} ppi)	{w} px × {h} px ({ppi} ppi)
 	Resolution: {dpi} pixels/inch	Rozlišení: {dpi} pixelů/palec
 	Doc: {w} × {h} px	Dok.: {w} × {h} px
@@ -1690,6 +1714,7 @@
 	Constraints ({n})	Omezení ({n})
 	Align {what}	Zarovnat: {what}
 @plural	{n} Layer|{n} Layers	{n} vrstva|{n} vrstvy|{n} vrstev
+@plural	{n} layer|{n} layers	{n} vrstva|{n} vrstvy|{n} vrstev
 @plural	Group · {n} layer|Group · {n} layers	Skupina · {n} vrstva|Skupina · {n} vrstvy|Skupina · {n} vrstev
 
 # Preferences (labels are generated from the setting names)
@@ -1784,6 +1809,7 @@
 	Light gray	Světle šedá
 	Line	Čára
 	Lines	Čáry
+	Lossless	Bezeztrátově
 	Lowercase extension	Přípona malými písmeny
 	Maximize psd compatibility	Maximalizovat kompatibilitu PSD
 	Medium gray	Středně šedá
@@ -1830,6 +1856,7 @@
 	Show only crosshair while painting	Při malování zobrazit jen nitkový kříž
 	Show slice numbers	Zobrazit čísla řezů
 	Show tooltips	Zobrazit popisky nástrojů
+	Show bounding box when dragging layer	Při přetahování vrstvy zobrazit ohraničovací rámeček
 	Show transformation values	Zobrazit hodnoty transformace
 	Slice color	Barva řezů
 	Smart guide color	Barva chytrých vodítek
@@ -1950,6 +1977,7 @@
 	Brush Projection	Projekce štětce
 	Apply the pen's tilt and rotation to the tip shape	Použít náklon a natočení pera na tvar hrotu
 	Mixer Brush	Míchací štětec
+	Mixer Brush Tool	Nástroj Míchací štětec
 	Wet	Vlhkost
 	Mix	Míchání
 	Wetness Jitter	Kolísání vlhkosti
@@ -1996,3 +2024,112 @@
 	Opening…	Otevírání…
 	Reading…	Načítání…
 	Working…	Zpracování…
+	3 x 3	3 × 3
+	4 x 4	4 × 4
+	5 x 5	5 × 5
+	Grid:	Mřížka:
+# Rendering mode and recovery
+	Rendering Mode	Režim vykreslování
+	Automatic (recommended)	Automaticky (doporučeno)
+	CPU / Compatibility	CPU / Kompatibilita
+	Automatic uses GPU acceleration when available and falls back to CPU rendering on errors.	Automatický režim používá dostupnou GPU a při chybě přejde na CPU.
+	Switched to CPU rendering	Přepnuto na vykreslování CPU
+	GPU acceleration could not continue. Your documents are unchanged.	Akcelerace GPU nemohla pokračovat. Dokumenty zůstaly nezměněny.
+	PhotoCraft is using the CPU image compositor. The window may still use your graphics adapter.	PhotoCraft skládá obraz pomocí CPU. Okno může nadále používat grafický adaptér.
+	Retry GPU requires a restart. Save your work first.	Opakování GPU vyžaduje restart. Nejprve uložte práci.
+	Keep Using CPU	Pokračovat s CPU
+	Retry GPU	Zkusit GPU znovu
+	Advanced	Pokročilé
+	GPU Backend	Backend GPU
+	Details	Podrobnosti
+	Rendering mode	Režim vykreslování
+	Freeze Lasso: drag to freeze an area, Alt-drag to thaw it (L)	Laso zmrazení: tažením zmrazíte oblast, tažením s klávesou Alt ji rozmrazíte (L)
+	Shadow Clipping Warning (U)	Varování oříznutí stínů (U)
+	Highlight Clipping Warning (O)	Varování oříznutí světel (O)
+	Show Lab Color Readouts	Zobrazit hodnoty barev Lab
+	Show Vectorscope	Zobrazit vektorskop
+	Show Red at 3 o'clock	Zobrazit červenou na třetí hodině
+	Show Skin Tone Indicator	Zobrazit indikátor pleťových tónů
+	Tone Histogram	Histogram tónů
+	Show Selected Region	Zobrazit vybranou oblast
+cameraRaw	Light	Světlo
+# Camera Raw: contextual controls and window title
+	Camera Raw Filter ({layer})	Filtr Camera Raw ({layer})
+cameraRaw	Red	Červené
+cameraRaw	Orange	Oranžové
+cameraRaw	Yellow	Žluté
+cameraRaw	Green	Zelené
+cameraRaw	Aqua	Tyrkysové
+cameraRaw	Blue	Modré
+cameraRaw	Purple	Fialové
+cameraRaw	Magenta	Purpurové
+cameraRaw	Blending	Míchání
+cameraRaw	Luminance	Jas
+cameraRaw	Temperature	Barevná teplota
+cameraRaw	Color	Barvy
+	Patch Tool	Nástroj záplata
+	Patch:	Záplata:
+	Lasso around an area, then drag the selection	Obtáhněte oblast lasem a pak přetáhněte výběr
+	Edit Type	Upravit text
+
+
+	New Style…	Nový styl…
+	Style {name} saved	Styl {name} uložen
+
+	Create new style (from the selected type)	Vytvořit nový styl (z vybraného textu)
+	Create new style from the selected layer	Vytvořit nový styl z vybrané vrstvy
+
+	Make Default	Nastavit jako výchozí
+	Reset to Default	Obnovit výchozí
+	Full-resolution preview unavailable	Náhled v plném rozlišení není dostupný
+	No patterns	Žádné vzorky
+	Enable {name}	Povolit {name}
+	Hold Alt while drawing for straight segments	Podržením Alt při kreslení vytvoříte rovné úseky
+	Drag or click polygon points · hold Alt during lasso for straight segments · {add} add · {sub} before drawing subtracts	Táhněte nebo klikejte body mnohoúhelníku · podržením Alt během lasa kreslíte rovné úseky · {add} přidat · {sub} před kreslením odečte
+	Move	Přesunout
+	Extend	Rozšířit
+	Structure:	Struktura:
+	Content-Aware Move Tool	Nástroj přesun s ohledem na obsah
+	TIFF Options	Možnosti TIFF
+	Including layers will increase file size.	Zahrnutí vrstev zvětší velikost souboru.
+	Discard Layers and Save a Copy	Zahodit vrstvy a uložit kopii
+	Don't show again	Příště nezobrazovat
+	Save failed: {error}	Uložení se nezdařilo: {error}
+	Save cancelled	Ukládání zrušeno
+	Couldn't place {name}: {error}	Nelze umístit {name}: {error}
+	Magnetic Lasso Tool	Nástroj magnetické laso
+	Frequency	Frekvence
+	Use tablet pressure to change pen width	Měnit šířku pera přítlakem tabletu
+
+# About ▸ Contributors / Models (credits, craftrules standards/contributors.md)
+	About	O aplikaci
+	Contributors	Přispěvatelé
+	Models	Modely
+	Sort	Řadit
+	Username	Uživatelské jméno
+	Display name	Zobrazované jméno
+	Real name	Skutečné jméno
+	Reverse the order	Obrátit pořadí
+	Grab bag	Výčet
+	Table	Tabulka
+	Name (A–Z)	Jméno (A–Z)
+	Merged PRs	Sloučené PR
+	Commits	Commity
+	Lines added	Přidané řádky
+	Lines deleted	Smazané řádky
+	Line delta	Rozdíl řádků
+	Binary assets added	Přidané binární soubory
+	Binary assets removed	Odebrané binární soubory
+	First commit	První commit
+	First	První
+	Last commit	Poslední commit
+	Last	Poslední
+	Contributors: {contributors} · Commits: {commits}	Přispěvatelé: {contributors} · Commity: {commits}
+	No contributor data was built into this copy.	Tato kopie neobsahuje údaje o přispěvatelích.
+	No model credits were built into this copy.	Tato kopie neobsahuje údaje o modelech.
+	Company	Společnost
+	Model	Model
+	Version	Verze
+	% of all commits	% všech commitů
+	Lines +/−	Řádky +/−
+	@{login}: {prs} PRs, {commits} commits, +{added} / −{deleted} lines (Δ {delta}), +{binAdded} / −{binDeleted} binary assets, {first} – {last}	@{login}: PR: {prs}, commity: {commits}, řádky +{added} / −{deleted} (Δ {delta}), binární soubory +{binAdded} / −{binDeleted}, {first} – {last}

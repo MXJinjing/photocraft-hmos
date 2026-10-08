@@ -85,7 +85,7 @@ pub fn parse_spec(spec: &str) -> Vec<Param> {
             Kind::Text
         } else if v == "doc" {
             Kind::Document
-        } else if v == "json" || v.starts_with('[') || v.starts_with('{') {
+        } else if v == "json" || v.starts_with("layer id") || v.starts_with('[') || v.starts_with('{') {
             Kind::Json
         } else if let Some(n) = v.strip_prefix("int[").and_then(|r| r.strip_suffix(']')).and_then(|n| n.parse().ok()) {
             Kind::Grid(n)
@@ -192,6 +192,9 @@ pub fn open(app: &mut PhotocraftApp, command: &str) -> Option<u64> {
         };
         fields.insert(p.key, v);
     }
+    if command == "image.rotation.arbitrary" {
+        straighten_defaults(app, &mut fields);
+    }
     if parse_spec(spec.params).iter().any(|p| p.kind == Kind::Document) {
         // The document picker lists every open document (params refer to them by index).
         let names: Vec<String> = app.session.documents().iter().map(|d| d.doc.name.clone()).collect();
@@ -199,6 +202,18 @@ pub fn open(app: &mut PhotocraftApp, command: &str) -> Option<u64> {
     }
     let id = app.ui.open_dialog(crate::state::DialogKind::Command, fields);
     Some(id)
+}
+
+/// Arbitrary rotation starts at the angle that straightens the ruler line, when there is one.
+fn straighten_defaults(app: &PhotocraftApp, fields: &mut Map<String, Value>) {
+    let Some(r) = app.session.active().and_then(|d| d.doc.measurement.ruler) else { return };
+    let rot = photocraft_engine::analysis_cmds::straighten_angle(&r);
+    // A ruler read from a damaged file could hold non-finite ends: keep the 0° default then.
+    if !rot.is_finite() {
+        return;
+    }
+    fields.insert("angle".into(), json!(rot.abs()));
+    fields.insert("direction".into(), json!(if rot < 0.0 { "ccw" } else { "cw" }));
 }
 
 /// A filter dialog with live preview for `command` whose parameters follow `spec` (registry
@@ -224,6 +239,10 @@ pub fn open_with_spec(app: &mut PhotocraftApp, command: &str, label: &str, spec:
 }
 
 pub(crate) fn label(key: &str) -> String {
+    tl!(&source_label(key)).to_owned()
+}
+
+pub(crate) fn source_label(key: &str) -> String {
     // camelCase → "Camel Case"
     let mut s = String::new();
     for (i, ch) in key.chars().enumerate() {
@@ -361,6 +380,11 @@ pub fn body(ui: &mut egui::Ui, f: &mut Map<String, Value>) {
             }
         }
     }
+    // Read-only context the dialog opener supplies (e.g. the monitor profile in use).
+    if let Some(note) = f.get("__note").and_then(Value::as_str) {
+        ui.add_space(4.0);
+        ui.add(egui::Label::new(egui::RichText::new(note).color(t.text_dim)).wrap());
+    }
     if let Some(mut preview) = f.get("__preview").and_then(Value::as_bool) {
         ui.add_space(4.0);
         crate::widgets::checkbox(ui, &mut preview, tl!("Preview"));
@@ -429,6 +453,16 @@ mod tests {
         );
     }
 
+    /// A layer-id param has no number field: drawing the Auto-Align dialog used to write
+    /// `reference: 0` back, which the engine rejects as not a selected layer (#674).
+    #[test]
+    fn layer_id_params_stay_out_of_the_dialog() {
+        let mut f = Map::new();
+        f.insert("__command".into(), json!("edit.autoAlignLayers"));
+        egui::Context::default().run_ui(Default::default(), |ui| body(ui, &mut f)).textures_delta.clear();
+        assert!(!params_of(&f).as_object().unwrap().contains_key("reference"), "{f:?}");
+    }
+
     #[test]
     fn wide_positive_ranges_use_the_logarithmic_slider_path() {
         assert!(uses_logarithmic_slider(0.1, 1000.0), "Gaussian Blur radius");
@@ -447,6 +481,7 @@ mod tests {
             "filter.distort.displace",
             "filter.pixelate.mezzotint",
             "filter.render.lightingEffects",
+            "filter.render.relight",
         ] {
             assert!(has_dialog(id), "{id}");
         }
@@ -465,6 +500,41 @@ mod tests {
     }
 
     #[test]
+    fn korean_covers_generated_filter_options_and_gallery_names() {
+        let ko = crate::i18n::lang_from_tag("ko-KR").unwrap();
+        let mut missing = std::collections::BTreeSet::new();
+        let mut check = |s: String| {
+            if !matches!(s.as_str(), "X" | "Y" | "A" | "B") && !crate::i18n::has(ko, &s) {
+                missing.insert(s);
+            }
+        };
+        for c in photocraft_engine::command_specs().iter().filter(|c| c.id.starts_with("filter.") || c.id.starts_with("image.adjustments.")) {
+            for p in parse_spec(c.params) {
+                if !p.key.chars().all(|c| c.is_ascii_alphanumeric()) || matches!(p.kind, Kind::Json) {
+                    continue;
+                }
+                check(source_label(&p.key));
+                if let Kind::Choice(choices) = p.kind {
+                    for choice in choices {
+                        // Only symbolic options are UI choices; registry docs also contain
+                        // colour syntax and array notation, which are not translatable names.
+                        if choice.chars().all(|c| c.is_ascii_alphanumeric()) {
+                            check(source_label(&choice));
+                        }
+                    }
+                }
+            }
+        }
+        for f in photocraft_algo::GalleryFilter::ALL {
+            check(f.name().to_string());
+        }
+        for cat in photocraft_algo::GALLERY_CATEGORIES {
+            check(cat.to_string());
+        }
+        assert!(missing.is_empty(), "missing Korean dynamic labels: {missing:#?}");
+    }
+
+    #[test]
     fn preview_runs_engine_command_on_proxy() {
         let mut doc = Document::with_background(
             "p",
@@ -479,5 +549,26 @@ mod tests {
         let p = out.layers[0].surface().unwrap().pixel(32, 32);
         assert!(p[0] > 0.2 && p[0] < 0.8, "edge blurred: {p:?}");
         assert_eq!(label("wavelengthMin"), "Wavelength Min");
+    }
+
+    #[test]
+    fn preview_stays_inside_the_selection_at_every_proxy_factor() {
+        use photocraft_doc::SampleType;
+        for depth in [SampleType::U8, SampleType::U16, SampleType::F32] {
+            let mut doc =
+                Document::with_background("p", photocraft_doc::Size::new(64, 64), photocraft_doc::ColorMode::Rgb, depth, photocraft_doc::Color::gray(0.5));
+            let bg = doc.layers[0].id;
+            let mut sel = photocraft_raster::Surface::new(photocraft_doc::PixelFormat::GRAY8);
+            sel.fill_rect(photocraft_geom::Rect::new(0, 0, 32, 64), &[1.0]);
+            doc.selection = Some(sel);
+            for k in [1, 2, 4] {
+                let out = preview_document(&doc, Some(bg), "filter.noise.addNoise", &json!({"amount": 100.0}), k).unwrap();
+                let s = out.layers[0].surface().unwrap();
+                let half = 32 / k as i32;
+                let changed = |x0: i32, x1: i32| (0..64 / k as i32).any(|y| (x0..x1).any(|x| s.pixel(x, y) != doc.layers[0].surface().unwrap().pixel(0, 0)));
+                assert!(changed(0, half), "{depth:?} k={k}: noise inside the selection");
+                assert!(!changed(half, 64 / k as i32), "{depth:?} k={k}: nothing outside the selection");
+            }
+        }
     }
 }

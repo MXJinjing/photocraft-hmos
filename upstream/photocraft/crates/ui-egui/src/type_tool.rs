@@ -26,11 +26,7 @@ fn text_layer(doc: &Document, id: LayerId) -> Option<&TextLayer> {
 }
 
 fn byte_of(text: &str, ci: usize) -> usize {
-    text.char_indices().nth(ci).map_or(text.len(), |(b, _)| b)
-}
-
-fn char_of(text: &str, bi: usize) -> usize {
-    text[..bi.min(text.len())].chars().count()
+    photocraft_text::byte_index(text, ci)
 }
 
 /// Layout of a type layer (cached per document revision) and its text → document transform.
@@ -70,7 +66,7 @@ fn hit_layer(app: &mut PhotocraftApp, x: f64, y: f64) -> Option<LayerId> {
         });
         let Some((l, aff, _)) = layout(app, *id) else { return shown };
         let (tx, ty) = to_text(&aff, x, y);
-        shown || l.bounds().is_some_and(|b| tx >= b[0] - slop && tx <= b[2] + slop && ty >= b[1] - slop && ty <= b[3] + slop)
+        shown || photocraft_text::text_point_inside(&l, tx, ty, slop)
     })
 }
 
@@ -88,20 +84,43 @@ fn shows_own_layout(doc: &Document, t: &TextLayer) -> bool {
 /// Start editing an existing type layer. Like Photoshop, editing shows the text as the type
 /// engine lays it out, so a PSD layer is re-rendered first (inside the edit session's history
 /// step, so Cancel brings Photoshop's pixels back).
-fn begin_edit(app: &mut PhotocraftApp, id: LayerId, key: &str) {
-    let Some(st) = app.session.active() else { return };
+fn begin_edit(app: &mut PhotocraftApp, id: LayerId, key: &str) -> Result<(), String> {
+    let st = app.session.active().ok_or("no document open")?;
     let doc = st.doc.clone();
     if let Some(t) = text_layer(&doc, id)
         && !shows_own_layout(&doc, t)
     {
-        let _ = app.run("type.edit", json!({"layer": id.0, "coalesce": key}));
+        app.run("type.edit", json!({"layer": id.0, "coalesce": key}))?;
     }
+    Ok(())
+}
+
+/// Edit the active type layer from its thumbnail, selecting all text like Photoshop. Reuse the
+/// current session when already editing it, so Cancel and undo still cover the whole edit.
+pub fn edit_active(app: &mut PhotocraftApp) -> Result<(), String> {
+    let st = app.session.active().ok_or("no document open")?;
+    let id = st.active_layer.ok_or("no active layer")?;
+    let n = text_layer(&st.doc, id).ok_or("active layer is not a type layer")?.text.chars().count();
+    if app.ui.text_edit.as_ref().is_none_or(|ed| ed.layer != id.0) {
+        commit(app);
+        let key = session_key(app);
+        begin_edit(app, id, &key)?;
+        app.ui.text_edit = Some(TextEdit { layer: id.0, caret: n, anchor: 0, session: key, created: false, dragging: false, resize: None, preedit: None });
+    } else if let Some(ed) = app.ui.text_edit.as_mut() {
+        ed.anchor = 0;
+        ed.caret = n;
+    }
+    let vertical = app.session.active().and_then(|st| text_layer(&st.doc, id)).is_some_and(|t| t.orientation == photocraft_doc::text::Orientation::Vertical);
+    app.ui.tool = if vertical { crate::state::Tool::VerticalType } else { crate::state::Tool::Type };
+    app.ui.mask_target = false;
+    app.ui.vector_mask_target = false;
+    Ok(())
 }
 
 fn hit_offset(app: &mut PhotocraftApp, id: LayerId, x: f64, y: f64) -> usize {
     let Some((l, aff, text)) = layout(app, id) else { return 0 };
     let (tx, ty) = to_text(&aff, x, y);
-    char_of(&text, l.hit_test(tx, ty))
+    photocraft_text::hit_char(&l, &text, tx, ty).0
 }
 
 fn hex(c: [f32; 4]) -> String {
@@ -202,7 +221,9 @@ pub fn pointer_down(app: &mut PhotocraftApp, x: f64, y: f64, shift: bool) -> boo
     if let Some(id) = hit_layer(app, x, y) {
         let _ = app.session.select_layer(id);
         let key = session_key(app);
-        begin_edit(app, id, &key);
+        if begin_edit(app, id, &key).is_err() {
+            return true;
+        }
         let off = hit_offset(app, id, x, y);
         app.ui.text_edit = Some(TextEdit { layer: id.0, caret: off, anchor: off, session: key, created: false, dragging: true, resize: None, preedit: None });
         return true;
@@ -236,6 +257,7 @@ pub fn pointer_up(app: &mut PhotocraftApp, start: [f64; 2], end: [f64; 2]) {
     let o = app.ui.tool_options.clone();
     let mut p = json!({
         "text": PLACEHOLDER,
+        "orientation": if app.ui.tool == crate::state::Tool::VerticalType { "vertical" } else { "horizontal" },
         "font": o.type_font,
         "fontStyle": o.type_style,
         "size": o.type_size,
@@ -325,26 +347,9 @@ fn ime_update(app: &mut PhotocraftApp, s: &str, commit: bool) {
     }
 }
 
-/// Character index of the previous / next word boundary.
+/// Character index of the previous / next word boundary (shared with `type.navigate`).
 fn word_boundary(text: &str, from: usize, forward: bool) -> usize {
-    let chars: Vec<char> = text.chars().collect();
-    let mut i = from.min(chars.len());
-    if forward {
-        while i < chars.len() && !chars[i].is_alphanumeric() {
-            i += 1;
-        }
-        while i < chars.len() && chars[i].is_alphanumeric() {
-            i += 1;
-        }
-    } else {
-        while i > 0 && !chars[i - 1].is_alphanumeric() {
-            i -= 1;
-        }
-        while i > 0 && chars[i - 1].is_alphanumeric() {
-            i -= 1;
-        }
-    }
-    i
+    photocraft_text::word_boundary(text, from, forward)
 }
 
 /// Double-click: select the word under the caret.
@@ -368,17 +373,8 @@ pub fn select_word(app: &mut PhotocraftApp) {
 /// along the line. Works in line space, so it serves both orientations.
 fn line_step(app: &mut PhotocraftApp, id: LayerId, caret: usize, dir: i32) -> usize {
     let Some((l, _, text)) = layout(app, id) else { return caret };
-    let (x, top, bottom) = l.caret(byte_of(&text, caret));
-    let h = (bottom - top).max(1.0);
-    let y = if dir < 0 { top - h * 0.5 } else { bottom + h * 0.5 };
-    let Some(b) = l.line_bounds() else { return caret };
-    if y < b[1] {
-        return 0;
-    }
-    if y > b[3] {
-        return text.chars().count();
-    }
-    char_of(&text, l.hit_test_line(x, y))
+    let x = l.caret(byte_of(&text, caret)).0;
+    photocraft_text::line_step(&l, &text, caret, x, dir)
 }
 
 fn is_vertical(app: &PhotocraftApp, id: LayerId) -> bool {
@@ -405,9 +401,7 @@ pub(crate) fn flow_key(key: egui::Key, vertical: bool) -> egui::Key {
 /// Line start / end for the caret's line.
 fn line_edge(app: &mut PhotocraftApp, id: LayerId, caret: usize, end: bool) -> usize {
     let Some((l, _, text)) = layout(app, id) else { return caret };
-    let b = byte_of(&text, caret);
-    let line = l.lines.iter().find(|ln| b >= ln.range.start && b <= ln.range.end).or(l.lines.last());
-    line.map_or(caret, |ln| char_of(&text, if end { ln.range.end } else { ln.range.start }))
+    photocraft_text::line_edge(&l, &text, caret, end)
 }
 
 /// Keyboard input while editing. Returns true when a type edit session is active (single-key
@@ -524,6 +518,11 @@ pub fn handle_keys(app: &mut PhotocraftApp, ctx: &egui::Context) -> bool {
                             e.caret = n;
                         }
                     }
+                    // Photoshop: while editing type, ⌘/Ctrl+T shows or hides the Character panel
+                    // (Free Transform of the layer being typed into is not what it means here).
+                    Key::T if m.command && !m.shift && !m.alt => {
+                        let _ = crate::menus::invoke(app, ctx, "window.panel.character", json!({}));
+                    }
                     // Other command shortcuts (⌘Z, ⌘S, …) pass through to the menus.
                     _ if m.command => handled[k] = false,
                     _ => {}
@@ -553,7 +552,7 @@ pub fn commit(app: &mut PhotocraftApp) {
     if text.trim().is_empty() && ed.created {
         let _ = app.run("layer.delete", json!({"layer": ed.layer}));
     } else if ed.created {
-        let name: String = text.lines().find(|l| !l.trim().is_empty()).unwrap_or("").trim().chars().take(40).collect();
+        let name = photocraft_engine::type_cmds::layer_name(&text);
         let _ = app.run("type.edit", json!({"layer": ed.layer, "name": name, "coalesce": ed.session}));
     }
 }
@@ -754,6 +753,15 @@ fn apply(app: &mut PhotocraftApp, ctx: &egui::Context, props: serde_json::Value)
     if let Some(key) = app.ui.text_edit.as_ref().map(|ed| ed.session.clone()).or_else(|| drag_key(ctx)) {
         p["coalesce"] = json!(key);
     }
+    let _ = app.run("type.setStyle", p);
+}
+
+/// While characters are selected in a type layer, a new foreground colour (Color and Swatches
+/// panels, the Color Picker) recolours them, in the editing session's history step.
+pub fn foreground_changed(app: &mut PhotocraftApp) {
+    let Some((layer, Some(range))) = target(app) else { return };
+    let Some(ed) = app.ui.text_edit.as_ref() else { return };
+    let p = json!({"layer": layer, "range": range, "color": hex(app.session.tools.foreground), "coalesce": ed.session});
     let _ = app.run("type.setStyle", p);
 }
 
@@ -1383,6 +1391,20 @@ mod tests {
         let doc = &app.session.active().unwrap().doc;
         assert_eq!(doc.layers.last().unwrap().name, "Héllo world");
         assert!(app.ui.text_edit.is_none());
+    }
+
+    #[test]
+    fn a_name_from_text_after_blank_lines_keeps_following_the_text() {
+        let mut app = app();
+        pointer_up(&mut app, [50.0, 100.0], [50.0, 100.0]);
+        insert(&mut app, "\n\nTitle");
+        let id = app.ui.text_edit.as_ref().unwrap().layer;
+        commit(&mut app);
+        let name = |app: &PhotocraftApp| app.session.active().unwrap().doc.layers.last().unwrap().name.clone();
+        assert_eq!(name(&app), "Title");
+        // Edited later, outside the session that created it (#483).
+        app.run("type.edit", json!({"layer": id, "text": "\nSubtitle"})).unwrap();
+        assert_eq!(name(&app), "Subtitle");
     }
 
     #[test]

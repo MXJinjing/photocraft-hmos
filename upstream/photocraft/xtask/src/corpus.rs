@@ -4,17 +4,20 @@
 use std::path::PathBuf;
 use std::process::Command;
 
-use crate::corpus_pins::{self, AG_PSD_COMMIT, PHOTOCRAFT_CORPUS_COMMIT, PNGSUITE_URL, PSD_TOOLS_COMMIT};
+use crate::corpus_pins::{self, AG_PSD_COMMIT, HEIC_RS_COMMIT, PHOTOCRAFT_CORPUS_COMMIT, PILLOW_HEIF_COMMIT, PNGSUITE_URL, PSD_TOOLS_COMMIT};
 use crate::pinned::USER_AGENT;
 use crate::{cargo, root, run};
 
 /// Crates with corpus tests (behind their `corpus` feature).
 pub const CORPUS_CRATES: &[&str] = &["photocraft-psd", "photocraft-codecs", "photocraft-io", "photocraft-engine"];
 
-/// Paths whose changes make `test-corpus --changed` run (the file-format and rendering crates).
-const CRITICAL: &[&str] = &["crates/psd/", "crates/io/", "crates/codecs/", "crates/compose/", "crates/gpu/", "crates/text/", "crates/format/"];
+/// Corpus crates with a `heif` feature: test-corpus enables it so the HEIF corpus tests run.
+const HEIF_CRATES: &[&str] = &["photocraft-codecs", "photocraft-io"];
 
-/// `cargo xtask corpus [--all | --pngsuite | --download | --psd | --psd-tools | --photoshop [--local]] [--update-manifest]`
+/// Paths whose changes make `test-corpus --changed` run (the file-format and rendering crates).
+const CRITICAL: &[&str] = &["crates/psd/", "crates/io/", "crates/codecs/", "crates/heif/", "crates/compose/", "crates/gpu/", "crates/text/", "crates/format/"];
+
+/// `cargo xtask corpus [--all | --pngsuite | --download | --psd | --psd-tools | --heif | --photoshop [--local]] [--update-manifest]`
 pub fn cmd(args: &[&str]) -> Result<(), String> {
     let update = args.contains(&"--update-manifest");
     let mut did = false;
@@ -31,6 +34,10 @@ pub fn cmd(args: &[&str]) -> Result<(), String> {
     }
     if args.contains(&"--psd-tools") {
         corpus_pins::PSD_TOOLS.fetch(update)?;
+        did = true;
+    }
+    if args.contains(&"--heif") {
+        corpus_pins::HEIF.fetch(update)?;
         did = true;
     }
     if args.contains(&"--photoshop") {
@@ -96,6 +103,8 @@ fn list() {
                      ag-psd@{}, manifest xtask/psd-corpus.sha256. Fetch: --psd
   corpus/psd-tools/  [{}] the full psd-tools test set (MIT) at {PSD_TOOLS_COMMIT}
                      manifest xtask/psd-tools-corpus.sha256. Fetch: --psd-tools
+  corpus/heif/       [{}] a few HEIC/HEIF files from heic-rs@{} (MIT OR Apache-2.0) and
+                     pillow-heif@{} (BSD-3-Clause), manifest xtask/heif-corpus.sha256. Fetch: --heif
   corpus/pngsuite/   [{}] PngSuite (public domain), {PNGSUITE_URL}. Fetch: --pngsuite
   corpus/tiff/, corpus/exr/, corpus/raw/   optional, copied in by hand
 
@@ -106,6 +115,9 @@ Pins: xtask/src/corpus_pins.rs. Moving one: change it, then --<name> --update-ma
         &PSD_TOOLS_COMMIT[..12],
         &AG_PSD_COMMIT[..12],
         status(corpus_pins::PSD_TOOLS.is_current()),
+        status(corpus_pins::HEIF.is_current()),
+        &HEIC_RS_COMMIT[..12],
+        &PILLOW_HEIF_COMMIT[..12],
         status(png_ok),
     );
 }
@@ -186,10 +198,11 @@ pub fn test_cmd(args: &[&str]) -> Result<(), String> {
     for k in &crates {
         c.args(["-p", k]);
     }
-    let features: Vec<String> = crates.iter().map(|k| format!("{k}/corpus")).collect();
+    let mut features: Vec<String> = crates.iter().map(|k| format!("{k}/corpus")).collect();
+    features.extend(crates.iter().filter(|k| HEIF_CRATES.contains(&k.as_str())).map(|k| format!("{k}/heif")));
     c.args(["--features", &features.join(",")]);
     if !passthrough.is_empty() {
         c.arg("--").args(passthrough);
     }
-    run(c, &format!("cargo test --release --features corpus ({})", crates.join(", ")))
+    run(c, &format!("cargo test --release --features corpus,heif ({})", crates.join(", ")))
 }

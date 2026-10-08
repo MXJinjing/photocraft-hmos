@@ -8,13 +8,17 @@ use photocraft_doc::{Document, Layer, LayerContent};
 use photocraft_geom::{Rect, Size, TILE_SIZE};
 use photocraft_raster::Surface;
 
-use crate::{ExportOptions, ExportResult, ImportResult, IoError};
+use crate::{ExportOptions, ExportResult, ImportResult, IoError, XmpEmbed};
 
 /// Bytes per band when converting or exporting a band of rows at a time.
 const BAND_BYTES: usize = 32 << 20;
 
-/// Decodes a flat image into a single-layer document.
+/// Decodes a flat image into a single-layer document; a TIFF with Photoshop layer data opens
+/// layered (see [`crate::tiff_layers`]).
 pub fn import_flat(name: &str, bytes: &[u8]) -> Result<ImportResult, IoError> {
+    if codecs::detect(bytes) == Some(Format::Tiff) {
+        return import_tiff_page(name, bytes, None);
+    }
     let img = codecs::decode(bytes)?;
     let mut r = image_to_document(name, &img)?;
     // OpenEXR and Radiance HDR hold linear, scene-referred values (Rec. 709 primaries unless
@@ -24,6 +28,27 @@ pub fn import_flat(name: &str, bytes: &[u8]) -> Result<ImportResult, IoError> {
         d.icc_profile = Some(photocraft_cms::Builtin::LinearSrgb.profile().to_bytes());
     }
     Ok(r)
+}
+
+/// Opens one page of a TIFF or BigTIFF file: `None` is the page Photoshop opens (the first
+/// full-resolution one), `Some(i)` an index into [`codecs::tiff_info`]'s pages (every IFD and
+/// SubIFD). A page with Photoshop layer data opens layered.
+pub fn import_tiff_page(name: &str, bytes: &[u8], page: Option<usize>) -> Result<ImportResult, IoError> {
+    // The orientation is applied after the layer check: rotating the composite but not the
+    // layers would misalign them, so a layered TIFF keeps its stored orientation.
+    let keep = codecs::DecodeOptions { keep_orientation: true, ..Default::default() };
+    let (img, orientation) = match page {
+        None => (codecs::decode_with(bytes, &keep)?, codecs::tiff_orientation(bytes)),
+        Some(p) => (codecs::decode_tiff_page(bytes, p, &keep)?, codecs::tiff_page_orientation(bytes, p)),
+    };
+    if let Some(layers) = img.meta.photoshop_layers.as_deref().filter(|l| !l.is_empty()) {
+        let mut r = crate::tiff_layers::import_layered(name, &img, layers)?;
+        if orientation != 1 {
+            r.warnings.push("the TIFF's orientation tag was ignored so the layers stay aligned with the image".to_string());
+        }
+        return Ok(r);
+    }
+    image_to_document(name, &img.oriented(orientation)?)
 }
 
 /// A decoded flat image as a single-layer document.
@@ -83,7 +108,7 @@ pub(crate) fn image_to_document(name: &str, img: &Image) -> Result<ImportResult,
 /// `Some(surface)` when the document is exactly one visible, unmasked,
 /// normal, fully opaque raster layer: its pixels can be written natively
 /// (keeping CMYK / depth exactly) instead of going through the compositor.
-fn single_layer(doc: &Document) -> Option<&Surface> {
+pub(crate) fn single_layer(doc: &Document) -> Option<&Surface> {
     let [l] = &doc.layers[..] else { return None };
     let ok = l.visible
         && l.opacity >= 1.0
@@ -101,7 +126,7 @@ fn single_layer(doc: &Document) -> Option<&Surface> {
     }
 }
 
-fn layout_for(mode: ColorMode, alpha: bool) -> ChannelLayout {
+pub(crate) fn layout_for(mode: ColorMode, alpha: bool) -> ChannelLayout {
     match (mode, alpha) {
         (ColorMode::Grayscale, false) => ChannelLayout::Gray,
         (ColorMode::Grayscale, true) => ChannelLayout::GrayA,
@@ -112,7 +137,7 @@ fn layout_for(mode: ColorMode, alpha: bool) -> ChannelLayout {
     }
 }
 
-fn csample(s: SampleType) -> CSample {
+pub(crate) fn csample(s: SampleType) -> CSample {
     match s {
         SampleType::U8 => CSample::U8,
         SampleType::U16 => CSample::U16,
@@ -209,14 +234,14 @@ pub fn document_to_image(doc: &Document, warnings: &mut Vec<String>) -> Result<I
         exif: doc.metadata.exif.as_ref().map(|e| e.to_vec()),
         xmp: doc.metadata.xmp.clone(),
         dpi: Some((doc.resolution_dpi, doc.resolution_dpi)),
-        text: Vec::new(),
+        ..Default::default()
     };
     Ok(img.with_icc(icc).with_meta(meta))
 }
 
 /// An empty buffer with room for `pixels × bytes_per_pixel` bytes, or an error (not an abort)
 /// when that much memory can't be had.
-fn try_buffer(pixels: usize, bytes_per_pixel: usize) -> Result<Vec<u8>, IoError> {
+pub(crate) fn try_buffer(pixels: usize, bytes_per_pixel: usize) -> Result<Vec<u8>, IoError> {
     let len = pixels.checked_mul(bytes_per_pixel).ok_or_else(|| IoError::Unsupported("image too large".into()))?;
     let mut v = Vec::new();
     v.try_reserve_exact(len).map_err(|_| IoError::Unsupported(format!("not enough memory for a {} MB image", len >> 20)))?;
@@ -262,6 +287,11 @@ pub fn export_flat(doc: &Document, format: Format, opts: &ExportOptions) -> Resu
     }
     let mut warnings = Vec::new();
     let mut img = document_to_image(doc, &mut warnings)?;
+    if opts.xmp == XmpEmbed::None {
+        // Export As's Metadata: None: the packet lists the text of every type layer and one id
+        // per placed document (#647).
+        img.meta.xmp = None;
+    }
     if img.layout().has_alpha() && !format.caps().alpha {
         // Flattened over white, as saving a transparent document without transparency does.
         img = matte_over_white(&img)?;

@@ -127,6 +127,12 @@ impl Ctx<'_> {
             planes.push(self.channel_plane(rec, c as i16, name));
         }
         planes.push(self.channel_plane(rec, CHANNEL_TRANSPARENCY, name));
+        // A channel that is in the file but could not be decoded leaves the layer empty, as the
+        // warning says. Filling in for it would paint an opaque black layer over the document.
+        let ids = (0..self.cc as i16).chain([CHANNEL_TRANSPARENCY]);
+        if ids.zip(&planes).any(|(id, p)| p.is_none() && rec.channel(id).is_some()) {
+            return Surface::new(self.fmt);
+        }
         let refs: Vec<Option<&[u8]>> = planes.iter().map(|p| p.as_deref()).collect();
         let mut fill: Vec<Vec<u8>> = vec![zero_sample(s); self.cc];
         fill.push(max_sample(s));
@@ -299,6 +305,8 @@ impl Ctx<'_> {
                 filter_mask,
                 warp: rec.block(k).and_then(|b| blocks::parse_placed_warp(k, &b.data)),
                 stack_mode: None,
+                // Distort / Perspective: the fourth corner (the affine `transform` drops it).
+                perspective: rec.block(k).and_then(|b| blocks::parse_smart_perspective(k, &b.data)),
             })
         } else if let Some(f) = soft_shape_fill(rec, vector_key.is_some(), fill_key) {
             // A shape whose vector mask has a density or feather is a fill layer seen through a
@@ -369,7 +377,7 @@ impl Ctx<'_> {
         l.vector_mask = Some(vm);
     }
 
-    fn build(&mut self, nodes: &[LayerNode]) -> Vec<Layer> {
+    fn build(&mut self, nodes: &[LayerNode], depth: usize) -> Vec<Layer> {
         let layers = self.file.layers();
         let ctl = self.ctl;
         nodes
@@ -386,7 +394,18 @@ impl Ctx<'_> {
                 }
                 LayerNode::Group { index, children, .. } => {
                     let rec = &layers[*index];
-                    let children = self.build(children);
+                    // The recursion here (and in every later consumer of the tree) is bounded by
+                    // the document model's nesting cap; a deeper subtree is not imported.
+                    let children = if depth >= photocraft_doc::MAX_GROUP_DEPTH {
+                        self.warn(format!(
+                            "group `{}` nests deeper than {} groups; its contents were not imported",
+                            rec.name(),
+                            photocraft_doc::MAX_GROUP_DEPTH
+                        ));
+                        Vec::new()
+                    } else {
+                        self.build(children, depth + 1)
+                    };
                     let sd = rec.section_divider();
                     let expanded = sd.is_none_or(|s| s.kind != photocraft_psd::SectionType::ClosedFolder);
                     let artboard = crate::comps_map::ARTBOARD_KEYS.iter().find_map(|k| rec.block(k)).and_then(|b| crate::comps_map::parse_artboard(&b.data));
@@ -403,18 +422,42 @@ impl Ctx<'_> {
 
 /// Sets `Layer::link_group` from resource 1026's per-record ids (`nodes` and `layers` correspond).
 fn apply_link_groups(nodes: &[LayerNode], layers: &mut [Layer], ids: &[u16]) {
-    for (n, l) in nodes.iter().zip(layers.iter_mut()) {
-        let index = match n {
-            LayerNode::Layer { index } => *index,
-            LayerNode::Group { index, children, .. } => {
-                if let LayerContent::Group(g) = &mut l.content {
-                    apply_link_groups(children, &mut g.children, ids);
+    fn rec(nodes: &[LayerNode], layers: &mut [Layer], ids: &[u16], depth: usize) {
+        for (n, l) in nodes.iter().zip(layers.iter_mut()) {
+            let index = match n {
+                LayerNode::Layer { index } => *index,
+                LayerNode::Group { index, children, .. } => {
+                    // Matches the importer's nesting cap: deeper children were not imported.
+                    if depth < photocraft_doc::MAX_GROUP_DEPTH
+                        && let LayerContent::Group(g) = &mut l.content
+                    {
+                        rec(children, &mut g.children, ids, depth + 1);
+                    }
+                    *index
                 }
-                *index
-            }
-        };
-        l.link_group = ids.get(index).copied().filter(|&g| g != 0).map(u64::from);
+            };
+            l.link_group = ids.get(index).copied().filter(|&g| g != 0).map(u64::from);
+        }
     }
+    rec(nodes, layers, ids, 0);
+}
+
+/// Deepest group nesting of the file's layer records (a layer inside this many groups is the
+/// deepest), computed like `layer_tree`'s stack — iteratively, so no file can make it recurse.
+pub(crate) fn group_depth(file: &PsdFile) -> usize {
+    use photocraft_psd::tagged::SectionType;
+    let (mut open, mut depth) = (0usize, 0usize);
+    for rec in file.layers() {
+        match rec.section_type() {
+            SectionType::BoundingDivider => {
+                open += 1;
+                depth = depth.max(open);
+            }
+            SectionType::OpenFolder | SectionType::ClosedFolder => open = open.saturating_sub(1),
+            _ => {}
+        }
+    }
+    depth
 }
 
 fn preserved_blocks(rec: &LayerRecord) -> Vec<([u8; 4], Arc<Vec<u8>>)> {
@@ -563,18 +606,28 @@ pub fn psd_to_document_with(file: &PsdFile, ctl: &photocraft_raster::Interrupt) 
     let (w, hh) = (h.width as usize, h.height as usize);
     let n = w * hh;
     let canvas = Rect::new(0, 0, h.width as i32, h.height as i32);
-    let merged = file.decode_merged();
-    if ctl.cancelled() {
-        return None;
-    }
-    ctl.progress(0.1);
-    if let Err(e) = &merged {
-        cx.warn(format!("merged image could not be decoded: {e}"));
-    }
+    // The merged composite is decoded only when something consumes it: a flattened or
+    // multichannel file (it *is* the image), or extra alpha/spot channels behind the colour
+    // ones. A normal layered Photoshop save carries a merged composite nobody reads - roughly
+    // half the file's bytes, decoded and thrown away on every open before this.
+    let extra = usize::from(h.channels) > cc + usize::from(file.merged_has_alpha());
+    let merged = if !layered || file.layers().is_empty() || extra {
+        let m = file.decode_merged();
+        if ctl.cancelled() {
+            return None;
+        }
+        ctl.progress(0.1);
+        if let Err(e) = &m {
+            cx.warn(format!("merged image could not be decoded: {e}"));
+        }
+        Some(m)
+    } else {
+        None
+    };
 
     if multichannel {
         // Ink channels only (no layers); see `multichannel_map`.
-        if let Ok(all) = &merged {
+        if let Some(Ok(all)) = &merged {
             let names = file.resource(1045).map(|r| unicode_names(&r.data)).unwrap_or_default();
             crate::multichannel_map::import(file, all, &mut doc, &names, &mut cx.warnings);
         }
@@ -583,7 +636,7 @@ pub fn psd_to_document_with(file: &PsdFile, ctl: &photocraft_raster::Interrupt) 
         }
     } else if layered {
         let tree = file.layer_tree();
-        doc.layers = cx.build(&tree);
+        doc.layers = cx.build(&tree, 0);
         // Layer › Link Layers: resource 1026 holds one group id per layer record (0 = unlinked).
         if let Some(Ok(photocraft_psd::resources::ResourceData::LayerGroupInfo(groups))) =
             file.resources.iter().find(|r| r.id == ids::LAYER_GROUP_INFO).and_then(photocraft_psd::resources::ImageResource::parsed)
@@ -591,7 +644,7 @@ pub fn psd_to_document_with(file: &PsdFile, ctl: &photocraft_raster::Interrupt) 
             apply_link_groups(&tree, &mut doc.layers, &groups);
         }
         if doc.layers.is_empty()
-            && let Ok(all) = &merged
+            && let Some(Ok(all)) = &merged
         {
             // Flattened file: the merged image becomes the background layer.
             let plane = h.row_bytes() * hh;
@@ -655,7 +708,7 @@ pub fn psd_to_document_with(file: &PsdFile, ctl: &photocraft_raster::Interrupt) 
         }
         let rgba = file.composite_rgba8().or_else(|_| {
             // Multichannel: show the first channels as RGB.
-            let all = merged.clone()?;
+            let all = merged.clone().ok_or_else(|| photocraft_psd::PsdError::Invalid("no merged image".into()))??;
             let plane = h.row_bytes() * hh;
             let mut data = vec![255u8; n * 4];
             for c in 0..3.min(usize::from(h.channels)) {
@@ -685,7 +738,7 @@ pub fn psd_to_document_with(file: &PsdFile, ctl: &photocraft_raster::Interrupt) 
     }
 
     // Extra (alpha / spot) channels of the merged image.
-    if layered && let Ok(all) = &merged {
+    if layered && let Some(Ok(all)) = &merged {
         let first = cc + usize::from(file.merged_has_alpha());
         let plane = h.row_bytes() * hh;
         let names = file.resource(1045).map(|r| unicode_names(&r.data)).unwrap_or_default();
@@ -719,7 +772,7 @@ pub fn psd_to_document_with(file: &PsdFile, ctl: &photocraft_raster::Interrupt) 
     // Slices (resource 1050), after layer ids are known; the raw data stays for verbatim export.
     crate::slices_map::import(&mut doc);
     // Character and paragraph styles from the type layers' engine data.
-    crate::text_styles_map::import(&mut doc);
+    cx.warnings.extend(crate::text_styles_map::import(&mut doc));
 
     if ctl.cancelled() {
         return None;

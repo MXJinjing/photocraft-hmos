@@ -21,6 +21,8 @@ pub enum Format {
     Hdr,
     /// Encode-only behind the `avif` feature; see [`ASYMMETRIC_EXCEPTIONS`].
     Avif,
+    /// HEIF/HEIC (HEVC-coded): read-only; see [`ASYMMETRIC_EXCEPTIONS`].
+    Heif,
 }
 
 /// What a format can hold **and** what this crate reads/writes for it.
@@ -51,11 +53,20 @@ pub struct FormatCaps {
 
 /// Formats that are enabled but intentionally not symmetric, with the reason.
 /// The test-suite asserts that every other enabled format is read+write.
-pub const ASYMMETRIC_EXCEPTIONS: &[(Format, &str)] = &[(
-    Format::Avif,
-    "AVIF encode uses ravif (pure Rust) but decoding requires dav1d (C); read stays unsupported \
-     until a pure-Rust AV1 decoder is viable. Only enabled with the non-default `avif` feature.",
-)];
+pub const ASYMMETRIC_EXCEPTIONS: &[(Format, &str)] = &[
+    (
+        Format::Avif,
+        "AVIF encode uses ravif (pure Rust) but decoding requires dav1d (C); read stays unsupported \
+         until a pure-Rust AV1 decoder is viable. Only enabled with the non-default `avif` feature.",
+    ),
+    (
+        Format::Heif,
+        "HEIC decode uses heic-rs (pure Rust, in the optional photocraft-heif crate behind the \
+         non-default `heif` feature, which official builds enable), so iPhone and Mac photos open; \
+         writing needs an HEVC encoder, and the mature ones (x265, libheif) are C, so write stays \
+         unsupported. Without the feature HEIF is detected but neither read nor written.",
+    ),
+];
 
 use ChannelLayout as L;
 use SampleType as S;
@@ -65,7 +76,7 @@ const ALL_LAYOUTS: &[ChannelLayout] = &[L::Gray, L::GrayA, L::Rgb, L::Rgba, L::C
 
 impl Format {
     /// Every format known to the crate (enabled or not).
-    pub const ALL: [Format; 13] = [
+    pub const ALL: [Format; 14] = [
         Format::Png,
         Format::Jpeg,
         Format::Tiff,
@@ -79,6 +90,7 @@ impl Format {
         Format::OpenExr,
         Format::Hdr,
         Format::Avif,
+        Format::Heif,
     ];
 
     pub fn caps(self) -> FormatCaps {
@@ -106,6 +118,7 @@ impl Format {
             Format::OpenExr => "OpenEXR",
             Format::Hdr => "Radiance HDR",
             Format::Avif => "AVIF",
+            Format::Heif => "HEIF",
         }
     }
 
@@ -126,6 +139,7 @@ impl Format {
             Format::OpenExr => &["exr"],
             Format::Hdr => &["hdr"],
             Format::Avif => &["avif"],
+            Format::Heif => &["heic", "heif", "hif"],
         }
     }
 
@@ -144,6 +158,7 @@ impl Format {
             Format::OpenExr => "image/x-exr",
             Format::Hdr => "image/vnd.radiance",
             Format::Avif => "image/avif",
+            Format::Heif => "image/heif",
         }
     }
 
@@ -190,6 +205,9 @@ pub fn caps(format: Format) -> FormatCaps {
         Format::OpenExr => FormatCaps { depths: &[S::F16, S::F32], layouts: RGB_GRAY, ..base },
         Format::Hdr => FormatCaps { depths: &[S::F32], layouts: &[L::Rgb], alpha: false, lossy: true, ..base },
         Format::Avif => FormatCaps { read: false, write: cfg!(feature = "avif"), lossy: true, ..base },
+        Format::Heif => {
+            FormatCaps { read: cfg!(feature = "heif"), write: false, depths: &[S::U8, S::U16], icc: true, exif: true, xmp: true, lossy: true, ..base }
+        }
     }
 }
 
@@ -221,8 +239,13 @@ pub fn detect(bytes: &[u8]) -> Option<Format> {
     if b.starts_with(b"#?RADIANCE") || b.starts_with(b"#?RGBE") {
         return Some(Format::Hdr);
     }
-    if b.len() >= 12 && &b[4..8] == b"ftyp" && is_avif_ftyp(b) {
-        return Some(Format::Avif);
+    if b.len() >= 12 && &b[4..8] == b"ftyp" {
+        if is_avif_ftyp(b) {
+            return Some(Format::Avif);
+        }
+        if is_heif_ftyp(b) {
+            return Some(Format::Heif);
+        }
     }
     if b.len() >= 14 && b.starts_with(b"BM") {
         return Some(Format::Bmp);
@@ -239,11 +262,22 @@ pub fn detect(bytes: &[u8]) -> Option<Format> {
     None
 }
 
-fn is_avif_ftyp(b: &[u8]) -> bool {
+/// The `ftyp` brands: the major brand, then the compatible ones (the minor version between them is skipped).
+fn ftyp_brands(b: &[u8]) -> impl Iterator<Item = &[u8; 4]> {
     let size = u32::from_be_bytes([b[0], b[1], b[2], b[3]]) as usize;
     let end = size.clamp(12, b.len().min(64));
-    let brands = &b[8..end];
-    brands.as_chunks::<4>().0.iter().enumerate().any(|(i, c)| i != 1 && (c == b"avif" || c == b"avis"))
+    b[8..end].as_chunks::<4>().0.iter().enumerate().filter(|(i, _)| *i != 1).map(|(_, c)| c)
+}
+
+fn is_avif_ftyp(b: &[u8]) -> bool {
+    ftyp_brands(b).any(|c| c == b"avif" || c == b"avis")
+}
+
+/// HEVC-coded HEIF (`heic`, `heix`, ...) or a generic HEIF file (`mif1`, `msf1`, `miaf`) that is
+/// not AVIF (checked first). Sequence-only files (`hevc`, `msf1`) are recognised so that opening
+/// one says what is unsupported instead of "unrecognized format".
+fn is_heif_ftyp(b: &[u8]) -> bool {
+    ftyp_brands(b).any(|c| matches!(c, b"heic" | b"heix" | b"heim" | b"heis" | b"hevc" | b"hevx" | b"mif1" | b"msf1" | b"miaf"))
 }
 
 fn looks_like_tga(b: &[u8]) -> bool {

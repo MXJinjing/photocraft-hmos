@@ -365,3 +365,90 @@ fn vertical_type_caret_selection_and_arrows_follow_the_columns() {
     }
     assert_eq!(super::flow_key(egui::Key::ArrowUp, false), egui::Key::ArrowUp);
 }
+
+fn rgb_at(app: &PhotocraftApp, id: LayerId, ci: usize) -> [u8; 4] {
+    let t = text(app, id);
+    let b = t.text.char_indices().nth(ci).map_or(t.text.len(), |(b, _)| b);
+    let mut at = 0;
+    for r in t.char_runs() {
+        if b < at + r.len {
+            return r.style.color.to_rgba8();
+        }
+        at += r.len;
+    }
+    [0; 4]
+}
+
+/// A new foreground colour recolours the selected characters only, inside the editing session's
+/// history step; with nothing selected (a caret, or not editing) the type keeps its colour.
+#[test]
+fn foreground_colour_recolours_only_selected_type() {
+    let mut app = new_app();
+    let id =
+        LayerId(app.run("type.create", json!({"text": "Hello world", "size": 40, "x": 300, "y": 420, "color": "#000000"})).unwrap()["layer"].as_u64().unwrap());
+    app.run("tools.setColors", json!({"foreground": "#ff0000"})).unwrap();
+    super::foreground_changed(&mut app);
+    assert_eq!(rgb_at(&app, id, 0), [0, 0, 0, 255], "not editing: unchanged");
+    let edit = |caret, anchor| crate::state::TextEdit {
+        layer: id.0,
+        caret,
+        anchor,
+        session: "s".into(),
+        created: false,
+        dragging: false,
+        resize: None,
+        preedit: None,
+    };
+    app.ui.text_edit = Some(edit(3, 3));
+    super::foreground_changed(&mut app);
+    assert_eq!(rgb_at(&app, id, 0), [0, 0, 0, 255], "a caret: unchanged");
+    let steps = app.session.active().unwrap().history.entries().len();
+    app.ui.text_edit = Some(edit(11, 6));
+    super::foreground_changed(&mut app);
+    app.run("tools.setColors", json!({"foreground": "#00ff00"})).unwrap();
+    super::foreground_changed(&mut app);
+    assert_eq!((rgb_at(&app, id, 0), rgb_at(&app, id, 5)), ([0, 0, 0, 255], [0, 0, 0, 255]));
+    assert_eq!((rgb_at(&app, id, 6), rgb_at(&app, id, 10)), ([0, 255, 0, 255], [0, 255, 0, 255]));
+    assert_eq!(app.session.active().unwrap().history.entries().len(), steps + 1, "one step for the session");
+}
+
+#[test]
+fn vertical_type_tool_creates_point_and_paragraph_text_with_one_undo() {
+    use crate::canvas::{ToolEvent, tool_event};
+    use photocraft_doc::text::{Orientation, TextShape};
+    for end in [[100.0, 100.0], [240.0, 230.0]] {
+        let mut app = new_app();
+        app.ui.tool = crate::state::Tool::VerticalType;
+        let before = app.session.active().unwrap().history.entries().len();
+        tool_event(&mut app, ToolEvent::Down { x: 100.0, y: 100.0, pressure: 1.0 }, Modifiers::NONE);
+        tool_event(&mut app, ToolEvent::Move { x: end[0], y: end[1], pressure: 1.0 }, Modifiers::NONE);
+        tool_event(&mut app, ToolEvent::Up { x: end[0], y: end[1] }, Modifiers::NONE);
+        let id = LayerId(app.ui.text_edit.as_ref().unwrap().layer);
+        let st = app.session.active().unwrap();
+        let text = text_layer(&st.doc, id).unwrap();
+        assert_eq!(text.orientation, Orientation::Vertical);
+        assert_eq!(matches!(text.shape, TextShape::Box { .. }), end != [100.0, 100.0]);
+        assert_eq!(st.history.entries().len(), before + 1);
+        super::commit(&mut app);
+        app.run("edit.undo", json!({})).unwrap();
+        assert!(app.session.active().unwrap().doc.layer(id).is_none());
+    }
+}
+
+/// #668: ⌘/Ctrl+T while typing shows or hides the Character panel, as in Photoshop, instead of
+/// starting Free Transform on the layer being typed into.
+#[test]
+fn command_t_while_typing_toggles_the_character_panel() {
+    let mut app = new_app();
+    let id = LayerId(app.run("type.create", json!({"text": "HOHO", "size": 60, "x": 300, "y": 420})).unwrap()["layer"].as_u64().unwrap());
+    let mut h = harness(1.0, app);
+    let p = glyph(&mut h, id, 1, 0.5);
+    click(&mut h, p);
+    assert!(h.state().ui.text_edit.is_some(), "editing");
+    let before = crate::view_cmds::checked(h.state(), "window.panel.character");
+    h.event(egui::Event::Key { key: egui::Key::T, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::COMMAND });
+    h.run_steps(2);
+    assert!(h.state().ui.transform.is_none(), "no Free Transform while typing");
+    assert!(h.state().ui.text_edit.is_some(), "still editing");
+    assert_ne!(crate::view_cmds::checked(h.state(), "window.panel.character"), before, "the Character panel toggled");
+}

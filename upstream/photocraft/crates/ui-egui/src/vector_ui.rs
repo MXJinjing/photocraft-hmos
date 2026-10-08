@@ -1,4 +1,5 @@
 //! Vector tools: Shape tools (U), Pen (P), Path Selection (A), path overlays and the Paths panel.
+//! Direct Selection (A) lives in `direct_select`.
 //! All edits go through the engine's `shape.*` / `path.*` commands.
 
 use egui::{Color32, Pos2, Rect, Sense, Stroke, pos2, vec2};
@@ -225,11 +226,21 @@ enum PathTarget {
 }
 
 /// The targeted vector mask of the active layer, if the Layers panel targets it.
-fn targeted_vector_mask(app: &PhotocraftApp) -> Option<(u64, Path)> {
+pub(crate) fn targeted_vector_mask(app: &PhotocraftApp) -> Option<(u64, Path)> {
     let st = app.session.active()?;
     let l = st.active_layer.and_then(|id| st.doc.layer(id))?;
     (app.ui.vector_mask_target && !matches!(l.content, LayerContent::Shape(_))).then_some(())?;
     l.vector_mask.as_ref().map(|m| (l.id.0, m.path.clone()))
+}
+
+/// The active shape layer's path, if the active layer is a shape layer.
+pub(crate) fn active_shape_path(app: &PhotocraftApp) -> Option<(u64, Path)> {
+    let st = app.session.active()?;
+    let l = st.active_layer.and_then(|id| st.doc.layer(id))?;
+    match &l.content {
+        LayerContent::Shape(sh) => Some((l.id.0, sh.path.clone())),
+        _ => None,
+    }
 }
 
 /// The path Path Selection edits: the targeted vector mask, the active shape layer's path, else
@@ -238,13 +249,10 @@ fn target_path(app: &PhotocraftApp) -> Option<(PathTarget, Path)> {
     if let Some((id, p)) = targeted_vector_mask(app) {
         return Some((PathTarget::VectorMask(id), p));
     }
-    let st = app.session.active()?;
-    if let Some(l) = st.active_layer.and_then(|id| st.doc.layer(id))
-        && let LayerContent::Shape(sh) = &l.content
-    {
-        return Some((PathTarget::Shape(l.id.0), sh.path.clone()));
+    if let Some((id, p)) = active_shape_path(app) {
+        return Some((PathTarget::Shape(id), p));
     }
-    st.doc.work_path.clone().map(|p| (PathTarget::Work, p))
+    app.session.active()?.doc.work_path.clone().map(|p| (PathTarget::Work, p))
 }
 
 pub fn path_selection_finish(app: &mut PhotocraftApp, start: [f64; 2], end: [f64; 2]) {
@@ -276,7 +284,7 @@ fn bezier(p0: [f64; 2], c0: [f64; 2], c1: [f64; 2], p1: [f64; 2], t: f64) -> [f6
 }
 
 /// Screen polylines for a path (one per subpath).
-fn path_lines(path: &Path, xf: &dyn Fn([f64; 2]) -> Pos2) -> Vec<(Vec<Pos2>, bool)> {
+pub(crate) fn path_lines(path: &Path, xf: &dyn Fn([f64; 2]) -> Pos2) -> Vec<(Vec<Pos2>, bool)> {
     path.subpaths
         .iter()
         .map(|s| {
@@ -301,6 +309,30 @@ fn path_lines(path: &Path, xf: &dyn Fn([f64; 2]) -> Pos2) -> Vec<(Vec<Pos2>, boo
         .collect()
 }
 
+/// A path's outline in the accent colour.
+pub(crate) fn draw_outline(painter: &egui::Painter, p: &Path, to_scr: &dyn Fn([f64; 2]) -> Pos2, accent: Color32) {
+    for (pts, closed) in path_lines(p, to_scr) {
+        if closed {
+            painter.add(egui::Shape::closed_line(pts, Stroke::new(1.0, accent)));
+        } else {
+            painter.add(egui::Shape::line(pts, Stroke::new(1.0, accent)));
+        }
+    }
+}
+
+/// An anchor point's square: filled with the accent when selected, else hollow (white).
+pub(crate) fn draw_anchor(painter: &egui::Painter, c: Pos2, selected: bool, accent: Color32) {
+    let r = Rect::from_center_size(c, vec2(6.0, 6.0));
+    painter.rect_filled(r, 0.0, if selected { accent } else { Color32::WHITE });
+    painter.rect_stroke(r, 0.0, Stroke::new(1.0, accent), egui::StrokeKind::Inside);
+}
+
+/// A direction handle: the line from its anchor and the round handle end.
+pub(crate) fn draw_handle(painter: &egui::Painter, anchor: Pos2, handle: Pos2, accent: Color32) {
+    painter.line_segment([anchor, handle], Stroke::new(1.0, accent));
+    painter.circle_filled(handle, 3.0, accent);
+}
+
 /// Work path / active shape path outlines, anchors, and the pen path in progress.
 pub fn draw_overlay(app: &PhotocraftApp, painter: &egui::Painter, xf: &ViewXform, doc: &Document) {
     let tool = app.ui.tool;
@@ -308,37 +340,32 @@ pub fn draw_overlay(app: &PhotocraftApp, painter: &egui::Painter, xf: &ViewXform
     let accent = Tokens::get(painter.ctx()).accent;
     let to_scr = |q: [f64; 2]| xf.to_screen(q[0] as f32, q[1] as f32);
     let draw_path = |p: &Path, anchors: bool| {
-        for (pts, closed) in path_lines(p, &to_scr) {
-            if closed {
-                painter.add(egui::Shape::closed_line(pts, Stroke::new(1.0, accent)));
-            } else {
-                painter.add(egui::Shape::line(pts, Stroke::new(1.0, accent)));
-            }
-        }
+        draw_outline(painter, p, &to_scr, accent);
         if anchors {
-            for s in &p.subpaths {
-                for k in &s.knots {
-                    let c = to_scr([k.anchor.x, k.anchor.y]);
-                    painter.rect_filled(Rect::from_center_size(c, vec2(6.0, 6.0)), 0.0, Color32::WHITE);
-                    painter.rect_stroke(Rect::from_center_size(c, vec2(6.0, 6.0)), 0.0, Stroke::new(1.0, accent), egui::StrokeKind::Inside);
-                }
+            for k in p.subpaths.iter().flat_map(|s| &s.knots) {
+                draw_anchor(painter, to_scr([k.anchor.x, k.anchor.y]), false, accent);
             }
         }
     };
-    if vector_tool {
-        if let Some(wp) = &doc.work_path {
-            draw_path(wp, tool == Tool::PathSelection);
+    if crate::direct_select::shows(app, painter.ctx().input(|i| i.modifiers)) {
+        // Direct Selection (or the Pen with ⌘/Ctrl held) draws the paths it edits (#790).
+        crate::direct_select::draw_overlay(app, painter, &to_scr, accent);
+    } else {
+        if vector_tool {
+            if let Some(wp) = &doc.work_path {
+                draw_path(wp, tool == Tool::PathSelection);
+            }
+            let st = app.session.active();
+            if let Some(l) = st.and_then(|s| s.active_layer.and_then(|id| s.doc.layer(id)))
+                && let LayerContent::Shape(sh) = &l.content
+            {
+                draw_path(&sh.path, tool == Tool::PathSelection);
+            }
         }
-        let st = app.session.active();
-        if let Some(l) = st.and_then(|s| s.active_layer.and_then(|id| s.doc.layer(id)))
-            && let LayerContent::Shape(sh) = &l.content
-        {
-            draw_path(&sh.path, tool == Tool::PathSelection);
+        // A targeted vector mask shows its path with any tool (#196).
+        if let Some((_, p)) = targeted_vector_mask(app) {
+            draw_path(&p, tool == Tool::PathSelection);
         }
-    }
-    // A targeted vector mask shows its path with any tool (#196).
-    if let Some((_, p)) = targeted_vector_mask(app) {
-        draw_path(&p, tool == Tool::PathSelection);
     }
     // Pen path in progress, with handles of the last knot and a rubber band to the pointer.
     if let Some(pen) = &app.ui.pen {
@@ -356,16 +383,13 @@ pub fn draw_overlay(app: &PhotocraftApp, painter: &egui::Painter, xf: &ViewXform
         }
         for (i, k) in pen.knots.iter().enumerate() {
             let c = to_scr(k[0]);
-            if i + 1 == pen.knots.len() && k[2] != k[0] {
+            let last = i + 1 == pen.knots.len();
+            if last && k[2] != k[0] {
                 for hnd in [k[1], k[2]] {
-                    let hp = to_scr(hnd);
-                    painter.line_segment([c, hp], Stroke::new(1.0, accent));
-                    painter.circle_filled(hp, 3.0, accent);
+                    draw_handle(painter, c, to_scr(hnd), accent);
                 }
             }
-            let r = Rect::from_center_size(c, vec2(6.0, 6.0));
-            painter.rect_filled(r, 0.0, if i + 1 == pen.knots.len() { accent } else { Color32::WHITE });
-            painter.rect_stroke(r, 0.0, Stroke::new(1.0, accent), egui::StrokeKind::Inside);
+            draw_anchor(painter, c, last, accent);
         }
     }
 }
@@ -375,7 +399,7 @@ pub fn draw_overlay(app: &PhotocraftApp, painter: &egui::Painter, xf: &ViewXform
 
 /// Options bar for vector tools; false for other tools.
 pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui, tool: Tool) -> bool {
-    if !(is_shape_tool(tool) || matches!(tool, Tool::Pen | Tool::PathSelection)) {
+    if !(is_shape_tool(tool) || matches!(tool, Tool::Pen | Tool::PathSelection | Tool::DirectSelection)) {
         return false;
     }
     let t = Tokens::get(ui.ctx());
@@ -385,6 +409,17 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui, tool: Tool) -> bo
     let o = &mut app.ui.tool_options;
     if tool == Tool::PathSelection {
         lbl(ui, if app.ui.vector_mask_target { "Drag to move the targeted vector mask" } else { tl!("Drag to move the active shape's path or the Work Path") });
+        return true;
+    }
+    if tool == Tool::DirectSelection {
+        let (shift, alt) = (crate::shortcuts::pretty("Shift"), crate::shortcuts::pretty("Alt"));
+        lbl(
+            ui,
+            &crate::i18n::fmt(
+                tl!("Click: select anchor · Drag: move anchor, handle or segment · {shift}-click: add · {alt}-click: whole subpath"),
+                &[("shift", &shift), ("alt", &alt)],
+            ),
+        );
         return true;
     }
     if tool == Tool::Pen {
@@ -679,6 +714,47 @@ pub fn paths_footer(ctx: &egui::Context) -> Option<Rect> {
     ctx.data(|d| d.get_temp(footer_id()))
 }
 
+/// Commands offered by a Paths row's context menu. The row's path is passed explicitly so a
+/// right-click acts on that row even when another path is selected in the panel.
+fn path_context_actions(entry: &PathEntry, doc: &Document) -> Vec<(&'static str, &'static str, Value)> {
+    let key = match entry.kind {
+        PathRow::Work => "work".to_string(),
+        PathRow::Layer => "layer".to_string(),
+        PathRow::Saved => entry.name.clone(),
+    };
+    let mut actions = vec![
+        ("Make Selection", "path.toSelection", json!({"name": key})),
+        ("Fill Path", "path.fill", json!({"name": key})),
+        ("Stroke Path", "path.stroke", json!({"name": key, "tool": "brush"})),
+    ];
+    if entry.kind == PathRow::Work {
+        let mut n = doc.paths.len().saturating_add(1);
+        while doc.paths.iter().any(|p| p.name == format!("Path {n}")) {
+            n = n.saturating_add(1);
+            if n == usize::MAX {
+                break;
+            }
+        }
+        actions.push(("Save Path", "path.rename", json!({"name": "work", "to": format!("Path {n}")})));
+    } else {
+        let mut n = 1usize;
+        while doc.paths.iter().any(|p| p.name == format!("{} copy {n}", entry.name)) {
+            n = n.saturating_add(1);
+            if n == usize::MAX {
+                break;
+            }
+        }
+        let copy_name = format!("{} copy {n}", entry.name);
+        actions.push(("Duplicate Path", "path.set", json!({"name": copy_name, "path": photocraft_engine::vector_cmds::path_json(&entry.path)})));
+    }
+    if entry.kind != PathRow::Layer {
+        actions.push(("Delete Path", "path.delete", json!({"name": key})));
+    } else if entry.name.ends_with(" Vector Mask") {
+        actions.push(("Delete Vector Mask", "layer.vectorMask.delete", json!({})));
+    }
+    actions
+}
+
 pub fn paths_panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let t = Tokens::get(ui.ctx());
     let Some(st) = app.session.active() else {
@@ -733,6 +809,20 @@ pub fn paths_panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                     let n = doc.paths.len() + 1;
                     action = Some(("path.rename", json!({"name": "work", "to": format!("Path {n}")})));
                 }
+                resp.context_menu(|ui| {
+                    crate::widgets::menu_scroll(ui, |ui| {
+                        ui.set_min_width(190.0);
+                        let entry = PathEntry { name: name.clone(), path: path.clone(), kind: *kind };
+                        let can_paint = app.session.active().and_then(|s| s.active_layer.and_then(|id| s.doc.layer(id))).is_some_and(|l| l.surface().is_some());
+                        for (label, cmd, params) in path_context_actions(&entry, &doc) {
+                            let enabled = !matches!(cmd, "path.fill" | "path.stroke") || can_paint;
+                            if ui.add_enabled(enabled, egui::Button::new(tl!(label))).clicked() {
+                                action = Some((cmd, params));
+                                ui.close();
+                            }
+                        }
+                    });
+                });
                 ui.painter().line_segment([r.left_bottom(), r.right_bottom()], Stroke::new(1.0, t.separator));
             }
         },
@@ -791,6 +881,49 @@ mod tests {
     }
 
     #[test]
+    fn paths_context_menu_uses_the_clicked_row_and_dispatches_commands() {
+        let mut app = app();
+        let path = json!({"subpaths": [{"closed": true, "knots": [
+            {"anchor": [10, 10], "in": [10, 10], "out": [10, 10]},
+            {"anchor": [80, 10], "in": [80, 10], "out": [80, 10]},
+            {"anchor": [80, 80], "in": [80, 80], "out": [80, 80]}
+        ]}]});
+        app.run("path.set", json!({"name": "First", "path": path})).unwrap();
+        app.run("path.set", json!({"name": "Second", "path": path})).unwrap();
+        let doc = &app.session.active().unwrap().doc;
+        let first = path_rows(doc, None).into_iter().find(|r| r.name == "First").unwrap();
+        let entries = path_context_actions(&first, doc);
+        assert_eq!(entries[0].1, "path.toSelection");
+        assert_eq!(entries[0].2["name"], "First");
+        assert!(entries.iter().all(|(_, id, _)| photocraft_engine::commands::find(id).is_some()));
+        let (_, id, params) = entries.into_iter().find(|(_, id, _)| *id == "path.toSelection").unwrap();
+        app.run(id, params).unwrap();
+        assert!(app.session.active().unwrap().doc.selection.is_some());
+        assert_eq!(app.session.journal.last().map(|(id, _)| id.as_str()), Some("path.toSelection"));
+
+        app.run("path.set", json!({"name": "First copy 1", "path": path})).unwrap();
+        let doc = &app.session.active().unwrap().doc;
+        let first = path_rows(doc, None).into_iter().find(|r| r.name == "First").unwrap();
+        let (_, _, duplicate) = path_context_actions(&first, doc).into_iter().find(|(_, id, _)| *id == "path.set").unwrap();
+        assert_eq!(duplicate["name"], "First copy 2", "duplicate must not overwrite an existing path");
+    }
+
+    #[test]
+    fn work_path_context_save_and_layer_path_deletion_rules() {
+        let mut app = app();
+        let path = json!({"subpaths": []});
+        app.run("path.set", json!({"name": "work", "path": path})).unwrap();
+        let doc = &app.session.active().unwrap().doc;
+        let work = path_rows(doc, None).into_iter().find(|r| r.kind == PathRow::Work).unwrap();
+        let entries = path_context_actions(&work, doc);
+        assert!(entries.iter().any(|(_, id, _)| *id == "path.rename"));
+        assert!(!entries.iter().any(|(_, id, _)| *id == "path.set"));
+        let layer = PathEntry { kind: PathRow::Layer, ..work };
+        let entries = path_context_actions(&layer, doc);
+        assert!(!entries.iter().any(|(_, id, _)| *id == "path.delete"));
+    }
+
+    #[test]
     fn shape_drag_creates_layers_with_modifiers() {
         let mut app = app();
         finish_shape(&mut app, Tool::Rectangle, [10.0, 10.0], [60.0, 30.0], egui::Modifiers::SHIFT);
@@ -803,6 +936,30 @@ mod tests {
         assert!(b.x0.abs_diff(80) <= 1 && b.width().abs_diff(40) <= 1, "alt = from centre: {b:?}");
         finish_shape(&mut app, Tool::Line, [10.0, 150.0], [90.0, 152.0], egui::Modifiers::SHIFT);
         assert_eq!(app.session.active().unwrap().doc.layers.len(), 4);
+    }
+
+    #[test]
+    fn shift_pressed_during_a_shape_drag_constrains_it() {
+        // #668: ⇧ only counted when held at the press; Photoshop constrains when it is pressed
+        // mid-drag (and stops when it is released).
+        use crate::canvas::{ToolEvent, tool_event};
+        for (tool, sides) in [(Tool::Polygon, 6), (Tool::Rectangle, 4), (Tool::EllipseShape, 0)] {
+            let mut app = app();
+            app.ui.tool = tool;
+            app.ui.tool_options.polygon_sides = 6;
+            let none = egui::Modifiers::NONE;
+            tool_event(&mut app, ToolEvent::Down { x: 10.0, y: 10.0, pressure: 1.0 }, none);
+            tool_event(&mut app, ToolEvent::Move { x: 40.0, y: 30.0, pressure: 1.0 }, none);
+            tool_event(&mut app, ToolEvent::Move { x: 70.0, y: 40.0, pressure: 1.0 }, egui::Modifiers::SHIFT);
+            tool_event(&mut app, ToolEvent::Up { x: 70.0, y: 40.0 }, egui::Modifiers::SHIFT);
+            let st = app.session.active().unwrap();
+            let l = st.doc.layer(st.active_layer.unwrap()).unwrap();
+            assert!(matches!(l.content, LayerContent::Shape(_)), "{tool:?} ({sides} sides): a shape layer");
+            let b = l.surface().unwrap().content_bounds();
+            // The drag is 60 × 30; constrained, the shape's box is 60 × 60 (a hexagon is narrower
+            // than its box, so the height tells).
+            assert!(b.height().abs_diff(60) <= 1 && b.width() <= 61, "{tool:?}: ⇧ mid-drag keeps proportions: {b:?}");
+        }
     }
 
     #[test]

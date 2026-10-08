@@ -15,7 +15,9 @@ fn f(p: &Value, k: &str, d: f32) -> f32 {
     p.get(k).and_then(Value::as_f64).map_or(d, |v| v as f32)
 }
 fn i(p: &Value, k: &str, d: i32) -> i32 {
-    p.get(k).and_then(|v| v.as_i64().or_else(|| v.as_f64().map(|f| f.round() as i64))).map_or(d, |v| v as i32)
+    // Clamped like the neighbouring filter params: an out-of-range value saturates instead of
+    // wrapping through `as i32` (`3e9` used to come back as a negative offset).
+    p.get(k).and_then(|v| v.as_i64().or_else(|| v.as_f64().map(|f| f.round() as i64))).map_or(d, |v| v.clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32)
 }
 fn b(p: &Value, k: &str, d: bool) -> bool {
     p.get(k).and_then(Value::as_bool).unwrap_or(d)
@@ -224,7 +226,7 @@ pub(crate) fn run_filter(s: &mut Session, id: &str, p: &Value) -> Result<Value> 
             let bounds = sel_bounds.filter(|b| !b.is_empty()).unwrap_or(doc_bounds);
             // Neighbourhood filters repeat edge pixels at the canvas edge (or past it, where the
             // layer has off-canvas pixels) instead of fading in transparency, as Photoshop does.
-            if let Some(surf) = crate::channel_cmds::channel_surface_for_filter(doc, &p)? {
+            if let Some(surf) = crate::channel_cmds::channel_surface_for_filter(doc, Some(layer), &p)? {
                 let content = surf.content_bounds();
                 let area = algo::output_area(&fp, content, bounds, sel_bounds);
                 *surf = filter(surf, &fp, area, bounds, selection.as_ref(), doc_bounds.union(&content))?;
@@ -499,6 +501,17 @@ mod tests {
     }
 
     #[test]
+    fn huge_offsets_clamp_instead_of_wrapping() {
+        // 3e9 wrapped to a negative offset through `as i32`; it saturates now, so it
+        // equals the maximal in-range offset instead of shifting the other way.
+        let mut a = session();
+        a.execute("filter.other.offset", json!({"horizontal": 3_000_000_000_i64, "vertical": 0})).unwrap();
+        let mut b = session();
+        b.execute("filter.other.offset", json!({"horizontal": 2_147_483_647_i64, "vertical": 0})).unwrap();
+        assert_eq!(active_pixels(&a), active_pixels(&b));
+    }
+
+    #[test]
     fn last_filter_repeats_with_same_params() {
         let mut s = session();
         paint_pattern(&mut s);
@@ -581,6 +594,7 @@ mod tests {
                     filter_mask: None,
                     warp: None,
                     stack_mode: None,
+                    perspective: None,
                 }),
             );
             *active = Some(doc.insert_above(*active, l));

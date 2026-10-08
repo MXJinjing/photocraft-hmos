@@ -51,7 +51,15 @@ pub fn no_embedded(_: CjkScript) -> Vec<&'static CraftFont> {
 impl Sources {
     #[cfg(not(target_arch = "wasm32"))]
     pub fn system() -> Self {
-        Self { locale: || cjk::ui_locale().map(str::to_string), files: cjk::font_files, last_resort: cjk::last_resort_files, embedded: craft_embedded }
+        Self {
+            locale: || match crate::i18n::current().code() {
+                code @ ("ja" | "ko" | "zh-hans" | "zh-hant") => Some(code.to_string()),
+                _ => cjk::ui_locale().map(str::to_string),
+            },
+            files: cjk::font_files,
+            last_resort: cjk::last_resort_files,
+            embedded: craft_embedded,
+        }
     }
     #[cfg(target_arch = "wasm32")]
     pub fn system() -> Self {
@@ -62,6 +70,8 @@ impl Sources {
 /// The lazy loader's state: which scripts were tried and which files were read.
 pub struct CjkFallback {
     sources: Sources,
+    /// set_fonts takes effect next pass; do not collide with a previous loader's font names.
+    defer_after_reset: bool,
     order: Option<[CjkScript; 4]>,
     tried: Vec<CjkScript>,
     last_resort_tried: bool,
@@ -72,7 +82,7 @@ pub struct CjkFallback {
 
 impl CjkFallback {
     pub fn new(sources: Sources) -> Self {
-        Self { sources, order: None, tried: Vec::new(), last_resort_tried: false, loaded: Vec::new(), registered: Vec::new() }
+        Self { sources, defer_after_reset: false, order: None, tried: Vec::new(), last_resort_tried: false, loaded: Vec::new(), registered: Vec::new() }
     }
 
     /// Script order for the UI locale (resolved on first use, not at startup).
@@ -235,6 +245,7 @@ fn add_to_all_families(ctx: &egui::Context, name: String, mut data: FontData) {
         }
     }
     let families = families.into_iter().map(|family| InsertFontFamily { family, priority: FontPriority::Lowest }).collect();
+    crate::theme::size_ui_font(ctx, &name, &mut data);
     ctx.add_font(FontInsert { name, data, families });
 }
 
@@ -247,6 +258,10 @@ impl egui::Plugin for CjkFontPlugin {
     }
 
     fn output_hook(&mut self, ctx: &egui::Context, output: &mut egui::FullOutput) {
+        if std::mem::take(&mut self.0.defer_after_reset) {
+            ctx.request_repaint();
+            return;
+        }
         if self.0.exhausted() {
             return;
         }
@@ -268,7 +283,19 @@ pub fn install(ctx: &egui::Context) {
 }
 
 pub fn install_with(ctx: &egui::Context, sources: Sources) {
-    ctx.add_plugin(CjkFontPlugin(CjkFallback::new(sources)));
+    // egui keeps the first plugin of a type. set_fonts removes loaded fallbacks, so reset the
+    // existing loader too; otherwise its tried/loaded sets prevent fonts being added again.
+    let mut fallback = CjkFallback::new(sources.clone());
+    fallback.defer_after_reset = true;
+    if ctx
+        .with_plugin::<CjkFontPlugin, _>(|plugin| {
+            plugin.0 = CjkFallback::new(sources.clone());
+            plugin.0.defer_after_reset = true;
+        })
+        .is_none()
+    {
+        ctx.add_plugin(CjkFontPlugin(fallback));
+    }
 }
 
 #[cfg(test)]
@@ -277,7 +304,54 @@ mod tests {
     use super::*;
     use std::sync::Mutex;
 
+    #[test]
+    fn lazy_fallbacks_follow_ui_font_size_and_survive_size_changes() {
+        use photocraft_engine::prefs::UiFontSize;
+        let ctx = egui::Context::default();
+        crate::theme::install_fonts(&ctx);
+        ctx.run_ui(Default::default(), |_| {}).textures_delta.clear();
+        crate::theme::set_ui_font_size(&ctx, UiFontSize::Large);
+        let name = "test-lazy-fallback".to_string();
+        add_to_all_families(&ctx, name.clone(), FontData::from_static(photocraft_text::fonts::INTER_REGULAR));
+        for (size, scale) in [(UiFontSize::Large, 16.0 / 12.0), (UiFontSize::Tiny, 10.0 / 12.0), (UiFontSize::Small, 1.0)] {
+            crate::theme::set_ui_font_size(&ctx, size);
+            for _ in 0..2 {
+                ctx.run_ui(Default::default(), |_| {}).textures_delta.clear();
+            }
+            let fonts = ctx.fonts(|f| f.definitions().clone());
+            let fallback = fonts.font_data.get(&name).unwrap();
+            assert_eq!(fallback.tweak.scale, scale);
+            assert_eq!(fallback.tweak.y_offset_factor, 0.0, "same face as Inter keeps its baseline");
+            for stack in fonts.families.values() {
+                assert_eq!(stack.iter().filter(|n| *n == &name).count(), 1);
+                assert_eq!(stack.last(), Some(&name), "fallback stays at the lowest priority");
+            }
+        }
+    }
+
     static DIR: Mutex<Option<PathBuf>> = Mutex::new(None);
+
+    #[test]
+    fn changing_language_resets_the_loader_once_and_reorders_scripts() {
+        crate::i18n::with_language(crate::i18n::Lang::EN, || {
+            let ctx = egui::Context::default();
+            crate::i18n::sync_context(&ctx, "ja");
+            ctx.with_plugin::<CjkFontPlugin, _>(|plugin| {
+                assert_eq!(plugin.0.order()[0], CjkScript::Japanese);
+                plugin.0.tried = plugin.0.order().to_vec();
+                plugin.0.last_resort_tried = true;
+            })
+            .expect("font plugin");
+            crate::i18n::sync_context(&ctx, "ja");
+            assert!(ctx.with_plugin::<CjkFontPlugin, _>(|plugin| plugin.0.exhausted()).expect("font plugin"), "idle frames must not reload fonts");
+            crate::i18n::sync_context(&ctx, "ko");
+            ctx.with_plugin::<CjkFontPlugin, _>(|plugin| {
+                assert!(!plugin.0.exhausted());
+                assert_eq!(plugin.0.order()[0], CjkScript::Korean);
+            })
+            .expect("font plugin");
+        });
+    }
 
     fn fake_dir() -> PathBuf {
         let mut g = DIR.lock().unwrap();

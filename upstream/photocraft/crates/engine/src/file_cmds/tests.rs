@@ -240,6 +240,21 @@ fn fit_image_and_conditional_mode_change() {
 }
 
 #[test]
+fn conditional_mode_change_cannot_run_a_mode_change_the_gate_denies() {
+    fn deny_mode(id: &str, _: &Value) -> Result<()> {
+        if id.starts_with("image.mode.") { Err(EngineError::Other(format!("automation command `{id}` is disabled"))) } else { Ok(()) }
+    }
+    let mut s = session(4, 4, 8);
+    s.authorize = Some(deny_mode);
+    let e = s.execute("file.automate.conditionalModeChange", json!({"to": "grayscale"})).unwrap_err();
+    assert!(e.to_string().contains("image.mode.grayscale"), "{e}");
+    assert_eq!(doc(&s).mode, ColorMode::Rgb, "the refused nested step leaves the document alone");
+    // Commands that compose only allowed steps still run.
+    s.execute("file.automate.fitImage", json!({"width": 2, "height": 2})).unwrap();
+    assert_eq!(doc(&s).size.width, 2);
+}
+
+#[test]
 fn flatten_all_layer_effects_and_masks() {
     for depth in [8, 16, 32] {
         let mut s = session(40, 40, depth);
@@ -389,6 +404,19 @@ fn only_layered_files_save_in_place() {
     }
     assert_eq!(extension("dir/Photo.JPEG").as_deref(), Some("jpeg"));
     assert_eq!(extension("my.dir/name"), None);
+}
+
+#[test]
+fn templates_open_untitled_without_their_path() {
+    assert!(is_template("dir/card.PSDT") && !is_template("card.psd") && !is_template("psdt"));
+    let dir = tmp("template");
+    let path = format!("{dir}/card.psdt");
+    let mut s = session(8, 8, 8);
+    std::fs::write(&path, encode(doc(&s), "x.psd", None).unwrap().0).unwrap();
+    s.execute("file.openAs", json!({"path": path})).unwrap();
+    s.execute("file.openAs", json!({"path": path, "as": "psd"})).unwrap();
+    let opened: Vec<_> = s.documents()[1..].iter().map(|d| (d.doc.name.as_str(), d.path.as_deref())).collect();
+    assert_eq!(opened, [("Untitled-1", None), ("Untitled-2", None)]);
 }
 
 /// Two inputs with one output name: the first result is kept and the second is an error, never

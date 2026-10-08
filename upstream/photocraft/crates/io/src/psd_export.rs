@@ -20,10 +20,22 @@ const PSD_ESTIMATE_FIXED_OVERHEAD: u64 = 1024 * 1024;
 const PSD_ESTIMATE_LAYER_OVERHEAD: u64 = 64 * 1024;
 
 /// Options for [`document_to_psd_with`].
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct PsdExportOptions {
     /// Write PSB even when the document fits PSD limits.
     pub force_psb: bool,
+    /// Matte the merged image against white where it is translucent, as Photoshop does
+    /// (`false` keeps straight colour under the alpha: for containers that store the composite
+    /// with its own alpha, such as a layered TIFF).
+    pub merged_matte: bool,
+    /// Compression of the merged image (32-bit float documents are always written raw).
+    pub merged_compression: Compression,
+}
+
+impl Default for PsdExportOptions {
+    fn default() -> Self {
+        PsdExportOptions { force_psb: false, merged_matte: true, merged_compression: Compression::Rle }
+    }
 }
 
 struct Ex {
@@ -554,7 +566,16 @@ impl Ex {
         let size = if size.0 > 0.0 && size.1 > 0.0 { size } else { size_from_layer(sm) };
         let mut warnings = Vec::new();
         let fx = (!stack.filters.is_empty()).then(|| filter_fx(&stack, &l.name, &mut warnings));
-        let spec = PlacedSpec { idnt: &src.uuid, placed: &placed, transform: sm.transform, size, dpi: src.dpi, warp: sm.warp.as_ref(), filter_fx: fx };
+        let spec = PlacedSpec {
+            idnt: &src.uuid,
+            placed: &placed,
+            transform: sm.transform,
+            perspective: sm.perspective,
+            size,
+            dpi: src.dpi,
+            warp: sm.warp.as_ref(),
+            filter_fx: fx,
+        };
         let sold = sold_bytes(same_source.map(|t| &t.descriptor), &spec, &mut warnings);
         let plld = plld_bytes(&spec, &mut warnings);
         warnings.dedup();
@@ -566,7 +587,12 @@ impl Ex {
             let bounds = sm.cache.as_ref().map_or(self.canvas, |c| c.content_bounds().union(&self.canvas));
             let item = match (sm.stack_mode, self.source_composite(&src.uuid)) {
                 (None, Some((img, img_bounds))) => {
-                    let unfiltered = photocraft_algo::warp::place_source(&img, img_bounds, &sm.transform, sm.warp.as_ref());
+                    let unfiltered = match &sm.perspective {
+                        Some(p) => {
+                            photocraft_algo::warp::place_source_projective(&img, img_bounds, &photocraft_algo::transform::Homography(*p), sm.warp.as_ref())
+                        }
+                        None => photocraft_algo::warp::place_source(&img, img_bounds, &sm.transform, sm.warp.as_ref()),
+                    };
                     crate::smart_map::feid_item(&placed, &unfiltered, sm.filter_mask.as_ref(), bounds, self.fmt)
                 }
                 _ => None,
@@ -687,7 +713,7 @@ impl Ex {
                 return Err(format!("smart objects nest more than {MAX_NESTING} deep"));
             }
             let doc = photocraft_format::load_from_bytes(bytes).map_err(|e| format!("its contents can't be read: {e}"))?;
-            let (file, warnings) = document_to_psd_nested(&doc, &PsdExportOptions { force_psb: true }, self.smart.depth + 1);
+            let (file, warnings) = document_to_psd_nested(&doc, &PsdExportOptions { force_psb: true, ..Default::default() }, self.smart.depth + 1);
             let data = file.to_bytes().map_err(|e| format!("its contents can't be written: {e}"))?;
             let stem = file_name.rsplit_once('.').map_or(file_name, |(a, _)| a);
             self.warnings.extend(warnings.into_iter().map(|w| format!("smart object {stem}: {w}")));
@@ -1123,8 +1149,8 @@ fn document_to_psd_nested(doc: &Document, opts: &PsdExportOptions, depth: u32) -
     // Merged composite, rendered and encoded in bands (no full-size float composite). Matting
     // against white only changes pixels with alpha < 1; if some are slightly translucent but all
     // round to opaque (so no alpha channel is written), encode once more without the matte.
-    let (mut planes, has_alpha, translucent) = merged_planes(doc, &fmt, cmyk_of(&fmt), true);
-    if !has_alpha && translucent {
+    let (mut planes, has_alpha, translucent) = merged_planes(doc, &fmt, cmyk_of(&fmt), opts.merged_matte);
+    if !has_alpha && translucent && opts.merged_matte {
         planes = merged_planes(doc, &fmt, cmyk_of(&fmt), false).0;
     }
     let n = doc.size.area() as usize;
@@ -1157,7 +1183,7 @@ fn document_to_psd_nested(doc: &Document, opts: &PsdExportOptions, depth: u32) -
     }
     let channels = (cc + usize::from(has_alpha) + extra.len()) as u16;
     let header = Header::new(version, doc.size.width, doc.size.height, channels, psd_depth(sample), psd_mode(fmt.mode));
-    let mcomp = if sample == SampleType::F32 { Compression::Raw } else { Compression::Rle };
+    let mcomp = if sample == SampleType::F32 { Compression::Raw } else { opts.merged_compression };
     let image_data = ImageData::encode(mcomp, &planes, &header)
         .or_else(|_| ImageData::encode(Compression::Raw, &planes, &header))
         .unwrap_or(ImageData { compression: Compression::Raw, data: planes });
@@ -1243,7 +1269,10 @@ fn document_to_psd_nested(doc: &Document, opts: &PsdExportOptions, depth: u32) -
         global_blocks.push(tb);
     }
     let comps_resource = ex.comps.is_some().then(|| crate::comps_map::write_comps_resource(doc));
-    let slices_resource = crate::slices_map::export_resource(doc, &ex.layer_ids);
+    let (slices_resource, slices_warning) = crate::slices_map::export_resource(doc, &ex.layer_ids);
+    if let Some(warning) = slices_warning {
+        ex.warnings.push(warning);
+    }
     for (id, name, data) in &doc.metadata.psd_resources {
         // Layer comps: the preserved list while unchanged, else regenerated (or dropped) below.
         if *id == crate::comps_map::LAYER_COMPS && comps_resource.is_some() {

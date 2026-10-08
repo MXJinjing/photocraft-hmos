@@ -409,6 +409,15 @@ fn level_room_keeps_every_level_below_the_bar() {
     assert_eq!(level_room(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(100.0, 40.0)), bar, 1, None, frame), 4.0 * ARROW);
     assert_eq!(level_room(screen, Some(f32::NAN), 1, None, frame), level_room(screen, None, 1, None, frame));
     assert_eq!(level_room(egui::Rect::NOTHING, bar, 2, Some(row), frame), 4.0 * ARROW);
+    // A window running under the taskbar: a top-level menu leaves a scrolling submenu's room above
+    // it, so the submenu of its last row (which egui opens downward) stays above the taskbar too.
+    let visible = egui::Rect::from_min_max(screen.min, egui::pos2(screen.right(), 600.0));
+    let top = level_room_in(screen, visible, bar, 1, None, None, frame);
+    assert_eq!(top, 600.0 - EDGE - (30.0 + EDGE) - (4.0 * ARROW + frame) - frame);
+    let last_row = egui::Rect::from_min_size(egui::pos2(100.0, 30.0 + EDGE + top - 24.0), egui::vec2(200.0, 24.0));
+    // A 200 pt submenu fits the window downward, so egui opens it that way: it scrolls in what is left.
+    let room = level_room_in(screen, visible, bar, 2, Some(last_row), Some(200.0), frame);
+    assert!(room >= 4.0 * ARROW && last_row.top() - (frame - 2.0) / 2.0 + room + frame <= 600.0 - EDGE + 0.5, "room {room}");
 }
 
 /// #315: a 1366 × 768 pt display with a Windows taskbar. `window` is the window's content size and
@@ -516,4 +525,68 @@ fn a_maximized_window_or_an_unknown_monitor_uses_the_whole_window() {
     assert_eq!(crate::work_area::visible_rect(&h.ctx), h.ctx.content_rect());
     let h = harness((1366.0, 768.0, 1.0));
     assert_eq!(crate::work_area::visible_rect(&h.ctx), h.ctx.content_rect());
+}
+
+/// One gesture: press a menu title (it opens on the press, not the release), drag down to an
+/// item and release on it to run it. A plain click still opens the menu and leaves it open.
+#[test]
+fn press_drag_release_runs_a_menu_item() {
+    use egui::{Modifiers, PointerButton};
+    let mut h = harness((1280.0, 720.0, 1.0));
+    let rulers = h.state().ui.extras.rulers;
+    let title = h.get_by_label("View").rect().center();
+    h.event(egui::Event::PointerMoved(title));
+    h.run_steps(1);
+    h.event(egui::Event::PointerButton { pos: title, button: PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE });
+    h.run_steps(2);
+    assert!(Nav::current(&h.ctx).rows.first().is_some_and(|r| !r.is_empty()), "the menu opens on the press");
+    let item = h.get_by_label_contains("Rulers").rect().center();
+    for k in 1..=8 {
+        h.event(egui::Event::PointerMoved(title + (item - title) * (k as f32 / 8.0)));
+        h.run_steps(1);
+    }
+    h.event(egui::Event::PointerButton { pos: item, button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE });
+    h.run_steps(3);
+    assert_eq!(h.state().ui.extras.rulers, !rulers, "releasing on Rulers ran it");
+    assert!(Nav::current(&h.ctx).rows.first().is_none_or(|r| r.is_empty()), "and closed the menu");
+    // A click (press and release on the title) opens the menu and leaves it open.
+    h.get_by_label("View").click();
+    h.run_steps(4);
+    assert!(Nav::current(&h.ctx).rows.first().is_some_and(|r| !r.is_empty()), "a click leaves it open");
+}
+
+/// Windows and Linux menus too (#775): one press-drag-release gesture can move across titles and
+/// into a submenu. Press File, drag over to View, down to Proof Setup, right into its submenu and
+/// release on Working CMYK.
+#[test]
+fn press_drag_release_reaches_other_menus_and_submenus() {
+    use egui::{Modifiers, PointerButton};
+    let mut h = harness((1280.0, 720.0, 1.0));
+    let mut at = h.get_by_label("File").rect().center();
+    h.event(egui::Event::PointerMoved(at));
+    h.run_steps(1);
+    h.event(egui::Event::PointerButton { pos: at, button: PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE });
+    h.run_steps(2);
+    let mut drag_to = |h: &mut Harness<'static, PhotocraftApp>, to: egui::Pos2| {
+        for k in 1..=8 {
+            h.event(egui::Event::PointerMoved(at + (to - at) * (k as f32 / 8.0)));
+            h.run_steps(1);
+        }
+        h.run_steps(2);
+        at = to;
+    };
+    let view = h.get_by_label("View").rect().center();
+    drag_to(&mut h, view);
+    assert!(h.query_by_label_contains("Proof Setup").is_some(), "dragging over View switched to its menu");
+    let proof = h.get_by_label_contains("Proof Setup").rect();
+    drag_to(&mut h, egui::pos2(proof.left() + 30.0, proof.center().y));
+    drag_to(&mut h, egui::pos2(proof.right() - 6.0, proof.center().y));
+    let item = h.get_by_label_contains("Working CMYK").rect();
+    drag_to(&mut h, egui::pos2(item.left() + 30.0, proof.center().y));
+    drag_to(&mut h, item.center());
+    h.event(egui::Event::PointerButton { pos: at, button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE });
+    h.run_steps(3);
+    let proofing = crate::menus::menu_items(h.state()).into_iter().find(|i| i.id == "view.proofColors").and_then(|i| i.checked);
+    assert_eq!(proofing, Some(true), "releasing on Working CMYK ran it");
+    assert!(Nav::current(&h.ctx).rows.first().is_none_or(|r| r.is_empty()), "and closed the menus");
 }

@@ -185,7 +185,7 @@ fn pattern_texture(ctx: &egui::Context, pat: &photocraft_doc::Pattern) -> Textur
     })
 }
 
-fn style_texture(app: &PhotocraftApp, ctx: &egui::Context, st: &photocraft_engine::presets::styles::StylePreset) -> TextureHandle {
+pub(crate) fn style_texture(app: &PhotocraftApp, ctx: &egui::Context, st: &photocraft_engine::presets::styles::StylePreset) -> TextureHandle {
     let key = ("style", st.name.clone(), st.effects.len(), format!("{:?}{:?}", st.blend, st.fill_opacity));
     cached_texture(ctx, key, || {
         const S: u32 = 64;
@@ -1127,5 +1127,20 @@ mod tests {
         app.drag = None;
         app.session.presets.clone.active_mut().anchor = Some([20.0, 20.0]);
         assert_eq!(clone_sample_point(&app, Some([30.0, 30.0])), Some([20.0, 20.0]));
+    }
+
+    #[test]
+    fn clone_marker_shows_only_while_painting() {
+        // #668: ⌥-click used to leave a "+" on the canvas until the next stroke.
+        let (mut app, _) = app();
+        app.ui.tool = Tool::CloneStamp;
+        crate::retouch_ui::set_source(&mut app, 10.0, 10.0);
+        app.hover_doc = Some([40.0, 40.0]);
+        assert_eq!(crate::retouch_ui::source_marker_point(&app), None, "hovering after ⌥-click shows nothing");
+        app.drag = Some(crate::canvas::Drag::new(Tool::CloneStamp, [40.0, 40.0], vec![[40.0, 40.0, 1.0]], egui::Modifiers::NONE, false));
+        assert!(crate::retouch_ui::source_marker_point(&app).is_some(), "painting shows where it samples");
+        app.drag = None;
+        app.ui.tool = Tool::Brush;
+        assert_eq!(crate::retouch_ui::source_marker_point(&app), None);
     }
 }

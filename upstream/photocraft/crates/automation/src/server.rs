@@ -80,9 +80,12 @@ pub struct SaveParams {
     /// Format override as an extension (pcraft, psd, png, jpg, tif, webp, exr, …).
     #[serde(default)]
     pub format: Option<String>,
-    /// JPEG quality 1..100 for lossy exports.
+    /// JPEG or WebP quality 1..100. A WebP saved with a quality is lossy; without one it is lossless.
     #[serde(default)]
     pub quality: Option<u8>,
+    /// TIFF: keep the layers (Photoshop layer data). Off by default: a flat TIFF.
+    #[serde(default, rename = "tiffLayers")]
+    pub tiff_layers: bool,
     #[serde(default)]
     pub index: Option<usize>,
 }
@@ -309,14 +312,14 @@ impl PhotocraftMcp {
             Ok(bytes) => bytes,
             Err(error) => return Ok(fail(format!("app screenshot data: {error}"))),
         };
-        if let Err(error) = check_png(bytes.len()) {
-            return Ok(fail(error));
-        }
         let bytes = match downscale_png(&bytes, max_side.unwrap_or(0)) {
             Ok(Some(small)) => small,
             Ok(None) => bytes,
             Err(error) => return Ok(fail(error)),
         };
+        if let Err(error) = check_png(bytes.len()) {
+            return Ok(fail(error));
+        }
         Ok(png_result(&bytes, "screenshot of the live app window".into()))
     }
 }
@@ -574,7 +577,9 @@ impl PhotocraftMcp {
         }
     }
 
-    #[tool(description = "Bridge mode: send pointer events (document coordinates) to the active tool.")]
+    #[tool(
+        description = "Bridge mode: send pointer events (document coordinates) to the active tool; with a Color Picker open they sample the image into it instead."
+    )]
     async fn ui_pointer(&self, Parameters(p): Parameters<PointerParams>) -> Result<CallToolResult, McpError> {
         match self.bridge_client() {
             Some(b) => {
@@ -655,9 +660,11 @@ impl PhotocraftMcp {
         }
         let Some(r) = self
             .headless_op(move |h| {
-                let mut opts = photocraft_io::ExportOptions::default();
+                let mut opts = photocraft_io::ExportOptions { tiff_layers: p.tiff_layers, ..Default::default() };
                 if let Some(q) = p.quality {
                     opts.encode.jpeg_quality = q.clamp(1, 100);
+                    opts.encode.webp_quality = q.clamp(1, 100);
+                    opts.encode.webp_lossless = false;
                 }
                 let path = p.path.map(PathBuf::from);
                 h.save(p.index, path.as_deref(), p.format.as_deref(), &opts)
@@ -697,6 +704,7 @@ mod tests {
     fn bridge_screenshot_decode_limits_apply_even_without_downscaling() {
         let image = photocraft_codecs::Image::from_u8(8193, 1, photocraft_codecs::ChannelLayout::Rgba, vec![0; 8193 * 4]).unwrap();
         let png = photocraft_codecs::encode(&image, photocraft_codecs::Format::Png, &Default::default()).unwrap();
+        assert!(downscale_png(b"not a png", 32).is_err());
         assert!(downscale_png(&png, 0).is_err());
         assert!(downscale_png(&png, 1024).is_err());
     }

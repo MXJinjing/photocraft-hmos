@@ -27,6 +27,8 @@ pub(crate) struct MovePreview {
     offsets: Vec<(i32, i32)>,
     /// The document at the latest offset.
     shown: Option<Arc<Document>>,
+    /// Shows a floating selection (`select.float`): offsets are the piece's, from where it was cut.
+    floating: bool,
 }
 
 impl MovePreview {
@@ -59,7 +61,14 @@ fn drag_offset(app: &PhotocraftApp) -> Option<(i32, i32)> {
 /// the pointer. `None` without a drag (or when the layers can't move: locked, say; the drag then
 /// shows its arrow and the release reports why).
 pub(crate) fn display_doc(app: &mut PhotocraftApp, idx: usize) -> Option<(Arc<Document>, u64)> {
-    if app.session.active_index() != Some(idx) {
+    if app.session.active_index() == Some(idx)
+        && let Some(st) = app.session.documents().get(idx)
+        && photocraft_engine::float_cmds::floating(st).is_some()
+    {
+        return floating_doc(app, idx);
+    }
+    // Preferences › Interface › Show bounding box when dragging layer: outline and arrow only.
+    if app.session.active_index() != Some(idx) || app.session.prefs().interface.show_bounding_box_when_dragging_layer {
         return None;
     }
     let Some(offset) = drag_offset(app) else {
@@ -77,7 +86,7 @@ pub(crate) fn display_doc(app: &mut PhotocraftApp, idx: usize) -> Option<(Arc<Do
         let all = Rect::new(i32::MIN / 2, i32::MIN / 2, i32::MAX / 2, i32::MAX / 2);
         let bounds = ids.iter().try_fold(Rect::EMPTY, |acc, id| Some(acc.union(&photocraft_compose::change_bounds(doc.layer(*id)?, all)?)));
         let canvas = doc.bounds();
-        app.move_preview = Some(MovePreview { doc: doc_id, revision, ids, bounds, canvas, offsets: Vec::new(), shown: None });
+        app.move_preview = Some(MovePreview { doc: doc_id, revision, ids, bounds, canvas, offsets: Vec::new(), shown: None, floating: false });
     }
     let p = app.move_preview.as_mut()?;
     if offset == (0, 0) && p.offsets.is_empty() {
@@ -98,6 +107,42 @@ pub(crate) fn display_doc(app: &mut PhotocraftApp, idx: usize) -> Option<(Arc<Do
             }
         }
         app.perf.span("move preview", crate::gpu_canvas::now_ms() - t0);
+    }
+    let p = app.move_preview.as_ref()?;
+    Some((p.shown.clone()?, p.key()))
+}
+
+/// A floating selection's offset plus a drag of it in progress (`canvas::selection_drag_delta`).
+pub(crate) fn floating_offset(app: &PhotocraftApp) -> Option<(i32, i32)> {
+    let f = photocraft_engine::float_cmds::floating(app.session.active()?)?;
+    let d = crate::canvas::selection_drag_delta(app).unwrap_or((0, 0));
+    Some((f.offset.0 + d.0, f.offset.1 + d.1))
+}
+
+/// The document shown while a selection floats: the cut piece at its offset, over the cut-out
+/// layer. Only the piece's area changes between offsets, so each move costs the piece, not the
+/// layer.
+fn floating_doc(app: &mut PhotocraftApp, idx: usize) -> Option<(Arc<Document>, u64)> {
+    let offset = floating_offset(app)?;
+    let st = app.session.documents().get(idx)?;
+    let f = photocraft_engine::float_cmds::floating(st)?;
+    let (doc_id, revision) = (st.doc.id, st.revision);
+    let fresh = app.move_preview.as_ref().is_some_and(|p| p.doc == doc_id && p.revision == revision && p.floating);
+    if !fresh {
+        let bounds = st.doc.selection.as_ref().map(|s| s.content_bounds());
+        let canvas = st.doc.bounds();
+        app.move_preview = Some(MovePreview { doc: doc_id, revision, ids: vec![f.layer], bounds, canvas, offsets: Vec::new(), shown: None, floating: true });
+    }
+    let st = app.session.documents().get(idx)?;
+    let shown = app.move_preview.as_ref()?.offsets.last() != Some(&offset);
+    if shown {
+        let t0 = crate::gpu_canvas::now_ms();
+        let d = photocraft_engine::float_cmds::displayed(st, crate::canvas::selection_drag_delta(app).unwrap_or((0, 0)))?;
+        let d = photocraft_engine::mode_cmds::display_document(&d).unwrap_or(d);
+        let p = app.move_preview.as_mut()?;
+        p.shown = Some(Arc::new(d));
+        p.offsets.push(offset);
+        app.perf.span("floating preview", crate::gpu_canvas::now_ms() - t0);
     }
     let p = app.move_preview.as_ref()?;
     Some((p.shown.clone()?, p.key()))
@@ -182,5 +227,30 @@ mod tests {
         // From +10 to +20 the strip x 0..10 shows pixels that were off the canvas a frame ago.
         let r = super::damage(&app, st.doc.id, st.revision, keys[0], keys[1]).unwrap();
         assert_eq!(r, Rect::new(0, 0, 64, 64));
+    }
+
+    /// Mid-drag on a painted layer: is the layer shown at the pointer?
+    fn live(outline: bool) -> bool {
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        app.session.execute("file.new", json!({"width": 64, "height": 64})).unwrap();
+        app.sync_views();
+        app.session.execute("layer.new.layer", json!({})).unwrap();
+        app.session.execute("select.rect", json!({"x": 8, "y": 8, "width": 16, "height": 16})).unwrap();
+        app.session.execute("edit.fill", json!({"color": "#ff0000"})).unwrap();
+        app.session.execute("select.deselect", json!({})).unwrap();
+        app.session.edit_prefs(|p| p.interface.show_bounding_box_when_dragging_layer = outline);
+        app.ui.tool = Tool::Move;
+        let m = egui::Modifiers::NONE;
+        crate::canvas::tool_event(&mut app, ToolEvent::Down { x: 16.0, y: 16.0, pressure: 1.0 }, m);
+        crate::canvas::tool_event(&mut app, ToolEvent::Move { x: 30.0, y: 20.0, pressure: 1.0 }, m);
+        let shown = super::display_doc(&mut app, 0).is_some();
+        assert_eq!(shown, super::showing(&app));
+        shown
+    }
+
+    #[test]
+    fn bounding_box_preference_turns_the_live_drag_off() {
+        assert!(live(false), "by default the layer follows the pointer");
+        assert!(!live(true), "with the preference on, only the outline and arrow move");
     }
 }

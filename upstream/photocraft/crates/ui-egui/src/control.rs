@@ -8,13 +8,13 @@
 //! - `engine.commands`: list commands with enablement
 //! - `ui.inspect`: full UI state (tool, panels, views, dialogs, windows, window size); the menu
 //!   tree is `ui.menu.list`
-//! - `ui.set {tool?, panels?, dock?, dockTabs?, dockWidth?, maskTarget?, vectorMaskTarget?, selectionMode?, zoom?, center?, fit?, theme?, brushSection?, brushTab?, brushesView?, brushSize?}`:
+//! - `ui.set {tool?, panels?, dock?, dockTabs?, dockWidth?, colorPanel?, maskTarget?, vectorMaskTarget?, selectionMode?, zoom?, center?, fit?, theme?, brushSection?, brushTab?, brushesView?, brushSize?}`:
 //!   change UI state; any other field is an error ([`UI_SET_FIELDS`])
 //! - `ui.menu.invoke {id, wait?}` / `ui.menu.list`: activate a menu item by id; list the menu tree
 //! - `ui.dialog.open {kind, fields?}` (kinds: newDocument, about, layerStyle {effect?}, colorPicker {target: foreground|background}, command {command}) / `ui.dialog.set {dialog, field, value}` / `ui.dialog.confirm {dialog, wait?}` / `ui.dialog.cancel {dialog}`
 //! - `ui.dialog.apply {dialog}`: commit Preferences changes without closing the dialog
 //! - `ui.window.open {document?}` / `ui.window.close {window}`: extra document windows
-//! - `ui.pointer {events: [{kind: down|move|up, x, y, pressure?, tiltX?, tiltY?, rotation?}], modifiers?, button?}`: drive the active tool in document coordinates (`button: "secondary"` = the right button: opens the Brush Preset picker, or erases with Preferences › Tools › Right-click with painting tools = erase)
+//! - `ui.pointer {events: [{kind: down|move|up, x, y, pressure?, tiltX?, tiltY?, rotation?}], modifiers?, button?}`: drive the active tool in document coordinates (`button: "secondary"` opens the tool's canvas context menu or Brush Preset picker, or erases with Preferences › Tools › Right-click with painting tools = erase)
 //! - `ui.click {x, y, button?, count?}` / `ui.move {x, y}`: synthetic pointer input in screen points
 //! - `ui.key {key, command?, shift?, alt?, ctrl?}` / `ui.type {text}`: synthetic keyboard input
 //! - `ui.resize {width, height}`: resize the main window
@@ -70,12 +70,13 @@ pub enum Outcome {
 
 /// The fields `ui.set` reads. Anything else is rejected before a field is applied, so a typo or
 /// a field the method doesn't have can't reply with success while nothing changes (#412).
-pub const UI_SET_FIELDS: [&str; 16] = [
+pub const UI_SET_FIELDS: [&str; 19] = [
     "tool",
     "panels",
     "dock",
     "dockTabs",
     "dockWidth",
+    "colorPanel",
     "maskTarget",
     "vectorMaskTarget",
     "selectionMode",
@@ -87,6 +88,8 @@ pub const UI_SET_FIELDS: [&str; 16] = [
     "brushTab",
     "brushesView",
     "brushSize",
+    "gradientBlendMode",
+    "gradientClassic",
 ];
 
 fn ok(v: Value) -> Outcome {
@@ -132,11 +135,35 @@ fn screen_point(app: &PhotocraftApp, x: f64, y: f64) -> [f32; 2] {
 }
 
 pub fn handle(app: &mut PhotocraftApp, ctx: &egui::Context, req: &ControlRequest) -> Outcome {
+    let saved = app.session.authorize;
+    if let Some(gate) = app.services.automation_authorize {
+        app.session.authorize = Some(gate);
+    }
+    let outcome = dispatch(app, ctx, req);
+    app.session.authorize = saved;
+    outcome
+}
+
+fn dispatch(app: &mut PhotocraftApp, ctx: &egui::Context, req: &ControlRequest) -> Outcome {
     let p = &req.params;
     let s = |k: &str| p.get(k).and_then(Value::as_str);
     let u = |k: &str| p.get(k).and_then(Value::as_u64);
     let wait = p.get("wait").and_then(Value::as_bool).unwrap_or(true);
     match req.method.as_str() {
+        "ui.context.choose" => {
+            let Some(id) = s("id") else { return err("missing `id`") };
+            let Some(menu) = app.ui.canvas_tool_menu.as_ref() else { return err("no canvas context menu is open") };
+            if !crate::canvas_tool_menu::available(app, menu, id) {
+                return err("context action is unavailable");
+            }
+            if let Some(authorize) = app.services.automation_command.as_ref()
+                && let Err(error) = authorize(id, &json!({}))
+            {
+                return err(error);
+            }
+            crate::canvas_tool_menu::choose(app, ctx, id);
+            ok(json!({"command": id, "dialog": app.ui.dialogs.last().map(|d| d.id)}))
+        }
         "engine.execute" | "ui.menu.invoke" => {
             let Some(id) = s("command").or(s("id")) else { return err("missing `command`") };
             let params = p.get("params").cloned().unwrap_or(json!({}));
@@ -180,11 +207,35 @@ pub fn handle(app: &mut PhotocraftApp, ctx: &egui::Context, req: &ControlRequest
             if let Some(field) = p.as_object().and_then(|o| o.keys().find(|k| !UI_SET_FIELDS.contains(&k.as_str()))) {
                 return err(format!("unknown field `{field}` (fields: {})", UI_SET_FIELDS.join(", ")));
             }
+            let gradient_blend = if let Some(value) = p.get("gradientBlendMode") {
+                let Some(name) = value.as_str() else { return err("gradientBlendMode must be a blend mode name") };
+                let Some(mode) = photocraft_engine::commands::blend_from_str(name).filter(|m| photocraft_color::BlendMode::LAYER_MODES.contains(m)) else {
+                    return err(format!("unknown gradient blend mode `{name}`"));
+                };
+                Some(mode)
+            } else {
+                None
+            };
+            if let Some(value) = p.get("gradientClassic")
+                && !value.is_boolean()
+            {
+                return err("gradientClassic must be a boolean");
+            }
             if let Some(t) = s("tool") {
                 match Tool::from_name(t) {
                     Some(t) => app.ui.tool = t,
                     None => return err(format!("unknown tool `{t}`")),
                 }
+            }
+            let gradient_before = app.ui.tool_options.clone();
+            if let Some(mode) = gradient_blend {
+                app.ui.tool_options.gradient_blend_mode = mode;
+            }
+            if let Some(classic) = p.get("gradientClassic").and_then(Value::as_bool) {
+                app.ui.tool_options.gradient_classic = classic;
+            }
+            if gradient_blend.is_some() {
+                crate::gradient_ui::options_changed(app, &gradient_before);
             }
             if let Some(panels) = p.get("panels") {
                 let mut cur = serde_json::to_value(&app.ui.panels).unwrap_or_default();
@@ -229,6 +280,13 @@ pub fn handle(app: &mut PhotocraftApp, ctx: &egui::Context, req: &ControlRequest
                     Err(e) => return err(e),
                 }
             }
+            // Which chip the Color panel edits.
+            if let Some(c) = p.get("colorPanel") {
+                match serde_json::from_value(c.clone()) {
+                    Ok(v) => app.ui.color_panel = v,
+                    Err(e) => return err(e),
+                }
+            }
             // Right dock width in points (clamped to the dock's 250..=520 range), applied next frame.
             if let Some(w) = p.get("dockWidth").and_then(Value::as_f64) {
                 crate::panels::request_dock_width(ctx, w as f32);
@@ -269,8 +327,10 @@ pub fn handle(app: &mut PhotocraftApp, ctx: &egui::Context, req: &ControlRequest
                     Err(e) => return err(format!("brushesView: {e} (list, grid)")),
                 }
             }
-            if let Some(size) = p.get("brushSize").and_then(Value::as_f64) {
-                app.session.tools.brush.size = size as f32;
+            if let Some(size) = p.get("brushSize").and_then(Value::as_f64)
+                && let Err(e) = app.run("tools.setBrush", json!({"brush": {"size": size}}))
+            {
+                return err(e);
             }
             ok(Value::Null)
         }
@@ -376,12 +436,26 @@ pub fn handle(app: &mut PhotocraftApp, ctx: &egui::Context, req: &ControlRequest
                     "up" => ToolEvent::Up { x, y },
                     _ => ToolEvent::Move { x, y, pressure: pr },
                 };
+                // With the Color Picker on top the image is its eyedropper, as for the mouse.
+                if crate::color_picker_ui::top(app).is_some() {
+                    if !matches!(ev, ToolEvent::Up { .. }) {
+                        crate::color_picker_ui::sample_at(app, x, y);
+                    }
+                    continue;
+                }
                 if matches!(s("button"), Some("secondary" | "right")) {
                     let down = matches!(ev, ToolEvent::Down { .. });
                     // Right-click with the Move tool, or ⌘/Ctrl+right-click: list the layers there.
                     if crate::layer_pick_ui::is_gesture(app.ui.tool, mods) {
                         if down {
+                            app.ui.canvas_tool_menu = None;
                             crate::layer_pick_ui::open(app, screen_point(app, x, y), x, y);
+                        }
+                        continue;
+                    }
+                    if crate::canvas_tool_menu::applies(app.ui.tool) {
+                        if down {
+                            crate::canvas_tool_menu::open(app, app.ui.tool, screen_point(app, x, y));
                         }
                         continue;
                     }
@@ -497,13 +571,11 @@ pub fn handle(app: &mut PhotocraftApp, ctx: &egui::Context, req: &ControlRequest
                     None => Err("automation read authority is not configured".into()),
                 };
                 wrap(opened.and_then(|(name, bytes)| {
+                    let name = app.open_name(&name);
                     let warnings = app.open_automation_bytes(&name, &bytes)?;
                     // Brushes/gradients go to the preset libraries: no document, no Open Recent entry.
                     if !crate::preset_files_ui::is_preset_file(&name) {
-                        if let Some(state) = app.session.active_mut() {
-                            state.path = Some(path.to_string());
-                        }
-                        app.push_recent(path);
+                        app.opened_from(path);
                     }
                     Ok(json!({"path": path, "name": name, "warnings": warnings}))
                 }))
@@ -528,8 +600,20 @@ pub fn inspect(app: &PhotocraftApp, ctx: &egui::Context) -> Value {
     json!({
         "window": {"width": screen.width(), "height": screen.height(), "pixelsPerPoint": ctx.pixels_per_point()},
         "tool": app.ui.tool,
+        "toolOptions": app.ui.tool_options,
+        "magnetic": app.ui.magnetic,
         "textEdit": app.ui.text_edit,
         "layerMenu": app.ui.layer_menu,
+        "canvasToolMenu": app.ui.canvas_tool_menu.as_ref().map(|menu| {
+            json!({
+                "pos": menu.pos,
+                "tool": menu.tool,
+                "entries": crate::canvas_tool_menu::rows(menu).iter().map(|row| match row {
+                    Some((label, id)) => json!({"label": label, "id": id, "enabled": crate::canvas_tool_menu::entry_enabled(app, menu, id)}),
+                    None => json!({"separator": true}),
+                }).collect::<Vec<_>>()
+            })
+        }),
         "panels": app.ui.panels,
         "views": app.ui.views,
         "dialogs": dialogs,
@@ -538,6 +622,7 @@ pub fn inspect(app: &PhotocraftApp, ctx: &egui::Context) -> Value {
         "status": app.ui.status,
         "statusError": app.ui.status_error,
         "notices": app.ui.notices,
+        "gpuFallbackNotice": app.ui.gpu_fallback_notice,
         "frame": app.frame,
         "session": photocraft_engine::inspect::session(&app.session),
         "document": app.session.active().map(photocraft_engine::inspect::document),
@@ -545,6 +630,7 @@ pub fn inspect(app: &PhotocraftApp, ctx: &egui::Context) -> Value {
         "brush": {"size": app.session.tools.brush.size, "hardness": app.session.tools.brush.hardness, "opacity": app.session.tools.brush.opacity},
         "distort": app.distort.describe(),
         "jobs": crate::jobs_ui::inspect(app),
+        "cameraRaw": app.camera_raw.as_ref().map(|d| d.describe(&app.ui.camera_raw_scope, &app.ui.camera_raw_preview)),
     })
 }
 
@@ -592,6 +678,57 @@ mod tests {
     }
 
     #[test]
+    fn right_pointer_opens_agent_visible_selection_menu() {
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        let ctx = egui::Context::default();
+        app.run("file.new", json!({"width": 32, "height": 32})).unwrap();
+        app.run("select.rect", json!({"x": 1, "y": 1, "width": 8, "height": 8})).unwrap();
+        let result = call(
+            &mut app,
+            &ctx,
+            "ui.pointer",
+            json!({
+                "tool": "RectMarquee", "button": "secondary",
+                "events": [{"kind": "down", "x": 4, "y": 4}, {"kind": "up", "x": 4, "y": 4}]
+            }),
+        );
+        assert_eq!(result.get("ok"), Some(&Value::Bool(true)));
+        let inspected = call(&mut app, &ctx, "ui.inspect", json!({}));
+        let entries = inspected.pointer("/result/canvasToolMenu/entries").and_then(Value::as_array).unwrap();
+        assert!(entries.iter().any(|entry| entry.get("id") == Some(&json!("select.inverse")) && entry.get("enabled") == Some(&json!(true))));
+        assert!(app.session.active().unwrap().doc.selection.is_some(), "right-click must not edit selection");
+    }
+
+    #[test]
+    fn agent_can_inspect_and_choose_pen_make_selection_from_full_context_menu() {
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        let ctx = egui::Context::default();
+        app.run("file.new", json!({"width": 32, "height": 32})).unwrap();
+        app.run("path.set", json!({"name":"work","path":{"subpaths":[{"closed":true,"knots":[[2,2],[20,2],[20,20]]}]}})).unwrap();
+        let expected_pos = screen_point(&app, 8.0, 8.0);
+        let result = call(
+            &mut app,
+            &ctx,
+            "ui.pointer",
+            json!({
+                "tool": "Pen", "button": "secondary", "events": [{"kind":"down","x":8,"y":8},{"kind":"up","x":8,"y":8}]
+            }),
+        );
+        assert_eq!(result["ok"], true);
+        let inspected = call(&mut app, &ctx, "ui.inspect", json!({}));
+        assert_eq!(app.ui.canvas_tool_menu.as_ref().unwrap().pos, expected_pos);
+        let entries = inspected.pointer("/result/canvasToolMenu/entries").and_then(Value::as_array).unwrap();
+        assert_eq!(entries.iter().filter(|row| row.get("separator") == Some(&json!(true))).count(), 9);
+        assert!(entries.iter().any(|row| row.get("id") == Some(&json!("path.toSelection")) && row.get("enabled") == Some(&json!(true))));
+        assert_eq!(call(&mut app, &ctx, "ui.context.choose", json!({"id":"file.new"}))["ok"], false);
+        let chosen = call(&mut app, &ctx, "ui.context.choose", json!({"id":"path.toSelection"}));
+        assert_eq!(chosen["ok"], true);
+        let dialog = chosen["result"]["dialog"].as_u64().unwrap();
+        assert_eq!(call(&mut app, &ctx, "ui.dialog.confirm", json!({"dialog":dialog}))["ok"], true);
+        assert!(app.session.active().unwrap().doc.selection.is_some());
+    }
+
+    #[test]
     fn engine_execute_runs_with_defaults_but_menu_invoke_opens_the_dialog() {
         let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
         let ctx = egui::Context::default();
@@ -630,6 +767,29 @@ mod tests {
     }
 
     #[test]
+    fn ui_set_gradient_blend_mode_validates_and_updates_options() {
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        let ctx = egui::Context::default();
+        let good = call(&mut app, &ctx, "ui.set", json!({"tool": "gradient", "gradientBlendMode": "Difference", "gradientClassic": true}));
+        assert_eq!(good["ok"], true, "{good}");
+        assert_eq!(app.ui.tool_options.gradient_blend_mode, photocraft_color::BlendMode::Difference);
+        assert!(app.ui.tool_options.gradient_classic);
+        let bad = call(&mut app, &ctx, "ui.set", json!({"gradientBlendMode": "nonsense", "gradientClassic": false}));
+        assert_eq!(bad["ok"], false, "{bad}");
+        assert!(app.ui.tool_options.gradient_classic, "invalid mode must not change options");
+    }
+
+    #[test]
+    fn ui_set_color_panel_picks_the_edited_chip() {
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        let ctx = egui::Context::default();
+        assert_eq!(call(&mut app, &ctx, "ui.set", json!({"colorPanel": {"background": true}}))["ok"], true);
+        assert!(app.ui.color_panel.background);
+        assert_eq!(call(&mut app, &ctx, "ui.set", json!({"colorPanel": {"background": "yes"}}))["ok"], false);
+        assert!(app.ui.color_panel.background, "a bad value changes nothing");
+    }
+
+    #[test]
     fn ui_set_unknown_theme_error_names_every_theme_and_each_name_works() {
         use crate::theme::ThemeKind;
         let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
@@ -643,6 +803,37 @@ mod tests {
             assert_eq!(app.ui.theme, kind);
             assert_eq!(ThemeKind::from_name(kind.id()), Some(kind));
         }
+    }
+
+    #[test]
+    fn ui_set_brush_size_dispatches_a_journaled_brush_command() {
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        let ctx = egui::Context::default();
+
+        let r = call(&mut app, &ctx, "ui.set", json!({"brushSize": 42.5}));
+        assert_eq!(r["ok"], true, "{r}");
+        assert_eq!(app.session.tools.brush.size, 42.5);
+        let (id, params) = app.session.journal.last().cloned().expect("brush change is journaled");
+        assert_eq!(id, "tools.setBrush");
+        assert_eq!(params, json!({"brush": {"size": 42.5}}));
+
+        // The control API has historically ignored non-numeric optional values.
+        for params in [json!({}), json!({"brushSize": null}), json!({"brushSize": "large"}), json!({"brushSize": true})] {
+            let journal_len = app.session.journal.len();
+            let r = call(&mut app, &ctx, "ui.set", params);
+            assert_eq!(r["ok"], true, "{r}");
+            assert_eq!(app.session.tools.brush.size, 42.5);
+            assert_eq!(app.session.journal.len(), journal_len);
+        }
+
+        // Values that cannot be represented by BrushSettings must report the command error and
+        // leave both the brush and journal unchanged instead of mutating tool state directly.
+        let journal_len = app.session.journal.len();
+        let r = call(&mut app, &ctx, "ui.set", json!({"brushSize": f64::MAX}));
+        assert_eq!(r["ok"], false, "{r}");
+        assert!(r["error"].as_str().is_some(), "{r}");
+        assert_eq!(app.session.tools.brush.size, 42.5);
+        assert_eq!(app.session.journal.len(), journal_len);
     }
 
     #[test]
@@ -749,5 +940,59 @@ mod tests {
         let r = call(&mut app, &ctx, "app.save", json!({}));
         assert_eq!(r["result"]["path"], "in/layered.psd", "{r}");
         assert_eq!(written.borrow().last().map(String::as_str), Some("in/layered.psd"));
+        // A template opens untitled, so a save without `path` never writes over it.
+        let r = call(&mut app, &ctx, "app.open", json!({"path": "in/card.psdt"}));
+        assert_eq!(r["result"]["name"], "Untitled-1", "{r}");
+        assert_eq!(app.session.active().unwrap().path, None);
+        let r = call(&mut app, &ctx, "app.save", json!({}));
+        assert!(r["error"].as_str().unwrap().contains("pass `path`"), "{r}");
+    }
+
+    fn deny_ambient_file(id: &str, _: &serde_json::Value) -> photocraft_engine::Result<()> {
+        if id.starts_with("file.") && id != "file.new" {
+            Err(photocraft_engine::EngineError::Other(format!("automation command `{id}` is disabled")))
+        } else {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn actions_play_checks_each_step_over_control() {
+        let services = crate::Services { automation_authorize: Some(deny_ambient_file), ..Default::default() };
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), services);
+        app.session.actions.list.push(photocraft_engine::actions_cmds::Action {
+            name: "Open".into(),
+            steps: vec![("file.open".into(), json!({"path": "/etc/passwd"})), ("layer.new.layer".into(), json!({}))],
+        });
+        let ctx = egui::Context::default();
+        let r = call(&mut app, &ctx, "engine.execute", json!({"command": "actions.play", "params": {"action": "Open"}}));
+        assert_eq!(r["ok"], true, "{r}");
+        assert_eq!(r["result"]["ran"], 0, "{r}");
+        assert_eq!(r["result"]["failed"]["id"], "file.open", "{r}");
+        assert!(r["result"]["failed"]["error"].as_str().unwrap_or("").contains("disabled"), "{r}");
+        assert!(app.session.documents().is_empty());
+        assert!(app.session.authorize.is_none(), "the per-step gate is only installed for the request");
+    }
+
+    #[test]
+    fn actions_play_checks_each_step_for_synthetic_input() {
+        let services = crate::Services { automation_authorize: Some(deny_ambient_file), ..Default::default() };
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), services);
+        app.session.actions.list.push(photocraft_engine::actions_cmds::Action {
+            name: "Open".into(),
+            steps: vec![("file.open".into(), json!({"path": "/etc/passwd"})), ("layer.new.layer".into(), json!({}))],
+        });
+        app.automation_input = true;
+        let r = app.run("actions.play", json!({"action": "Open"})).unwrap();
+        assert_eq!(r["ran"], 0, "{r}");
+        assert_eq!(r["failed"]["id"], "file.open", "{r}");
+        assert!(app.session.authorize.is_none(), "the per-step gate is only installed for the command");
+
+        // A local play (no automation input) still runs recorded steps.
+        app.automation_input = false;
+        app.session.actions.list[0].steps.remove(0);
+        app.session.execute("file.new", json!({"width": 4, "height": 4})).unwrap();
+        let r = app.run("actions.play", json!({"action": "Open"})).unwrap();
+        assert_eq!(r["ran"], 1, "{r}");
     }
 }

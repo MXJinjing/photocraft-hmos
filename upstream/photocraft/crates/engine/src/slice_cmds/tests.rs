@@ -1,4 +1,5 @@
 use super::*;
+use photocraft_doc::LayerId;
 use photocraft_doc::effects::Effect;
 
 fn session(depth: u32) -> Session {
@@ -48,6 +49,19 @@ fn user_slices_and_options() {
         assert!(s.execute("slice.set", json!({"slice": id, "kind": "bogus"})).is_err());
         assert!(s.execute("slice.new", json!({"rect": [500, 500, 10, 10]})).is_err(), "outside the canvas");
     }
+}
+
+#[test]
+fn rect_param_rejects_corner_overflow() {
+    assert_eq!(rect_param(&json!({"rect": [1, 2, 3, 4]})), Some(Rect::new(1, 2, 4, 6)));
+    assert_eq!(rect_param(&json!({"x": 1, "y": 2, "width": 3, "height": 4})), Some(Rect::new(1, 2, 4, 6)));
+    assert_eq!(rect_param(&json!({"rect": [i32::MAX, 0, 1, 1]})), None);
+    assert_eq!(rect_param(&json!({"x": 0, "y": i32::MAX, "width": 1, "height": 1})), None);
+
+    let mut s = session(8);
+    assert!(s.execute("slice.new", json!({"rect": [i32::MAX, 0, 1, 1]})).is_err());
+    let id = s.execute("slice.new", json!({"rect": [1, 1, 8, 8]})).unwrap()["slice"].as_u64().unwrap();
+    assert!(s.execute("slice.set", json!({"slice": id, "rect": [0, i32::MAX, 1, 1]})).is_err());
 }
 
 #[test]
@@ -157,4 +171,90 @@ fn slices_round_trip_through_psd_and_pcraft() {
         assert_eq!(layer.name, "Layer 1", "{ext}: the slice still names its layer");
         assert_eq!(ls.rect, Rect::new(50, 40, 70, 60));
     }
+}
+
+#[test]
+fn exhausted_slice_ids_fail_without_mutating_document_or_history() {
+    let mut s = session(8);
+    s.edit("loaded max slice", |doc, _| {
+        doc.slices.list.push(Slice { id: 1, rect: Rect::new(10, 10, 20, 20), ..Default::default() });
+        doc.slices.list.push(Slice { id: u32::MAX, rect: Rect::new(10, 10, 20, 20), ..Default::default() });
+        Ok(())
+    })
+    .unwrap();
+    let past = s.active().unwrap().history.past_len();
+    let revision = s.active().unwrap().revision;
+
+    for (command, params) in [
+        ("slice.new", json!({"rect": [30, 30, 10, 10]})),
+        ("slice.divide", json!({"slice": 1, "horizontal": 1, "vertical": 2})),
+        ("slice.promote", json!({"number": 1})),
+    ] {
+        assert!(s.execute(command, params).unwrap_err().to_string().contains("slice id space exhausted"), "{command}");
+        assert_eq!(doc(&s).slices.list.len(), 2, "{command}");
+        assert!(doc(&s).slices.get(u32::MAX).is_some(), "{command}");
+        assert_eq!(s.active().unwrap().history.past_len(), past, "{command}");
+        assert_eq!(s.active().unwrap().revision, revision, "{command}");
+    }
+}
+
+#[test]
+fn rejected_slice_options_change_nothing() {
+    // #910: an invalid option on an auto slice used to promote it before failing.
+    let mut s = session(8);
+    let past = s.active().unwrap().history.past_len();
+    assert!(s.execute("slice.set", json!({"number": 1, "kind": "bogus"})).is_err());
+    assert!(doc(&s).slices.is_empty());
+    assert_eq!(s.active().unwrap().history.past_len(), past);
+    // A user slice moved off the canvas is rejected without committing the move.
+    let id = s.execute("slice.new", json!({"rect": [0, 0, 10, 10]})).unwrap()["slice"].as_u64().unwrap() as u32;
+    let past = s.active().unwrap().history.past_len();
+    assert!(s.execute("slice.set", json!({"slice": id, "rect": [500, 500, 10, 10]})).is_err());
+    assert_eq!(doc(&s).slices.get(id).unwrap().rect, Rect::new(0, 0, 10, 10));
+    assert_eq!(s.active().unwrap().history.past_len(), past);
+}
+
+#[test]
+fn dividing_an_auto_slice_is_one_step() {
+    // #911: one undo restores the original auto slice.
+    let mut s = session(8);
+    let past = s.active().unwrap().history.past_len();
+    let r = s.execute("slice.divide", json!({"number": 1, "vertical": 2})).unwrap();
+    assert_eq!(r["count"], 2);
+    assert_eq!(doc(&s).slices.list.len(), 2);
+    assert_eq!(s.active().unwrap().history.past_len(), past + 1);
+    assert!(s.undo());
+    assert!(doc(&s).slices.is_empty());
+    // A rejected division doesn't promote either.
+    assert!(s.execute("slice.divide", json!({"number": 1, "vertical": 1000})).is_err());
+    assert!(doc(&s).slices.is_empty());
+    assert_eq!(s.active().unwrap().history.past_len(), past);
+}
+
+#[test]
+fn slice_options_after_an_explicit_promote_is_its_own_step() {
+    // #912: Slice Options used to fold into an earlier, separate Promote.
+    let mut s = session(8);
+    s.execute("slice.promote", json!({"number": 1})).unwrap();
+    s.execute("slice.set", json!({"number": 1, "name": "renamed"})).unwrap();
+    assert!(s.undo());
+    assert_eq!(doc(&s).slices.list.len(), 1, "the promotion survives undoing the rename");
+    assert_eq!(doc(&s).slices.list[0].name, "");
+    assert!(s.undo());
+    assert!(doc(&s).slices.is_empty());
+}
+
+#[test]
+fn out_of_range_slice_ids_are_rejected_not_wrapped() {
+    // #914: 2^32 + 1 used to wrap to slice 1 and delete it.
+    let mut s = session(8);
+    let id = s.execute("slice.new", json!({"rect": [0, 0, 10, 10]})).unwrap()["slice"].as_u64().unwrap();
+    assert_eq!(id, 1);
+    let wrapped = (1u64 << 32) + 1;
+    assert!(s.execute("slice.delete", json!({"slice": wrapped})).is_err());
+    assert!(s.execute("slice.delete", json!({"slices": [wrapped]})).is_err());
+    assert!(s.execute("slice.set", json!({"slice": wrapped, "name": "x"})).is_err());
+    assert!(s.execute("slice.delete", json!({"slice": -1})).is_err());
+    assert_eq!(doc(&s).slices.list.len(), 1);
+    assert_eq!(doc(&s).slices.list[0].name, "");
 }

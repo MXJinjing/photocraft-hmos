@@ -33,6 +33,9 @@
 	Open Recent	最近使ったファイルを開く
 	Clear Recent Files	最近使ったファイルを消去
 	Close	閉じる
+	Minimize	最小化
+	Maximize	最大化
+	Restore	元に戻す（縮小）
 	Close All	すべて閉じる
 	Close Others	ほかを閉じる
 	Save	保存
@@ -177,8 +180,13 @@
 	Lab Color	Lab カラー
 	Multichannel	マルチチャンネル
 	8 Bits/Channel	8 ビット/チャンネル
+	8 bit	8 ビット
+	Integer	整数
 	16 Bits/Channel	16 ビット/チャンネル
+	16 bit	16 ビット
 	32 Bits/Channel	32 ビット/チャンネル
+	32 bit (float)	32 ビット（float）
+	Floating point	浮動小数点
 	Color Table…	カラーテーブル…
 	Bitmap…	ビットマップ…
 	Duotone…	ダブルトーン…
@@ -261,6 +269,7 @@
 	Layer Style	レイヤースタイル
 	Blending Options…	レイヤー効果の描画オプション…
 	Bevel & Emboss…	ベベルとエンボス…
+	Use Global Light	グローバルライトを使用
 	Inner Shadow…	シャドウ(内側)…
 	Inner Glow…	光彩(内側)…
 	Satin…	サテン…
@@ -305,6 +314,7 @@
 	Smart Object	スマートオブジェクト
 	Convert to Smart Object	スマートオブジェクトに変換
 	Convert to Embedded	埋め込みに変換
+	Convert to Layers	レイヤーに変換
 	Convert to Linked…	リンクに変換…
 	Edit Contents	コンテンツを編集
 	Replace Contents…	コンテンツを置き換え…
@@ -521,6 +531,7 @@
 	Flame…	炎…
 	Lens Flare…	レンズフレア…
 	Lighting Effects…	照明効果…
+	Relight…	再照明…
 	Picture Frame…	フレーム…
 	Tree…	木…
 	Sharpen	シャープ
@@ -568,6 +579,12 @@
 	Fit Artboard on Screen	アートボードを画面サイズに合わせる
 	100%	100%
 	200%	200%
+	75%	75%
+	125%	125%
+	150%	150%
+	175%	175%
+	250%	250%
+	300%	300%
 	Print Size	印刷サイズ
 	Pixel Aspect Ratio	ピクセル縦横比
 	Pixel Aspect Ratio Correction	ピクセル縦横比を補正
@@ -891,8 +908,6 @@
 	Create new pattern from the selection	選択範囲から新規パターンを作成
 	Create new shape from the current path	現在のパスから新規シェイプを作成
 	Create new snapshot	新規スナップショットを作成
-	Create new style (from the selected type)	新規スタイルを作成(選択した文字から)
-	Create new style from the selected layer	選択したレイヤーから新規スタイルを作成
 	Create new tool preset	新規ツールプリセットを作成
 	Crop Factor	切り抜き係数
 	Ctrl	Ctrl
@@ -953,16 +968,22 @@
 	Divide…	分割…
 	Document	ドキュメント
 	Don't Save	保存しない
+	No	いいえ
+	Yes	はい
 	Done	完了
 	Dots	ドット
 	Drag a rectangle around the object	オブジェクトを囲む矩形をドラッグ
 	Drag on the image to add a constraint; Shift for horizontal/vertical; right-click to delete.	画像上をドラッグして制約を追加。Shift で水平/垂直、右クリックで削除。
 	Drag to move the active shape's path or the Work Path	ドラッグして、アクティブなシェイプのパスまたは作業用パスを移動
+	Click: select anchor · Drag: move anchor, handle or segment · {shift}-click: add · {alt}-click: whole subpath	クリック: アンカーポイントを選択 · ドラッグ: ポイント、ハンドル、セグメントを移動 · {shift}+クリック: 追加 · {alt}+クリック: サブパス全体
 	Draw with the Pen tool (P) or make a work path from a selection.	ペンツール(P)で描くか、選択範囲から作業用パスを作成します。
 	Drop an image or PSD anywhere to open it.	画像や PSD をここにドロップすると開きます。
+	Native file drag-and-drop is unavailable	Wayland ではネイティブのファイルドラッグ＆ドロップを利用できません
+	Native file drag-and-drop is not supported on Wayland yet. Use File › Open, or run PhotoCraft under XWayland with `WAYLAND_DISPLAY= photocraft`.	Wayland ではネイティブのファイルドラッグ＆ドロップはまだ利用できません。[ファイル › 開く] を使うか、`WAYLAND_DISPLAY= photocraft` を指定して PhotoCraft を XWayland 上で起動してください。
 	Duplicate Layers…	レイヤーを複製…
 	Duplicate style	スタイルを複製
 	Edit Toolbar…	ツールバーを編集…
+	Use File › Open to open an image.	画像を開くには [ファイル › 開く] を使ってください。
 	Edit in Quick Mask Mode  (Q)	クイックマスクモードで編集(Q)
 	Edit in Standard Mode  (Q)	標準モードで編集(Q)
 	Effects	効果
@@ -1480,6 +1501,7 @@
 	Comic Book	コミック
 	Conform	適合
 	Content-Aware Fill needs a selection on a pixel layer	コンテンツに応じた塗りつぶしには、ピクセルレイヤー上の選択範囲が必要です
+	Couldn't place {name}: {error}	{name} を配置できませんでした: {error}
 	Could not transform: the layer is empty	変形できません: レイヤーが空です
 	Could not use Perspective Warp: the layer is empty	遠近法ワープを使えません: レイヤーが空です
 	Could not use Puppet Warp: no opaque pixels	パペットワープを使えません: 不透明なピクセルがありません
@@ -1583,6 +1605,7 @@
 	Paint Bucket Tool	塗りつぶしツール
 	Paints from the document's opening state	ドキュメントを開いた時点の状態から描画します
 	Path Selection Tool	パスコンポーネント選択ツール
+	Direct Selection Tool	パス選択ツール
 	Pattern Overlay	パターンオーバーレイ
 	Pen Pressure	ペンの筆圧
 	Pen Tilt	ペンの傾き
@@ -1671,6 +1694,8 @@
 	Doc: {flat}/{layered}	ドキュメント: {flat}/{layered}
 	Scratch: {size}	スクラッチ: {size}
 	Untagged {mode}	タグなし {mode}
+	Invalid {mode} profile	無効な {mode} プロファイル
+	Unnamed {mode} profile	名前のない {mode} プロファイル
 	{w} px x {h} px ({ppi} ppi)	{w} px × {h} px ({ppi} ppi)
 	Resolution: {dpi} pixels/inch	解像度: {dpi} ピクセル/インチ
 	Doc: {w} × {h} px	ドキュメント: {w} × {h} px
@@ -1775,6 +1800,7 @@
 	Light gray	ライトグレー
 	Line	線
 	Lines	線
+	Lossless	可逆圧縮
 	Lowercase extension	拡張子を小文字にする
 	Maximize psd compatibility	PSD の互換性を最大にする
 	Medium gray	中間グレー
@@ -1821,6 +1847,7 @@
 	Show only crosshair while painting	描画中は十字線のみ表示
 	Show slice numbers	スライス番号を表示
 	Show tooltips	ツールチップを表示
+	Show bounding box when dragging layer	レイヤーのドラッグ中にバウンディングボックスを表示
 	Show transformation values	変形値を表示
 	Slice color	スライスの色
 	Smart guide color	スマートガイドの色
@@ -1941,6 +1968,7 @@
 	Brush Projection	ブラシの投影
 	Apply the pen's tilt and rotation to the tip shape	ペンの傾きと回転を先端のシェイプに適用します
 	Mixer Brush	混合ブラシ
+	Mixer Brush Tool	混合ブラシツール
 	Wet	ウェット
 	Mix	混合
 	Wetness Jitter	ウェットのジッター
@@ -1986,3 +2014,105 @@
 	Opening…	開いています…
 	Reading…	読み込み中…
 	Working…	処理中…
+	3 x 3	3 × 3
+	4 x 4	4 × 4
+	5 x 5	5 × 5
+	Grid:	グリッド:
+# Rendering mode and recovery
+	Rendering Mode	レンダリングモード
+	Automatic (recommended)	自動（推奨）
+	CPU / Compatibility	CPU / 互換性
+	Automatic uses GPU acceleration when available and falls back to CPU rendering on errors.	自動モードは利用可能な場合にGPUを使用し、エラー時はCPU描画に切り替えます。
+	Switched to CPU rendering	CPU描画に切り替えました
+	GPU acceleration could not continue. Your documents are unchanged.	GPUアクセラレーションを継続できませんでした。ドキュメントは変更されていません。
+	PhotoCraft is using the CPU image compositor. The window may still use your graphics adapter.	PhotoCraftはCPUで画像を合成しています。ウィンドウは引き続きグラフィックスアダプターを使用する場合があります。
+	Retry GPU requires a restart. Save your work first.	GPUの再試行には再起動が必要です。先に作業を保存してください。
+	Keep Using CPU	CPUを使い続ける
+	Retry GPU	GPUを再試行
+	Advanced	詳細設定
+	GPU Backend	GPUバックエンド
+	Details	詳細
+	Rendering mode	レンダリングモード
+	Freeze Lasso: drag to freeze an area, Alt-drag to thaw it (L)	フリーズなげなわ：ドラッグで範囲をフリーズ、Alt+ドラッグで解凍 (L)
+	Shadow Clipping Warning (U)	シャドウのクリッピング警告 (U)
+	Highlight Clipping Warning (O)	ハイライトのクリッピング警告 (O)
+	Show Lab Color Readouts	Lab カラー値を表示
+	Show Vectorscope	ベクトルスコープを表示
+	Show Red at 3 o'clock	赤を3時の位置に表示
+	Show Skin Tone Indicator	スキントーン指標を表示
+	Tone Histogram	階調ヒストグラム
+	Show Selected Region	選択範囲を表示
+cameraRaw	Light	ライト
+# Camera Raw: contextual controls and window title
+	Camera Raw Filter ({layer})	Camera Raw フィルター ({layer})
+cameraRaw	Lights	明部
+cameraRaw	Blending	ブレンド
+cameraRaw	Blacks	黒レベル
+cameraRaw	Amount	適用量
+cameraRaw	Color	カラー
+	Patch Tool	パッチツール
+	Patch:	パッチ:
+	Lasso around an area, then drag the selection	投げ縄で範囲を囲み、選択範囲をドラッグします
+	Edit Type	文字を編集
+
+
+	New Style…	新規スタイル…
+	Style {name} saved	スタイル {name} を保存しました
+
+	Create new style (from the selected type)	新規スタイルを作成（選択したテキストから）
+	Create new style from the selected layer	選択したレイヤーから新規スタイルを作成
+
+	Make Default	既定に設定
+	Reset to Default	既定値に戻す
+	Vertical Type Tool	縦書き文字ツール
+	Full-resolution preview unavailable	フル解像度のプレビューを利用できません
+	No patterns	パターンなし
+	Enable {name}	{name}を有効にする
+	Hold Alt while drawing for straight segments	描画中に Alt を押すと直線セグメントになります
+	Drag or click polygon points · hold Alt during lasso for straight segments · {add} add · {sub} before drawing subtracts	ドラッグまたは多角形の点をクリック · なげなわ中に Alt で直線セグメント · {add} 追加 · 描画前の {sub} で削除
+	Move	移動
+	Extend	拡張
+	Structure:	構造:
+	Content-Aware Move Tool	コンテンツに応じた移動ツール
+	TIFF Options	TIFF オプション
+	Including layers will increase file size.	レイヤーを含めるとファイルサイズが大きくなります。
+	Discard Layers and Save a Copy	レイヤーを破棄してコピーを保存
+	Don't show again	次回から表示しない
+	Save failed: {error}	保存に失敗しました: {error}
+	Save cancelled	保存をキャンセルしました
+	Magnetic Lasso Tool	マグネット選択ツール
+	Frequency	頻度
+	Use tablet pressure to change pen width	タブレットの筆圧を使用してペンの幅を変更
+
+# About ▸ Contributors / Models (credits, craftrules standards/contributors.md)
+	About	バージョン情報
+	Contributors	コントリビューター
+	Models	モデル
+	Sort	並べ替え
+	Username	ユーザー名
+	Display name	表示名
+	Real name	本名
+	Reverse the order	順序を反転
+	Grab bag	一覧
+	Table	表
+	Name (A–Z)	名前 (A–Z)
+	Merged PRs	マージされた PR
+	Commits	コミット
+	Lines added	追加行数
+	Lines deleted	削除行数
+	Line delta	行数の増減
+	Binary assets added	追加したバイナリ
+	Binary assets removed	削除したバイナリ
+	First commit	最初のコミット
+	First	最初
+	Last commit	最後のコミット
+	Last	最後
+	Contributors: {contributors} · Commits: {commits}	コントリビューター: {contributors} · コミット: {commits}
+	No contributor data was built into this copy.	このコピーにはコントリビューターのデータが含まれていません。
+	No model credits were built into this copy.	このコピーにはモデルのクレジットが含まれていません。
+	Company	会社
+	Model	モデル
+	Version	バージョン
+	% of all commits	全コミットに占める割合 (%)
+	Lines +/−	行数 +/−
+	@{login}: {prs} PRs, {commits} commits, +{added} / −{deleted} lines (Δ {delta}), +{binAdded} / −{binDeleted} binary assets, {first} – {last}	@{login}: PR {prs} 件、コミット {commits} 件、行 +{added} / −{deleted} (Δ {delta})、バイナリ +{binAdded} / −{binDeleted}、{first} – {last}

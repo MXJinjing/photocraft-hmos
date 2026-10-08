@@ -42,6 +42,21 @@ pub fn paint(ui: &egui::Ui, rect: Rect, name: &str, size: f32, tint: Color32) {
     image(name, size, tint).paint_at(ui, r);
 }
 
+/// An icon as the pointer, above every window: `name` with its hotspot `hot` (a fraction of the
+/// icon box) on `p`, white with a dark outline so it reads on any image. The caller hides the OS
+/// cursor (`CursorIcon::None`).
+pub fn cursor(ctx: &egui::Context, name: &str, p: egui::Pos2, hot: Vec2, size: f32) {
+    let rect = Rect::from_min_size(p - hot * size, Vec2::splat(size));
+    let area = egui::Area::new(egui::Id::new("pc-icon-cursor")).order(egui::Order::Tooltip).fixed_pos(rect.min).constrain(false).interactable(false);
+    area.show(ctx, |ui| {
+        let outline = image(name, size, Color32::from_black_alpha(200));
+        for (dx, dy) in [(-1.0, 0.0), (1.0, 0.0), (0.0, -1.0), (0.0, 1.0), (-1.0, -1.0), (1.0, 1.0), (-1.0, 1.0), (1.0, -1.0)] {
+            outline.paint_at(ui, rect.translate(egui::vec2(dx, dy)));
+        }
+        image(name, size, Color32::WHITE).paint_at(ui, rect);
+    });
+}
+
 pub fn tool_icon(t: Tool) -> &'static str {
     match t {
         Tool::Move => "move",
@@ -49,6 +64,7 @@ pub fn tool_icon(t: Tool) -> &'static str {
         Tool::EllipseMarquee => "circle-dashed",
         Tool::Brush => "brush",
         Tool::Pencil => "pencil",
+        Tool::MixerBrush => "palette",
         Tool::Eraser => "eraser",
         Tool::BackgroundEraser => "eraser-background",
         Tool::MagicEraser => "eraser-magic",
@@ -58,16 +74,19 @@ pub fn tool_icon(t: Tool) -> &'static str {
         Tool::Count => "circle-dot",
         Tool::Lasso => "lasso",
         Tool::PolygonLasso => "pentagon",
+        Tool::MagneticLasso => "lasso-magnetic",
         Tool::MagicWand => "wand-sparkles",
         Tool::Crop => "crop",
         Tool::Slice => "slice-knife",
         Tool::SliceSelect => "square-dashed-mouse-pointer",
         Tool::Gradient => "blend",
         Tool::PaintBucket => "paint-bucket",
-        Tool::Type => "type",
+        Tool::Type | Tool::VerticalType => "type",
         Tool::Hand => "hand",
         Tool::Zoom => "zoom-in",
         Tool::SpotHealing | Tool::Healing => "bandage",
+        Tool::Patch => "lasso-select",
+        Tool::ContentAwareMove => "arrow-left-right",
         Tool::CloneStamp => "stamp",
         Tool::HistoryBrush => "clock",
         Tool::Blur => "droplet",
@@ -80,6 +99,7 @@ pub fn tool_icon(t: Tool) -> &'static str {
         Tool::ObjectSelection => "square-dashed-mouse-pointer",
         Tool::Pen => "pen-tool",
         Tool::PathSelection => "mouse-pointer-2",
+        Tool::DirectSelection => "direct-select",
         Tool::Rectangle => "rectangle-horizontal",
         Tool::EllipseShape => "circle",
         Tool::Triangle => "triangle",
@@ -89,24 +109,28 @@ pub fn tool_icon(t: Tool) -> &'static str {
     }
 }
 
-/// Square icon button: transparent until hovered; `selected` gets the accent treatment.
-pub fn button(ui: &mut egui::Ui, name: &str, box_size: f32, selected: bool, tooltip: &str) -> Response {
+/// Selected and hover fill shared by square icon buttons. Returns the icon tint.
+pub fn button_chrome(ui: &egui::Ui, rect: Rect, selected: bool, hovered: bool) -> Color32 {
     let t = Tokens::get(ui.ctx());
-    let (rect, resp) = ui.allocate_exact_size(Vec2::splat(box_size), Sense::click());
-    let hovered = resp.hovered();
     if selected {
         ui.painter().rect_filled(rect, t.radius_sm, t.accent_soft);
         ui.painter().rect_stroke(rect, t.radius_sm, egui::Stroke::new(1.0, t.accent_border), egui::StrokeKind::Inside);
     } else if hovered {
         ui.painter().rect_filled(rect, t.radius_sm, t.hover);
     }
-    let tint = if selected {
+    if selected {
         t.accent_text
     } else if hovered {
         t.text
     } else {
         t.icon
-    };
+    }
+}
+
+/// Square icon button: transparent until hovered; `selected` gets the accent treatment.
+pub fn button(ui: &mut egui::Ui, name: &str, box_size: f32, selected: bool, tooltip: &str) -> Response {
+    let (rect, resp) = ui.allocate_exact_size(Vec2::splat(box_size), Sense::click());
+    let tint = button_chrome(ui, rect, selected, resp.hovered());
     paint(ui, rect, name, (box_size * 0.52).round(), tint);
     if tooltip.is_empty() { resp } else { resp.on_hover_text(tl!(tooltip)) }
 }

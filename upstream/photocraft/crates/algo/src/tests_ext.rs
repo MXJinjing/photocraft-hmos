@@ -74,6 +74,7 @@ fn new_filters() -> Vec<FilterParams> {
             height: 50.0,
             white_is_high: true,
         },
+        FilterParams::Relight { angle: 45.0, elevation: 40.0, intensity: 40.0, ambient: 55.0, warmth: 0.0, softness: 25.0 },
         FilterParams::ReduceNoise { strength: 6.0, preserve_details: 60.0, reduce_color_noise: 45.0, sharpen_details: 25.0, remove_jpeg_artifact: true },
         FilterParams::SmartBlur { radius: 3.0, threshold: 40.0, quality: BlurQuality::High, mode: SmartBlurMode::Normal },
         FilterParams::SmartBlur { radius: 3.0, threshold: 25.0, quality: BlurQuality::Low, mode: SmartBlurMode::OverlayEdge },
@@ -668,23 +669,26 @@ fn oil_paint_smooths_along_strokes() {
 }
 
 #[test]
-fn cancelled_filters_return_none_and_progress_is_monotonic() {
+fn cancelled_filters_return_none_and_progress_never_regresses() {
     use std::sync::atomic::{AtomicU32, Ordering};
     let s = pattern(SampleType::U8, R);
     let p = FilterParams::GaussianBlur { radius: 3.0 };
     let area = output_area(&p, s.content_bounds(), R, None);
     let yes = || true;
     assert!(apply_tiled_with(&s, &p, area, R, None, 16, Some(R), &photocraft_raster::Interrupt::cancel_only(&yes)).is_none());
-    let last = AtomicU32::new(0);
+    // Tile workers report progress from their own threads, so values can arrive out of order;
+    // consumers keep the high-water mark (as `JobCtx::progress` does with `fetch_max`).
+    // Non-negative f32s order like their bits, so `fetch_max` on the bits needs no lock.
+    let high = AtomicU32::new(0);
     let calls = AtomicU32::new(0);
     let no = || false;
     let progress = |f: f32| {
-        assert!(f >= f32::from_bits(last.load(Ordering::Relaxed)));
-        last.store(f.to_bits(), Ordering::Relaxed);
+        assert!((0.0..=1.0).contains(&f), "progress in range: {f}");
+        high.fetch_max(f.to_bits(), Ordering::Relaxed);
         calls.fetch_add(1, Ordering::Relaxed);
     };
     let out = apply_tiled_with(&s, &p, area, R, None, 16, Some(R), &photocraft_raster::Interrupt::new(&no, &progress)).unwrap();
-    assert_eq!(f32::from_bits(last.load(Ordering::Relaxed)), 1.0);
+    assert_eq!(f32::from_bits(high.load(Ordering::Relaxed)), 1.0);
     assert!(calls.load(Ordering::Relaxed) >= 1);
     assert_eq!(out.read_region(R), apply_tiled(&s, &p, area, R, None, 16, Some(R)).read_region(R));
 }

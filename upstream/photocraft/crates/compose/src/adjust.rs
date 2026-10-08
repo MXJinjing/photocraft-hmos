@@ -3,7 +3,8 @@
 //! Formulas are documented approximations of Photoshop behaviour. Exact matching is tuned in
 //! milestone M7 against Photoshop-rendered PSD composites (the oracle in `testkit`).
 
-use photocraft_color::convert::rgb_to_gray;
+use photocraft_color::SampleType;
+use photocraft_color::convert::{D50, SRGB_TO_XYZ_D50, XYZ_D50_TO_SRGB, mat3_mul, rgb_to_gray, srgb_to_linear};
 use photocraft_doc::Adjustment;
 use photocraft_doc::adjust::{CurvePoint, HueRange, LevelsChannel, ToneSpace};
 
@@ -68,10 +69,10 @@ pub fn apply_with(adj: &Adjustment, buf: &mut Buffer, transfer: Transfer) {
     apply_depth(adj, buf, transfer, None);
 }
 
-/// Applies an adjustment with the document's tone transfer, on samples with `quantum` steps
-/// per unit (the document's integer depth, see `adjustment_quantum`): Levels then works on
-/// whole levels like Photoshop's (see [`levels_q`]).
-pub fn apply_depth(adj: &Adjustment, buf: &mut Buffer, transfer: Transfer, quantum: Option<f32>) {
+/// Applies an adjustment with the document's tone transfer, in a document of `depth` (`None`:
+/// unrounded). Integer depths work on whole levels like Photoshop's (see [`levels_q`] and
+/// `adjustment_quantum`), 32-bit documents get its float Levels (see [`levels_float`]).
+pub fn apply_depth(adj: &Adjustment, buf: &mut Buffer, transfer: Transfer, depth: Option<SampleType>) {
     match adj {
         Adjustment::Invert => map_rgb(buf, |c| [1.0 - c[0], 1.0 - c[1], 1.0 - c[2]]),
         Adjustment::Threshold { level } => {
@@ -119,7 +120,7 @@ pub fn apply_depth(adj: &Adjustment, buf: &mut Buffer, transfer: Transfer, quant
             })
         }
         Adjustment::Levels { space, .. } | Adjustment::Curves { space, .. } => {
-            let luts = tone_luts_q(adj, quantum);
+            let luts = tone_luts_depth(adj, depth);
             match space {
                 ToneSpace::Rgb => map_rgb(buf, |c| std::array::from_fn(|i| lut(&luts[i], c[i]))),
                 ToneSpace::Cmyk | ToneSpace::Lab => map_rgb(buf, |c| tone_in_space(*space, &luts, c)),
@@ -153,15 +154,16 @@ pub fn apply_depth(adj: &Adjustment, buf: &mut Buffer, transfer: Transfer, quant
             let mix = |row: &[f32; 4]| (row[0] * c[0] + row[1] * c[1] + row[2] * c[2] + row[3]).clamp(0.0, 1.0);
             if *monochrome { [mix(&matrix[0]); 3] } else { [mix(&matrix[0]), mix(&matrix[1]), mix(&matrix[2])] }
         }),
-        Adjustment::PhotoFilter { color, density, preserve_luminosity } => map_rgb(buf, |c| {
-            let filtered: [f32; 3] = std::array::from_fn(|i| c[i] * (1.0 - density) + c[i] * color[i] * density);
-            if *preserve_luminosity {
-                let (l0, l1) = (rgb_to_gray(c), rgb_to_gray(filtered).max(1e-6));
-                filtered.map(|v| (v * l0 / l1).clamp(0.0, 1.0))
-            } else {
-                filtered
-            }
-        }),
+        Adjustment::PhotoFilter { color, density, preserve_luminosity } => {
+            let linear_doc = depth == Some(SampleType::F32);
+            let m = photo_filter_matrix(*color, *density, *preserve_luminosity && linear_doc);
+            let set_lum = *preserve_luminosity && !linear_doc;
+            map_rgb(buf, |c| {
+                let f = mat3_mul(&m, c.map(|v| transfer.decode(v))).map(|v| transfer.encode(v));
+                let f = if set_lum { photocraft_color::blend::set_lum(f, photocraft_color::blend::lum(c)) } else { f };
+                f.map(|v| v.clamp(0.0, 1.0))
+            })
+        }
         Adjustment::BlackWhite { weights, tint } => map_rgb(buf, |c| {
             let g = black_white_gray(c, weights);
             match tint {
@@ -245,6 +247,19 @@ pub fn tone_luts_q(adj: &Adjustment, quantum: Option<f32>) -> [Vec<f32>; 4] {
             [row(&per_channel[0]), row(&per_channel[1]), row(&per_channel[2]), row(if *space == ToneSpace::Cmyk { black } else { &[] })]
         }
         _ => std::array::from_fn(|_| (0..LUT_SIZE).map(x).collect()),
+    }
+}
+
+/// [`tone_luts_q`] in a document of `depth` (`None`: unrounded). 32-bit Levels use
+/// [`levels_float`], sampled on 0..1 and kept in 0..1 like every adjustment result here.
+pub fn tone_luts_depth(adj: &Adjustment, depth: Option<SampleType>) -> [Vec<f32>; 4] {
+    match (adj, depth) {
+        (Adjustment::Levels { master, per_channel, space: ToneSpace::Rgb, .. }, Some(SampleType::F32)) => {
+            let x = |k: usize| k as f32 / (LUT_SIZE - 1) as f32;
+            let row = |c: &LevelsChannel| (0..LUT_SIZE).map(|k| levels_float(c, levels_float(master, x(k))).clamp(0.0, 1.0)).collect();
+            [row(&per_channel[0]), row(&per_channel[1]), row(&per_channel[2]), (0..LUT_SIZE).map(x).collect()]
+        }
+        _ => tone_luts_q(adj, depth.and_then(crate::adjustment_quantum)),
     }
 }
 
@@ -447,6 +462,23 @@ fn lut(table: &[f32], v: f32) -> f32 {
     table[i] * (1.0 - f) + table[j] * f
 }
 
+/// Photo Filter's linear-light RGB matrix. Photoshop multiplies the pixel's D50 XYZ, relative to
+/// white, by the filter colour's (mixed in by `density`): a fixed linear map, so it is folded into
+/// one matrix. With `normalize_y` the map keeps luminance Y (32-bit Preserve Luminosity; 8/16-bit
+/// documents instead restore the encoded luminosity like the Luminosity blend mode). Fitted on the
+/// photoshop corpus `photo-filter.psd`: rgb16 within 0.6/255 everywhere.
+pub fn photo_filter_matrix(color: [f32; 3], density: f32, normalize_y: bool) -> [[f32; 3]; 3] {
+    let d = if density.is_finite() { density.clamp(0.0, 1.0) } else { 0.0 };
+    let xyz = mat3_mul(&SRGB_TO_XYZ_D50, color.map(|v| srgb_to_linear(v.clamp(0.0, 1.0))));
+    let mut s: [f32; 3] = std::array::from_fn(|i| 1.0 - d + d * xyz[i] / D50[i]);
+    if normalize_y && s[1] > 1e-6 {
+        let y = s[1];
+        s = s.map(|v| v / y);
+    }
+    // XYZ_D50_TO_SRGB · diag(s) · SRGB_TO_XYZ_D50
+    std::array::from_fn(|r| std::array::from_fn(|c| (0..3).map(|k| XYZ_D50_TO_SRGB[r][k] * s[k] * SRGB_TO_XYZ_D50[k][c]).sum()))
+}
+
 /// Photoshop posterize: `n` equal input bins over 0..=255, output levels
 /// `floor(k * 255 / (n - 1))` (exact on the corpus for 3, 7, 13 and 21 levels).
 /// Modern Brightness curve (one channel, `brightness` in [-150, 150]). A line of slope
@@ -522,6 +554,16 @@ pub fn levels_q(ch: &LevelsChannel, v: f32, quantum: Option<f32>) -> f32 {
     } else {
         u.powf(1.0 / g)
     };
+    ch.out_black + t * (ch.out_white - ch.out_black)
+}
+
+/// [`levels`] in a 32-bit document. Neither the input is clipped to the input range nor the result
+/// to the output range there, and the midtone gamma is a plain power curve, mirrored below the
+/// black point (the oracle corpus' rgb32 and gray32 levels.psd: within 0.5/255, 10/255 off with
+/// the clipped curve).
+pub fn levels_float(ch: &LevelsChannel, v: f32) -> f32 {
+    let t = (v - ch.in_black) / (ch.in_white - ch.in_black).max(1e-6);
+    let t = t.signum() * t.abs().powf(1.0 / ch.gamma.max(0.01));
     ch.out_black + t * (ch.out_white - ch.out_black)
 }
 

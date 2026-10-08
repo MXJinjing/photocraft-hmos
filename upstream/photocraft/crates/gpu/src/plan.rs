@@ -16,7 +16,7 @@ use photocraft_color::BlendMode;
 use photocraft_compose::adjust::{self, Transfer};
 use photocraft_compose::effects::has_effects;
 use photocraft_doc::adjust::ToneSpace;
-use photocraft_doc::{Adjustment, Document, Effect, Fill, FxPaint, GlobalLight, Gradient, Layer, LayerContent, LayerId, Pattern, StrokePosition};
+use photocraft_doc::{Adjustment, Document, Effect, Fill, FxPaint, GlobalLight, Glow, Gradient, Layer, LayerContent, LayerId, Pattern, StrokePosition};
 use photocraft_geom::Rect;
 use photocraft_raster::Surface;
 
@@ -880,7 +880,7 @@ impl<'a> Planner<'a> {
         }
         let mut p = Pass::new(Kernel::Adjust, 0);
         p.a = Some(src);
-        let (kind, params, lut) = adjustment_program(adj, self.cx.transfer, photocraft_compose::adjustment_quantum(self.cx.depth));
+        let (kind, params, lut) = adjustment_program(adj, self.cx.transfer, self.cx.depth);
         p.adjust_kind = kind;
         p.params = params;
         p.lut = lut;
@@ -999,7 +999,7 @@ impl<'a> Planner<'a> {
         }
         for &(i, e) in &rev {
             if let Effect::OuterGlow(g) = e {
-                let paint = self.fx_paint(&g.paint, anchor);
+                let paint = self.glow_paint(g, anchor);
                 w = self.paint(w, content, Cov::Map(map(i, 0), 0.0), &paint, g.common.blend, g.common.opacity, 0, clip, sb);
             }
         }
@@ -1037,7 +1037,7 @@ impl<'a> Planner<'a> {
         }
         for &(i, e) in &rev {
             if let Effect::InnerGlow(g) = e {
-                let paint = self.fx_paint(&g.paint, anchor);
+                let paint = self.glow_paint(g, anchor);
                 l = self.paint(l, content, Cov::Map(map(i, 0), 0.0), &paint, g.common.blend, g.common.opacity, F_REL, clip, sb);
             }
         }
@@ -1235,6 +1235,13 @@ impl<'a> Planner<'a> {
         }
     }
 
+    fn glow_paint(&self, g: &'a Glow, anchor: (f64, f64)) -> Paint<'a> {
+        match &g.paint {
+            FxPaint::Gradient(gradient) => Paint::GlowGradient(gradient, photocraft_compose::effects::glow_gradient_gain(g.range)),
+            p => self.fx_paint(p, anchor),
+        }
+    }
+
     /// An effect pass reading `dst` (A, retained) and the layer `content` (B, retained) with its
     /// paint set up.
     #[allow(clippy::too_many_arguments)]
@@ -1273,14 +1280,13 @@ impl<'a> Planner<'a> {
                 p.params[2][0] = offset.0;
                 p.params[2][1] = offset.1;
                 p.params[2][2] = 1.0;
-                let mut rows = vec![[0.0f32; 4096]; 4];
-                for k in 0..4096 {
-                    let v = photocraft_compose::effects::sample_gradient(g, k as f32 / 4095.0);
-                    for (ch, row) in rows.iter_mut().enumerate() {
-                        row[k] = v[ch];
-                    }
-                }
-                p.lut = Some(rows);
+                p.lut = Some(gradient_rows(g));
+            }
+            Paint::GlowGradient(g, gain) => {
+                // effects::paint_glow: the gradient at 1 - strength, opaque from 1 / gain.
+                p.params[0][0] = *gain;
+                p.params[2][2] = 4.0;
+                p.lut = Some(gradient_rows(g));
             }
             Paint::Pattern(pat, pl) => {
                 p.params[2][2] = 2.0;
@@ -1337,6 +1343,8 @@ enum Paint<'a> {
     None,
     Color([f32; 3]),
     Gradient(&'a Gradient),
+    /// A glow's gradient with its opacity gain (`effects::paint_glow`).
+    GlowGradient(&'a Gradient, f32),
     Pattern(&'a Pattern, Placement),
 }
 
@@ -1426,8 +1434,16 @@ pub fn adjustment_on_gpu(adj: &Adjustment) -> bool {
     !matches!(adj, Adjustment::Levels { space: ToneSpace::Cmyk | ToneSpace::Lab, .. } | Adjustment::Curves { space: ToneSpace::Cmyk | ToneSpace::Lab, .. })
 }
 
+/// A tone transfer as the shader's `t_decode`/`t_encode` exponent (0: the sRGB curve).
+fn transfer_exponent(t: Transfer) -> f32 {
+    match t {
+        Transfer::Srgb => 0.0,
+        Transfer::Gamma(g) => g,
+    }
+}
+
 /// Adjustment → (kernel kind, parameters, LUT rows). Kinds are the `switch` in `adjust()`.
-pub fn adjustment_program(adj: &Adjustment, transfer: Transfer, quantum: Option<f32>) -> Program {
+pub fn adjustment_program(adj: &Adjustment, transfer: Transfer, depth: photocraft_color::SampleType) -> Program {
     let mut p = [[0.0f32; 4]; 4];
     match adj {
         Adjustment::Invert => (1, p, None),
@@ -1452,15 +1468,13 @@ pub fn adjustment_program(adj: &Adjustment, transfer: Transfer, quantum: Option<
             (5, p, None)
         }
         Adjustment::Exposure { exposure, offset, gamma } => {
-            let g = match transfer.for_exposure() {
-                Transfer::Srgb => 0.0,
-                Transfer::Gamma(g) => g,
-            };
-            p[0] = [2f32.powf(*exposure), *offset, gamma.max(0.01), g];
+            p[0] = [2f32.powf(*exposure), *offset, gamma.max(0.01), transfer_exponent(transfer.for_exposure())];
             (6, p, None)
         }
         // RGB space only (see `adjustment_on_gpu`); the rows are the CPU's channel∘master LUTs.
-        Adjustment::Levels { .. } | Adjustment::Curves { .. } => (7, p, Some(adjust::tone_luts_q(adj, quantum).iter().take(3).map(|t| to_row(t)).collect())),
+        Adjustment::Levels { .. } | Adjustment::Curves { .. } => {
+            (7, p, Some(adjust::tone_luts_depth(adj, Some(depth)).iter().take(3).map(|t| to_row(t)).collect()))
+        }
         Adjustment::HueSaturation { hue, saturation, lightness, colorize, ranges } => {
             p[0] = [*hue, saturation / 100.0, lightness / 100.0, if *colorize { 1.0 } else { 0.0 }];
             if !*colorize && ranges.iter().any(|r| !r.is_neutral()) {
@@ -1483,8 +1497,13 @@ pub fn adjustment_program(adj: &Adjustment, transfer: Transfer, quantum: Option<
             (10, p, None)
         }
         Adjustment::PhotoFilter { color, density, preserve_luminosity } => {
-            p[0] = [color[0], color[1], color[2], *density];
-            p[1][0] = if *preserve_luminosity { 1.0 } else { 0.0 };
+            // compose::adjust: the linear-light matrix, then SetLum on the encoded values (8/16-bit).
+            let linear_doc = depth == photocraft_color::SampleType::F32;
+            let m = adjust::photo_filter_matrix(*color, *density, *preserve_luminosity && linear_doc);
+            for (row, m) in p.iter_mut().zip(m) {
+                *row = [m[0], m[1], m[2], 0.0];
+            }
+            p[3] = [if *preserve_luminosity && !linear_doc { 1.0 } else { 0.0 }, transfer_exponent(transfer), 0.0, 0.0];
             (11, p, None)
         }
         Adjustment::BlackWhite { weights, tint } => {
@@ -1536,6 +1555,18 @@ pub fn adjustment_program(adj: &Adjustment, transfer: Transfer, quantum: Option<
         // Identity on the CPU too (not evaluated there).
         Adjustment::ColorLookup { .. } | Adjustment::Unsupported { .. } => (0, p, None),
     }
+}
+
+/// A gradient's colour and alpha as four 4096-entry LUT rows (`lut_tex`).
+fn gradient_rows(g: &Gradient) -> Vec<[f32; 4096]> {
+    let mut rows = vec![[0.0f32; 4096]; 4];
+    for k in 0..4096 {
+        let v = photocraft_compose::effects::sample_gradient(g, k as f32 / 4095.0);
+        for (ch, row) in rows.iter_mut().enumerate() {
+            row[k] = v[ch];
+        }
+    }
+    rows
 }
 
 /// Mode index used by the shader (declaration order of [`BlendMode`]).

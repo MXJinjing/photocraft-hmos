@@ -211,7 +211,9 @@ pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                 if let Some(mut text) = ctx.data(|d| d.get_temp::<String>(rename_id)) {
                     let edit_rect = Rect::from_min_max(pos2(text_pos.x - 3.0, rect.center().y - 11.0), pos2(rect.right() - 36.0, rect.center().y + 11.0));
                     let te = ui.put(edit_rect, egui::TextEdit::singleline(&mut text).font(egui::FontId::proportional(12.5)));
-                    te.request_focus();
+                    if !te.has_focus() && !te.lost_focus() {
+                        te.request_focus();
+                    }
                     let (enter, esc) = ui.input(|i| (i.key_pressed(egui::Key::Enter), i.key_pressed(egui::Key::Escape)));
                     if esc {
                         ctx.data_mut(|d| d.remove::<String>(rename_id));
@@ -226,43 +228,45 @@ pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                 }
             }
             resp.context_menu(|ui| {
-                ui.set_min_width(210.0);
-                let a = &mut actions;
-                match row {
-                    Row::Alpha(i) => {
-                        let ch = &doc.channels[i];
-                        item(ui, a, "Duplicate Channel", "channel.duplicate", json!({ "channel": i }));
-                        item(ui, a, "Delete Channel", "channel.delete", json!({ "channel": i }));
-                        item(ui, a, "Rename Channel…", "ui.renameChannel", json!(i));
-                        ui.separator();
-                        if ch.spot.is_some() {
-                            item(ui, a, "Merge Spot Channel", "channel.mergeSpot", json!({ "channel": i }));
-                            item(ui, a, "Convert to Alpha Channel", "channel.options", json!({ "channel": i, "indicates": "masked" }));
-                        } else {
-                            indicates_items(ui, a, json!(i), ch.indicates);
-                            overlay_colors(ui, a, json!(i));
+                crate::widgets::menu_scroll(ui, |ui| {
+                    ui.set_min_width(210.0);
+                    let a = &mut actions;
+                    match row {
+                        Row::Alpha(i) => {
+                            let ch = &doc.channels[i];
+                            item(ui, a, "Duplicate Channel", "channel.duplicate", json!({ "channel": i }));
+                            item(ui, a, "Delete Channel", "channel.delete", json!({ "channel": i }));
+                            item(ui, a, "Rename Channel…", "ui.renameChannel", json!(i));
+                            ui.separator();
+                            if ch.spot.is_some() {
+                                item(ui, a, "Merge Spot Channel", "channel.mergeSpot", json!({ "channel": i }));
+                                item(ui, a, "Convert to Alpha Channel", "channel.options", json!({ "channel": i, "indicates": "masked" }));
+                            } else {
+                                indicates_items(ui, a, json!(i), ch.indicates);
+                                overlay_colors(ui, a, json!(i));
+                            }
+                        }
+                        Row::QuickMask => {
+                            item(ui, a, "Exit Quick Mask", "select.editInQuickMaskMode", json!({ "on": false }));
+                            indicates_items(ui, a, json!("quickMask"), doc.quick_mask.as_ref().map(|q| q.indicates).unwrap_or_default());
+                            overlay_colors(ui, a, json!("quickMask"));
+                        }
+                        Row::Composite | Row::Color(_) => {
+                            item(ui, a, "Duplicate Channel", "channel.duplicate", json!({ "channel": row.reference() }));
+                        }
+                        Row::LayerMask => {
+                            let enabled = masked.as_ref().and_then(|l| l.mask.as_ref()).is_none_or(|m| m.enabled);
+                            item(ui, a, if enabled { "Disable Layer Mask" } else { "Enable Layer Mask" }, "layer.layerMask.enabled", json!({}));
+                            item(ui, a, "Delete Layer Mask", "layer.layerMask.delete", json!({}));
                         }
                     }
-                    Row::QuickMask => {
-                        item(ui, a, "Exit Quick Mask", "select.editInQuickMaskMode", json!({ "on": false }));
-                        indicates_items(ui, a, json!("quickMask"), doc.quick_mask.as_ref().map(|q| q.indicates).unwrap_or_default());
-                        overlay_colors(ui, a, json!("quickMask"));
-                    }
-                    Row::Composite | Row::Color(_) => {
-                        item(ui, a, "Duplicate Channel", "channel.duplicate", json!({ "channel": row.reference() }));
-                    }
-                    Row::LayerMask => {
-                        let enabled = masked.as_ref().and_then(|l| l.mask.as_ref()).is_none_or(|m| m.enabled);
-                        item(ui, a, if enabled { "Disable Layer Mask" } else { "Enable Layer Mask" }, "layer.layerMask.enabled", json!({}));
-                        item(ui, a, "Delete Layer Mask", "layer.layerMask.delete", json!({}));
-                    }
-                }
-                ui.separator();
-                item(ui, a, "New Channel…", "channel.new", json!({}));
-                item(ui, a, "New Spot Channel…", "channel.newSpot", json!({}));
-                ui.separator();
-                item(ui, a, "Split Channels", "channel.split", json!({}));
-                item(ui, a, "Merge Channels…", "channel.merge", json!({}));
+                    ui.separator();
+                    item(ui, a, "New Channel…", "channel.new", json!({}));
+                    item(ui, a, "New Spot Channel…", "channel.newSpot", json!({}));
+                    ui.separator();
+                    item(ui, a, "Split Channels", "channel.split", json!({}));
+                    item(ui, a, "Merge Channels…", "channel.merge", json!({}));
+                });
             });
         }
     });
@@ -379,5 +383,27 @@ mod tests {
         assert_eq!(load_operation(m(true, false)), "add");
         assert_eq!(load_operation(m(false, true)), "subtract");
         assert_eq!(load_operation(m(true, true)), "intersect");
+    }
+
+    #[test]
+    fn rename_field_interrupts_the_ime_only_when_it_takes_focus() {
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        app.run("file.new", json!({"width": 32, "height": 32})).unwrap();
+        app.run("channel.new", json!({})).unwrap();
+        let ctx = egui::Context::default();
+        crate::theme::install_fonts(&ctx);
+        ctx.run_ui(Default::default(), |_| {}).textures_delta.clear();
+        let doc = app.session.active().unwrap().doc.id.0;
+        let name = app.session.active().unwrap().doc.channels[0].name.clone();
+        ctx.data_mut(|d| d.insert_temp(egui::Id::new(("chan-rename", doc, format!("{:?}", Row::Alpha(0).reference()))), name));
+        // The field takes focus on the first pass and owns the IME from the second on (#585).
+        let interrupts: Vec<Option<bool>> = (0..4)
+            .map(|_| {
+                let mut out = ctx.run_ui(Default::default(), |ui| show(&mut app, ui));
+                out.textures_delta.clear();
+                out.platform_output.ime.map(|ime| ime.should_interrupt_composition)
+            })
+            .collect();
+        assert_eq!(interrupts, [None, Some(false), Some(false), Some(false)]);
     }
 }

@@ -37,6 +37,9 @@
 	Open Recent	最近開啟的檔案
 	Clear Recent Files	清除最近檔案
 	Close	關閉
+	Minimize	最小化
+	Maximize	最大化
+	Restore	向下還原
 	Close All	全部關閉
 	Close Others	關閉其他
 	Save	儲存
@@ -181,8 +184,13 @@
 	Lab Color	Lab 色彩
 	Multichannel	多重色版
 	8 Bits/Channel	8 位元/色版
+	8 bit	8 位元
+	Integer	整數
 	16 Bits/Channel	16 位元/色版
+	16 bit	16 位元
 	32 Bits/Channel	32 位元/色版
+	32 bit (float)	32 位元（浮點）
+	Floating point	浮點數
 	Color Table…	色彩表…
 	Bitmap…	點陣圖…
 	Duotone…	雙色調…
@@ -265,6 +273,7 @@
 	Layer Style	圖層樣式
 	Blending Options…	混合選項…
 	Bevel & Emboss…	斜角和浮雕…
+	Use Global Light	使用全域光
 	Inner Shadow…	內陰影…
 	Inner Glow…	內光暈…
 	Satin…	緞面…
@@ -309,6 +318,7 @@
 	Smart Object	智慧型物件
 	Convert to Smart Object	轉換為智慧型物件
 	Convert to Embedded	轉換為嵌入
+	Convert to Layers	轉換為圖層
 	Convert to Linked…	轉換為連結…
 	Edit Contents	編輯內容
 	Replace Contents…	取代內容…
@@ -525,6 +535,7 @@
 	Flame…	火焰…
 	Lens Flare…	反光效果…
 	Lighting Effects…	光照效果…
+	Relight…	重新打光…
 	Picture Frame…	相框…
 	Tree…	樹…
 	Sharpen	銳利化
@@ -572,6 +583,12 @@
 	Fit Artboard on Screen	使工作區域符合螢幕
 	100%	100%
 	200%	200%
+	75%	75%
+	125%	125%
+	150%	150%
+	175%	175%
+	250%	250%
+	300%	300%
 	Print Size	列印尺寸
 	Pixel Aspect Ratio	像素外觀比例
 	Pixel Aspect Ratio Correction	像素外觀比例校正
@@ -892,8 +909,6 @@
 	Create new pattern from the selection	從選取範圍建立新圖樣
 	Create new shape from the current path	從目前路徑建立新形狀
 	Create new snapshot	建立新快照
-	Create new style (from the selected type)	建立新樣式 (依所選文字)
-	Create new style from the selected layer	從所選圖層建立新樣式
 	Create new tool preset	建立新工具預設集
 	Crop Factor	裁切係數
 	Ctrl	Ctrl
@@ -954,16 +969,22 @@
 	Divide…	分割…
 	Document	文件
 	Don't Save	不儲存
+	No	否
+	Yes	是
 	Done	完成
 	Dots	點
 	Drag a rectangle around the object	在物件周圍拖曳出矩形
 	Drag on the image to add a constraint; Shift for horizontal/vertical; right-click to delete.	在影像上拖曳以新增限制線；按住 Shift 可限制水平/垂直；按右鍵可刪除。
 	Drag to move the active shape's path or the Work Path	拖曳以移動作用中形狀的路徑或工作路徑
+	Click: select anchor · Drag: move anchor, handle or segment · {shift}-click: add · {alt}-click: whole subpath	按一下：選取錨點 · 拖曳：移動錨點、把手或線段 · {shift}-按一下：增加 · {alt}-按一下：整個子路徑
 	Draw with the Pen tool (P) or make a work path from a selection.	使用筆型工具 (P) 繪製，或從選取範圍建立工作路徑。
 	Drop an image or PSD anywhere to open it.	將影像或 PSD 拖放到任何位置即可開啟。
+	Native file drag-and-drop is unavailable	Wayland 不支援原生檔案拖放
+	Native file drag-and-drop is not supported on Wayland yet. Use File › Open, or run PhotoCraft under XWayland with `WAYLAND_DISPLAY= photocraft`.	Wayland 尚未支援原生檔案拖放。請使用「檔案 › 開啟」，或透過 `WAYLAND_DISPLAY= photocraft` 在 XWayland 下執行 PhotoCraft。
 	Duplicate Layers…	複製圖層…
 	Duplicate style	複製樣式
 	Edit Toolbar…	編輯工具列…
+	Use File › Open to open an image.	使用「檔案 › 開啟」開啟影像。
 	Edit in Quick Mask Mode  (Q)	在快速遮色片模式下編輯 (Q)
 	Edit in Standard Mode  (Q)	在標準模式下編輯 (Q)
 	Effects	效果
@@ -1479,6 +1500,7 @@
 	Comic Book	漫畫書
 	Conform	符合
 	Content-Aware Fill needs a selection on a pixel layer	內容感知填滿需要在像素圖層上建立選取範圍
+	Couldn't place {name}: {error}	無法置入 {name}：{error}
 	Could not transform: the layer is empty	無法變形：圖層是空的
 	Could not use Perspective Warp: the layer is empty	無法使用透視彎曲：圖層是空的
 	Could not use Puppet Warp: no opaque pixels	無法使用操控彎曲：沒有不透明像素
@@ -1582,6 +1604,7 @@
 	Paint Bucket Tool	油漆桶工具
 	Paints from the document's opening state	從文件開啟時的狀態繪製
 	Path Selection Tool	路徑選取工具
+	Direct Selection Tool	直接選取工具
 	Pattern Overlay	圖樣覆蓋
 	Pen Pressure	筆壓
 	Pen Tilt	筆傾斜
@@ -1668,6 +1691,8 @@
 	Doc: {flat}/{layered}	文件：{flat}/{layered}
 	Scratch: {size}	暫存：{size}
 	Untagged {mode}	未標記的 {mode}
+	Invalid {mode} profile	無效的 {mode} 描述檔
+	Unnamed {mode} profile	未命名的 {mode} 描述檔
 	{w} px x {h} px ({ppi} ppi)	{w} px x {h} px ({ppi} ppi)
 	Resolution: {dpi} pixels/inch	解析度：{dpi} 像素/英吋
 	Doc: {w} × {h} px	文件：{w} × {h} px
@@ -1770,6 +1795,7 @@
 	Light gray	淺灰
 	Line	直線
 	Lines	直線
+	Lossless	無損
 	Lowercase extension	副檔名小寫
 	Maximize psd compatibility	最大化 PSD 相容性
 	Medium gray	中灰
@@ -1816,6 +1842,7 @@
 	Show only crosshair while painting	繪圖時僅顯示十字線
 	Show slice numbers	顯示切片編號
 	Show tooltips	顯示工具提示
+	Show bounding box when dragging layer	拖曳圖層時顯示邊界框
 	Show transformation values	顯示變形數值
 	Slice color	切片顏色
 	Smart guide color	智慧型參考線顏色
@@ -1932,6 +1959,7 @@
 	Brush Projection	筆刷投影
 	Apply the pen's tilt and rotation to the tip shape	將筆的傾斜和旋轉套用至筆尖形狀
 	Mixer Brush	混合器筆刷
+	Mixer Brush Tool	混合器筆刷工具
 	Wet	濕度
 	Mix	混合
 	Wetness Jitter	濕度快速變換
@@ -1978,3 +2006,107 @@
 	Opening…	正在開啟…
 	Reading…	正在讀取…
 	Working…	處理中…
+	3 x 3	3 × 3
+	4 x 4	4 × 4
+	5 x 5	5 × 5
+	Grid:	格點：
+# Rendering mode and recovery
+	Rendering Mode	渲染模式
+	Automatic (recommended)	自動（建議）
+	CPU / Compatibility	CPU / 相容模式
+	Automatic uses GPU acceleration when available and falls back to CPU rendering on errors.	自動模式會在可用時使用 GPU 加速，發生錯誤時改用 CPU 渲染。
+	Switched to CPU rendering	已改用 CPU 渲染
+	GPU acceleration could not continue. Your documents are unchanged.	GPU 加速無法繼續。您的文件未變更。
+	PhotoCraft is using the CPU image compositor. The window may still use your graphics adapter.	PhotoCraft 正使用 CPU 合成影像。視窗仍可能使用您的顯示卡。
+	Retry GPU requires a restart. Save your work first.	重試 GPU 需要重新啟動。請先儲存您的工作。
+	Keep Using CPU	繼續使用 CPU
+	Retry GPU	重試 GPU
+	Advanced	進階
+	GPU Backend	GPU 後端
+	Details	詳細資訊
+	Rendering mode	渲染模式
+	Freeze Lasso: drag to freeze an area, Alt-drag to thaw it (L)	凍結套索：拖曳以凍結區域，按住 Alt 拖曳以解凍 (L)
+	Shadow Clipping Warning (U)	陰影剪裁警告 (U)
+	Highlight Clipping Warning (O)	亮部剪裁警告 (O)
+	Show Lab Color Readouts	顯示 Lab 色彩讀值
+	Show Vectorscope	顯示向量示波器
+	Show Red at 3 o'clock	將紅色顯示在三點鐘方向
+	Show Skin Tone Indicator	顯示膚色指示線
+	Tone Histogram	色調直方圖
+	Show Selected Region	顯示選取區域
+cameraRaw	Light	光線
+# Camera Raw: contextual controls and window title
+	Camera Raw Filter ({layer})	Camera Raw 濾鏡（{layer}）
+cameraRaw	Lights	亮調
+cameraRaw	Darks	暗調
+cameraRaw	Blacks	黑色色階
+cameraRaw	Whites	白色色階
+cameraRaw	Amount	強度
+cameraRaw	Tint	色偏
+cameraRaw	Masking	遮色片保護
+cameraRaw	Blending	混合
+	Patch Tool	修補工具
+	Patch:	修補：
+	Lasso around an area, then drag the selection	用套索圈出區域，然後拖曳選取範圍
+	Edit Type	編輯文字
+
+
+	New Style…	新增樣式…
+	Style {name} saved	已儲存樣式 {name}
+
+	Create new style (from the selected type)	新增樣式（基於所選文字）
+	Create new style from the selected layer	從所選圖層新增樣式
+
+	Make Default	設為預設
+	Reset to Default	重設為預設
+	Full-resolution preview unavailable	無法使用完整解析度預覽
+	No patterns	無圖樣
+	Enable {name}	啟用{name}
+	Hold Alt while drawing for straight segments	繪製中按住 Alt 可逐點連接直線
+	Drag or click polygon points · hold Alt during lasso for straight segments · {add} add · {sub} before drawing subtracts	拖曳圈選或逐點繪製 · 圈選中按住 Alt 畫直線 · {add} 增加 · 起筆前按 {sub} 減去
+	Move	移動
+	Extend	延伸
+	Structure:	結構：
+	Content-Aware Move Tool	內容感知移動工具
+	TIFF Options	TIFF 選項
+	Including layers will increase file size.	包含圖層會增加檔案大小。
+	Discard Layers and Save a Copy	放棄圖層並儲存拷貝
+	Don't show again	不再顯示
+	Save failed: {error}	儲存失敗：{error}
+	Save cancelled	已取消儲存
+	Magnetic Lasso Tool	磁性套索工具
+	Frequency	頻率
+	Use tablet pressure to change pen width	使用繪圖板壓力以變更鋼筆寬度
+
+# About ▸ Contributors / Models (credits, craftrules standards/contributors.md)
+	About	關於
+	Contributors	貢獻者
+	Models	模型
+	Sort	排序
+	Username	使用者名稱
+	Display name	顯示名稱
+	Real name	真實姓名
+	Reverse the order	反轉順序
+	Grab bag	清單
+	Table	表格
+	Name (A–Z)	名稱 (A–Z)
+	Merged PRs	已合併的 PR
+	Commits	提交
+	Lines added	新增行數
+	Lines deleted	刪除行數
+	Line delta	行數增減
+	Binary assets added	新增二進位檔
+	Binary assets removed	刪除二進位檔
+	First commit	首次提交
+	First	首次
+	Last commit	最近提交
+	Last	最近
+	Contributors: {contributors} · Commits: {commits}	貢獻者：{contributors} · 提交：{commits}
+	No contributor data was built into this copy.	此副本未內建貢獻者資料。
+	No model credits were built into this copy.	此副本未內建模型致謝。
+	Company	公司
+	Model	模型
+	Version	版本
+	% of all commits	佔全部提交的 %
+	Lines +/−	行數 +/−
+	@{login}: {prs} PRs, {commits} commits, +{added} / −{deleted} lines (Δ {delta}), +{binAdded} / −{binDeleted} binary assets, {first} – {last}	@{login}：{prs} 個 PR，{commits} 次提交，行 +{added} / −{deleted}（Δ {delta}），二進位檔 +{binAdded} / −{binDeleted}，{first} – {last}

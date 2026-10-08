@@ -11,7 +11,7 @@ use photocraft_doc::{CompLayerState, Document, LayerComp, LayerId};
 use serde_json::{Value, json};
 
 use crate::commands::CommandSpec;
-use crate::file_cmds::{f64_param, join, native_doc, sanitize, save_doc, stem, str_param};
+use crate::file_cmds::{SaveOpts, join, native_doc, sanitize, save_doc, stem, str_param};
 use crate::{EngineError, Result, Session};
 
 fn bad(cmd: &str, msg: impl Into<String>) -> EngineError {
@@ -40,8 +40,8 @@ fn export_comps(s: &Session) -> std::result::Result<(), String> {
 /// The comp a command acts on: `"comp"` as an id or a name, else the last applied comp.
 fn comp_param(doc: &Document, p: &Value, cmd: &str) -> Result<u32> {
     match p.get("comp") {
-        Some(Value::Number(n)) => {
-            let id = n.as_u64().ok_or_else(|| bad(cmd, "\"comp\" must be a comp id or name"))? as u32;
+        Some(v @ Value::Number(_)) => {
+            let id = crate::commands::u32_id(cmd, "comp", v)?;
             doc.comp(id).map(|c| c.id).ok_or_else(|| bad(cmd, format!("no layer comp with id {id}")))
         }
         Some(Value::String(name)) => {
@@ -351,7 +351,7 @@ fn comps_to_files(s: &mut Session, p: &Value) -> Result<Value> {
     let prefix = p.get("prefix").and_then(Value::as_str).map(str::to_string).unwrap_or_else(|| stem(&d.doc.name));
     let doc = d.doc.clone();
     let chosen: Vec<u32> = match p.get("comps") {
-        Some(Value::Array(a)) => a.iter().filter_map(Value::as_u64).map(|v| v as u32).collect(),
+        Some(Value::Array(a)) => a.iter().map(|v| crate::commands::u32_id(cmd, "comps", v)).collect::<Result<Vec<_>>>()?,
         _ if flag(p, "selectedOnly", false) => vec![comp_param(&doc, &json!({}), cmd)?],
         _ => doc.layer_comps.iter().map(|c| c.id).collect(),
     };
@@ -361,7 +361,7 @@ fn comps_to_files(s: &mut Session, p: &Value) -> Result<Value> {
         apply_comp(&mut one, c, false);
         one.last_applied_comp = Some(c.id);
         let path = join(&dir, &format!("{}_{:04}_{}.{format}", sanitize(&prefix), i, sanitize(&c.name)));
-        save_doc(&one, &path, f64_param(p, "quality"))?;
+        save_doc(&one, &path, SaveOpts::from_params(p))?;
         files.push(path);
     }
     if files.is_empty() {

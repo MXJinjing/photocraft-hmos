@@ -139,7 +139,15 @@ pub fn raw_params(cmd: &str, p: &Value) -> Result<CameraRaw> {
     if let Value::Object(m) = &mut q {
         m.remove("layer");
     }
-    serde_json::from_value(q).map_err(|e| bad(cmd, format!("bad params: {e}")))
+    let mut cr: CameraRaw = serde_json::from_value(q).map_err(|e| bad(cmd, format!("bad params: {e}")))?;
+    // The noise stages turn these straight into a guided-filter radius and a
+    // blur sigma, so an out-of-range value means unbounded work. Clamp to the
+    // documented 0..100 (part of #707).
+    cr.noise_luminance = cr.noise_luminance.clamp(0.0, 100.0);
+    cr.noise_luminance_detail = cr.noise_luminance_detail.clamp(0.0, 100.0);
+    cr.noise_color = cr.noise_color.clamp(0.0, 100.0);
+    cr.noise_color_detail = cr.noise_color_detail.clamp(0.0, 100.0);
+    Ok(cr)
 }
 
 // ---------- pixels ----------
@@ -263,12 +271,13 @@ fn run_filter(s: &mut Session, cmd: &str, label: &str, stored: Value, float_bg: 
     s.edit(label, |doc: &mut Document, _| {
         let canvas = doc.bounds();
         let selection = doc.selection.clone();
+        let locks = doc.effective_locks(id);
         let l = doc.layer_mut(id).ok_or(EngineError::NoLayer(id))?;
         if let LayerContent::Smart(_) = l.content {
             let sf = SmartFilter { command: cmd.to_string(), params: stored.clone(), blend: photocraft_color::BlendMode::Normal, opacity: 1.0, visible: true };
             return crate::smart_cmds::add_smart_filter(doc, id, sf, selection.as_ref());
         }
-        if l.locks.all || l.locks.pixels {
+        if locks.all || locks.pixels {
             return Err(EngineError::Other(format!("layer \"{}\" is locked", l.name)));
         }
         // A Background layer gains transparency when the edge mode exposes it (as in Photoshop).
@@ -346,6 +355,8 @@ fn adaptive_wide_angle(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn camera_raw_cmd(s: &mut Session, p: &Value) -> Result<Value> {
     let cr = raw_params(RAW, p)?;
+    // New settings are strict; stored Smart Filters re-apply through the lenient `raw_params`.
+    cr.validate().map_err(|e| bad(RAW, e))?;
     let t0 = Stopwatch::start();
     let id = run_filter(s, RAW, "Camera Raw Filter", p.clone(), false, &|surf, canvas| camera_raw_surface(surf, canvas.union(&surf.content_bounds()), &cr))?;
     Ok(json!({"layer": id.0, "identity": cr.is_identity(), "ms": t0.ms()}))
@@ -363,7 +374,7 @@ fn lens_batch(_s: &mut Session, p: &Value) -> Result<Value> {
         // Batch default: the EXIF-driven profile, as Photoshop's dialog suggests.
         m.entry("profile").or_insert(json!("auto"));
     }
-    let r = crate::file_cmds::process_files(&inputs, &output, &format, crate::file_cmds::f64_param(p, "quality"), "", &|scratch| {
+    let r = crate::file_cmds::process_files(&inputs, &output, &format, crate::file_cmds::SaveOpts::from_params(p), "", &|scratch| {
         if scratch.active().is_some_and(|d| d.doc.layers.len() > 1) {
             scratch.execute("layer.flattenImage", json!({}))?;
         }
@@ -529,6 +540,12 @@ mod tests {
         assert!(active_px(&s, 10, 40)[1] < inside_before[1]);
         assert_eq!(active_px(&s, 100, 40), outside_before);
         assert!(s.execute(RAW, json!({"exposure": "bright"})).is_err());
+        let legacy_curve = json!([[0, 0], [60, 40], [60, 200], [255, 255]]);
+        assert!(s.execute(RAW, json!({"pointCurve": legacy_curve})).is_err(), "new curves are validated");
+        // A curve an older editor saved must still re-apply as a Smart Filter.
+        let surf = s.active().unwrap().doc.layer(s.active().unwrap().active_layer.unwrap()).unwrap().surface().unwrap().clone();
+        let stored = apply_to_surface(RAW, &json!({"pointCurve": legacy_curve, "exposure": 1.0}), &surf, Rect::new(0, 0, 120, 80));
+        assert!(stored.is_some(), "a stored legacy curve must not drop the whole filter");
         // Smart filter.
         let mut s = session(8);
         s.execute("layer.smartObjects.convertToSmartObject", json!({})).unwrap();

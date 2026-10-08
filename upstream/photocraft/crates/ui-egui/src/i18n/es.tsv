@@ -29,6 +29,9 @@
 	Open Recent	Archivos recientes
 	Clear Recent Files	Vaciar archivos recientes
 	Close	Cerrar
+	Minimize	Minimizar
+	Maximize	Maximizar
+	Restore	Restaurar
 	Close All	Cerrar todo
 	Close Others	Cerrar otros
 	Save	Guardar
@@ -173,8 +176,13 @@
 	Lab Color	Color Lab
 	Multichannel	Multicanal
 	8 Bits/Channel	8 bits/canal
+	8 bit	8 bits
+	Integer	Entero
 	16 Bits/Channel	16 bits/canal
+	16 bit	16 bits
 	32 Bits/Channel	32 bits/canal
+	32 bit (float)	32 bits (float)
+	Floating point	Punto flotante
 	Color Table…	Tabla de colores…
 	Bitmap…	Mapa de bits…
 	Duotone…	Duotono…
@@ -257,6 +265,7 @@
 	Layer Style	Estilo de capa
 	Blending Options…	Opciones de fusión…
 	Bevel & Emboss…	Bisel y relieve…
+	Use Global Light	Usar luz global
 	Inner Shadow…	Sombra interior…
 	Inner Glow…	Resplandor interior…
 	Satin…	Satinado…
@@ -301,6 +310,7 @@
 	Smart Object	Objeto inteligente
 	Convert to Smart Object	Convertir en objeto inteligente
 	Convert to Embedded	Convertir en incrustado
+	Convert to Layers	Convertir en capas
 	Convert to Linked…	Convertir en vinculado…
 	Edit Contents	Editar contenido
 	Replace Contents…	Reemplazar contenido…
@@ -517,6 +527,7 @@
 	Flame…	Llama…
 	Lens Flare…	Destello de lente…
 	Lighting Effects…	Efectos de iluminación…
+	Relight…	Reiluminar…
 	Picture Frame…	Marco de imagen…
 	Tree…	Árbol…
 	Sharpen	Enfocar
@@ -564,6 +575,12 @@
 	Fit Artboard on Screen	Encajar lienzo en pantalla
 	100%	100%
 	200%	200%
+	75%	75%
+	125%	125%
+	150%	150%
+	175%	175%
+	250%	250%
+	300%	300%
 	Print Size	Tamaño de impresión
 	Pixel Aspect Ratio	Relación de aspecto de píxel
 	Pixel Aspect Ratio Correction	Corrección de la relación de aspecto de píxel
@@ -886,8 +903,6 @@
 	Create new pattern from the selection	Crear un patrón nuevo a partir de la selección
 	Create new shape from the current path	Crear una forma nueva a partir del trazado actual
 	Create new snapshot	Crear una instantánea nueva
-	Create new style (from the selected type)	Crear un estilo nuevo (del texto seleccionado)
-	Create new style from the selected layer	Crear un estilo nuevo a partir de la capa seleccionada
 	Create new tool preset	Crear un preajuste de herramienta nuevo
 	Crop Factor	Factor de recorte
 	Ctrl	Ctrl
@@ -948,16 +963,22 @@
 	Divide…	Dividir…
 	Document	Documento
 	Don't Save	No guardar
+	No	No
+	Yes	Sí
 	Done	Hecho
 	Dots	Puntos
 	Drag a rectangle around the object	Arrastre un rectángulo alrededor del objeto
 	Drag on the image to add a constraint; Shift for horizontal/vertical; right-click to delete.	Arrastre sobre la imagen para añadir una restricción; Mayús para horizontal/vertical; clic derecho para eliminar.
 	Drag to move the active shape's path or the Work Path	Arrastre para mover el trazado de la forma activa o el Trazado de trabajo
+	Click: select anchor · Drag: move anchor, handle or segment · {shift}-click: add · {alt}-click: whole subpath	Clic: seleccionar punto · Arrastrar: mover punto, manejador o segmento · {shift}-clic: añadir · {alt}-clic: subtrazado completo
 	Draw with the Pen tool (P) or make a work path from a selection.	Dibuja con la herramienta Pluma (P) o crea un trazado de trabajo a partir de una selección.
 	Drop an image or PSD anywhere to open it.	Suelte una imagen o un PSD en cualquier lugar para abrirlo.
+	Native file drag-and-drop is unavailable	El arrastrar y soltar archivos de forma nativa no está disponible en Wayland
+	Native file drag-and-drop is not supported on Wayland yet. Use File › Open, or run PhotoCraft under XWayland with `WAYLAND_DISPLAY= photocraft`.	El arrastrar y soltar archivos de forma nativa aún no está disponible en Wayland. Usa Archivo › Abrir o ejecuta PhotoCraft bajo XWayland con `WAYLAND_DISPLAY= photocraft`.
 	Duplicate Layers…	Duplicar capas…
 	Duplicate style	Duplicar estilo
 	Edit Toolbar…	Editar barra de herramientas…
+	Use File › Open to open an image.	Usa Archivo › Abrir para abrir una imagen.
 	Edit in Quick Mask Mode  (Q)	Editar en modo de máscara rápida  (Q)
 	Edit in Standard Mode  (Q)	Editar en modo estándar  (Q)
 	Effects	Efectos
@@ -1475,6 +1496,7 @@
 	Comic Book	Cómic
 	Conform	Conformar
 	Content-Aware Fill needs a selection on a pixel layer	El relleno de contenido necesita una selección en una capa de píxeles
+	Couldn't place {name}: {error}	No se pudo colocar {name}: {error}
 	Could not transform: the layer is empty	No se pudo transformar: la capa está vacía
 	Could not use Perspective Warp: the layer is empty	No se pudo usar la deformación en perspectiva: la capa está vacía
 	Could not use Puppet Warp: no opaque pixels	No se pudo usar la deformación de clavos: no hay píxeles opacos
@@ -1578,6 +1600,7 @@
 	Paint Bucket Tool	Herramienta Bote de pintura
 	Paints from the document's opening state	Pinta a partir del estado en que se abrió el documento.
 	Path Selection Tool	Herramienta Selección de trazado
+	Direct Selection Tool	Herramienta Selección directa
 	Pattern Overlay	Superposición de patrón
 	Pen Pressure	Presión del lápiz
 	Pen Tilt	Inclinación del lápiz
@@ -1666,6 +1689,8 @@
 	Doc: {flat}/{layered}	Doc: {flat}/{layered}
 	Scratch: {size}	Temporal: {size}
 	Untagged {mode}	Sin etiquetar {mode}
+	Invalid {mode} profile	Perfil {mode} no válido
+	Unnamed {mode} profile	Perfil {mode} sin nombre
 	{w} px x {h} px ({ppi} ppi)	{w} px × {h} px ({ppi} ppi)
 	Resolution: {dpi} pixels/inch	Resolución: {dpi} píxeles/pulgada
 	Doc: {w} × {h} px	Doc: {w} × {h} px
@@ -1770,6 +1795,7 @@
 	Light gray	Gris claro
 	Line	Línea
 	Lines	Líneas
+	Lossless	Sin pérdida
 	Lowercase extension	Extensión en minúsculas
 	Maximize psd compatibility	Maximizar la compatibilidad de PSD
 	Medium gray	Gris medio
@@ -1816,6 +1842,7 @@
 	Show only crosshair while painting	Mostrar solo la retícula al pintar
 	Show slice numbers	Mostrar los números de sección
 	Show tooltips	Mostrar las descripciones emergentes
+	Show bounding box when dragging layer	Mostrar el cuadro delimitador al arrastrar la capa
 	Show transformation values	Mostrar los valores de transformación
 	Slice color	Color de las secciones
 	Smart guide color	Color de las guías inteligentes
@@ -1936,6 +1963,7 @@
 	Brush Projection	Proyección del pincel
 	Apply the pen's tilt and rotation to the tip shape	Aplicar la inclinación y la rotación del lápiz a la forma de la punta
 	Mixer Brush	Pincel mezclador
+	Mixer Brush Tool	Herramienta Pincel mezclador
 	Wet	Húmedo
 	Mix	Mezcla
 	Wetness Jitter	Variación de humedad
@@ -1982,7 +2010,10 @@
 	Opening…	Abriendo…
 	Reading…	Leyendo…
 	Working…	Procesando…
-
+	3 x 3	3 × 3
+	4 x 4	4 × 4
+	5 x 5	5 × 5
+	Grid:	Rejilla:
 # Tool, filter, warp-style, path, layer-comp and metadata names that fell outside the `tl!` test.
 # Spanish follows the tool wording used above (Herramienta X).
 	Color Range	Gama de colores
@@ -2047,7 +2078,6 @@
 	Auto Erase	Borrado automático
 	Color Adaptation	Adaptación de color
 	Preserve Transparency	Conservar transparencia
-	New Style…	Nuevo estilo…
 	shortcut	atajo
 	Saved	Guardado
 	Arc	Arco
@@ -2068,6 +2098,109 @@
 	New Channel	Nuevo canal
 	Save Selection	Guardar selección
 	Load Selection	Cargar selección
-
 # Command-id override: under Edit > Purge a bare "Deshacer" reads as an action, not the history.
 @id	edit.purge.undo	Historial de deshacer
+# Rendering mode and recovery
+	Rendering Mode	Modo de renderizado
+	Automatic (recommended)	Automático (recomendado)
+	CPU / Compatibility	CPU / Compatibilidad
+	Automatic uses GPU acceleration when available and falls back to CPU rendering on errors.	Automático utiliza la GPU cuando está disponible y cambia a la CPU si hay errores.
+	Switched to CPU rendering	Se cambió al renderizado por CPU
+	GPU acceleration could not continue. Your documents are unchanged.	La aceleración GPU no pudo continuar. Los documentos no han cambiado.
+	PhotoCraft is using the CPU image compositor. The window may still use your graphics adapter.	PhotoCraft compone las imágenes en la CPU. La ventana aún puede usar el adaptador gráfico.
+	Retry GPU requires a restart. Save your work first.	Reintentar la GPU requiere reiniciar. Guarda primero tu trabajo.
+	Keep Using CPU	Seguir usando CPU
+	Retry GPU	Reintentar GPU
+	Advanced	Avanzado
+	GPU Backend	Motor GPU
+	Details	Detalles
+	Rendering mode	Modo de renderizado
+	Freeze Lasso: drag to freeze an area, Alt-drag to thaw it (L)	Lazo de congelación: arrastre para congelar un área; Alt+arrastrar para descongelarla (L)
+	Shadow Clipping Warning (U)	Aviso de recorte de sombras (U)
+	Highlight Clipping Warning (O)	Aviso de recorte de luces (O)
+	Show Lab Color Readouts	Mostrar valores de color Lab
+	Show Vectorscope	Mostrar vectorscopio
+	Show Red at 3 o'clock	Mostrar rojo a las 3 en punto
+	Show Skin Tone Indicator	Mostrar indicador de tono de piel
+	Tone Histogram	Histograma tonal
+	Show Selected Region	Mostrar región seleccionada
+cameraRaw	Light	Luz
+# Camera Raw: contextual controls and window title
+	Camera Raw Filter ({layer})	Filtro Camera Raw ({layer})
+cameraRaw	Lights	Tonos claros
+cameraRaw	Darks	Tonos oscuros
+cameraRaw	Red	Rojos
+cameraRaw	Orange	Naranjas
+cameraRaw	Yellow	Amarillos
+cameraRaw	Green	Verdes
+cameraRaw	Aqua	Aguamarinas
+cameraRaw	Blue	Azules
+cameraRaw	Purple	Morados
+cameraRaw	Magenta	Magentas
+cameraRaw	Blending	Mezcla
+cameraRaw	Tint	Matiz
+cameraRaw	Temperature	Temperatura de color
+cameraRaw	Amount	Cantidad
+	Patch Tool	Herramienta Parche
+	Patch:	Parche:
+	Lasso around an area, then drag the selection	Rodee un área con el lazo y arrastre la selección
+	Edit Type	Editar texto
+
+
+	New Style…	Nuevo estilo…
+	Style {name} saved	Estilo {name} guardado
+
+	Create new style (from the selected type)	Crear estilo nuevo (del texto seleccionado)
+	Create new style from the selected layer	Crear estilo nuevo de la capa seleccionada
+
+	Make Default	Predeterminar
+	Reset to Default	Restablecer predeterminado
+	Full-resolution preview unavailable	Vista previa a resolución completa no disponible
+	No patterns	Sin motivos
+	Enable {name}	Activar {name}
+	Hold Alt while drawing for straight segments	Mantenga Alt al dibujar para segmentos rectos
+	Drag or click polygon points · hold Alt during lasso for straight segments · {add} add · {sub} before drawing subtracts	Arrastre o haga clic en los puntos del polígono · mantenga Alt durante el lazo para segmentos rectos · {add} añadir · {sub} antes de dibujar resta
+	Extend	Extender
+	Structure:	Estructura:
+	Content-Aware Move Tool	Herramienta Mover según el contenido
+	TIFF Options	Opciones de TIFF
+	Including layers will increase file size.	Incluir las capas aumentará el tamaño del archivo.
+	Discard Layers and Save a Copy	Descartar capas y guardar una copia
+	Don't show again	No volver a mostrar
+	Save failed: {error}	Error al guardar: {error}
+	Save cancelled	Guardado cancelado
+	Magnetic Lasso Tool	Herramienta Lazo magnético
+	Frequency	Frecuencia
+	Use tablet pressure to change pen width	Usar la presión de la tableta para cambiar la anchura del lápiz
+
+# About ▸ Contributors / Models (credits, craftrules standards/contributors.md)
+	About	Acerca de
+	Contributors	Colaboradores
+	Models	Modelos
+	Sort	Ordenar
+	Username	Nombre de usuario
+	Display name	Nombre visible
+	Real name	Nombre real
+	Reverse the order	Invertir el orden
+	Grab bag	Lista libre
+	Table	Tabla
+	Name (A–Z)	Nombre (A–Z)
+	Merged PRs	PR fusionadas
+	Commits	Commits
+	Lines added	Líneas añadidas
+	Lines deleted	Líneas eliminadas
+	Line delta	Balance de líneas
+	Binary assets added	Archivos binarios añadidos
+	Binary assets removed	Archivos binarios eliminados
+	First commit	Primer commit
+	First	Primero
+	Last commit	Último commit
+	Last	Último
+	Contributors: {contributors} · Commits: {commits}	Colaboradores: {contributors} · Commits: {commits}
+	No contributor data was built into this copy.	Esta copia no incluye datos de colaboradores.
+	No model credits were built into this copy.	Esta copia no incluye créditos de modelos.
+	Company	Empresa
+	Version	Versión
+	% of all commits	% de todos los commits
+	Lines +/−	Líneas +/−
+	@{login}: {prs} PRs, {commits} commits, +{added} / −{deleted} lines (Δ {delta}), +{binAdded} / −{binDeleted} binary assets, {first} – {last}	@{login}: {prs} PR, {commits} commits, +{added} / −{deleted} líneas (Δ {delta}), +{binAdded} / −{binDeleted} archivos binarios, {first} – {last}

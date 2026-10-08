@@ -26,6 +26,10 @@ fn bad(cmd: &str, msg: impl Into<String>) -> EngineError {
     EngineError::BadParams { cmd: cmd.into(), msg: msg.into() }
 }
 
+fn exhausted_id(paragraph: bool) -> EngineError {
+    EngineError::Other(format!("{} style id space exhausted", if paragraph { "paragraph" } else { "character" }))
+}
+
 fn has_doc(s: &Session) -> std::result::Result<(), String> {
     s.active().map(|_| ()).ok_or_else(|| "no document open".into())
 }
@@ -71,8 +75,8 @@ fn range_of(text: &str, p: &Value) -> (usize, usize) {
     }
 }
 
-fn id_param(p: &Value) -> Option<u32> {
-    p.get("id").and_then(Value::as_u64).map(|v| v as u32)
+fn id_param(cmd: &str, p: &Value) -> Result<Option<u32>> {
+    crate::commands::u32_id_param(cmd, p, "id")
 }
 
 // ---------- attribute parameters ----------
@@ -443,11 +447,11 @@ fn new_style(s: &mut Session, p: &Value, paragraph: bool) -> Result<Value> {
         .map(str::to_string)
         .unwrap_or_else(|| st.unique_name(paragraph, if paragraph { "Paragraph Style" } else { "Character Style" }));
     let id = if paragraph {
-        let id = st.next_para_id();
+        let id = st.next_para_id().ok_or_else(|| exhausted_id(true))?;
         st.paragraph.push(ParagraphStyleDef { id, name: name.clone(), para_attrs: pa, char_attrs: ca });
         id
     } else {
-        let id = st.next_char_id();
+        let id = st.next_char_id().ok_or_else(|| exhausted_id(false))?;
         st.character.push(CharacterStyleDef { id, name: name.clone(), attrs: ca });
         id
     };
@@ -463,7 +467,7 @@ fn new_style(s: &mut Session, p: &Value, paragraph: bool) -> Result<Value> {
 }
 
 fn lookup_id(cmd: &str, st: &TextStyles, p: &Value, paragraph: bool, allow_default: bool) -> Result<u32> {
-    let id = id_param(p).ok_or_else(|| bad(cmd, "missing `id`"))?;
+    let id = id_param(cmd, p)?.ok_or_else(|| bad(cmd, "missing `id`"))?;
     let ok = if paragraph { st.para_style(id).is_some() } else { st.char_style(id).is_some() };
     if !(ok || (allow_default && id == 0)) {
         return Err(bad(cmd, format!("no style with id {id}")));
@@ -481,14 +485,14 @@ fn duplicate(s: &mut Session, p: &Value, paragraph: bool) -> Result<Value> {
     let (new_id, name) = if paragraph {
         let src = st.para_style(id).cloned().unwrap_or_default();
         let name = format!("{} copy", src.name);
-        let nid = st.next_para_id();
+        let nid = st.next_para_id().ok_or_else(|| exhausted_id(true))?;
         let pos = st.paragraph.iter().position(|d| d.id == id).map_or(0, |i| i + 1);
         st.paragraph.insert(pos, ParagraphStyleDef { id: nid, name: name.clone(), ..src });
         (nid, name)
     } else {
         let src = st.char_style(id).cloned().unwrap_or_default();
         let name = format!("{} copy", src.name);
-        let nid = st.next_char_id();
+        let nid = st.next_char_id().ok_or_else(|| exhausted_id(false))?;
         let pos = st.character.iter().position(|d| d.id == id).map_or(0, |i| i + 1);
         st.character.insert(pos, CharacterStyleDef { id: nid, name: name.clone(), ..src });
         (nid, name)
@@ -634,7 +638,7 @@ fn redefine(s: &mut Session, p: &Value, paragraph: bool) -> Result<Value> {
     let cmd = if paragraph { "type.paragraphStyle.redefine" } else { "type.characterStyle.redefine" };
     let mut st = styles(s)?;
     let (run, para, layer, span) = sample(s, p).ok_or_else(|| bad(cmd, "select type to redefine the style from"))?;
-    let id = match id_param(p) {
+    let id = match id_param(cmd, p)? {
         Some(_) => lookup_id(cmd, &st, p, paragraph, paragraph)?,
         None if paragraph => para.style_sheet.unwrap_or(0),
         None => run.style_sheet.ok_or_else(|| bad(cmd, "the selected text has no character style"))?,

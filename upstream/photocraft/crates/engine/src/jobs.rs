@@ -258,7 +258,8 @@ fn independent_of_document(id: &str) -> bool {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn read_path(path: &str) -> Result<Vec<u8>> {
-    std::fs::read(path).map_err(|e| EngineError::Other(format!("{path}: {e}")))
+    // Bounded reads, and a clear error for a file larger than memory (#375).
+    photocraft_format::read_file(std::path::Path::new(path)).map_err(|e| EngineError::Other(format!("{path}: {e}")))
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -593,15 +594,25 @@ impl Session {
         if !(params.is_object() || params.is_null()) {
             return Err(EngineError::BadParams { cmd: id.to_string(), msg: "params must be a JSON object".into() });
         }
-        if let Err(why) = crate::smart_cmds::target_enabled(self, spec, &params).unwrap_or_else(|| (spec.enabled)(self)) {
+        // Untrusted sessions gate every command, including the ones a command runs on its own
+        // behalf (`file.automate.conditionalModeChange` runs `image.mode.*`), before any side
+        // effect.
+        if let Some(gate) = self.authorize {
+            gate(id, &params)?;
+        }
+        // A floating selection drops before any other command (Undo puts it back instead).
+        if let Some(v) = crate::float_cmds::before_command(self, id)? {
+            return Ok(Started::Done(v));
+        }
+        // Pixel commands follow the Channels panel target unless the caller names one.
+        let run_params = crate::channel_cmds::inject_target(self, id, crate::commands::inject_kind(id, params.clone()));
+        if let Err(why) = crate::smart_cmds::target_enabled(self, spec, &params).unwrap_or_else(|| self.precondition(spec, &run_params)) {
             return Err(EngineError::Disabled(id.to_string(), why));
         }
         if let Some(why) = self.job_conflict(id, spec.journal) {
             return Err(EngineError::Disabled(id.to_string(), why));
         }
         self.coalesce_request = params.get("coalesce").and_then(Value::as_str).map(str::to_string);
-        // Pixel commands follow the Channels panel target unless the caller names one.
-        let run_params = crate::channel_cmds::inject_target(self, id, crate::commands::inject_kind(id, params.clone()));
         self.color_restrict = crate::channel_cmds::color_restriction(self, id, &run_params);
         self.jobs.spawn = background;
         // Last-resort guard (AGENTS.md, Never crash): a command that panics anyway fails with an
