@@ -1,0 +1,31 @@
+{
+  "version": "0.3.0",
+  "source": "https://github.com/storytold/photocraft/releases/download/v0.3.0/photocraft-web-0.3.0.zip",
+  "archive_sha256": "1825b2beb2b84331124f6cb78e5eb6eb9584612e8ad6a4e817b7f27cb3f93d06",
+  "files": {
+    "index.html": "9aab1b9d486fc4aadad38868c6c19163111b4fccbc83c198afffce20fe2fb6b9",
+    "photocraft-web-72921900975c7e6f.js": "9d0cd08076224bfac6cf21b6e4bc68b2e4edd2492ecaeaff8d2a84ec0e23b8a4",
+    "photocraft-web-72921900975c7e6f_bg.wasm": "ba4f823d2d2f913411cdd272be71dad9ce9b5182bc3b038597502ca395ecc003",
+    "LICENSE-MIT": "1a8f66d8a86b146f5336fa0d4b1186576c8aa98e60823080c85c7811cfd810af",
+    "LICENSE-APACHE": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594",
+    "README.md": "58c7c2def9cde974fbce5361698ac831936aaf053a5da7ea29c6be8215152776",
+    "HOSTING.md": "ee623d60ba5b4538badeaa52447cb018116507ecdb376ab0d087280afeb153a0"
+  },
+  "adapted_web": {
+    "source": "https://github.com/storytold/photocraft/archive/refs/tags/v0.3.0.tar.gz",
+    "source_archive_sha256": "40a4810f2fc474fdfd2b300771c4630d2c3da06ba4b64a5a55cd63304ac1c45b",
+    "patch": "third_party/photocraft/photocraft-source.patch",
+    "reason": "Clamp the WebGL shader limit, tolerate optimized-out uniform blocks, and use CPU canvas composition on HarmonyOS API 20 emulator.",
+    "files": {
+      "index.html": "82305f0010543a54b785f62c76889bd14d22de6ecd69960fbd3512bbb08738c2",
+      "photocraft-web-a705b2188e2fccf8.js": "4d32c8c78439ac6b200ae326f4362202a86684d987becfe669ea6d02723d0318",
+      "photocraft-web-a705b2188e2fccf8_bg.wasm": "8729a0f4e7e76835a2f35454516a7c72a903866e9b49b20f3cc4d38f5c256d44"
+    },
+    "patch_sha256": "218e72386f3f1dde2690e159a6c06bab59359e2b7e9285b128b200ab646b7dbc",
+    "html_error_handler": "Logs WebAssembly startup errors and displays them on the loading page.",
+    "dependency_patch": "third_party/photocraft/wgpu-hal-uniform-block.patch",
+    "dependency_patch_sha256": "e5ecf0e090826f9d6aa4e6184c7d952ecbd7fb1956a5e5add758288650191acb",
+    "dependency_crate": "https://static.crates.io/crates/wgpu-hal/wgpu-hal-30.0.1.crate",
+    "dependency_crate_sha256": "b6b7fb58561a792bc237628ba0792e332de418fefe145f13b5ed8201e6d52f58"
+  }
+}

@@ -1,0 +1,16 @@
+.hvigor/
+.idea/
+build/
+entry/build/
+oh_modules/
+entry/oh_modules/
+*.hap
+*.app
+/build-profile.json5
+.codegenie/
+*.p12
+*.p7b
+*.cer
+*.pem
+upstream/photocraft/target/
+upstream/photocraft/dist/

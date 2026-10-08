@@ -1,0 +1,54 @@
+--- a/apps/photocraft-web/Cargo.toml
++++ b/apps/photocraft-web/Cargo.toml
+@@ -29,4 +29,4 @@
+ wasm-bindgen = "0.2"
+ wasm-bindgen-futures = "0.4"
+ js-sys = "0.3"
+-web-sys = { version = "0.3", features = ["Window", "Document", "Element", "HtmlElement", "HtmlCanvasElement", "HtmlAnchorElement", "Blob", "BlobPropertyBag", "Url", "Location", "CssStyleDeclaration", "Storage", "Event", "EventTarget", "MouseEvent", "PointerEvent"] }
++web-sys = { version = "0.3", features = ["Window", "Document", "Element", "HtmlElement", "HtmlCanvasElement", "HtmlAnchorElement", "Blob", "BlobPropertyBag", "Url", "Location", "CssStyleDeclaration", "Storage", "Event", "EventTarget", "MouseEvent", "PointerEvent", "console"] }
+--- a/apps/photocraft-web/src/main.rs
++++ b/apps/photocraft-web/src/main.rs
+@@ -21,6 +21,9 @@
+ 
+ #[cfg(target_arch = "wasm32")]
+ fn main() {
++    std::panic::set_hook(Box::new(|info| {
++        web_sys::console::error_1(&wasm_bindgen::JsValue::from_str(&format!("PhotoCraft panic: {info}")));
++    }));
+     web::start();
+ }
+ 
+--- a/crates/ui-egui/src/gpu_canvas.rs
++++ b/crates/ui-egui/src/gpu_canvas.rs
+@@ -238,7 +238,7 @@
+     /// Whether [`GpuCanvas::composite`] would draw `doc` with the wgpu compositor (rather than
+     /// fall back to the CPU compositor).
+     pub fn supports(&self, doc: &photocraft_doc::Document) -> bool {
+-        if std::env::var_os("PHOTOCRAFT_CPU_COMPOSE").is_some() || doc.size.width == 0 || doc.size.height == 0 {
++        if cfg!(target_arch = "wasm32") || std::env::var_os("PHOTOCRAFT_CPU_COMPOSE").is_some() || doc.size.width == 0 || doc.size.height == 0 {
+             return false;
+         }
+         let r = self.rs.renderer.read();
+@@ -341,7 +341,7 @@
+         if size[0] == 0 || size[1] == 0 {
+             return Err(photocraft_gpu::Unsupported("empty document".into()));
+         }
+-        if std::env::var_os("PHOTOCRAFT_CPU_COMPOSE").is_some() {
++        if cfg!(target_arch = "wasm32") || std::env::var_os("PHOTOCRAFT_CPU_COMPOSE").is_some() {
+             return Err(photocraft_gpu::Unsupported("disabled by PHOTOCRAFT_CPU_COMPOSE".into()));
+         }
+         if let Some(f) = self.fault() {
+@@ -736,7 +736,12 @@
+ pub fn device_limits(adapter: &wgpu::Adapter) -> wgpu::Limits {
+     let base = if adapter.get_info().backend == wgpu::Backend::Gl { wgpu::Limits::downlevel_webgl2_defaults() } else { wgpu::Limits::default() };
+     let a = adapter.limits();
+-    wgpu::Limits { max_texture_dimension_2d: a.max_texture_dimension_2d, max_buffer_size: a.max_buffer_size, ..base }
++    wgpu::Limits {
++        max_texture_dimension_2d: a.max_texture_dimension_2d,
++        max_buffer_size: a.max_buffer_size,
++        max_inter_stage_shader_variables: a.max_inter_stage_shader_variables.min(base.max_inter_stage_shader_variables),
++        ..base
++    }
+ }
+ 
+ /// Milliseconds since first call (monotonic). Always 0 on wasm, where `std::time` is unavailable.
