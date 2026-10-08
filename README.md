@@ -12,7 +12,7 @@
 
 完整 PhotoCraft v0.3.0 Rust 源码位于 `upstream/photocraft/`。它通过未压缩历史的 Git subtree 导入，`git remote -v` 可看到当前目录的 `upstream` 远程，`git log v0.3.0` 可查看原版提交记录。Git 远程配置不会随克隆传播；在新克隆中执行 `git remote add upstream https://github.com/storytold/photocraft.git` 即可继续跟踪。鸿蒙适配改动直接写在这份源码中；`third_party/wgpu-hal-30.0.1/` 包含已打补丁的依赖源码。根目录 `build-profile.json5` 是本机签名配置，不纳入 Git；新环境可从 `build-profile.example.json5` 复制后在 DevEco Studio 配置签名。
 
-安装 Rust wasm32-unknown-unknown 目标和 Trunk 0.21.14 后，连接 HarmonyOS 6.0 Pad 模拟器，执行 `scripts/dev.sh run`。若 Trunk 不在 PATH，可设置 `PHOTOCRAFT_TRUNK=/path/to/trunk`。脚本会编译并安装调试 HAP、启动源码服务、映射设备端 8765 端口，然后以开发模式启动应用。保持该终端运行；修改 `upstream/photocraft/crates/` 或网页版源码后，Trunk 自动重建 WASM，ArkWeb 自动刷新，无须复制编译文件或重装 HAP。第一次 Rust 构建可能需要数分钟。修改 ArkTS 包装代码后仍需重建 HAP。
+安装 Rust wasm32-unknown-unknown 目标和 Trunk 0.21.14 后，连接 HarmonyOS 6.0 Pad 模拟器，执行 `scripts/dev.sh run`。本机的工具路径已写入 Git 忽略的 `scripts/dev.local.env`；在新机器上若 Trunk 不在 PATH，可复制 `scripts/dev.local.env.example` 为 `scripts/dev.local.env` 并填写路径。脚本会编译并安装调试 HAP、启动源码服务、映射设备端 8765 端口，然后以开发模式启动应用。保持该终端运行；修改 `upstream/photocraft/crates/` 或网页版源码后，Trunk 自动重建 WASM，ArkWeb 自动刷新，无须复制编译文件或重装 HAP。第一次 Rust 构建可能需要数分钟。修改 ArkTS 包装代码后仍需重建 HAP。
 
 如果调试 HAP 已安装，也可分别运行 `scripts/dev.sh serve` 和 `scripts/dev.sh launch`。开发页面通过设备本地 `http://127.0.0.1:8765/index.html?webgl&cpu` 获取；不带开发参数的普通启动继续使用离线打包资源。脚本默认使用 macOS 的 `/Applications/DevEco-Studio.app`，其他安装位置可通过 `PHOTOCRAFT_HDC` 和 `PHOTOCRAFT_HVIGOR` 指定。
 

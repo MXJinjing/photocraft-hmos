@@ -18,7 +18,7 @@
 ## Development loop
 
 1. Edit Rust or web files under `upstream/photocraft/`.
-2. Run `PHOTOCRAFT_TRUNK=/path/to/trunk scripts/dev.sh run` with a HarmonyOS 6.0 Pad simulator and configured debug signing. The script builds and installs the wrapper, runs Trunk, establishes `hdc rport` for port 8765 and launches ArkWeb in source development mode.
+2. Run `scripts/dev.sh run` with a HarmonyOS 6.0 Pad simulator and configured debug signing. The current Mac has ignored tool paths in `scripts/dev.local.env`; on other machines, install the tools on PATH or copy `scripts/dev.local.env.example` and fill in their paths. The script builds and installs the wrapper, runs Trunk, establishes `hdc rport` for port 8765 and launches ArkWeb in source development mode.
 3. Keep the terminal open. Trunk watches source edits, rebuilds WASM and refreshes the page automatically. No HAP rebuild or reinstall is needed for PhotoCraft source edits. ArkTS wrapper edits still require a HAP rebuild.
 4. For an already installed wrapper, use `scripts/dev.sh serve` in one terminal and `scripts/dev.sh launch` in another. A normal launch without the `photocraft.dev` Want parameter uses bundled offline assets.
 5. Before shipping a new offline HAP, run the release Web build and intentionally update `entry/src/main/resources/rawfile`, resource names in `Index.ets`, and `third_party/photocraft/manifest.json`; verify them with `scripts/verify_assets.py`.

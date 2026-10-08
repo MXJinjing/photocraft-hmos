@@ -8,6 +8,7 @@ entry/oh_modules/
 *.app
 /build-profile.json5
 .codegenie/
+/scripts/dev.local.env
 *.p12
 *.p7b
 *.cer

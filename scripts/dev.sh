@@ -2,6 +2,10 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+if [[ -f "$ROOT/scripts/dev.local.env" ]]; then
+  # Local tool paths are machine specific and must not be committed.
+  source "$ROOT/scripts/dev.local.env"
+fi
 WEB="$ROOT/upstream/photocraft/apps/photocraft-web"
 SOURCE="$ROOT/upstream/photocraft"
 PORT=8765
