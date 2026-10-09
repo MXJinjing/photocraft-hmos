@@ -15,3 +15,4 @@ entry/oh_modules/
 *.pem
 upstream/photocraft/target/
 upstream/photocraft/dist/
+.DS_Store
