@@ -9,7 +9,7 @@ fi
 WEB="$ROOT/upstream/photocraft/apps/photocraft-web"
 SOURCE="$ROOT/upstream/photocraft"
 PORT=8765
-BUNDLE=io.github.storytold.photocraft.pad
+BUNDLE=io.github.storytold.photocraft.hmos
 HDC="${PHOTOCRAFT_HDC:-/Applications/DevEco-Studio.app/Contents/sdk/default/openharmony/toolchains/hdc}"
 HVIGOR="${PHOTOCRAFT_HVIGOR:-/Applications/DevEco-Studio.app/Contents/tools/hvigor/bin/hvigorw}"
 TRUNK="${PHOTOCRAFT_TRUNK:-$(command -v trunk || true)}"

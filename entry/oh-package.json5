@@ -1,10 +1,9 @@
 {
   "name": "entry",
   "version": "1.0.0",
-  "description": "PhotoCraft Pad entry module",
+  "description": "PhotoCraft entry module",
   "main": "",
   "author": "",
   "license": "MIT OR Apache-2.0",
   "dependencies": {}
 }
-

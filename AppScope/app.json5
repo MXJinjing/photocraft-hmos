@@ -1,6 +1,6 @@
 {
   "app": {
-    "bundleName": "io.github.storytold.photocraft.pad",
+    "bundleName": "io.github.storytold.photocraft.hmos",
     "vendor": "photocraft-hmos",
     "versionCode": 1,
     "versionName": "0.3.0-hmos.1",
@@ -8,4 +8,3 @@
     "label": "$string:app_name"
   }
 }
-

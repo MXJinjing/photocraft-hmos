@@ -13,7 +13,7 @@
       { "name": "release" }
     ],
     "capabilities": [
-      { "bundleName": "io.github.storytold.photocraft.pad", "config": [] }
+      { "bundleName": "io.github.storytold.photocraft.hmos", "config": [] }
     ]
   },
   "modules": [
