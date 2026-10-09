@@ -15,7 +15,9 @@
 //! Builds made with the optional craft-fonts input (`CRAFT_FONTS_DIR`,
 //! [`photocraft_text::craft_fonts`]) carry Japanese fonts (BIZ UDPGothic first): they are tried
 //! before the system Japanese fonts, in the Japanese slot of the same locale order. Without
-//! craft-fonts (and on the web, which never embeds them) nothing changes.
+//! craft-fonts the web build has no embedded CJK faces. The HarmonyOS wrapper can supply
+//! HarmonyOS Sans SC/TC through [`store_host_cjk_font`]; [`reapply_host_fonts`] puts them back
+//! after a language change rebuilds the font definitions.
 
 use egui::epaint::text::{FontInsert, FontPriority, InsertFontFamily};
 use egui::{FontData, FontFamily, FontId, Shape};
@@ -63,7 +65,15 @@ impl Sources {
     }
     #[cfg(target_arch = "wasm32")]
     pub fn system() -> Self {
-        Self { locale: || None, files: |_| Vec::new(), last_resort: Vec::new, embedded: craft_embedded }
+        Self {
+            locale: || match crate::i18n::current().code() {
+                code @ ("ja" | "ko" | "zh-hans" | "zh-hant") => Some(code.to_string()),
+                _ => None,
+            },
+            files: |_| Vec::new(),
+            last_resort: Vec::new,
+            embedded: craft_embedded,
+        }
     }
 }
 
@@ -231,6 +241,83 @@ fn baseline_offset(face: (f32, f32, f32), primary: (f32, f32, f32)) -> f32 {
     if off.is_finite() { off.clamp(-0.5, 0.5) } else { 0.0 }
 }
 
+/// True for a TTF, OTF or collection small enough to register. Rejects HTML error pages.
+pub fn font_bytes_ok(bytes: &[u8]) -> bool {
+    let Some(tag) = bytes.get(..4) else { return false };
+    bytes.len() > 12 && bytes.len() <= MAX_FONT_BYTES as usize && matches!(tag, b"\x00\x01\x00\x00" | b"OTTO" | b"true" | b"ttcf")
+}
+
+struct HostCjkFonts {
+    simplified: Option<Vec<u8>>,
+    traditional: Option<Vec<u8>>,
+}
+
+fn host_cjk_fonts() -> &'static std::sync::Mutex<HostCjkFonts> {
+    static FONTS: std::sync::OnceLock<std::sync::Mutex<HostCjkFonts>> = std::sync::OnceLock::new();
+    FONTS.get_or_init(|| std::sync::Mutex::new(HostCjkFonts { simplified: None, traditional: None }))
+}
+
+/// Keep HarmonyOS Sans (or another host-supplied face) for the web UI and the type engine.
+/// `script` is `zh-hans` or `zh-hant`. A second store of the same script is ignored.
+pub fn store_host_cjk_font(script: &str, bytes: Vec<u8>) -> bool {
+    if !font_bytes_ok(&bytes) {
+        return false;
+    }
+    let traditional = match script {
+        "zh-hans" => false,
+        "zh-hant" => true,
+        _ => return false,
+    };
+    {
+        let mut fonts = host_cjk_fonts().lock().unwrap_or_else(|e| e.into_inner());
+        let slot = if traditional { &mut fonts.traditional } else { &mut fonts.simplified };
+        if slot.is_some() {
+            return true;
+        }
+        *slot = Some(bytes.clone());
+    }
+    register_host_text_font(&bytes);
+    true
+}
+
+fn register_host_text_font(bytes: &[u8]) {
+    photocraft_text::cjk::set_ui_locale(Some(crate::i18n::current().code()));
+    let mut engine = photocraft_text::shared().lock().unwrap_or_else(|e| e.into_inner());
+    engine.fonts.register_font_data(bytes.to_vec());
+    drop(engine);
+    crate::type_tool::forget_families();
+}
+
+/// Add the stored host faces again. `set_fonts` drops them; language changes call that.
+pub fn reapply_host_fonts(ctx: &egui::Context) {
+    let fonts = host_cjk_fonts().lock().unwrap_or_else(|e| e.into_inner());
+    let traditional_first = crate::i18n::current().code() == "zh-hant";
+    let mut pending = Vec::new();
+    let order: [(&str, Option<&Vec<u8>>); 2] = if traditional_first {
+        [("HarmonyOS Sans TC", fonts.traditional.as_ref()), ("HarmonyOS Sans SC", fonts.simplified.as_ref())]
+    } else {
+        [("HarmonyOS Sans SC", fonts.simplified.as_ref()), ("HarmonyOS Sans TC", fonts.traditional.as_ref())]
+    };
+    for (name, bytes) in order {
+        if let Some(bytes) = bytes {
+            pending.push((name.to_owned(), bytes.clone()));
+        }
+    }
+    drop(fonts);
+    if pending.is_empty() {
+        return;
+    }
+    photocraft_text::cjk::set_ui_locale(Some(crate::i18n::current().code()));
+    photocraft_text::shared().lock().unwrap_or_else(|e| e.into_inner()).fonts.refresh_fallbacks();
+    for (name, bytes) in pending {
+        // A later face must not register the earlier one again.
+        if ctx.fonts(|fonts| fonts.definitions().font_data.contains_key(&name)) {
+            continue;
+        }
+        add_to_all_families(ctx, name, FontData::from_owned(bytes));
+    }
+}
+
 /// Registers `name` at the lowest priority in every font family.
 fn add_to_all_families(ctx: &egui::Context, name: String, mut data: FontData) {
     // Align to Inter, the primary of every UI family; JetBrains Mono differs by under 0.005em.
@@ -303,6 +390,18 @@ pub fn install_with(ctx: &egui::Context, sources: Sources) {
 mod tests {
     use super::*;
     use std::sync::Mutex;
+
+    #[test]
+    fn host_font_bytes_reject_pages_and_accept_truetype() {
+        assert!(!font_bytes_ok(b""));
+        assert!(!font_bytes_ok(b"<html></html>"));
+        assert!(!font_bytes_ok(b"\x00\x01\x00\x00"));
+        assert!(font_bytes_ok(b"\x00\x01\x00\x00rest-of-face"));
+        assert!(font_bytes_ok(b"OTTOrest-of-face"));
+        assert!(font_bytes_ok(b"ttcfrest-of-face"));
+        assert!(!store_host_cjk_font("zh-hans", b"<html>missing</html>".to_vec()));
+        assert!(!store_host_cjk_font("en", b"\x00\x01\x00\x00not-a-real-face-but-tagged".to_vec()));
+    }
 
     #[test]
     fn lazy_fallbacks_follow_ui_font_size_and_survive_size_changes() {

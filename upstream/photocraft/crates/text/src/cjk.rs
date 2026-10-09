@@ -86,9 +86,23 @@ pub fn ui_locale() -> Option<&'static str> {
     LOCALE.get_or_init(detect_locale).as_deref()
 }
 
-/// [`script_order`] for [`ui_locale`].
+// Process-wide, like [`ui_locale`]'s cache. The web shell sets it from the UI language because a
+// browser has no `LANG`. Empty means "use the OS locale".
+static UI_LOCALE_OVERRIDE: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+/// [`script_order`] for [`ui_locale`], unless [`set_ui_locale`] supplied a tag.
 pub fn ui_script_order() -> [CjkScript; 4] {
+    let override_tag = UI_LOCALE_OVERRIDE.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    if let Some(tag) = override_tag {
+        return script_order(Some(&tag));
+    }
     script_order(ui_locale())
+}
+
+/// Prefer `tag` over the OS locale for [`ui_script_order`]. `None` or whitespace clears it.
+pub fn set_ui_locale(tag: Option<&str>) {
+    let next = tag.map(str::trim).filter(|tag| !tag.is_empty()).map(str::to_owned);
+    *UI_LOCALE_OVERRIDE.lock().unwrap_or_else(|e| e.into_inner()) = next;
 }
 
 fn detect_locale() -> Option<String> {
@@ -207,10 +221,13 @@ pub fn bplist_first_language(b: &[u8]) -> Option<String> {
 pub fn families(script: CjkScript) -> &'static [&'static str] {
     match script {
         CjkScript::Japanese => &["Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic", "Meiryo", "Noto Sans CJK JP", "Noto Sans JP", "IPAexGothic"],
-        CjkScript::SimplifiedChinese => {
-            &["PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", "Noto Sans SC", "WenQuanYi Micro Hei", "WenQuanYi Zen Hei", "Heiti SC"]
-        }
-        CjkScript::TraditionalChinese => &["PingFang TC", "Microsoft JhengHei", "Noto Sans CJK TC", "Noto Sans TC", "Hiragino Sans CNS", "Heiti TC"],
+        CjkScript::SimplifiedChinese => &[
+            "HarmonyOS Sans SC", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", "Noto Sans SC", "WenQuanYi Micro Hei", "WenQuanYi Zen Hei",
+            "Heiti SC",
+        ],
+        CjkScript::TraditionalChinese => {
+            &["HarmonyOS Sans TC", "PingFang TC", "Microsoft JhengHei", "Noto Sans CJK TC", "Noto Sans TC", "Hiragino Sans CNS", "Heiti TC"]
+        },
         CjkScript::Korean => &["Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans CJK KR", "Noto Sans KR", "NanumGothic", "UnDotum"],
     }
 }
@@ -396,9 +413,11 @@ mod tests {
         assert!(pos(&ja, "Hiragino Sans") < pos(&ja, "PingFang SC"));
         assert!(pos(&ja, "Noto Sans CJK JP") < pos(&ja, "Noto Sans CJK SC"));
         let sc = crate::fonts::fallback_candidates(&script_order(Some("zh_CN")));
+        assert!(pos(&sc, "HarmonyOS Sans SC") < pos(&sc, "PingFang SC"));
         assert!(pos(&sc, "PingFang SC") < pos(&sc, "Hiragino Sans"));
         assert!(pos(&sc, "Microsoft YaHei") < pos(&sc, "Microsoft JhengHei"));
         let tc = crate::fonts::fallback_candidates(&script_order(Some("zh-Hant")));
+        assert!(pos(&tc, "HarmonyOS Sans TC") < pos(&tc, "PingFang TC"));
         assert!(pos(&tc, "PingFang TC") < pos(&tc, "PingFang SC"));
         let ko = crate::fonts::fallback_candidates(&script_order(Some("ko")));
         assert!(pos(&ko, "Apple SD Gothic Neo") < pos(&ko, "PingFang SC"));
@@ -408,6 +427,26 @@ mod tests {
             assert!(pos(v, "Arial Unicode MS") > pos(v, "Noto Sans CJK KR"));
             assert!(pos(v, "Noto Sans") < pos(v, "Hiragino Sans"));
         }
+    }
+
+    #[test]
+    fn ui_locale_override_changes_script_order_and_restores() {
+        struct Restore;
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                set_ui_locale(None);
+            }
+        }
+        let _restore = Restore;
+        let previous = ui_script_order();
+        set_ui_locale(Some("zh-Hant-TW"));
+        assert_eq!(ui_script_order()[0], TraditionalChinese);
+        set_ui_locale(Some("  "));
+        assert_eq!(ui_script_order(), previous);
+        set_ui_locale(Some("ja"));
+        assert_eq!(ui_script_order()[0], Japanese);
+        set_ui_locale(None);
+        assert_eq!(ui_script_order(), previous);
     }
 
     #[test]

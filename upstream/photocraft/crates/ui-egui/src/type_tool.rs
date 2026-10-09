@@ -648,10 +648,23 @@ pub fn draw_overlay(app: &mut PhotocraftApp, painter: &egui::Painter, xf: &ViewX
     }
 }
 
-/// Font families (bundled + system), cached for the process.
-pub fn families() -> &'static [String] {
-    static FAMILIES: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
-    FAMILIES.get_or_init(|| photocraft_text::shared().lock().map(|mut e| e.fonts.families()).unwrap_or_default())
+/// Font families (bundled + system). Cached until [`forget_families`].
+pub fn families() -> Vec<String> {
+    let generation = FAMILY_GENERATION.load(std::sync::atomic::Ordering::Relaxed);
+    let mut cache = FAMILY_CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    if cache.0 != generation {
+        cache.1 = photocraft_text::shared().lock().map(|mut e| e.fonts.families()).unwrap_or_default();
+        cache.0 = generation;
+    }
+    cache.1.clone()
+}
+
+static FAMILY_GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static FAMILY_CACHE: std::sync::Mutex<(u64, Vec<String>)> = std::sync::Mutex::new((u64::MAX, Vec::new()));
+
+/// Drop the cached family list so a font registered after startup appears in the type menu.
+pub fn forget_families() {
+    FAMILY_GENERATION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 }
 
 fn weight_name(w: f32) -> &'static str {

@@ -61,8 +61,13 @@ The native-only, pinned `sys-locale` dependency provides safe Rust access to the
 override falls back to English. Empty overrides use the system. Unix locale variables do not
 override Windows/macOS UI-language preferences. Tags are read once per process (at most 64,
 128 bytes each) and matched against the supported language registry. Changes to the
-OS language list itself take effect at the next launch. The web build keeps its existing
-English Auto fallback until browser-locale detection is implemented.
+OS language list itself take effect at the next launch.
+
+The web build uses the same Auto rules. `?lang=<tag>` on the page URL is the single-tag
+override (`?webgl&cpu&lang=zh-Hans`, including percent-encoded tags). An empty or absent
+`lang` follows `navigator.languages`, then `navigator.language`. An unsupported `lang`
+stays English and does not fall through to the browser list. Tags are read once per page
+load. A saved Interface language still takes precedence over both.
 
 API implementation and licensing: [sys-locale](https://github.com/1Password/sys-locale).
 
@@ -90,8 +95,12 @@ Other languages retain the system's CJK fallback preference for document names a
 
 Font files are not added to this repository. Native rendering uses installed system fonts
 and the optional craft-fonts build input; see [Fonts](development.md#fonts-craft-fonts).
-The web build can select every catalog, but CJK glyph delivery and automatic browser-locale
-detection remain separate outstanding work. Switching catalogs does not supply missing fonts.
+The web build can select every catalog. Automatic browser-locale detection uses `?lang=` and
+`navigator.languages`, as above. A plain browser still has no CJK faces. The HarmonyOS wrapper
+reads HarmonyOS Sans SC and TC from the system (`font.getFontByName`, then
+`/system/fonts/HarmonyOS_Sans_SC.ttf` and `HarmonyOS_Sans_TC.ttf`) and serves them at
+`fonts/HarmonyOS_Sans_SC.ttf` and `fonts/HarmonyOS_Sans_TC.ttf`. The web shell registers those
+bytes as UI fallbacks and as type-tool families. The font files are not bundled.
 
 ## Add or maintain a catalog
 

@@ -192,6 +192,11 @@ impl FontDb {
         self.fallbacks = fallback_candidates(&order).into_iter().filter(|f| c.family_id(f).is_some()).map(str::to_string).collect();
     }
 
+    /// Rebuild the CJK fallback list after [`crate::cjk::set_ui_locale`] or a newly registered face.
+    pub fn refresh_fallbacks(&mut self) {
+        self.refresh_generics();
+    }
+
     /// Families available after the requested one (bundled default + installed coverage fonts).
     pub(crate) fn fallback_stack(&self) -> impl Iterator<Item = &str> {
         std::iter::once(DEFAULT_FAMILY).chain(self.fallbacks.iter().map(String::as_str))

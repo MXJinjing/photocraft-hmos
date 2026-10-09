@@ -369,6 +369,8 @@ pub fn install_fonts_with(ctx: &egui::Context, cjk: crate::cjk_fonts::Sources) {
     // Japanese / Chinese / Korean fallback fonts (craft-fonts' Japanese ones if built in, then
     // the system's) are registered on demand (cjk_fonts.rs).
     crate::cjk_fonts::install_with(ctx, cjk);
+    // set_fonts drops fonts added earlier. Put HarmonyOS Sans back if the web host has supplied it.
+    crate::cjk_fonts::reapply_host_fonts(ctx);
 }
 
 fn ui_fonts_id() -> egui::Id {

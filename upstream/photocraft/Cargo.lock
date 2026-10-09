@@ -3811,6 +3811,7 @@ dependencies = [
  "egui",
  "egui_extras",
  "egui_kittest",
+ "js-sys",
  "log",
  "photocraft-algo",
  "photocraft-cms",
@@ -3834,6 +3835,8 @@ dependencies = [
  "serde_json",
  "sys-locale",
  "toml",
+ "wasm-bindgen",
+ "web-sys",
 ]
 
 [[package]]
