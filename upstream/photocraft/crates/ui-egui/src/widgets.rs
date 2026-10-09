@@ -523,6 +523,24 @@ pub fn dropdown<T: PartialEq + Clone>(ui: &mut Ui, id: &str, current: &mut T, op
     changed
 }
 
+/// Gap between a context menu and the edge it must not cross.
+const MENU_BOUNDS_GAP: f32 = 8.0;
+
+/// Where a menu's top-left goes. It stays on `at` (top-left aligned to the last pen-down) unless
+/// that would put the menu past `bounds`: then it shifts up, or left, just enough to clear a gap.
+pub fn menu_anchor(at: Pos2, size: Vec2, bounds: Rect) -> Pos2 {
+    let gap = MENU_BOUNDS_GAP;
+    let width = size.x.max(0.0);
+    let height = size.y.max(0.0);
+    let x = at.x.min(bounds.right() - width - gap).max(bounds.left() + gap);
+    let mut y = at.y;
+    if y + height > bounds.bottom() - gap {
+        y = bounds.bottom() - gap - height;
+    }
+    y = y.max(bounds.top() + gap);
+    pos2(x, y)
+}
+
 /// The body of a right-click menu: as tall as its items up to the part of the window that can be
 /// seen (clear of a taskbar a too-tall window runs under, #315), scrolling past that, so long
 /// context menus (a layer's, the canvas tools') stay reachable on small windows instead of running
@@ -697,6 +715,21 @@ fn product(s: &str) -> Option<f64> {
 
 #[cfg(test)]
 mod tests {
+    use super::menu_anchor;
+    use egui::{Rect, pos2, vec2};
+
+    #[test]
+    fn a_menu_near_the_bottom_shifts_up_just_enough_to_clear_it() {
+        let bounds = Rect::from_min_max(pos2(0.0, 0.0), pos2(800.0, 400.0));
+        let size = vec2(200.0, 180.0);
+        let high = menu_anchor(pos2(40.0, 50.0), size, bounds);
+        assert_eq!(high, pos2(40.0, 50.0), "top-left stays on the pen-down when it fits");
+        let low = menu_anchor(pos2(40.0, 300.0), size, bounds);
+        assert_eq!(low.x, 40.0);
+        assert_eq!(low.y, 400.0 - 8.0 - 180.0, "bottom overflow shifts the menu up");
+        assert!(low.y + size.y <= bounds.bottom() - 8.0);
+    }
+
     /// A right-aligned OK / Cancel / Apply row as `os` draws it: labels left to right, and the
     /// row's right edge with the window's.
     fn button_row(os: egui::os::OperatingSystem) -> (Vec<String>, f32, f32) {

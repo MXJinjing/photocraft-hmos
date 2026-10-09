@@ -69,9 +69,8 @@ pub fn show(app: &mut PhotocraftApp, ctx: &Context) {
     }
     let active = app.session.active().and_then(|st| st.active_layer).map(|l| l.0);
     let id = egui::Id::new("canvas-layer-menu");
-    let screen = ctx.content_rect();
-    let size = ctx.memory(|m| m.area_rect(id)).map_or(egui::vec2(200.0, 24.0 * menu.layers.len() as f32 + 12.0), |r| r.size());
-    let pos = egui::pos2(menu.pos[0].min(screen.right() - size.x).max(screen.left()), menu.pos[1].min(screen.bottom() - size.y).max(screen.top()));
+    let size = ctx.memory(|m| m.area_rect(id)).map(|r| r.size()).unwrap_or(egui::vec2(200.0, 24.0 * menu.layers.len() as f32 + 12.0));
+    let pos = crate::widgets::menu_anchor(egui::pos2(menu.pos[0], menu.pos[1]), size, crate::work_area::visible_rect(ctx));
     let mut chosen = None;
     let area = egui::Area::new(id).order(egui::Order::Foreground).fixed_pos(pos).show(ctx, |ui| {
         egui::Frame::menu(ui.style()).show(ui, |ui| {
@@ -82,7 +81,8 @@ pub fn show(app: &mut PhotocraftApp, ctx: &Context) {
             ui.set_width(w);
             ui.spacing_mut().item_spacing.y = 0.0;
             // A long list scrolls instead of running off the screen.
-            egui::ScrollArea::vertical().max_height((screen.height() - 24.0).max(48.0)).show(ui, |ui| {
+            let room = (crate::work_area::visible_rect(ui.ctx()).height() - 24.0).max(48.0);
+            egui::ScrollArea::vertical().max_height(room).show(ui, |ui| {
                 ui.set_width(w);
                 for (layer, name) in &menu.layers {
                     let b = egui::Button::selectable(Some(*layer) == active, name.as_str()).truncate().min_size(egui::vec2(w, 22.0));

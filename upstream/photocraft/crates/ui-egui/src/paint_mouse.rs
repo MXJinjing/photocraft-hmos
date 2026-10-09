@@ -125,11 +125,11 @@ pub fn show_picker(app: &mut PhotocraftApp, ctx: &egui::Context) {
         app.ui.brush_picker = None;
         return;
     }
-    let screen = ctx.content_rect();
     // Keep the whole picker on screen: its last size, or about 320 × 480 points before it shows.
+    // A low anchor shifts the top-left up so the picker does not cross the bottom edge.
     let id = egui::Id::new("canvas-brush-picker");
-    let size = ctx.memory(|m| m.area_rect(id)).map_or(egui::vec2(324.0, 480.0), |r| r.size());
-    let pos = egui::pos2(x.min(screen.right() - size.x).max(screen.left()), y.min(screen.bottom() - size.y).max(screen.top()));
+    let size = ctx.memory(|m| m.area_rect(id)).map(|r| r.size()).unwrap_or(egui::vec2(324.0, 480.0));
+    let pos = crate::widgets::menu_anchor(egui::pos2(x, y), size, crate::work_area::visible_rect(ctx));
     let area = egui::Area::new(id).order(egui::Order::Foreground).fixed_pos(pos).show(ctx, |ui| {
         let before = app.session.tools.brush.clone();
         let mut b = before.clone();

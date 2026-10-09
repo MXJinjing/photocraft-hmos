@@ -21,6 +21,27 @@ pub struct CanvasToolMenu {
     pub transform: bool,
 }
 
+/// An open context menu owns the contact through its release, even if it closes on press.
+/// Keep this in egui's transient memory so dismissing with a pen cannot become a canvas stroke.
+pub fn canvas_input_blocked(app: &PhotocraftApp, ctx: &Context) -> bool {
+    let open = app.ui.canvas_tool_menu.is_some() || app.ui.brush_picker.is_some() || app.ui.layer_menu.is_some();
+    let down = ctx.input(|i| i.pointer.any_down() || i.any_touches());
+    let frame = ctx.cumulative_frame_nr();
+    let id = egui::Id::new("canvas-menu-contact");
+    ctx.data_mut(|d| {
+        let previous = d.get_temp::<(u64, bool, bool)>(id);
+        // A second layout pass in the release frame must still swallow the same contact.
+        if let Some((at, blocked, _)) = previous
+            && at == frame
+        {
+            return blocked;
+        }
+        let blocked = open || previous.is_some_and(|(_, _, held)| held);
+        d.insert_temp(id, (frame, blocked, blocked && down));
+        blocked
+    })
+}
+
 /// One menu row: label and command id. `None` is a separator.
 pub type Row = Option<(&'static str, &'static str)>;
 
@@ -118,6 +139,14 @@ pub fn applies(tool: Tool) -> bool {
 /// The selection tools' rows, with or without an active selection.
 pub fn selection_rows(has_selection: bool) -> &'static [Row] {
     if has_selection { SELECTION_MENU } else { NO_SELECTION_MENU }
+}
+
+/// Height to reserve before the menu has been shown, so a low pen-down shifts it up on the first frame.
+fn menu_height(menu: &CanvasToolMenu) -> f32 {
+    let rows = rows(menu);
+    let seps = rows.iter().filter(|r| r.is_none()).count() as f32;
+    let items = rows.len() as f32 - seps;
+    items * 22.0 + seps * 8.0 + 24.0
 }
 
 /// The rows of an open menu.
@@ -301,9 +330,8 @@ pub fn show(app: &mut PhotocraftApp, ctx: &Context) {
         return;
     }
     let id = egui::Id::new("canvas-selection-menu");
-    let screen = ctx.content_rect();
-    let size = ctx.memory(|m| m.area_rect(id)).map_or(egui::vec2(210.0, 140.0), |r| r.size());
-    let pos = egui::pos2(menu.pos[0].min(screen.right() - size.x).max(screen.left()), menu.pos[1].min(screen.bottom() - size.y).max(screen.top()));
+    let size = ctx.memory(|m| m.area_rect(id)).map(|r| r.size()).unwrap_or_else(|| egui::vec2(210.0, menu_height(&menu)));
+    let pos = crate::widgets::menu_anchor(egui::pos2(menu.pos[0], menu.pos[1]), size, crate::work_area::visible_rect(ctx));
     let mut selected = None;
     let area = egui::Area::new(id).order(egui::Order::Foreground).fixed_pos(pos).show(ctx, |ui| {
         egui::Frame::menu(ui.style()).show(ui, |ui| {
