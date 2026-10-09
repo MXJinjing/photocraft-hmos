@@ -14,7 +14,8 @@
 //! Per frame the shader draws, in *device pixels*:
 //! - a soft analytic drop shadow around the document on the pasteboard (erf-blurred box),
 //! - a screen-space transparency checkerboard (8 pt squares, grays 255/204) under the document,
-//! - the document itself, sampled trilinearly when zoomed out, bilinearly between 1× and 2×, and
+//! - the document itself, sampled trilinearly when zoomed out (bilinear lod 0 on wasm/WebGL,
+//!   where render-to-mip often leaves higher levels empty), bilinearly between 1× and 2×, and
 //!   with an anti-aliased "sharp nearest" filter at integer scales and ≥ 2×,
 //! - a one-device-pixel pixel grid at zoom ≥ 8.
 //!
@@ -95,7 +96,22 @@ pub struct GpuCanvas {
     rs: RenderState,
     tile: u32,
     high: HighPolicy,
+    composition_enabled: bool,
     health: photocraft_gpu::DeviceHealth,
+}
+
+/// Keep web composition opt-in while validating ArkWeb drivers. CPU takes precedence.
+fn composition_enabled_for(web: bool, query: &str) -> bool {
+    let flag = |name| query.trim_start_matches('?').split('&').any(|part| part == name);
+    !web || (flag("gpu") && !flag("cpu"))
+}
+
+fn composition_enabled() -> bool {
+    #[cfg(target_arch = "wasm32")]
+    let query = web_sys::window().and_then(|w| w.location().search().ok()).unwrap_or_default();
+    #[cfg(not(target_arch = "wasm32"))]
+    let query = String::new();
+    composition_enabled_for(cfg!(target_arch = "wasm32"), &query)
 }
 
 /// Can `adapter` use `Rgba16Float` as a sampled, filtered, render-target and copy texture?
@@ -129,7 +145,9 @@ impl GpuCanvas {
         res.health = health.clone();
         rs.renderer.write().callback_resources.insert(res);
         log::info!("gpu canvas: target {:?}, max texture {max}, tile {tile}, 16F canvas {high:?}", rs.target_format);
-        Self { rs: rs.clone(), tile, high, health }
+        let composition_enabled = composition_enabled();
+        log::info!("gpu canvas: document composition enabled={composition_enabled}");
+        Self { rs: rs.clone(), tile, high, composition_enabled, health }
     }
 
     /// The device's health flag (shared with the wgpu compositor and the paint callback).
@@ -240,7 +258,7 @@ impl GpuCanvas {
     /// Whether [`GpuCanvas::composite`] would draw `doc` with the wgpu compositor (rather than
     /// fall back to the CPU compositor).
     pub fn supports(&self, doc: &photocraft_doc::Document) -> bool {
-        if cfg!(target_arch = "wasm32") || std::env::var_os("PHOTOCRAFT_CPU_COMPOSE").is_some() || doc.size.width == 0 || doc.size.height == 0 {
+        if !self.composition_enabled || std::env::var_os("PHOTOCRAFT_CPU_COMPOSE").is_some() || doc.size.width == 0 || doc.size.height == 0 {
             return false;
         }
         let r = self.rs.renderer.read();
@@ -343,8 +361,8 @@ impl GpuCanvas {
         if size[0] == 0 || size[1] == 0 {
             return Err(photocraft_gpu::Unsupported("empty document".into()));
         }
-        if cfg!(target_arch = "wasm32") || std::env::var_os("PHOTOCRAFT_CPU_COMPOSE").is_some() {
-            return Err(photocraft_gpu::Unsupported("disabled by PHOTOCRAFT_CPU_COMPOSE".into()));
+        if !self.composition_enabled || std::env::var_os("PHOTOCRAFT_CPU_COMPOSE").is_some() {
+            return Err(photocraft_gpu::Unsupported("GPU document composition disabled".into()));
         }
         if let Some(f) = self.fault() {
             return Err(photocraft_gpu::Unsupported(f.to_string()));
@@ -498,9 +516,17 @@ impl GpuCanvas {
                 out.px = region.width() as u64 * region.height() as u64;
                 out.composite_ms = now_ms() - t0;
                 out.uploads = stats.tiles_uploaded as u64;
+                if damage.is_none() {
+                    log::info!("canvas refresh: {}, {} pixels, {} layer uploads", out.kind, out.px, out.uploads);
+                }
                 return out;
             }
-            Err(e) => out.fallback = Some(e.0),
+            Err(e) => {
+                if damage.is_none() {
+                    log::warn!("canvas refresh: CPU fallback: {e}");
+                }
+                out.fallback = Some(e.0);
+            }
         }
         if let Some(r) = damage {
             if r.is_empty() {
@@ -1419,7 +1445,7 @@ impl DocTextures {
         for ty in (0..size[1]).step_by(tile as usize) {
             for tx in (0..size[0]).step_by(tile as usize) {
                 let (w, h) = (tile.min(size[0] - tx), tile.min(size[1] - ty));
-                let levels_n = mip_count(w, h);
+                let levels_n = if skip_canvas_mips() { 1 } else { mip_count(w, h) };
                 let texture = device.create_texture(&wgpu::TextureDescriptor {
                     label: Some("pc_canvas_tile"),
                     size: wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
@@ -1480,6 +1506,9 @@ impl DocTextures {
 
     /// Rebuild the mip chain inside document rect `r` (x0, y0, x1, y1) with 2×2 box filtering.
     fn regenerate_mips(&self, device: &wgpu::Device, queue: &wgpu::Queue, res: &Resources, r: [u32; 4]) {
+        if skip_canvas_mips() {
+            return;
+        }
         let Some(mip_pipeline) = res.mip_pipeline(self.format) else { return };
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("pc_mips") });
         for t in &self.tiles {
@@ -1533,10 +1562,16 @@ struct CanvasCallback {
     params: ViewParams,
 }
 
+/// WebGL (HarmonyOS ArkWeb, browsers): drawing into non-zero mip levels often leaves them
+/// empty/transparent, so zooming out would fade the document. Sample lod 0 only.
+fn skip_canvas_mips() -> bool {
+    cfg!(target_arch = "wasm32")
+}
+
 /// Sampling mode: 0 trilinear, 1 bilinear, 2 anti-aliased nearest.
 fn filter_mode(scale: f32) -> (f32, f32) {
     if scale < 0.999 {
-        (0.0, (-scale.log2()).max(0.0))
+        if skip_canvas_mips() { (1.0, 0.0) } else { (0.0, (-scale.log2()).max(0.0)) }
     } else if (scale - scale.round()).abs() < 1e-3 || scale >= 2.0 {
         (2.0, 0.0)
     } else {
@@ -1901,8 +1936,24 @@ mod tests {
     }
 
     #[test]
+    fn web_composition_requires_explicit_gpu_flag() {
+        assert!(!composition_enabled_for(true, "?webgl&cpu"));
+        assert!(!composition_enabled_for(true, "?webgl"));
+        assert!(composition_enabled_for(true, "?webgl&gpu&lang=zh-Hans"));
+        assert!(!composition_enabled_for(true, "?gpu&cpu"));
+        assert!(!composition_enabled_for(true, "?lang=gpu"));
+        assert!(composition_enabled_for(false, ""));
+    }
+
+    #[test]
     fn filter_modes() {
-        assert_eq!(filter_mode(0.25), (0.0, 2.0));
+        if skip_canvas_mips() {
+            assert_eq!(filter_mode(0.25), (1.0, 0.0), "wasm/WebGL must not sample empty mips");
+            assert_eq!(filter_mode(0.5), (1.0, 0.0));
+        } else {
+            assert_eq!(filter_mode(0.25), (0.0, 2.0));
+            assert_eq!(filter_mode(0.5), (0.0, 1.0));
+        }
         assert_eq!(filter_mode(1.0).0, 2.0);
         assert_eq!(filter_mode(1.5).0, 1.0);
         assert_eq!(filter_mode(3.3).0, 2.0);
