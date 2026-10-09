@@ -708,3 +708,8 @@ mod tests {
 
 #[cfg(test)]
 mod live_tests;
+
+/// Supply the system locale for an embedded native host before its first frame.
+pub fn set_host_locale(tag: &str) {
+    system::set_host_locale(tag);
+}

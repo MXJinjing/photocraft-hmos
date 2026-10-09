@@ -5,6 +5,13 @@
 
 use super::{Lang, lang_from_tag};
 
+static HOST_TAGS: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+
+/// Supply the platform locale before creating the editor on a custom native host.
+pub fn set_host_locale(tag: &str) {
+    let _ = HOST_TAGS.set(bounded_tags([tag.to_owned()]));
+}
+
 const MAX_SYSTEM_TAGS: usize = 64;
 const MAX_SYSTEM_TAG_BYTES: usize = 128;
 
@@ -41,6 +48,9 @@ fn bounded_tags(tags: impl IntoIterator<Item = String>) -> Vec<String> {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn detect_system_tags() -> Vec<String> {
+    if let Some(tags) = HOST_TAGS.get() {
+        return tags.clone();
+    }
     if let Ok(tag) = std::env::var("PHOTOCRAFT_LOCALE")
         && !tag.trim().is_empty()
     {

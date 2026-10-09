@@ -1,3 +1,4 @@
+import native from 'libphotocraft.so';
 import { AbilityConstant, UIAbility, Want } from '@kit.AbilityKit';
 import { window } from '@kit.ArkUI';
 import { BusinessError } from '@kit.BasicServicesKit';
@@ -17,10 +18,12 @@ export default class EntryAbility extends UIAbility {
   }
 
   private noteWant(want: Want): void {
-    AppStorage.setOrCreate('photocraftDev', want.parameters?.['photocraft.dev'] === true);
-    AppStorage.setOrCreate('photocraftGpu', want.parameters?.['photocraft.gpu'] === true);
     acceptOpenWant(want);
   }
+
+  onForeground(): void { native.active(true); }
+
+  onBackground(): void { native.active(false); }
 
   onWindowStageCreate(windowStage: window.WindowStage): void {
     windowStage.on('windowStageClose', () => requestWindowClose());

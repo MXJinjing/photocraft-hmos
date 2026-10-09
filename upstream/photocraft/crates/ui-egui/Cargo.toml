@@ -4,6 +4,10 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[features]
+default = ["eframe-host"]
+eframe-host = ["dep:eframe"]
+
 [lints]
 workspace = true
 
@@ -27,7 +31,9 @@ photocraft-format = { workspace = true }
 photocraft-codecs = { workspace = true }
 egui = { workspace = true }
 egui_extras = { version = "0.36", default-features = false, features = ["svg"] }
-eframe = { workspace = true, features = ["default_fonts", "wgpu", "accesskit"] }
+eframe = { workspace = true, optional = true, features = ["default_fonts", "wgpu", "accesskit"] }
+egui-wgpu = { version = "0.36", default-features = false }
+wgpu = { version = "30", default-features = false, features = ["std", "wgsl"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 log = { workspace = true }

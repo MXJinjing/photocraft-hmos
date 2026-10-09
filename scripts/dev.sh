@@ -1,85 +1,37 @@
 #!/usr/bin/env bash
+# Native development: rebuild Rust/C++/ArkTS and install, or launch an existing HAP.
 set -euo pipefail
-
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-if [[ -f "$ROOT/scripts/dev.local.env" ]]; then
-  # Local tool paths are machine specific and must not be committed.
-  source "$ROOT/scripts/dev.local.env"
-fi
-WEB="$ROOT/upstream/photocraft/apps/photocraft-web"
-SOURCE="$ROOT/upstream/photocraft"
-PORT=8765
-BUNDLE=io.github.storytold.photocraft.hmos
+if [[ -f "$ROOT/scripts/dev.local.env" ]]; then source "$ROOT/scripts/dev.local.env"; fi
 HDC="${PHOTOCRAFT_HDC:-/Applications/DevEco-Studio.app/Contents/sdk/default/openharmony/toolchains/hdc}"
 HVIGOR="${PHOTOCRAFT_HVIGOR:-/Applications/DevEco-Studio.app/Contents/tools/hvigor/bin/hvigorw}"
-TRUNK="${PHOTOCRAFT_TRUNK:-$(command -v trunk || true)}"
-TRUNK_ARGS=(serve --skip-version-check --watch "$SOURCE/crates" --watch "$WEB" --watch "$SOURCE/Cargo.toml" --watch "$SOURCE/Cargo.lock" --poll --poll-interval 1000ms)
+OHPM="${PHOTOCRAFT_OHPM:-/Applications/DevEco-Studio.app/Contents/tools/ohpm/bin/ohpm}"
 export DEVECO_SDK_HOME="${DEVECO_SDK_HOME:-/Applications/DevEco-Studio.app/Contents/sdk}"
 export JAVA_HOME="${JAVA_HOME:-/Applications/DevEco-Studio.app/Contents/jbr/Contents/Home}"
-
-serve() {
-  if [[ -z "$TRUNK" || ! -x "$TRUNK" ]]; then
-    echo 'Trunk is missing. Install trunk 0.21.14 or set PHOTOCRAFT_TRUNK.' >&2
-    exit 1
-  fi
-  cd "$WEB"
-  exec env -u NO_COLOR "$TRUNK" "${TRUNK_ARGS[@]}"
+export PATH="/Applications/DevEco-Studio.app/Contents/tools/node/bin:$PATH"
+BUNDLE=io.github.storytold.photocraft.hmos
+one_device() {
+  count="$("$HDC" list targets | tr -d '\r' | awk 'NF && $0 != "[Empty]" {n++} END {print n+0}')"
+  [[ "$count" == 1 ]] || { echo "Connect exactly one simulator/device ($count found)" >&2; exit 1; }
 }
-
-launch() {
-  if [[ "$("$HDC" fport ls)" != *"tcp:$PORT tcp:$PORT"* ]]; then
-    "$HDC" rport "tcp:$PORT" "tcp:$PORT"
-  fi
-  "$HDC" shell aa force-stop "$BUNDLE" >/dev/null 2>&1 || true
-  "$HDC" shell aa start -a EntryAbility -b "$BUNDLE" --pb photocraft.dev true
-}
-
+launch() { one_device; "$HDC" shell aa start -a EntryAbility -b "$BUNDLE"; }
 case "${1:-run}" in
-  serve)
-    serve
-    ;;
-  launch)
-    launch
-    ;;
-  run)
-    if [[ -z "$TRUNK" || ! -x "$TRUNK" ]]; then
-      echo 'Trunk is missing. Install trunk 0.21.14 or set PHOTOCRAFT_TRUNK.' >&2
-      exit 1
-    fi
+  build|run)
+    "$ROOT/scripts/build_native.sh"
     cd "$ROOT"
+    "$OHPM" install
     "$HVIGOR" assembleHap --mode module -p product=default -p buildMode=debug --no-daemon
-    HAP="$ROOT/entry/build/default/outputs/default/entry-default-signed.hap"
-    if [[ ! -f "$HAP" ]]; then
-      echo 'Signed HAP is unavailable. Configure DevEco Studio debug signing first.' >&2
-      exit 1
+    python3 "$ROOT/scripts/verify_native.py" "$ROOT/entry/build/default/outputs/default/entry-default-unsigned.hap"
+    if [[ "${1:-run}" == run ]]; then
+      one_device
+      HAP="$ROOT/entry/build/default/outputs/default/entry-default-signed.hap"
+      [[ -f "$HAP" ]] || { echo 'Configure local debug signing in DevEco Studio' >&2; exit 1; }
+      result="$("$HDC" install -r "$HAP")"; echo "$result"
+      [[ "$result" == *'install bundle successfully'* ]] || exit 1
+      "$HDC" shell aa force-stop "$BUNDLE" >/dev/null 2>&1 || true
+      launch
     fi
-    INSTALL_RESULT="$("$HDC" install -r "$HAP")"
-    echo "$INSTALL_RESULT"
-    if [[ "$INSTALL_RESULT" != *'install bundle successfully'* ]]; then
-      echo 'HAP installation failed. If the simulator has a differently signed copy, remove it after backing up app data.' >&2
-      exit 1
-    fi
-    cd "$WEB"
-    env -u NO_COLOR "$TRUNK" "${TRUNK_ARGS[@]}" &
-    SERVER_PID=$!
-    trap 'kill "$SERVER_PID" 2>/dev/null || true' EXIT INT TERM
-    for ((i=0; i<600; i++)); do
-      if curl --silent --fail "http://127.0.0.1:$PORT/index.html" >/dev/null; then
-        break
-      fi
-      if ! kill -0 "$SERVER_PID" 2>/dev/null; then
-        wait "$SERVER_PID"
-        exit 1
-      fi
-      sleep 1
-    done
-    curl --silent --fail "http://127.0.0.1:$PORT/index.html" >/dev/null
-    launch
-    echo 'PhotoCraft is running from source. Keep this terminal open for automatic rebuilds.'
-    wait "$SERVER_PID"
     ;;
-  *)
-    echo 'Usage: scripts/dev.sh [run|serve|launch]' >&2
-    exit 2
-    ;;
+  launch) launch;;
+  *) echo 'Usage: scripts/dev.sh [build|run|launch]' >&2; exit 2;;
 esac

@@ -16,3 +16,6 @@ entry/oh_modules/
 upstream/photocraft/target/
 upstream/photocraft/dist/
 .DS_Store
+
+native/rust/target/
+entry/.cxx/

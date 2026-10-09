@@ -1,14 +1,15 @@
 # Repository agent instructions
 
-PhotoCraft's own source specific guidance is in `upstream/photocraft/AGENTS.md`; the user requested ArkWeb wrapper in this repository takes precedence for wrapper work.
+PhotoCraft's own source specific guidance is in `upstream/photocraft/AGENTS.md`; the user requested HarmonyOS native integration in this branch takes precedence for platform host work.
 
 # PhotoCraft HarmonyOS Pad agent notes
 
 ## Repository layout
 
-- `upstream/photocraft/` is the PhotoCraft v0.5.0 Rust source, imported as a Git subtree **without squashing history** and updated from v0.3.0 without squashing. Its own `AGENTS.md` applies to PhotoCraft code. This repository's HarmonyOS ArkWeb wrapper is an intentional user requested integration.
+- `upstream/photocraft/` is the PhotoCraft v0.5.0 Rust source, imported as a Git subtree **without squashing history** and updated from v0.3.0 without squashing. Its own `AGENTS.md` applies to PhotoCraft code. This branch's native self-drawing HarmonyOS host is an intentional user requested integration.
 - `third_party/wgpu-hal-30.0.1/` is the verified wgpu-hal 30.0.1 crate with the WebGL uniform block fix. The path override is in `upstream/photocraft/Cargo.toml`.
-- `entry/` is the HarmonyOS app. Its `rawfile` assets are the offline packaged snapshot. They are not the source for development edits.
+- `entry/` is the HarmonyOS ArkTS/C++ host. `rawfile` contains only file-type metadata; do not restore the web snapshot.
+- `native/rust/` is an independent native adapter workspace. FFI and NativeWindow unsafe code stay here; upstream continues to forbid unsafe. Its lockfile and wgpu-hal patch must stay compatible with upstream.
 
 ## Git ancestry and upstream updates
 
@@ -20,11 +21,11 @@ PhotoCraft's own source specific guidance is in `upstream/photocraft/AGENTS.md`;
 
 ## Development loop
 
-1. Edit Rust or web files under `upstream/photocraft/`.
-2. Run `scripts/dev.sh run` with a HarmonyOS 6.0 Pad simulator and configured debug signing. The current Mac has ignored tool paths in `scripts/dev.local.env`; on other machines, install the tools on PATH or copy `scripts/dev.local.env.example` and fill in their paths. The script builds and installs the wrapper, runs Trunk, establishes `hdc rport` for port 8765 and launches ArkWeb in source development mode.
-3. Keep the terminal open. Trunk watches source edits, rebuilds WASM and refreshes the page automatically. No HAP rebuild or reinstall is needed for PhotoCraft source edits. ArkTS wrapper edits still require a HAP rebuild.
-4. For an already installed wrapper, use `scripts/dev.sh serve` in one terminal and `scripts/dev.sh launch` in another. A normal launch without the `photocraft.dev` Want parameter uses bundled offline assets.
-5. Before shipping a new offline HAP, run `scripts/package_offline.sh`. It builds the release web package, replaces `entry/src/main/resources/rawfile`, updates resource names in `Index.ets`, and verifies them with `scripts/verify_assets.py`.
+1. Edit shared Rust code under `upstream/photocraft/`, native adapter code under `native/rust/`, and platform code under `entry/`.
+2. Install `aarch64-unknown-linux-ohos` and `x86_64-unknown-linux-ohos` for the configured Rust toolchain.
+3. Run `scripts/dev.sh build` for a dual-architecture native HAP, `scripts/dev.sh run` to build/install/launch on exactly one connected simulator/device, or `scripts/dev.sh launch` for an already installed HAP. Tool paths remain in ignored `scripts/dev.local.env`.
+4. Rust and ArkTS edits require HAP rebuild/deployment. There is no ArkWeb, Trunk development server or hdc reverse-port mapping in this branch.
+5. `scripts/package_offline.sh` builds the native HAP; `--install` also installs it. Verify with `scripts/verify_native.py <HAP>`. Upstream Web sources remain for regression checks.
 
 ## Version numbers
 
@@ -40,7 +41,7 @@ HarmonyOS accepts digits and dots only in `AppScope/app.json5` `versionName`. Th
 
 ## CI
 
-`.github/workflows/build-hap.yml` runs only when dispatched by hand and builds an **unsigned** HAP from the repository. It takes a required `version_name` (see above), an optional `version_code` that defaults to the run number, a `build_mode` of release or debug, a `runner`, `commandline_tools_url`, and a `publish` choice of `none`, `prerelease` or `release`. It writes the version into `AppScope/app.json5`, generates `build-profile.json5` from the committed `build-profile.example.json5`, builds, and uploads `photocraft-hmos-<version>-<mode>-unsigned.hap` as an artifact. Signing material stays local, so the artifact installs on a simulator only.
+`.github/workflows/build-hap.yml` runs only when dispatched by hand and builds dual-architecture Rust libraries and an **unsigned** native HAP from the repository. It takes a required `version_name` (see above), an optional `version_code` that defaults to the run number, a `build_mode` of release or debug, a `runner`, `commandline_tools_url`, and a `publish` choice of `none`, `prerelease` or `release`. It writes the version into `AppScope/app.json5`, generates `build-profile.json5` from the committed `build-profile.example.json5`, builds, and uploads `photocraft-hmos-<version>-<mode>-unsigned.hap` as an artifact. Signing material stays local, so the artifact installs on a simulator only.
 
 With `publish` set, the job also pushes that HAP to a GitHub release tagged `release_tag` (empty means `v<version_name>`), which is also where a channel marker belongs. Re-running against an existing tag replaces the asset and the notes, so a rebuild never fails on a duplicate tag; the release body records the version, the build mode and the HAP's SHA-256.
 
@@ -52,5 +53,5 @@ The HarmonyOS SDK is absent from GitHub-hosted images, and Huawei serves the Dev
 ## Verification
 
 - Run `cargo metadata --offline` from `upstream/photocraft/`, then a Trunk Web build for Rust changes. For wrapper changes, build the HAP and verify on the simulator before connecting a real Pad.
-- Confirm live editing by changing a visible source string, waiting for Trunk to rebuild, observing the refreshed simulator page, and reverting the test change.
+- Native host changes require tests, dual-target Rust builds, a HAP build and simulator verification. Use fixed-size before/after screenshots for UI comparisons.
 - Preserve the existing Save/Save As picker and system browser external link behavior during wrapper changes.

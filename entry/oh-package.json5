@@ -5,5 +5,5 @@
   "main": "",
   "author": "",
   "license": "MIT OR Apache-2.0",
-  "dependencies": {}
+  "dependencies": {"libphotocraft.so": "file:./src/main/cpp/types/libphotocraft"}
 }

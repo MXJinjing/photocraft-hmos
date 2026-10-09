@@ -315,15 +315,22 @@ jobs:
           PY
 
       - name: Resolve ohpm dependencies
-        # The project declares no third-party dependencies, so a failure here is not fatal.
-        continue-on-error: true
         run: |
           set -euo pipefail
           if command -v ohpm >/dev/null 2>&1; then
             ohpm install
           else
-            echo "ohpm not on PATH; skipping dependency resolution"
+            echo "::error::ohpm not on PATH; native type dependency must be installed"
+            exit 1
           fi
+
+      - name: Set up Rust for native HarmonyOS
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-unknown-linux-ohos,x86_64-unknown-linux-ohos
+
+      - name: Build Rust native libraries
+        run: scripts/build_native.sh
 
       - name: Build HAP
         env:
@@ -345,6 +352,9 @@ jobs:
 
           "$hvigor" --version || true
           "$hvigor" assembleHap --mode module -p product=default -p buildMode="$BUILD_MODE" --no-daemon
+
+      - name: Verify native HAP
+        run: python3 scripts/verify_native.py entry/build/default/outputs/default/entry-default-unsigned.hap
 
       - name: Collect artifact
         id: collect

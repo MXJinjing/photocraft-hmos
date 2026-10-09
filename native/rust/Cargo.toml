@@ -1,0 +1,35 @@
+[workspace]
+resolver = "3"
+
+[package]
+name = "photocraft-hmos"
+version = "0.5.0"
+edition = "2024"
+
+[lib]
+crate-type = ["staticlib", "rlib"]
+
+[dependencies]
+photocraft-ui-egui = { path = "../../upstream/photocraft/crates/ui-egui", default-features = false }
+photocraft-text = { path = "../../upstream/photocraft/crates/text" }
+photocraft-engine = { path = "../../upstream/photocraft/crates/engine" }
+photocraft-io = { path = "../../upstream/photocraft/crates/io" }
+photocraft-format = { path = "../../upstream/photocraft/crates/format" }
+egui = { version = "0.36", features = ["default_fonts"] }
+egui-wgpu = { version = "0.36", default-features = false }
+wgpu = { version = "30", default-features = false, features = ["std", "wgsl", "gles"] }
+raw-window-handle = "0.6"
+pollster = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[patch.crates-io]
+wgpu-hal = { path = "../../third_party/wgpu-hal-30.0.1" }
+
+[profile.dev]
+opt-level = 1
+[profile.dev.package."*"]
+opt-level = 2
+[profile.release]
+lto = "thin"
+codegen-units = 1

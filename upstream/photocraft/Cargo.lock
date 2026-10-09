@@ -3809,6 +3809,7 @@ dependencies = [
  "base64",
  "eframe",
  "egui",
+ "egui-wgpu",
  "egui_extras",
  "egui_kittest",
  "js-sys",
@@ -3837,6 +3838,7 @@ dependencies = [
  "toml",
  "wasm-bindgen",
  "web-sys",
+ "wgpu",
 ]
 
 [[package]]

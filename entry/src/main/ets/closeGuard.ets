@@ -1,4 +1,4 @@
-// The window-stage callback lives in EntryAbility; the page owns the ArkWeb controller.
+// The window-stage callback lives in EntryAbility; the native editor guards unsaved work.
 let requestPageClose: (() => void) | null = null;
 let confirmedClose: boolean = false;
 

@@ -1,6 +1,6 @@
 {
   "modelVersion": "6.0.0",
-  "description": "PhotoCraft offline ArkWeb wrapper for HarmonyOS tablet and PC",
+  "description": "PhotoCraft native egui application for HarmonyOS tablet and PC",
   "dependencies": {},
   "devDependencies": {}
 }

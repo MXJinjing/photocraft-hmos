@@ -250,6 +250,11 @@ pub struct Services {
     pub pick_open_paths: Option<PickOpenPathsFn>,
     /// Show a "save file" dialog; returns a path/name to write.
     pub pick_save: Option<PickSaveFn>,
+    /// Always choose a target, even for Save of a named document. Hosts with
+    /// opaque storage URIs use the picker to associate the display name with
+    /// write authority. They also export through these services instead of
+    /// the engine's filesystem-based quick export.
+    pub always_pick_save: bool,
     /// Write bytes to a path (native) or trigger a download (web).
     pub write: Option<WriteFn>,
     /// When set, Save from the unsaved-changes prompt is not finished when `write` returns. The
@@ -561,7 +566,7 @@ impl PhotocraftApp {
 
     /// Draw the document canvas on the GPU (custom WGSL shader) instead of via egui textures.
     /// Call from the app creator with `cc.wgpu_render_state`; without it the CPU path is used.
-    pub fn set_wgpu(&mut self, rs: eframe::egui_wgpu::RenderState) {
+    pub fn set_wgpu(&mut self, rs: egui_wgpu::RenderState) {
         // Preferences › Performance › cache tile size (PHOTOCRAFT_GPU_TILE still overrides).
         let tile = self.session.prefs().performance.cache_tile_size;
         // Escaped driver/setup panics must leave the session and CPU canvas alive.
@@ -850,7 +855,8 @@ impl PhotocraftApp {
         // Documents are named after their file ("cat.png"): suggest "cat.psd", not "cat.png.psd".
         let suggested = st.path.clone().unwrap_or_else(|| format!("{}.psd", st.doc.name.rsplit_once('.').map_or(st.doc.name.as_str(), |(stem, _)| stem)));
         let path = match path {
-            Some(p) => p,
+            Some(p) if !self.services.always_pick_save => p,
+            Some(p) => self.services.pick_save.as_mut().and_then(|f| f(&p)).ok_or("cancelled")?,
             None => self.services.pick_save.as_mut().and_then(|f| f(&suggested)).ok_or("cancelled")?,
         };
         // A layered TIFF asks about its layers first (Preferences › File Handling); the save
@@ -972,8 +978,8 @@ impl PhotocraftApp {
     }
 }
 
-impl eframe::App for PhotocraftApp {
-    fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+impl PhotocraftApp {
+    pub fn host_logic(&mut self, ctx: &egui::Context) {
         i18n::set_current(i18n::Lang::from_pref(&self.session.prefs().interface.language));
         if !self.styled {
             Self::setup_context(ctx, self.ui.theme);
@@ -1046,7 +1052,7 @@ impl eframe::App for PhotocraftApp {
         }
     }
 
-    fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
+    pub fn host_input(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
         // Native menu key equivalents become the key presses they were (see `native_menu`).
         if let Some(menu) = self.services.native_menu.as_mut() {
             menu.raw_input(raw_input);
@@ -1055,7 +1061,7 @@ impl eframe::App for PhotocraftApp {
         raw_input.events.extend(self.take_synthetic_step());
     }
 
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+    pub fn host_ui(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
         i18n::set_current(i18n::Lang::from_pref(&self.session.prefs().interface.language));
         // Fonts registered via set_fonts only take effect next frame; named families would panic now.
@@ -1621,5 +1627,93 @@ mod clipboard_tests {
         }
         assert_eq!(reads.load(std::sync::atomic::Ordering::SeqCst), 0, "the OS clipboard is read only on an explicit paste");
         assert!(h.state().session.clipboard.is_none());
+    }
+}
+
+/// Desktop and browser hosts share the same frame implementation as custom native hosts.
+#[cfg(feature = "eframe-host")]
+impl eframe::App for PhotocraftApp {
+    fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.host_logic(ctx);
+    }
+    fn raw_input_hook(&mut self, ctx: &egui::Context, input: &mut egui::RawInput) {
+        self.host_input(ctx, input);
+    }
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        self.host_ui(ui);
+    }
+}
+
+#[cfg(test)]
+mod native_host_tests {
+    use super::*;
+    #[test]
+    fn custom_host_draws_editor_without_eframe_frame() {
+        let ctx = egui::Context::default();
+        let mut app = PhotocraftApp::new(Session::new(), Services::default());
+        let mut painted = false;
+        for _ in 0..4 {
+            let mut raw = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 800.0))), ..Default::default() };
+            app.host_input(&ctx, &mut raw);
+            let _logic = ctx.run_logic(&raw, |ctx| app.host_logic(ctx));
+            let output = ctx.run_ui(raw, |ui| app.host_ui(ui));
+            painted |= !output.shapes.is_empty();
+            output.drop_without_applying_deltas();
+        }
+        assert!(painted);
+        assert_eq!(app.frame, 4);
+    }
+    #[test]
+    fn uri_host_save_reselects_target_and_records_actual_filename() {
+        use std::sync::{Arc, Mutex};
+        let picked = Arc::new(Mutex::new(Vec::new()));
+        let seen = picked.clone();
+        let services = Services {
+            always_pick_save: true,
+            pick_save: Some(Box::new(move |suggested| {
+                seen.lock().unwrap().push(suggested.to_owned());
+                Some("renamed.psd".into())
+            })),
+            export: Some(Box::new(|_, name, _| {
+                assert_eq!(name, "renamed.psd");
+                Ok((vec![1], vec![]))
+            })),
+            write: Some(Box::new(|name, _| {
+                assert_eq!(name, "renamed.psd");
+                Ok(())
+            })),
+            ..Default::default()
+        };
+        let mut app = PhotocraftApp::new(Session::new(), services);
+        app.run("file.new", serde_json::json!({"width": 16, "height": 16})).unwrap();
+        app.run("layer.new.layer", serde_json::json!({})).unwrap();
+        assert!(app.session.active().unwrap().is_dirty());
+        app.save_as(Some("original.psd".into())).unwrap();
+        assert_eq!(picked.lock().unwrap().as_slice(), &["original.psd"]);
+        assert_eq!(app.session.active().unwrap().path.as_deref(), Some("renamed.psd"));
+        assert!(!app.session.active().unwrap().is_dirty());
+        app.services.pick_save = Some(Box::new(|_| None));
+        app.run("layer.new.layer", serde_json::json!({})).unwrap();
+        assert_eq!(app.save_as(Some("renamed.psd".into())), Err("cancelled".into()));
+        assert!(app.session.active().unwrap().is_dirty());
+        assert_eq!(app.session.active().unwrap().path.as_deref(), Some("renamed.psd"));
+    }
+    #[test]
+    fn failed_native_write_never_marks_document_saved() {
+        for failure in ["cancelled", "permission denied", "file close failed"] {
+            let services = Services {
+                export: Some(Box::new(|_, _, _| Ok((vec![1, 2, 3], Vec::new())))),
+                write: Some(Box::new(move |_, _| Err(failure.into()))),
+                ..Default::default()
+            };
+            let mut app = PhotocraftApp::new(Session::new(), services);
+            app.run("file.new", serde_json::json!({"width": 16, "height": 16})).unwrap();
+            app.run("layer.new.layer", serde_json::json!({"name": "second"})).unwrap();
+            let old = app.session.active().unwrap().saved_revision;
+            assert_eq!(app.save_as(Some("test.psd".into())), Err(failure.into()));
+            assert_eq!(app.session.active().unwrap().saved_revision, old);
+            assert!(app.session.active().unwrap().path.is_none());
+            assert!(app.session.active().unwrap().is_dirty());
+        }
     }
 }
