@@ -3,7 +3,7 @@
 #
 # Usage: scripts/package_offline.sh [--skip-build] [--assets-only] [--install]
 #
-# Default: trunk release build, replace rawfile, update Index.ets and manifest.json,
+# Default: trunk release build, replace rawfile, update Index.ets,
 # verify, then assemble a signed debug HAP. --assets-only stops before the HAP.
 # --install also installs that HAP on the hdc target (disconnect the simulator first).
 # Resolve this file before nounset: zsh rejects BASH_SOURCE, and some terminals run the file with zsh.
@@ -72,8 +72,6 @@ if [[ "$SKIP_BUILD" -eq 0 ]]; then
 fi
 
 python3 - "$ROOT" "$DIST" "$RAWFILE" <<'PY'
-import hashlib
-import json
 import re
 import shutil
 import sys
@@ -103,11 +101,6 @@ size = wasm.stat().st_size
 print(f"{wasm.name}: {size} bytes ({size / 1048576:.1f} MiB; limit {max_wasm})")
 if size > max_wasm:
     raise SystemExit(f"{wasm.name} is over the 24 MiB offline package limit")
-
-def sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    digest.update(path.read_bytes())
-    return digest.hexdigest()
 
 rawfile.mkdir(parents=True, exist_ok=True)
 for old in rawfile.iterdir():
@@ -143,20 +136,6 @@ page.write_text(updated, encoding="utf-8")
 cargo = (root / "upstream/photocraft/Cargo.toml").read_text(encoding="utf-8")
 version = re.search(r'(?m)^version = "([^"]+)"', cargo)
 photocraft_version = version.group(1) if version else "unknown"
-manifest_path = root / "third_party/photocraft/manifest.json"
-manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-adapted = manifest.setdefault("adapted_web", {})
-adapted["files"] = {
-    "index.html": sha256(rawfile / "index.html"),
-    script.name: sha256(rawfile / script.name),
-    wasm.name: sha256(rawfile / wasm.name),
-}
-adapted["photocraft_version"] = photocraft_version
-adapted["reason"] = (
-    "Offline web build of the workspace PhotoCraft sources, including the HarmonyOS "
-    "WebGL fixes, packaged by scripts/package_offline.sh."
-)
-manifest_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 print(f"Installed offline assets for PhotoCraft {photocraft_version}: {script.name}, {wasm.name}")
 PY
 

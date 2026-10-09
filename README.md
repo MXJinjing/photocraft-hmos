@@ -44,7 +44,7 @@ scripts/dev.sh launch
 
 ### `scripts/package_offline.sh`
 
-把当前源码打成可离线运行的完整版本。它编译 release 网页包，替换 `entry/src/main/resources/rawfile`，更新 `Index.ets` 里的 JS/WASM 文件名和 `third_party/photocraft/manifest.json` 的哈希，再运行 `scripts/verify_assets.py`。默认还会打出已签名的 debug HAP。磁盘上未提交的鸿蒙源码改动会一起编进去。第一次编译可能要十几分钟。
+把当前源码打成可离线运行的完整版本。它编译 release 网页包，替换 `entry/src/main/resources/rawfile`，更新 `Index.ets` 里的 JS/WASM 文件名，再运行 `scripts/verify_assets.py`。默认还会打出已签名的 debug HAP。磁盘上未提交的鸿蒙源码改动会一起编进去。第一次编译可能要十几分钟。
 
 ```bash
 scripts/package_offline.sh
@@ -92,9 +92,9 @@ scripts/package_offline.sh --install
 
 ## 资源来源与重建
 
-`third_party/photocraft/manifest.json` 固定官方网页发布包、官方 v0.3.0 源码归档、适配后资源及校验值。`scripts/verify_assets.py` 可校验发布包、适配资源、HTML 引用、ArkWeb 映射和补丁哈希。原版静态资源保存在 `third_party/photocraft/release-web`，当前离线适配版在 `rawfile`；开发时以 `upstream/photocraft/` 源码为准。
+当前离线适配版在 `entry/src/main/resources/rawfile`，由 `scripts/package_offline.sh` 从 `upstream/photocraft/` 源码构建；开发时以源码为准，应用包不再附带独立的官方静态发布包。`scripts/verify_assets.py` 校验 HTML 引用、`rawfile` 文件集合、ArkWeb 资源映射和 MIME 类型。
 
-上游静态包在模拟器上因 WebGL shader 上限与驱动行为无法直接启动。`third_party/photocraft/photocraft-source.patch` 记录设备上限兼容、网页端 CPU 文档合成和 WASM 错误日志；这些修改已应用到仓库源码。`wgpu-hal-uniform-block.patch` 记录依赖修复，其已打补丁源码存于 `third_party/wgpu-hal-30.0.1/`，Cargo 路径覆盖已配置。开发模式直接编译这份源码。离线包更新见上面的 `scripts/package_offline.sh`。上游双许可证见 `third_party/photocraft/`。
+上游静态包在模拟器上因 WebGL shader 上限与驱动行为无法直接启动，因此离线包改用本仓库源码构建：设备上限兼容、按设备限制设置 shader 参数、网页端禁用 GPU 文档合成与画布 mipmap、WASM 错误日志等改动都已直接写入 `upstream/photocraft/`。依赖修复在 `third_party/wgpu-hal-30.0.1/`，Cargo 路径覆盖已配置。离线包更新见上面的 `scripts/package_offline.sh`。许可证见根目录 `LICENSE`（Apache-2.0）与 `upstream/photocraft/LICENSE-*`。
 
 ## 下一阶段
 
