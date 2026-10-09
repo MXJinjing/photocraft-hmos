@@ -200,6 +200,12 @@ fn stroke_params(app: &PhotocraftApp, tool: Tool, erase: bool, points: &[Vec<f64
     if tool == Tool::Pencil {
         p["autoErase"] = json!(app.ui.tool_options.pencil_auto_erase);
     }
+    // The Eraser keeps its own Pressure for Size / Opacity. A right-click erase with the brush
+    // still uses the brush (`erase` is true, but `tool` is not the Eraser).
+    if tool == Tool::Eraser {
+        let o = &app.ui.tool_options;
+        p["brush"] = json!({ "pressureSize": o.eraser_pressure_size, "pressureOpacity": o.eraser_pressure_opacity });
+    }
     p
 }
 
@@ -2475,6 +2481,13 @@ pub fn tool_event(app: &mut PhotocraftApp, ev: ToolEvent, mods: egui::Modifiers)
     crate::transform_tool::end_if_left(app);
     // View › Snap / Snap To and smart guides (snap_ui.rs).
     let raw = ev;
+    // Track both ends of a pen stroke so a gesture after lifting opens at the lift point.
+    if app.stylus.is_pen() {
+        match raw {
+            ToolEvent::Down { x, y, .. } | ToolEvent::Up { x, y } => app.stylus.note_pen_point([x, y]),
+            ToolEvent::Move { .. } => {}
+        }
+    }
     // A press anywhere but on the floating piece (or with ⇧ / ⌥, to draw) drops it first.
     if let ToolEvent::Down { x, y, .. } = raw
         && app.session.active().is_some_and(|st| photocraft_engine::float_cmds::floating(st).is_some())
@@ -3305,6 +3318,33 @@ mod tests {
     fn same_pixels(a: &Document, b: &Document) -> bool {
         let (a, b) = (a.layers[0].surface().unwrap(), b.layers[0].surface().unwrap());
         (0..80).all(|y| (0..200).all(|x| a.rgba(x, y) == b.rgba(x, y)))
+    }
+
+    #[test]
+    fn eraser_pressure_flags_stay_independent_of_the_brush() {
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), Default::default());
+        app.run("file.new", json!({"width": 80, "height": 40, "background": "white"})).unwrap();
+        app.run("tools.setBrush", json!({"brush": {"size": 16, "pressureSize": true, "pressureOpacity": false}})).unwrap();
+        app.ui.tool_options.eraser_pressure_size = false;
+        app.ui.tool_options.eraser_pressure_opacity = true;
+        app.ui.tool = Tool::Eraser;
+        let m = egui::Modifiers::NONE;
+        tool_event(&mut app, ToolEvent::Down { x: 10.0, y: 20.0, pressure: 0.2 }, m);
+        tool_event(&mut app, ToolEvent::Up { x: 40.0, y: 20.0 }, m);
+        let erase = app.session.journal.iter().rev().find(|(id, _)| id == "paint.stroke").map(|(_, p)| p.clone()).unwrap();
+        assert_eq!(erase["erase"], json!(true));
+        assert_eq!(erase["brush"]["pressureSize"], json!(false));
+        assert_eq!(erase["brush"]["pressureOpacity"], json!(true));
+        assert!(app.session.tools.brush.pressure_size && !app.session.tools.brush.pressure_opacity, "the brush flags are untouched");
+
+        app.ui.tool = Tool::Brush;
+        tool_event(&mut app, ToolEvent::Down { x: 10.0, y: 8.0, pressure: 0.2 }, m);
+        tool_event(&mut app, ToolEvent::Up { x: 30.0, y: 8.0 }, m);
+        let paint = app.session.journal.iter().rev().find(|(id, _)| id == "paint.stroke").map(|(_, p)| p.clone()).unwrap();
+        assert_eq!(paint["erase"], json!(false));
+        assert!(paint.get("brush").and_then(|b| b.get("pressureSize")).is_none(), "the brush stroke keeps the session brush");
+        assert!(app.session.tools.brush.pressure_size);
+        assert!(!app.ui.tool_options.eraser_pressure_size && app.ui.tool_options.eraser_pressure_opacity);
     }
 
     #[test]

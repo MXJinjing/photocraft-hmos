@@ -481,6 +481,12 @@ pub struct ToolOptions {
     /// Pencil › Auto Erase: a stroke that starts on the foreground colour paints the background colour.
     #[serde(default)]
     pub pencil_auto_erase: bool,
+    /// Eraser tool › Pressure for Size. Independent of the brush/pen (`session.tools.brush`).
+    #[serde(default = "yes")]
+    pub eraser_pressure_size: bool,
+    /// Eraser tool › Pressure for Opacity. Independent of the brush/pen.
+    #[serde(default)]
+    pub eraser_pressure_opacity: bool,
     /// Magnetic Lasso: detection width (px, 1..256), edge contrast (%, 1..100), how often it
     /// fastens points by itself (0..100), and whether pen pressure narrows the width.
     pub magnetic_width: f32,
@@ -562,6 +568,8 @@ impl Default for ToolOptions {
             bg_protect_fg: false,
             zoom_scrubby: true,
             pencil_auto_erase: false,
+            eraser_pressure_size: true,
+            eraser_pressure_opacity: false,
             magnetic_width: 10.0,
             magnetic_contrast: 10.0,
             magnetic_frequency: 57.0,

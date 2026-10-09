@@ -1646,7 +1646,9 @@
 	Std Dev:	Écart type :
 	Studio (Dark)	Studio (sombre)
 	Studio (Light)	Studio (clair)
+	Stylus	Stylet
 	Stylus Wheel	Molette du stylet
+	Block finger input	Bloquer la saisie au doigt
 	Subtract	Soustraction
 	Tabloid	Tabloïd
 	Text Replacement	Remplacement de texte
@@ -2564,3 +2566,8 @@ cameraRaw	Blending	Fusion
 	% of all commits	% de tous les commits
 	Lines +/−	Lignes +/−
 	@{login}: {prs} PRs, {commits} commits, +{added} / −{deleted} lines (Δ {delta}), +{binAdded} / −{binDeleted} binary assets, {first} – {last}	@{login} : {prs} PR, {commits} commits, +{added} / −{deleted} lignes (Δ {delta}), +{binAdded} / −{binDeleted} fichiers binaires, {first} – {last}
+	Double-tap pen body	Double-clic sur le corps du stylet
+	Current tool and Eraser	Outil actuel et gomme
+	Previous tool	Outil précédent
+	Long-press pen body	Appui long sur le corps du stylet
+	Show or hide context menu	Afficher ou masquer le menu contextuel

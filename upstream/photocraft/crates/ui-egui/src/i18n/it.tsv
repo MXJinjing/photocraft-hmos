@@ -1659,7 +1659,9 @@
 	Std Dev:	Dev std:
 	Studio (Dark)	Studio (scuro)
 	Studio (Light)	Studio (chiaro)
+	Stylus	Stilo
 	Stylus Wheel	Rotella stilo
+	Block finger input	Blocca input dito
 	Subtract	Sottrai
 	Tabloid	Tabloid
 	Text Replacement	Sostituzione testo
@@ -2206,3 +2208,8 @@ cameraRaw	Amount	Quantità
 	Lines +/−	Righe +/−
 	@{login}: {prs} PRs, {commits} commits, +{added} / −{deleted} lines (Δ {delta}), +{binAdded} / −{binDeleted} binary assets, {first} – {last}	@{login}: {prs} PR, {commits} commit, +{added} / −{deleted} righe (Δ {delta}), +{binAdded} / −{binDeleted} risorse binarie, {first} – {last}
 	Convert to Layers	Converti in livelli
+	Double-tap pen body	Doppio tocco sul corpo della penna
+	Current tool and Eraser	Strumento attuale e gomma
+	Previous tool	Strumento precedente
+	Long-press pen body	Pressione prolungata sul corpo della penna
+	Show or hide context menu	Mostra o nascondi il menu contestuale

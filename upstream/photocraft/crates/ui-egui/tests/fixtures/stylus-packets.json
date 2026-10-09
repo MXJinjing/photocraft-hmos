@@ -1,0 +1,9 @@
+[
+  {"version":1,"type":"connection","connected":true},
+  {"version":1,"type":"pointer","source":"pen","sample":{"pressure":0.25,"tiltX":30,"tiltY":-20,"rotation":90,"eraser":false}},
+  {"version":1,"type":"barrelButton","timestampMs":500,"pressed":true},
+  {"version":1,"type":"barrelButton","timestampMs":550,"pressed":false},
+  {"version":1,"type":"gesture","gesture":"doubleTap","timestampMs":1000},
+  {"version":1,"type":"gesture","gesture":"longPress","timestampMs":2000},
+  {"version":1,"type":"pointer","source":"touch","sample":null}
+]

@@ -1662,7 +1662,9 @@
 	Std Dev:	Desv. estándar:
 	Studio (Dark)	Estudio (oscuro)
 	Studio (Light)	Estudio (claro)
+	Stylus	Lápiz
 	Stylus Wheel	Rueda del lápiz
+	Block finger input	Bloquear entrada táctil
 	Subtract	Restar
 	Tabloid	Tabloide
 	Text Replacement	Sustitución de texto
@@ -2204,3 +2206,8 @@ cameraRaw	Amount	Cantidad
 	% of all commits	% de todos los commits
 	Lines +/−	Líneas +/−
 	@{login}: {prs} PRs, {commits} commits, +{added} / −{deleted} lines (Δ {delta}), +{binAdded} / −{binDeleted} binary assets, {first} – {last}	@{login}: {prs} PR, {commits} commits, +{added} / −{deleted} líneas (Δ {delta}), +{binAdded} / −{binDeleted} archivos binarios, {first} – {last}
+	Double-tap pen body	Doble toque en el cuerpo del lápiz
+	Current tool and Eraser	Herramienta actual y borrador
+	Previous tool	Herramienta anterior
+	Long-press pen body	Mantener pulsado el cuerpo del lápiz
+	Show or hide context menu	Mostrar u ocultar el menú contextual

@@ -1,7 +1,7 @@
 //! Photoshop 2026 window chrome details: the status bar's info field and its "Show" menu, and the
 //! Home button at the start of the options bar.
 
-use egui::{RichText, Sense, Stroke, vec2};
+use egui::{Align2, Rect, RichText, Sense, Stroke, pos2, vec2};
 use photocraft_doc::{Document, LayerContent};
 use serde::{Deserialize, Serialize};
 
@@ -18,6 +18,13 @@ pub struct ChromeState {
     /// when it was opened, so opening or creating a document leaves it.
     pub home: Option<usize>,
 }
+
+pub use photocraft_engine::prefs::{StylusDoubleTap, StylusLongPress};
+
+/// Shared choices for the options-bar menu and Preferences › Tools.
+pub const STYLUS_DOUBLE_TAP_OPTIONS: &[(StylusDoubleTap, &str)] =
+    &[(StylusDoubleTap::Eraser, "Current tool and Eraser"), (StylusDoubleTap::Previous, "Previous tool"), (StylusDoubleTap::Off, "Off")];
+pub const STYLUS_LONG_PRESS_OPTIONS: &[(StylusLongPress, &str)] = &[(StylusLongPress::ContextMenu, "Show or hide context menu"), (StylusLongPress::Off, "Off")];
 
 impl ChromeState {
     /// Is the Home screen up, given the current number of open documents? With no documents it
@@ -158,6 +165,172 @@ pub fn status_bar_pro(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     }
 }
 
+/// Chevron width of the options-bar stylus control. The menu opens from this end.
+const STYLUS_CHEVRON_W: f32 = 22.0;
+
+/// Width of the options-bar stylus menu. `labeled` includes the title (`Stylus` / 手写笔).
+pub fn stylus_menu_width(ui: &egui::Ui, labeled: bool) -> f32 {
+    if !labeled {
+        return 28.0 + STYLUS_CHEVRON_W;
+    }
+    let font = egui::TextStyle::Body.resolve(ui.style());
+    let text_w = ui.painter().layout_no_wrap(tl!("Stylus").to_string(), font, egui::Color32::WHITE).size().x;
+    // Left pad, pencil, gap, title, gap, menu chevron.
+    8.0 + 16.0 + 6.0 + text_w + 4.0 + STYLUS_CHEVRON_W
+}
+
+/// Options-bar stylus menu, right-aligned. Title is `Stylus` (简体中文：手写笔). The menu holds
+/// Block finger input: fingers then only pan or pinch-zoom; the pen still paints.
+pub fn stylus_menu(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
+    let t = Tokens::get(ui.ctx());
+    let labeled = ui.available_width() + 0.5 >= stylus_menu_width(ui, true);
+    let width = stylus_menu_width(ui, labeled);
+    let height = if t.pro { 26.0 } else { 28.0 };
+    let (rect, resp) = ui.allocate_exact_size(vec2(width, height), Sense::click());
+    if resp.hovered() {
+        ui.painter().rect_filled(rect, t.radius_sm, t.hover);
+    }
+    let tint = if resp.hovered() { t.text } else { t.text_dim };
+    let icon_x = if labeled { rect.left() + 16.0 } else { rect.left() + (rect.width() - STYLUS_CHEVRON_W) / 2.0 };
+    let icon = Rect::from_center_size(pos2(icon_x, rect.center().y), vec2(16.0, 16.0));
+    icons::paint(ui, icon, "pencil", 15.0, tint);
+    if app.stylus.feed.connected() {
+        // Bottom-right of the glyph: a presence dot, not a selected-button highlight.
+        let c = icon.right_bottom() + vec2(-1.0, -1.0);
+        ui.painter().circle_filled(c, 3.2, t.chrome);
+        ui.painter().circle_filled(c, 2.2, t.online);
+    }
+    if labeled {
+        let font = egui::TextStyle::Body.resolve(ui.style());
+        ui.painter().text(pos2(icon.right() + 6.0, rect.center().y), Align2::LEFT_CENTER, tl!("Stylus"), font, t.text);
+    }
+    let chev = Rect::from_min_max(pos2(rect.right() - STYLUS_CHEVRON_W, rect.top()), rect.max);
+    ui.painter().line_segment([pos2(chev.left(), rect.top() + 6.0), pos2(chev.left(), rect.bottom() - 6.0)], Stroke::new(1.0, t.separator));
+    icons::paint(ui, Rect::from_center_size(chev.center(), vec2(12.0, 12.0)), "chevron-down", 10.0, tint);
+    // English source `Stylus`; zh-Hans catalog renders it as 手写笔.
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), "Stylus"));
+    let resp = resp.on_hover_text(tl!("Stylus"));
+    egui::Popup::menu(&resp).show(|ui| {
+        let t = Tokens::get(ui.ctx());
+        ui.set_min_width(240.0);
+        ui.label(RichText::new(tl!("Stylus")).color(t.text));
+        ui.separator();
+        let on = app.session.prefs().tools.block_finger_input;
+        if ui.add(egui::Button::selectable(on, tl!("Block finger input"))).clicked() {
+            app.session.edit_prefs(|p| p.tools.block_finger_input = !on);
+            ui.close();
+        }
+        ui.separator();
+        ui.label(RichText::new(tl!("Double-tap pen body")).color(t.text_dim));
+        for &(mode, label) in STYLUS_DOUBLE_TAP_OPTIONS {
+            if ui.add(egui::Button::selectable(app.session.prefs().tools.stylus_double_tap == mode, tl!(label))).clicked() {
+                app.session.edit_prefs(|p| p.tools.stylus_double_tap = mode);
+                ui.close();
+            }
+        }
+        ui.separator();
+        ui.label(RichText::new(tl!("Long-press pen body")).color(t.text_dim));
+        for &(mode, label) in STYLUS_LONG_PRESS_OPTIONS {
+            if ui.add(egui::Button::selectable(app.session.prefs().tools.stylus_long_press == mode, tl!(label))).clicked() {
+                app.session.edit_prefs(|p| p.tools.stylus_long_press = mode);
+                ui.close();
+            }
+        }
+    });
+}
+
+/// Apply normalised stylus actions queued by any input adapter.
+pub fn drain_stylus_gestures(app: &mut PhotocraftApp, ctx: &egui::Context) {
+    app.stylus.note_tool(app.ui.tool);
+    let gestures = app.stylus.feed.take_gestures();
+    if gestures.is_empty() {
+        return;
+    }
+    let at = stylus_menu_point(app, ctx);
+    for gesture in gestures {
+        apply_pen_gesture(app, gesture, at);
+    }
+    ctx.request_repaint();
+}
+
+/// Screen point for a pen long-press menu: the last pen lift (or press before a lift).
+/// Hover, then the canvas centre, if the pen has not landed yet.
+fn stylus_menu_point(app: &PhotocraftApp, ctx: &egui::Context) -> [f32; 2] {
+    if let Some([x, y]) = app.stylus.last_pen_point
+        && x.is_finite()
+        && y.is_finite()
+        && let Some(xf) = crate::canvas::ViewXform::active(app)
+    {
+        let p = xf.to_screen(x as f32, y as f32);
+        if p.x.is_finite() && p.y.is_finite() {
+            return [p.x, p.y];
+        }
+    }
+    let canvas = app.last_canvas_rect;
+    let hover = ctx.input(|i| i.pointer.hover_pos().or(i.pointer.interact_pos()));
+    if let Some(p) = hover.filter(|p| p.x.is_finite() && p.y.is_finite() && canvas.contains(*p)) {
+        return [p.x, p.y];
+    }
+    let c = canvas.center();
+    [c.x, c.y]
+}
+
+fn apply_pen_gesture(app: &mut PhotocraftApp, gesture: crate::stylus::PenGesture, at: [f32; 2]) {
+    if app.drag.is_some() {
+        return;
+    }
+    match gesture {
+        crate::stylus::PenGesture::DoubleTap => match app.session.prefs().tools.stylus_double_tap {
+            StylusDoubleTap::Off => {}
+            StylusDoubleTap::Eraser => app.stylus.toggle_eraser_tool(&mut app.ui.tool),
+            StylusDoubleTap::Previous => app.stylus.switch_previous_tool(&mut app.ui.tool),
+        },
+        crate::stylus::PenGesture::LongPress => {
+            if app.session.prefs().tools.stylus_long_press == StylusLongPress::ContextMenu {
+                toggle_canvas_context_menu(app, at);
+            }
+        }
+    }
+}
+
+/// Show the menu a canvas right-click would open, or hide it if one is already up.
+/// `at` is the menu's top-left in screen points (the last pen lift, when available).
+fn toggle_canvas_context_menu(app: &mut PhotocraftApp, at: [f32; 2]) {
+    if !at.iter().all(|v| v.is_finite()) {
+        return;
+    }
+    if app.ui.canvas_tool_menu.is_some() || app.ui.brush_picker.is_some() || app.ui.layer_menu.is_some() {
+        app.ui.canvas_tool_menu = None;
+        app.ui.brush_picker = None;
+        app.ui.layer_menu = None;
+        return;
+    }
+    if app.ui.transform.as_ref().is_some_and(|t| t.warp.is_none()) {
+        let _ = crate::canvas_tool_menu::open_transform(app, at);
+        return;
+    }
+    let tool = app.ui.tool;
+    if tool == crate::state::Tool::Move {
+        open_layer_menu_at(app, at);
+        return;
+    }
+    if crate::paint_mouse::has_brush_picker(tool) && !crate::paint_mouse::right_erases(app, tool) {
+        app.ui.canvas_tool_menu = None;
+        app.ui.layer_menu = None;
+        app.ui.brush_picker = Some(at);
+        return;
+    }
+    if !crate::canvas_tool_menu::open(app, tool, at) {
+        open_layer_menu_at(app, at);
+    }
+}
+
+fn open_layer_menu_at(app: &mut PhotocraftApp, at: [f32; 2]) {
+    let Some(xf) = crate::canvas::ViewXform::active(app) else { return };
+    let d = xf.to_doc(egui::pos2(at[0], at[1]));
+    let _ = crate::layer_pick_ui::open(app, at, d[0], d[1]);
+}
+
 /// Home button at the very start of Photoshop 2026's options bar: toggles the Home (start)
 /// screen over the open documents, which stay open.
 pub fn home_button(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
@@ -226,6 +399,9 @@ mod tests {
     fn default_status_shows_dimensions_like_photoshop() {
         let d = doc();
         assert_eq!(ChromeState::default().status_info, "dimensions");
+        assert!(!photocraft_engine::prefs::Tools::default().block_finger_input);
+        assert_eq!(photocraft_engine::prefs::Tools::default().stylus_double_tap, StylusDoubleTap::Eraser);
+        assert_eq!(photocraft_engine::prefs::Tools::default().stylus_long_press, StylusLongPress::ContextMenu);
         assert_eq!(status_info_text(&d, "dimensions", "", ""), "2400 px x 1500 px (72 ppi)");
         assert_eq!(status_info_text(&d, "layers", "", ""), "1 Layer");
         assert_eq!(status_info_text(&d, "tool", "Brush Tool", ""), "Brush Tool");
@@ -323,5 +499,102 @@ mod tests {
         for (k, _) in STATUS_INFO {
             assert!(!status_info_text(&d, k, "x", "p").is_empty());
         }
+    }
+
+    #[test]
+    fn stylus_menu_sits_at_the_right_of_the_options_bar_and_toggles_block_finger() {
+        use egui_kittest::{Harness, kittest::Queryable};
+
+        let app = crate::PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        let mut h = Harness::builder().with_size(egui::vec2(1400.0, 80.0)).build_ui_state(
+            |ui, app| {
+                if !ui.ctx().fonts(|f| f.families().contains(&egui::FontFamily::Name("medium".into()))) {
+                    return;
+                }
+                crate::panels::options_bar(app, ui);
+            },
+            app,
+        );
+        crate::PhotocraftApp::setup_context(&h.ctx, crate::theme::ThemeKind::Studio);
+        h.run_steps(4);
+        let stylus = h.get_by_label("Stylus").rect();
+        assert!(stylus.right() > 1300.0, "stylus menu is right-aligned, rect {stylus:?}");
+        assert!(!h.state().session.prefs().tools.block_finger_input);
+        h.get_by_label("Stylus").click();
+        h.run_steps(2);
+        h.get_by_label("Block finger input").click();
+        h.run_steps(2);
+        assert!(h.state().session.prefs().tools.block_finger_input, "the stylus menu toggles block finger input");
+        h.get_by_label("Stylus").click();
+        h.run_steps(2);
+        h.get_by_label("Block finger input").click();
+        h.run_steps(2);
+        assert!(!h.state().session.prefs().tools.block_finger_input);
+        let zh = crate::i18n::Lang::from_code("zh-hans").expect("zh-hans registered");
+        assert_eq!(crate::i18n::tr(zh, "Stylus"), "手写笔");
+        assert_eq!(crate::i18n::tr(crate::i18n::Lang::EN, "Stylus"), "Stylus");
+        assert_eq!(crate::i18n::tr(zh, "Double-tap pen body"), "双击笔身");
+        assert_eq!(crate::i18n::tr(zh, "Long-press pen body"), "长按笔身");
+
+        let app = crate::PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        let mut status = Harness::builder().with_size(egui::vec2(1400.0, 80.0)).build_ui_state(
+            |ui, app| {
+                crate::panels::status_bar(app, ui);
+            },
+            app,
+        );
+        crate::PhotocraftApp::setup_context(&status.ctx, crate::theme::ThemeKind::Studio);
+        status.run_steps(3);
+        assert!(status.query_by_label_contains("Block finger input").is_none(), "status bar no longer hosts the stylus menu");
+    }
+
+    #[test]
+    fn pen_body_gestures_follow_the_stylus_menu_settings() {
+        use crate::state::Tool;
+        let mut app = crate::PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        app.ui.tool = Tool::Brush;
+        app.session.edit_prefs(|p| p.tools.stylus_long_press = StylusLongPress::ContextMenu);
+        super::toggle_canvas_context_menu(&mut app, [12.0, 34.0]);
+        assert_eq!(app.ui.brush_picker, Some([12.0, 34.0]));
+        super::toggle_canvas_context_menu(&mut app, [12.0, 34.0]);
+        assert!(app.ui.brush_picker.is_none());
+
+        app.session.edit_prefs(|p| p.tools.stylus_long_press = StylusLongPress::Off);
+        super::apply_pen_gesture(&mut app, crate::stylus::PenGesture::LongPress, [8.0, 8.0]);
+        assert!(app.ui.brush_picker.is_none());
+
+        app.session.edit_prefs(|p| p.tools.stylus_double_tap = StylusDoubleTap::Off);
+        super::apply_pen_gesture(&mut app, crate::stylus::PenGesture::DoubleTap, [8.0, 8.0]);
+        assert_eq!(app.ui.tool, Tool::Brush);
+        app.session.edit_prefs(|p| p.tools.stylus_double_tap = StylusDoubleTap::Eraser);
+        super::apply_pen_gesture(&mut app, crate::stylus::PenGesture::DoubleTap, [8.0, 8.0]);
+        assert_eq!(app.ui.tool, Tool::Eraser);
+        super::apply_pen_gesture(&mut app, crate::stylus::PenGesture::DoubleTap, [8.0, 8.0]);
+        assert_eq!(app.ui.tool, Tool::Brush);
+    }
+
+    #[test]
+    fn long_press_menu_opens_with_its_top_left_on_the_last_pen_lift() {
+        use crate::canvas::{ToolEvent, ViewXform, tool_event};
+        use crate::state::Tool;
+        use crate::stylus::{PenGesture, PenSample, PointerSource};
+        let mut app = crate::PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        app.run("file.new", serde_json::json!({"width": 200, "height": 120, "background": "white"})).unwrap();
+        app.ui.views[0].center = [100.0, 60.0];
+        app.ui.views[0].zoom = 2.0;
+        app.ui.views[0].fit_pending = false;
+        app.last_canvas_rect = egui::Rect::from_min_size(egui::pos2(10.0, 20.0), egui::vec2(400.0, 300.0));
+        app.ui.tool = Tool::Brush;
+        app.session.edit_prefs(|p| p.tools.stylus_long_press = StylusLongPress::ContextMenu);
+        app.stylus.feed.report(PointerSource::Pen, Some(PenSample { pressure: 0.8, ..Default::default() }));
+        tool_event(&mut app, ToolEvent::Down { x: 40.0, y: 30.0, pressure: 0.8 }, egui::Modifiers::NONE);
+        tool_event(&mut app, ToolEvent::Up { x: 48.0, y: 36.0 }, egui::Modifiers::NONE);
+        app.stylus.feed.report(PointerSource::Mouse, None);
+        tool_event(&mut app, ToolEvent::Down { x: 90.0, y: 80.0, pressure: 1.0 }, egui::Modifiers::NONE);
+        tool_event(&mut app, ToolEvent::Up { x: 90.0, y: 80.0 }, egui::Modifiers::NONE);
+        let expected = ViewXform::active(&app).unwrap().to_screen(48.0, 36.0);
+        app.stylus.feed.push_gesture(PenGesture::LongPress, 1_000.0);
+        super::drain_stylus_gestures(&mut app, &egui::Context::default());
+        assert_eq!(app.ui.brush_picker, Some([expected.x, expected.y]), "menu top-left is the last pen lift, not the pen press or later mouse click");
     }
 }

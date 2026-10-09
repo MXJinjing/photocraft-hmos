@@ -272,3 +272,33 @@ fn gpu_backend_round_trips_and_validates() {
         assert_eq!(GpuBackend::parse(n).map(GpuBackend::name), Some(*n));
     }
 }
+
+#[test]
+fn stylus_tools_preferences_persist_validate_and_default_for_old_settings() {
+    let mut s = session();
+    s.execute(
+        "prefs.set",
+        json!({"values": {
+            "tools.blockFingerInput": true,
+            "tools.stylusDoubleTap": "previous",
+            "tools.stylusLongPress": "off"
+        }}),
+    )
+    .unwrap();
+    let mut restored = Session::new();
+    restored.load_prefs_json(&s.prefs_to_json()).unwrap();
+    assert!(restored.prefs().tools.block_finger_input);
+    assert_eq!(restored.prefs().tools.stylus_double_tap, StylusDoubleTap::Previous);
+    assert_eq!(restored.prefs().tools.stylus_long_press, StylusLongPress::Off);
+    let before = s.prefs().clone();
+    for path in ["tools.stylusDoubleTap", "tools.stylusLongPress"] {
+        for invalid in [json!("invalid"), json!(7), Value::Null] {
+            assert!(s.execute("prefs.set", json!({"values": {"tools.blockFingerInput": false, path: invalid}})).is_err());
+            assert_eq!(s.prefs(), &before, "invalid gesture choices must not partially change preferences");
+        }
+    }
+    restored.load_prefs_json(r#"{"tools":{"useTabletPressure":false}}"#).unwrap();
+    assert!(!restored.prefs().tools.block_finger_input);
+    assert_eq!(restored.prefs().tools.stylus_double_tap, StylusDoubleTap::Eraser);
+    assert_eq!(restored.prefs().tools.stylus_long_press, StylusLongPress::ContextMenu);
+}

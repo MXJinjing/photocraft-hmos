@@ -9,7 +9,8 @@
 //!   winit drops the pen's tilt and rotation, so those stay 0.
 //! - **Web**: eframe forwards touch force but not pen pointer events, so the web runner listens
 //!   to `pointerdown`/`pointermove` itself and writes `pressure`, `tiltX`, `tiltY`, `twist` and
-//!   the eraser button of `pointerType == "pen"` events into the [`StylusFeed`].
+//!   the eraser button of `pointerType == "pen"` events into the [`StylusFeed`], plus the
+//!   `pointerType` so fingers can be told from the pen.
 //! - **macOS**: winit 0.30 drops `NSEvent` tablet data, so the desktop app installs an AppKit
 //!   local event monitor (the `photocraft-tablet` crate) that writes pressure, tilt, rotation and
 //!   the eraser end into the [`StylusFeed`] before winit handles each event.
@@ -21,16 +22,21 @@
 //!
 //! Preferences › Tools › Use Tablet Pressure off makes a pen paint like a mouse. Flipping the pen
 //! to its eraser end selects the Eraser tool and flipping back restores the previous tool, as in
-//! Photoshop.
+//! Photoshop. Platform adapters submit [`StylusInput`] to the shared feed. The shell consumes
+//! normalised double-tap and long-press actions without knowing which SDK produced them.
+//! The versioned host transport is documented in `docs/stylus-input.md`.
 //!
 //! Automation simulates a pen with `ui.pointer` events carrying `pressure`, `tiltX`, `tiltY`
 //! and `rotation`.
 
 use std::sync::{Arc, Mutex};
 
+use serde::{Deserialize, Serialize};
+
 /// One stylus reading. Tilt is in degrees (-90..90, W3C Pointer Events convention), rotation in
 /// degrees 0..360.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
 pub struct PenSample {
     pub pressure: f32,
     pub tilt_x: f32,
@@ -61,19 +67,198 @@ impl PenSample {
     }
 }
 
+/// What last wrote the pointer slot: a mouse, a pen, or a finger.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum PointerSource {
+    #[default]
+    Mouse,
+    Pen,
+    Touch,
+}
+
+impl PointerSource {
+    /// W3C `pointerType`: `"pen"`, `"touch"`, `"mouse"`, or anything else.
+    pub fn from_pointer_type(ty: &str) -> Self {
+        match ty {
+            "pen" => Self::Pen,
+            "touch" => Self::Touch,
+            _ => Self::Mouse,
+        }
+    }
+}
+
+/// Platform-independent pen actions. Adapters translate physical gestures (for example a
+/// squeeze or a held side button) into these actions; tool preferences decide what they do.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum PenGesture {
+    DoubleTap,
+    LongPress,
+}
+
+/// The common input contract for browser, native tablet and host adapters.
+/// All timestamps use milliseconds on the same clock (web adapters use Unix epoch time).
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "camelCase", rename_all_fields = "camelCase")]
+pub enum StylusInput {
+    Pointer { source: PointerSource, sample: Option<PenSample> },
+    BarrelButton { pressed: bool, timestamp_ms: f64 },
+    Gesture { gesture: PenGesture, timestamp_ms: f64 },
+    Connection { connected: bool },
+}
+
+/// Barrel-button timing. A short second press within [`DOUBLE_MS`] is a double-tap; holding for
+/// [`LONG_MS`] is a long-press. A long-press does not also count as a tap.
+#[derive(Clone, Debug, Default)]
+pub struct BarrelWatch {
+    down_at: Option<f64>,
+    last_tap_up: Option<f64>,
+    long_sent: bool,
+}
+
+impl BarrelWatch {
+    /// Two short barrel presses this close (ms) are one double-tap.
+    pub const DOUBLE_MS: f64 = 400.0;
+    /// Holding the barrel this long (ms) is a long-press.
+    pub const LONG_MS: f64 = 450.0;
+
+    /// `down` is the barrel button this sample. `now` is a monotonic millisecond clock.
+    pub fn update(&mut self, down: bool, now: f64) -> Option<PenGesture> {
+        if !now.is_finite() {
+            return None;
+        }
+        if down {
+            let started = *self.down_at.get_or_insert(now);
+            if !self.long_sent && now - started >= Self::LONG_MS {
+                self.long_sent = true;
+                self.last_tap_up = None;
+                return Some(PenGesture::LongPress);
+            }
+            return None;
+        }
+        let started = self.down_at.take()?;
+        let was_long = std::mem::take(&mut self.long_sent);
+        if was_long || now - started >= Self::LONG_MS {
+            self.last_tap_up = None;
+            return None;
+        }
+        if let Some(prev) = self.last_tap_up.take()
+            && now - prev <= Self::DOUBLE_MS
+        {
+            return Some(PenGesture::DoubleTap);
+        }
+        self.last_tap_up = Some(now);
+        None
+    }
+}
+
+#[derive(Debug)]
+struct Slot {
+    sample: Option<PenSample>,
+    source: PointerSource,
+    gestures: Vec<PenGesture>,
+    barrel: BarrelWatch,
+    last_gesture: Option<(PenGesture, f64)>,
+    /// Attachment reported by an adapter, distinct from contact with the screen.
+    connected: bool,
+}
+
+impl Default for Slot {
+    fn default() -> Self {
+        Self { sample: None, source: PointerSource::Mouse, gestures: Vec::new(), barrel: BarrelWatch::default(), last_gesture: None, connected: false }
+    }
+}
+
+fn enqueue_gesture(slot: &mut Slot, gesture: PenGesture, now: f64) {
+    if let Some((prev, at)) = slot.last_gesture
+        && prev == gesture
+        && now.is_finite()
+        && at.is_finite()
+        && (now - at).abs() < 350.0
+    {
+        return;
+    }
+    slot.last_gesture = Some((gesture, now));
+    slot.gestures.push(gesture);
+    let overflow = slot.gestures.len().saturating_sub(8);
+    if overflow > 0 {
+        slot.gestures.drain(0..overflow);
+    }
+}
+
 /// Shared slot a platform backend writes the current pen sample into (`None` = no pen down).
 /// Cloning shares the slot.
 #[derive(Clone, Debug, Default)]
-pub struct StylusFeed(Arc<Mutex<Option<PenSample>>>);
+pub struct StylusFeed(Arc<Mutex<Slot>>);
 
 impl StylusFeed {
-    pub fn set(&self, s: Option<PenSample>) {
-        if let Ok(mut g) = self.0.lock() {
-            *g = s.map(PenSample::sanitized);
+    /// Submit normalised input from any adapter. True requests a UI repaint; false means the
+    /// input was unchanged, a side-button transition has no action yet, or its time is invalid.
+    pub fn submit(&self, input: StylusInput) -> bool {
+        match input {
+            StylusInput::Pointer { source, sample } => {
+                self.report(source, sample);
+                true
+            }
+            StylusInput::BarrelButton { pressed, timestamp_ms } => self.report_barrel(pressed, timestamp_ms).is_some(),
+            StylusInput::Gesture { gesture, timestamp_ms } => {
+                if !timestamp_ms.is_finite() {
+                    return false;
+                }
+                self.push_gesture(gesture, timestamp_ms);
+                true
+            }
+            StylusInput::Connection { connected } => self.set_connected(connected),
         }
     }
+
+    /// Convenience for native tablet monitors that only provide pen samples.
+    pub fn set(&self, s: Option<PenSample>) {
+        let source = if s.is_some() { PointerSource::Pen } else { PointerSource::Mouse };
+        self.submit(StylusInput::Pointer { source, sample: s });
+    }
     pub fn get(&self) -> Option<PenSample> {
-        self.0.lock().ok().and_then(|g| *g)
+        self.0.lock().ok().and_then(|g| g.sample)
+    }
+    pub fn source(&self) -> PointerSource {
+        self.0.lock().ok().map_or(PointerSource::Mouse, |g| g.source)
+    }
+    /// Web Pointer Events: record the device and, for a pen contact, its sample.
+    pub fn report(&self, source: PointerSource, sample: Option<PenSample>) {
+        if let Ok(mut g) = self.0.lock() {
+            g.source = source;
+            g.sample = if source == PointerSource::Pen { sample.map(PenSample::sanitized) } else { None };
+        }
+    }
+    /// Barrel button from a pen Pointer Event. Returns the gesture just recognised, if any.
+    pub fn report_barrel(&self, down: bool, now_ms: f64) -> Option<PenGesture> {
+        let Ok(mut g) = self.0.lock() else { return None };
+        let gesture = g.barrel.update(down, now_ms)?;
+        enqueue_gesture(&mut g, gesture, now_ms);
+        Some(gesture)
+    }
+    /// An adapter named the action directly. Repeats within 350 ms are dropped so the host
+    /// event and a browser side-button fallback cannot run the action twice.
+    pub fn push_gesture(&self, gesture: PenGesture, now_ms: f64) {
+        if let Ok(mut g) = self.0.lock() {
+            enqueue_gesture(&mut g, gesture, now_ms);
+        }
+    }
+    /// Whether a stylus is attached, as reported by the platform adapter.
+    pub fn set_connected(&self, on: bool) -> bool {
+        let Ok(mut g) = self.0.lock() else { return false };
+        let changed = g.connected != on;
+        g.connected = on;
+        changed
+    }
+    /// A stylus is attached right now. False until the platform says otherwise.
+    pub fn connected(&self) -> bool {
+        self.0.lock().is_ok_and(|g| g.connected)
+    }
+    /// Gestures queued since the last take, oldest first.
+    pub fn take_gestures(&self) -> Vec<PenGesture> {
+        self.0.lock().ok().map(|mut g| std::mem::take(&mut g.gestures)).unwrap_or_default()
     }
 }
 
@@ -88,6 +273,14 @@ pub struct Stylus {
     end: Option<bool>,
     /// The tool to restore when the pen tip comes back after the eraser end switched tools.
     pub(crate) tool_before_eraser: Option<crate::state::Tool>,
+    /// Tool before the latest change, for double-tap › Previous tool.
+    previous_tool: Option<crate::state::Tool>,
+    /// Last tool [`Self::note_tool`] saw, so a change can be told from a repeat.
+    tool_seen: Option<crate::state::Tool>,
+    /// Tool to restore when double-tap swaps back from the Eraser.
+    double_tap_restore: Option<crate::state::Tool>,
+    /// Last pen contact in document coordinates. The menu uses the lift point after a stroke.
+    pub(crate) last_pen_point: Option<[f64; 2]>,
     /// Force of the touch/pen contact currently down (egui `Event::Touch`).
     touch: Option<f32>,
     /// The contact ended this frame: keep its force for this frame's last tool events, clear next frame.
@@ -98,7 +291,19 @@ pub struct Stylus {
 
 impl Default for Stylus {
     fn default() -> Self {
-        Self { feed: StylusFeed::default(), use_pressure: true, end: None, tool_before_eraser: None, touch: None, lifted: false, stroke: Vec::new() }
+        Self {
+            feed: StylusFeed::default(),
+            use_pressure: true,
+            end: None,
+            tool_before_eraser: None,
+            previous_tool: None,
+            tool_seen: None,
+            double_tap_restore: None,
+            last_pen_point: None,
+            touch: None,
+            lifted: false,
+            stroke: Vec::new(),
+        }
     }
 }
 
@@ -122,13 +327,23 @@ impl Stylus {
         }
     }
 
-    /// The current pen sample, `None` for a mouse (and for any pen while Use Tablet Pressure is
-    /// off).
+    /// The current pen sample, `None` for a mouse, a finger, or any pen while Use Tablet Pressure
+    /// is off. Fingers never carry pressure: the brush uses the full tip size.
     pub fn sample(&self) -> Option<PenSample> {
-        if !self.use_pressure {
+        if !self.use_pressure || self.is_finger() {
             return None;
         }
         self.feed.get().or(self.touch.map(|pressure| PenSample { pressure, ..Default::default() }))
+    }
+
+    /// Last Pointer Event was a finger (`pointerType == "touch"`).
+    pub fn is_finger(&self) -> bool {
+        self.feed.source() == PointerSource::Touch
+    }
+
+    /// Last Pointer Event was a pen (`pointerType == "pen"`), including hover.
+    pub fn is_pen(&self) -> bool {
+        self.feed.source() == PointerSource::Pen
     }
 
     /// Did the pen just flip to its eraser end (`Some(true)`) or back to its tip (`Some(false)`)?
@@ -138,6 +353,54 @@ impl Stylus {
         let flipped = self.end.map_or(eraser, |e| e != eraser);
         self.end = Some(eraser);
         flipped.then_some(eraser)
+    }
+
+    /// Remember a pen press or lift for positioning the stylus context menu.
+    pub fn note_pen_point(&mut self, at: [f64; 2]) {
+        if at.iter().all(|v| v.is_finite()) {
+            self.last_pen_point = Some(at);
+        }
+    }
+
+    /// Remember a tool change so double-tap can return to the previous tool.
+    pub fn note_tool(&mut self, current: crate::state::Tool) {
+        if self.tool_seen == Some(current) {
+            return;
+        }
+        if self.tool_seen.is_some() {
+            self.previous_tool = self.tool_seen;
+        }
+        self.tool_seen = Some(current);
+    }
+
+    /// Double-tap › current tool and Eraser: swap, then swap back to the tool double-tap left.
+    pub fn toggle_eraser_tool(&mut self, tool: &mut crate::state::Tool) {
+        use crate::state::Tool;
+        if *tool == Tool::Eraser {
+            let back = self.double_tap_restore.take().or(self.previous_tool).filter(|t| *t != Tool::Eraser);
+            if let Some(back) = back {
+                self.previous_tool = Some(Tool::Eraser);
+                self.tool_seen = Some(back);
+                *tool = back;
+            }
+            return;
+        }
+        self.double_tap_restore = Some(*tool);
+        self.previous_tool = Some(*tool);
+        self.tool_seen = Some(Tool::Eraser);
+        *tool = Tool::Eraser;
+    }
+
+    /// Double-tap › previous tool: swap with the tool used just before this one.
+    pub fn switch_previous_tool(&mut self, tool: &mut crate::state::Tool) {
+        let Some(prev) = self.previous_tool else { return };
+        if prev == *tool {
+            return;
+        }
+        let current = *tool;
+        self.previous_tool = Some(current);
+        self.tool_seen = Some(prev);
+        *tool = prev;
     }
 
     /// Switch to the Eraser when the pen's eraser end comes in, and back to the previous tool when
@@ -213,6 +476,16 @@ mod tests {
         let mut s = Stylus::default();
         s.update(&[egui::Event::PointerMoved(egui::pos2(3.0, 4.0))]);
         assert_eq!(s.pressure(), 1.0);
+        assert_eq!(s.sample(), None);
+    }
+
+    #[test]
+    fn a_finger_paints_at_full_tip_size() {
+        let mut s = Stylus::default();
+        s.feed.report(PointerSource::Touch, None);
+        s.update(&[touch(egui::TouchPhase::Start, Some(0.2))]);
+        assert!(s.is_finger());
+        assert_eq!(s.pressure(), 1.0, "fingers never use contact force as brush pressure");
         assert_eq!(s.sample(), None);
     }
 
@@ -326,5 +599,76 @@ mod tests {
         app.stylus.feed.set(pen(false));
         assert!(!Stylus::sync_eraser_tool(&mut app));
         assert_eq!(app.ui.tool, Tool::Eraser);
+    }
+
+    #[test]
+    fn connection_starts_off_and_only_the_platform_sets_it() {
+        let feed = StylusFeed::default();
+        assert!(!feed.connected());
+        assert!(feed.set_connected(true));
+        assert!(feed.connected());
+        assert!(!feed.set_connected(true), "unchanged");
+        assert!(feed.set_connected(false));
+        assert!(!feed.connected());
+    }
+
+    #[test]
+    fn barrel_double_tap_and_long_press_are_distinct() {
+        let mut w = BarrelWatch::default();
+        assert_eq!(w.update(true, 0.0), None);
+        assert_eq!(w.update(false, 40.0), None, "one short press waits for a second");
+        assert_eq!(w.update(true, 120.0), None);
+        assert_eq!(w.update(false, 160.0), Some(PenGesture::DoubleTap));
+
+        let mut held = BarrelWatch::default();
+        assert_eq!(held.update(true, 0.0), None);
+        assert_eq!(held.update(true, BarrelWatch::LONG_MS), Some(PenGesture::LongPress));
+        assert_eq!(held.update(false, BarrelWatch::LONG_MS + 20.0), None, "releasing a long-press is not a tap");
+        assert_eq!(held.update(true, 1000.0), None);
+        assert_eq!(held.update(false, 1040.0), None, "the long-press consumed the previous tap");
+    }
+
+    #[test]
+    fn host_and_barrel_gestures_do_not_double_fire() {
+        let feed = StylusFeed::default();
+        feed.push_gesture(PenGesture::DoubleTap, 1_000.0);
+        assert!(feed.report_barrel(true, 1_050.0).is_none());
+        assert!(feed.report_barrel(false, 1_080.0).is_none());
+        assert!(feed.report_barrel(true, 1_140.0).is_none());
+        assert_eq!(feed.report_barrel(false, 1_180.0), Some(PenGesture::DoubleTap));
+        assert_eq!(feed.take_gestures(), vec![PenGesture::DoubleTap], "the barrel echo of the host action is dropped");
+        feed.push_gesture(PenGesture::LongPress, 2_000.0);
+        feed.push_gesture(PenGesture::LongPress, 2_100.0);
+        assert_eq!(feed.take_gestures(), vec![PenGesture::LongPress]);
+    }
+
+    #[test]
+    fn double_tap_swaps_the_current_tool_and_the_eraser_then_back() {
+        use crate::state::Tool;
+        let mut stylus = Stylus::default();
+        let mut tool = Tool::Brush;
+        stylus.note_tool(tool);
+        stylus.toggle_eraser_tool(&mut tool);
+        assert_eq!(tool, Tool::Eraser);
+        stylus.toggle_eraser_tool(&mut tool);
+        assert_eq!(tool, Tool::Brush);
+        stylus.toggle_eraser_tool(&mut tool);
+        assert_eq!(tool, Tool::Eraser);
+    }
+
+    #[test]
+    fn double_tap_previous_swaps_back_and_forth() {
+        use crate::state::Tool;
+        let mut stylus = Stylus::default();
+        let mut tool = Tool::Brush;
+        stylus.note_tool(tool);
+        stylus.switch_previous_tool(&mut tool);
+        assert_eq!(tool, Tool::Brush, "nothing to return to yet");
+        tool = Tool::Pencil;
+        stylus.note_tool(tool);
+        stylus.switch_previous_tool(&mut tool);
+        assert_eq!(tool, Tool::Brush);
+        stylus.switch_previous_tool(&mut tool);
+        assert_eq!(tool, Tool::Pencil);
     }
 }

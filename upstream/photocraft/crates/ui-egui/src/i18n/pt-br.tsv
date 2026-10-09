@@ -1645,7 +1645,9 @@
 	Std Dev:	Desvio padrão:
 	Studio (Dark)	Studio (escuro)
 	Studio (Light)	Studio (claro)
+	Stylus	Caneta
 	Stylus Wheel	Roda da caneta
+	Block finger input	Bloquear entrada por dedo
 	Subtract	Subtrair
 	Tabloid	Tabloide
 	Text Replacement	Substituição de texto
@@ -2571,3 +2573,8 @@ cameraRaw	Whites	Brancos
 	% of all commits	% de todos os commits
 	Lines +/−	Linhas +/−
 	@{login}: {prs} PRs, {commits} commits, +{added} / −{deleted} lines (Δ {delta}), +{binAdded} / −{binDeleted} binary assets, {first} – {last}	@{login}: {prs} PRs, {commits} commits, +{added} / −{deleted} linhas (Δ {delta}), +{binAdded} / −{binDeleted} arquivos binários, {first} – {last}
+	Double-tap pen body	Toque duplo no corpo da caneta
+	Current tool and Eraser	Ferramenta atual e borracha
+	Previous tool	Ferramenta anterior
+	Long-press pen body	Pressionar o corpo da caneta
+	Show or hide context menu	Mostrar ou ocultar o menu de contexto

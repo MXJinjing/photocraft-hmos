@@ -1676,7 +1676,9 @@
 	Std Dev:	Sm. odchylka:
 	Studio (Dark)	Studio (tmavý)
 	Studio (Light)	Studio (světlý)
+	Stylus	Stylus
 	Stylus Wheel	Kolečko stylusu
+	Block finger input	Blokovat zadávání prstem
 	Subtract	Odečíst
 	Tabloid	Tabloid
 	Text Replacement	Nahrazení textu
@@ -2133,3 +2135,8 @@ cameraRaw	Color	Barvy
 	% of all commits	% všech commitů
 	Lines +/−	Řádky +/−
 	@{login}: {prs} PRs, {commits} commits, +{added} / −{deleted} lines (Δ {delta}), +{binAdded} / −{binDeleted} binary assets, {first} – {last}	@{login}: PR: {prs}, commity: {commits}, řádky +{added} / −{deleted} (Δ {delta}), binární soubory +{binAdded} / −{binDeleted}, {first} – {last}
+	Double-tap pen body	Dvojité klepnutí na tělo pera
+	Current tool and Eraser	Aktuální nástroj a guma
+	Previous tool	Předchozí nástroj
+	Long-press pen body	Dlouhé stisknutí těla pera
+	Show or hide context menu	Zobrazit nebo skrýt místní nabídku

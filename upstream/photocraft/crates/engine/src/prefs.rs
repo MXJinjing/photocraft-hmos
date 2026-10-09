@@ -88,6 +88,14 @@ choice!(
     /// pointer (Photoshop), or erase with the current brush while dragging (Krita, Paint).
     RightClickPaint { BrushPicker = "brushPicker", Erase = "erase" } default BrushPicker
 );
+choice!(
+    /// Action for a double-tap on the pen body.
+    StylusDoubleTap { Eraser = "eraser", Previous = "previous", Off = "off" } default Eraser
+);
+choice!(
+    /// Action for a pen-body long-press or squeeze.
+    StylusLongPress { ContextMenu = "contextMenu", Off = "off" } default ContextMenu
+);
 choice!(OtherCursor { Standard = "standard", Precise = "precise" } default Standard);
 choice!(CheckerSize { None = "none", Small = "small", Medium = "medium", Large = "large" } default Medium);
 choice!(CheckerColors { Light = "light", Medium = "medium", Dark = "dark", Red = "red", Orange = "orange", Green = "green", Blue = "blue", Purple = "purple", Custom = "custom" } default Light);
@@ -284,6 +292,10 @@ pub struct Tools {
     pub right_click_with_painting_tools: RightClickPaint,
     /// Pen tablets: pressure, tilt and rotation reach the brush (off: a pen paints like a mouse).
     pub use_tablet_pressure: bool,
+    /// Fingers navigate the canvas while the pen operates the current tool.
+    pub block_finger_input: bool,
+    pub stylus_double_tap: StylusDoubleTap,
+    pub stylus_long_press: StylusLongPress,
 }
 
 impl Default for Tools {
@@ -300,6 +312,9 @@ impl Default for Tools {
             double_click_layer_mask_launches_select_and_mask: true,
             right_click_with_painting_tools: RightClickPaint::BrushPicker,
             use_tablet_pressure: true,
+            block_finger_input: false,
+            stylus_double_tap: StylusDoubleTap::Eraser,
+            stylus_long_press: StylusLongPress::ContextMenu,
         }
     }
 }
@@ -883,6 +898,8 @@ pub fn choices(path: &str) -> Option<&'static [&'static str]> {
         "cursors.painting" => PaintingCursor::NAMES,
         "cursors.other" => OtherCursor::NAMES,
         "tools.rightClickWithPaintingTools" => RightClickPaint::NAMES,
+        "tools.stylusDoubleTap" => StylusDoubleTap::NAMES,
+        "tools.stylusLongPress" => StylusLongPress::NAMES,
         "transparencyAndGamut.gridSize" => CheckerSize::NAMES,
         "transparencyAndGamut.gridColors" => CheckerColors::NAMES,
         "unitsAndRulers.rulers" | "guidesGridAndSlices.gridUnit" => Unit::NAMES,

@@ -482,7 +482,28 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
             let r = ui.max_rect();
             ui.painter().line_segment([r.left_top(), r.right_top()], Stroke::new(1.0, t.separator));
             ui.painter().line_segment([r.left_bottom(), r.right_bottom()], Stroke::new(1.0, t.separator));
-            ui.horizontal_centered(|ui| {
+            // Stylus menu stays at the right end, whatever tool options are showing.
+            let labeled = r.width() >= 560.0;
+            let slot_w = crate::chrome_ui::stylus_menu_width(ui, labeled);
+            let gap = 8.0;
+            let split = (r.right() - slot_w - gap).max(r.left());
+            let content = Rect::from_min_max(r.min, pos2(split, r.bottom()));
+            let stylus = Rect::from_min_max(pos2((r.right() - slot_w).max(r.left()), r.top()), r.max);
+            let mut content_ui = ui.new_child(egui::UiBuilder::new().max_rect(content));
+            content_ui.set_clip_rect(content.intersect(ui.clip_rect()));
+            // A narrow window (a Pad in portrait, or panels open) clips the tool options.
+            // Scroll sideways instead of hiding the rest; the stylus control stays pinned.
+            egui::ScrollArea::horizontal()
+                .id_salt("pc-options-bar")
+                .auto_shrink([false, false])
+                .scroll_source(egui::scroll_area::ScrollSource {
+                    scroll_bar: true,
+                    drag: egui::scroll_area::DragScroll::Always,
+                    mouse_wheel: true,
+                })
+                .show(&mut content_ui, |ui| {
+                    ui.set_min_height(content.height());
+                    ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
                 if t.pro {
                     crate::chrome_ui::home_button(app, ui);
                     widgets::vline(ui, 22.0);
@@ -536,8 +557,13 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                             b.mode = mode;
                         }
                         percent_field(ui, tl!("Opacity"), &mut b.opacity, 0.0..=100.0, 62.0);
-                        if icons::button(ui, "circle-dot", 24.0, b.pressure_opacity, tl!("Always use pressure for opacity")).clicked() {
-                            b.pressure_opacity = !b.pressure_opacity;
+                        let pressure_opacity = if tool == Tool::Eraser { app.ui.tool_options.eraser_pressure_opacity } else { b.pressure_opacity };
+                        if icons::button(ui, "circle-dot", 24.0, pressure_opacity, tl!("Always use pressure for opacity")).clicked() {
+                            if tool == Tool::Eraser {
+                                app.ui.tool_options.eraser_pressure_opacity = !pressure_opacity;
+                            } else {
+                                b.pressure_opacity = !pressure_opacity;
+                            }
                         }
                         percent_field(ui, tl!("Flow"), &mut b.flow, 1.0..=100.0, 62.0);
                         let _ = icons::button(ui, "sparkles", 24.0, false, tl!("Enable airbrush-style build-up effects"));
@@ -545,8 +571,13 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                         smoothing_field(ui, b, 58.0);
                         let _ = icons::button(ui, "settings", 24.0, false, tl!("Set additional smoothing options"));
                         widgets::vline(ui, 22.0);
-                        if icons::button(ui, "circle-dot", 24.0, b.pressure_size, tl!("Always use pressure for size")).clicked() {
-                            b.pressure_size = !b.pressure_size;
+                        let pressure_size = if tool == Tool::Eraser { app.ui.tool_options.eraser_pressure_size } else { b.pressure_size };
+                        if icons::button(ui, "circle-dot", 24.0, pressure_size, tl!("Always use pressure for size")).clicked() {
+                            if tool == Tool::Eraser {
+                                app.ui.tool_options.eraser_pressure_size = !pressure_size;
+                            } else {
+                                b.pressure_size = !pressure_size;
+                            }
                         }
                         let _ = icons::button(ui, "arrow-left-right", 24.0, false, tl!("Set painting symmetry options"));
                     }
@@ -585,8 +616,13 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                         opt_label(ui, tl!("Smoothing"));
                         smoothing_field(ui, b, 66.0);
                         widgets::vline(ui, 22.0);
-                        widgets::toggle(ui, &mut b.pressure_size, tl!("Pressure for Size"));
-                        widgets::toggle(ui, &mut b.pressure_opacity, tl!("Pressure for Opacity"));
+                        if tool == Tool::Eraser {
+                            widgets::toggle(ui, &mut app.ui.tool_options.eraser_pressure_size, tl!("Pressure for Size"));
+                            widgets::toggle(ui, &mut app.ui.tool_options.eraser_pressure_opacity, tl!("Pressure for Opacity"));
+                        } else {
+                            widgets::toggle(ui, &mut b.pressure_size, tl!("Pressure for Size"));
+                            widgets::toggle(ui, &mut b.pressure_opacity, tl!("Pressure for Opacity"));
+                        }
                     }
                     Tool::MixerBrush => {
                         picked = brush_preset_chip(ui, b, &app.session.tools.presets);
@@ -921,7 +957,13 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                 }
                 crate::brush_panel::commit_gesture(app, ui.ctx(), &brush_before, &brush);
                 crate::brush_picker::apply(app, ui.ctx(), picked);
-            });
+                    });
+                });
+            if split > r.left() + 8.0 {
+                ui.painter().line_segment([pos2(split + gap * 0.5, r.top() + 8.0), pos2(split + gap * 0.5, r.bottom() - 8.0)], Stroke::new(1.0, t.separator));
+            }
+            let mut stylus_ui = ui.new_child(egui::UiBuilder::new().max_rect(stylus).layout(egui::Layout::right_to_left(egui::Align::Center)));
+            crate::chrome_ui::stylus_menu(app, &mut stylus_ui);
         });
 }
 

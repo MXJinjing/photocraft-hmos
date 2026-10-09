@@ -756,6 +756,11 @@ pub fn body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Valu
 }
 
 fn humanize(key: &str) -> String {
+    match key {
+        "stylusDoubleTap" => return "Double-tap pen body".into(),
+        "stylusLongPress" => return "Long-press pen body".into(),
+        _ => {}
+    }
     let mut s = String::new();
     for (i, ch) in key.chars().enumerate() {
         if i == 0 {
@@ -771,6 +776,14 @@ fn humanize(key: &str) -> String {
 }
 
 fn choice_label(v: &str) -> String {
+    // Reuse the exact menu labels for the new gesture preferences, including translation audits.
+    let mut stylus_options = crate::chrome_ui::STYLUS_DOUBLE_TAP_OPTIONS
+        .iter()
+        .map(|(mode, label)| (mode.name(), *label))
+        .chain(crate::chrome_ui::STYLUS_LONG_PRESS_OPTIONS.iter().map(|(mode, label)| (mode.name(), *label)));
+    if let Some((_, label)) = stylus_options.find(|(name, _)| *name == v) {
+        return label.into();
+    }
     match v {
         "cm" => "Centimeters".into(),
         "mm" => "Millimeters".into(),
@@ -954,7 +967,10 @@ fn section_fields(ui: &mut egui::Ui, section: &str, obj: &mut Map<String, Value>
             let path = format!("{section}.{k}");
             // Settings nothing reads yet stay out of the dialog (issue #204); their stored values
             // pass through untouched.
-            if prefs::is_hidden(&path) || (section == "performance" && matches!(k.as_str(), "useGpu" | "gpuBackend" | "renderingMode")) {
+            if (section == "tools" && matches!(k.as_str(), "blockFingerInput" | "stylusDoubleTap" | "stylusLongPress"))
+                || prefs::is_hidden(&path)
+                || (section == "performance" && matches!(k.as_str(), "useGpu" | "gpuBackend" | "renderingMode"))
+            {
                 continue;
             }
             let v = obj.get(&k).cloned().unwrap_or(Value::Null);
@@ -1044,6 +1060,33 @@ fn section_fields(ui: &mut egui::Ui, section: &str, obj: &mut Map<String, Value>
             }
             ui.end_row();
         }
+    });
+    if section == "tools" {
+        stylus_fields(ui, obj);
+    }
+}
+
+/// The draft uses the same preference keys and choices as the options-bar Stylus menu.
+fn stylus_fields(ui: &mut egui::Ui, obj: &mut Map<String, Value>) {
+    let t = Tokens::get(ui.ctx());
+    ui.add_space(10.0);
+    ui.label(RichText::new(tl!("Stylus")).font(crate::theme::semibold(12.5)).color(t.text));
+    let mut blocked = obj.get("blockFingerInput").and_then(Value::as_bool).unwrap_or(false);
+    crate::widgets::checkbox(ui, &mut blocked, tl!("Block finger input"));
+    obj.insert("blockFingerInput".into(), json!(blocked));
+    egui::Grid::new("prefs-stylus").num_columns(2).spacing([14.0, 7.0]).show(ui, |ui| {
+        ui.label(tl!("Double-tap pen body"));
+        let mut double = obj.get("stylusDoubleTap").and_then(Value::as_str).unwrap_or("eraser").to_string();
+        let options: Vec<_> = crate::chrome_ui::STYLUS_DOUBLE_TAP_OPTIONS.iter().map(|(mode, label)| (mode.name().to_string(), tl!(label))).collect();
+        crate::widgets::dropdown(ui, "pref-tools.stylusDoubleTap", &mut double, &options, 240.0);
+        obj.insert("stylusDoubleTap".into(), json!(double));
+        ui.end_row();
+        ui.label(tl!("Long-press pen body"));
+        let mut long = obj.get("stylusLongPress").and_then(Value::as_str).unwrap_or("contextMenu").to_string();
+        let options: Vec<_> = crate::chrome_ui::STYLUS_LONG_PRESS_OPTIONS.iter().map(|(mode, label)| (mode.name().to_string(), tl!(label))).collect();
+        crate::widgets::dropdown(ui, "pref-tools.stylusLongPress", &mut long, &options, 240.0);
+        obj.insert("stylusLongPress".into(), json!(long));
+        ui.end_row();
     });
 }
 
@@ -1786,6 +1829,88 @@ mod tests {
         for n in ["Early", "Late"] {
             assert!(s2.tools.presets.iter().any(|p| p.name == n), "{n}");
         }
+    }
+
+    #[test]
+    fn stylus_menu_and_tools_preferences_share_applied_and_persisted_values() {
+        use crate::chrome_ui::{StylusDoubleTap, StylusLongPress};
+        use egui_kittest::{Harness, kittest::Queryable};
+
+        let (mut app, store) = app_with_store();
+        app.run("file.new", json!({"width": 400, "height": 300})).unwrap();
+        app.session.edit_prefs(|p| {
+            p.interface.language = "en".into();
+            p.interface.theme = prefs::Theme::Studio;
+            p.interface.ui_scale = prefs::UiScale::P100;
+        });
+        let mut h = Harness::builder().with_size(vec2(1280.0, 800.0)).build_eframe(move |cc| {
+            PhotocraftApp::setup_context(&cc.egui_ctx, Default::default());
+            app
+        });
+        h.run_steps(4);
+        h.get_by_label("Stylus").click();
+        h.run_steps(2);
+        h.get_by_label("Block finger input").click();
+        h.run_steps(2);
+        h.get_by_label("Stylus").click();
+        h.run_steps(2);
+        h.get_by_label("Previous tool").click();
+        h.run_steps(2);
+        h.get_by_label("Stylus").click();
+        h.run_steps(2);
+        h.query_all_by_label("Off").last().unwrap().click();
+        h.run_steps(2);
+
+        let id = open_preferences(h.state_mut(), "tools");
+        h.run_steps(3);
+        let draft = &h.state().ui.dialogs.iter().find(|d| d.id == id).unwrap().fields["values"]["tools"];
+        assert_eq!(draft["blockFingerInput"], true);
+        assert_eq!(draft["stylusDoubleTap"], "previous");
+        assert_eq!(draft["stylusLongPress"], "off");
+        assert!(h.query_by_label("Double-tap pen body").is_some());
+        assert!(h.query_by_label("Long-press pen body").is_some());
+        if let Some(dir) = std::env::var_os("PHOTOCRAFT_SETTINGS_SCREENSHOT_DIR") {
+            let dir = std::path::PathBuf::from(dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            h.render().unwrap().save(dir.join("tools-stylus.png")).unwrap();
+        }
+        h.get_by_label("Block finger input").click();
+        h.run_steps(2);
+        h.query_all_by_role(egui::accesskit::Role::ComboBox).find(|n| n.value().as_deref() == Some("Previous tool")).unwrap().click();
+        h.run_steps(2);
+        h.get_by_label("Current tool and Eraser").click();
+        h.run_steps(2);
+        h.query_all_by_role(egui::accesskit::Role::ComboBox).find(|n| n.value().as_deref() == Some("Off")).unwrap().click();
+        h.run_steps(2);
+        h.get_by_label("Show or hide context menu").click();
+        h.run_steps(2);
+        assert!(h.state().session.prefs().tools.block_finger_input, "editing a draft must not change live settings");
+        assert_eq!(h.state().session.prefs().tools.stylus_double_tap, StylusDoubleTap::Previous);
+        h.get_by_label("Apply").click();
+        h.run_steps(3);
+        assert!(!h.state().session.prefs().tools.block_finger_input);
+        assert_eq!(h.state().session.prefs().tools.stylus_double_tap, StylusDoubleTap::Eraser);
+        assert_eq!(h.state().session.prefs().tools.stylus_long_press, StylusLongPress::ContextMenu);
+        // Cancel a later edit; the previously applied values remain shared with the menu.
+        h.get_by_label("Block finger input").click();
+        h.run_steps(2);
+        h.get_by_label("Cancel").click();
+        h.run_steps(3);
+        assert!(!h.state().session.prefs().tools.block_finger_input);
+        h.state_mut().stylus.feed.push_gesture(crate::stylus::PenGesture::DoubleTap, 2000.0);
+        let ctx = h.ctx.clone();
+        crate::chrome_ui::drain_stylus_gestures(h.state_mut(), &ctx);
+        assert_eq!(h.state().ui.tool, crate::state::Tool::Eraser, "the gesture must use the applied Tools setting");
+        h.get_by_label("Stylus").click();
+        h.run_steps(2);
+        h.get_by_label("Previous tool").click();
+        h.run_steps(3);
+        let id = open_preferences(h.state_mut(), "tools");
+        assert_eq!(h.state().ui.dialogs.iter().find(|d| d.id == id).unwrap().fields["values"]["tools"]["stylusDoubleTap"], "previous");
+        let (restarted, _) = app_with_saved(store.lock().unwrap().clone());
+        assert!(!restarted.session.prefs().tools.block_finger_input);
+        assert_eq!(restarted.session.prefs().tools.stylus_double_tap, StylusDoubleTap::Previous);
+        assert_eq!(restarted.session.prefs().tools.stylus_long_press, StylusLongPress::ContextMenu);
     }
 
     #[test]

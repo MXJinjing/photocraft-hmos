@@ -1641,7 +1641,9 @@
 	Std Dev:	표준 편차:
 	Studio (Dark)	스튜디오(어둡게)
 	Studio (Light)	스튜디오(밝게)
+	Stylus	스타일러스
 	Stylus Wheel	스타일러스 휠
+	Block finger input	손가락 입력 차단
 	Subtract	빼기
 	Tabloid	타블로이드
 	Text Replacement	텍스트 대체
@@ -2717,3 +2719,8 @@ cameraRaw	Color	색상
 	% of all commits	전체 커밋 대비 %
 	Lines +/−	줄 +/−
 	@{login}: {prs} PRs, {commits} commits, +{added} / −{deleted} lines (Δ {delta}), +{binAdded} / −{binDeleted} binary assets, {first} – {last}	@{login}: PR {prs}개, 커밋 {commits}개, 줄 +{added} / −{deleted} (Δ {delta}), 바이너리 +{binAdded} / −{binDeleted}, {first} – {last}
+	Double-tap pen body	펜 몸통 두 번 탭
+	Current tool and Eraser	현재 도구와 지우개
+	Previous tool	이전 도구
+	Long-press pen body	펜 몸통 길게 누르기
+	Show or hide context menu	상황에 맞는 메뉴 표시/숨기기

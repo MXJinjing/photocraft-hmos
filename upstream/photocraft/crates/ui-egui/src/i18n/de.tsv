@@ -1657,7 +1657,9 @@
 	Std Dev:	Std.-Abw.:
 	Studio (Dark)	Studio (Dunkel)
 	Studio (Light)	Studio (Hell)
+	Stylus	Stift
 	Stylus Wheel	Stiftrad
+	Block finger input	Fingereingabe blockieren
 	Subtract	Subtrahieren
 	Tabloid	Tabloid
 	Text Replacement	Textersatz
@@ -2172,3 +2174,8 @@
 	% of all commits	% aller Commits
 	Lines +/−	Zeilen +/−
 	@{login}: {prs} PRs, {commits} commits, +{added} / −{deleted} lines (Δ {delta}), +{binAdded} / −{binDeleted} binary assets, {first} – {last}	@{login}: {prs} PRs, {commits} Commits, +{added} / −{deleted} Zeilen (Δ {delta}), +{binAdded} / −{binDeleted} Binärdateien, {first} – {last}
+	Double-tap pen body	Stiftgehäuse doppeltippen
+	Current tool and Eraser	Aktuelles Werkzeug und Radierer
+	Previous tool	Vorheriges Werkzeug
+	Long-press pen body	Stiftgehäuse lange drücken
+	Show or hide context menu	Kontextmenü ein- oder ausblenden

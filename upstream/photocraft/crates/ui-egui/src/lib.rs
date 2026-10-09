@@ -120,6 +120,7 @@ pub mod state;
 pub mod stroke_constraint;
 pub mod stroke_trail;
 pub mod stylus;
+pub mod stylus_protocol;
 mod tab_strip;
 pub mod theme;
 pub mod tiff_options_ui;
@@ -1080,6 +1081,8 @@ impl eframe::App for PhotocraftApp {
         egui::CentralPanel::default().frame(egui::Frame::NONE.fill(backdrop)).show(ui, |ui| {
             canvas::document_area(self, ui);
         });
+        // Finish this frame's pen release before placing a queued squeeze menu.
+        chrome_ui::drain_stylus_gestures(self, &ctx);
         panels::properties_window(self, &ctx);
         brush_panel::window(self, &ctx);
         preset_panels::windows(self, &ctx);

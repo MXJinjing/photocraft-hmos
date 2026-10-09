@@ -97,6 +97,8 @@ pub struct Tokens {
     pub primary_text: Color32,
     pub danger: Color32,
     pub warning: Color32,
+    /// Presence indicator (a stylus is attached). The same green on every theme.
+    pub online: Color32,
     pub radius_sm: f32,
     pub radius: f32,
     pub radius_lg: f32,
@@ -167,6 +169,7 @@ impl Tokens {
                 primary_text: Color32::WHITE,
                 danger: Color32::from_rgb(236, 91, 98),
                 warning: Color32::from_rgb(232, 176, 70),
+                online: Color32::from_rgb(46, 184, 92),
                 radius_sm: 3.0,
                 radius: 4.0,
                 radius_lg: 6.0,
@@ -205,6 +208,7 @@ impl Tokens {
                 primary_text: Color32::from_rgb(12, 12, 14),
                 danger: Color32::from_rgb(240, 96, 96),
                 warning: Color32::from_rgb(240, 190, 90),
+                online: Color32::from_rgb(46, 184, 92),
                 radius_sm: 6.0,
                 radius: 8.0,
                 radius_lg: 12.0,
@@ -243,6 +247,7 @@ impl Tokens {
                 primary_text: Color32::from_rgb(250, 250, 252),
                 danger: Color32::from_rgb(210, 60, 60),
                 warning: Color32::from_rgb(190, 130, 20),
+                online: Color32::from_rgb(46, 184, 92),
                 radius_sm: 6.0,
                 radius: 8.0,
                 radius_lg: 12.0,
@@ -281,6 +286,7 @@ impl Tokens {
                 primary_text: Color32::BLACK,
                 danger: Color32::from_rgb(160, 0, 0),
                 warning: Color32::from_rgb(128, 96, 0),
+                online: Color32::from_rgb(46, 184, 92),
                 radius_sm: 0.0,
                 radius: 0.0,
                 radius_lg: 0.0,
@@ -698,6 +704,7 @@ pub mod live {
                 primary_text,
                 danger,
                 warning,
+                online,
                 tab_strip,
                 row_selected
             );

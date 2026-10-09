@@ -1673,7 +1673,9 @@
 	Std Dev:	标准差：
 	Studio (Dark)	工作室（深色）
 	Studio (Light)	工作室（浅色）
+	Stylus	手写笔
 	Stylus Wheel	触控笔滚轮
+	Block finger input	屏蔽手指输入
 	Subtract	减去
 	Tabloid	Tabloid 纸
 	Text Replacement	文字替换
@@ -2141,3 +2143,8 @@ cameraRaw	Blending	混合
 	% of all commits	占全部提交的 %
 	Lines +/−	行数 +/−
 	@{login}: {prs} PRs, {commits} commits, +{added} / −{deleted} lines (Δ {delta}), +{binAdded} / −{binDeleted} binary assets, {first} – {last}	@{login}：{prs} 个 PR，{commits} 次提交，行 +{added} / −{deleted}（Δ {delta}），二进制文件 +{binAdded} / −{binDeleted}，{first} – {last}
+	Double-tap pen body	双击笔身
+	Current tool and Eraser	当前工具与橡皮擦
+	Previous tool	上一个工具
+	Long-press pen body	长按笔身
+	Show or hide context menu	显示或隐藏右键菜单

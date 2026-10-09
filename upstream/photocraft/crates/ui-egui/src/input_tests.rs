@@ -278,6 +278,287 @@ fn alt_scroll_zooms_while_a_temporary_tool_is_held() {
     assert_eq!(h.state().ui.tool, crate::state::Tool::Brush);
 }
 
+fn touch(id: u64, phase: egui::TouchPhase, pos: Pos2) -> egui::Event {
+    egui::Event::Touch { device_id: egui::TouchDeviceId(0), id: egui::TouchId(id), phase, pos, force: Some(1.0) }
+}
+
+fn pointer_button(pos: Pos2, pressed: bool) -> egui::Event {
+    egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: Modifiers::NONE }
+}
+
+fn open_stylus_menu(h: &mut Harness<'static, PhotocraftApp>, tool: crate::state::Tool) {
+    h.state_mut().ui.tool = tool;
+    h.state_mut().session.edit_prefs(|p| p.tools.block_finger_input = true);
+    h.state_mut().session.edit_prefs(|p| p.tools.stylus_long_press = crate::chrome_ui::StylusLongPress::ContextMenu);
+    h.state_mut().stylus.feed.push_gesture(crate::stylus::PenGesture::LongPress, 1_000.0);
+    let ctx = h.ctx.clone();
+    crate::chrome_ui::drain_stylus_gestures(h.state_mut(), &ctx);
+    h.run_steps(3);
+    assert!(canvas_menu_open(h.state()), "{tool:?} long-press must open a menu");
+    h.state_mut().stylus.feed.report(crate::stylus::PointerSource::Touch, None);
+}
+
+fn canvas_menu_open(app: &PhotocraftApp) -> bool {
+    app.ui.brush_picker.is_some() || app.ui.canvas_tool_menu.is_some() || app.ui.layer_menu.is_some()
+}
+
+fn capture_menu_frame(h: &mut Harness<'static, PhotocraftApp>, name: &str) {
+    if let Some(dir) = std::env::var_os("PHOTOCRAFT_INPUT_SCREENSHOT_DIR") {
+        let dir = std::path::PathBuf::from(dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        h.render().unwrap().save(dir.join(format!("{name}.png"))).unwrap();
+    }
+}
+
+#[test]
+fn finger_dismisses_stylus_menus_and_they_stay_closed_after_lift() {
+    use crate::state::Tool;
+    for tool in [Tool::Brush, Tool::RectMarquee, Tool::Move] {
+        let mut h = harness();
+        open_stylus_menu(&mut h, tool);
+        capture_menu_frame(&mut h, &format!("{tool:?}-open"));
+        let p = free_canvas(&h);
+        let revision = h.state().session.active().unwrap().revision;
+        h.input_mut().events.extend([egui::Event::PointerMoved(p), pointer_button(p, true), touch(1, egui::TouchPhase::Start, p)]);
+        h.run_steps(1);
+        assert!(!canvas_menu_open(h.state()), "{tool:?}: finger-down must close the menu, not just hide it");
+        // Keep the finger down past egui's long-touch threshold before lifting it.
+        h.run_steps(45);
+        assert!(!canvas_menu_open(h.state()), "{tool:?}: the dismissing contact must not reopen the menu");
+        capture_menu_frame(&mut h, &format!("{tool:?}-finger-down"));
+        h.input_mut().events.extend([pointer_button(p, false), touch(1, egui::TouchPhase::End, p)]);
+        h.run_steps(4);
+        assert!(!canvas_menu_open(h.state()), "{tool:?}: menu must stay closed after finger-up");
+        capture_menu_frame(&mut h, &format!("{tool:?}-finger-up"));
+        assert_eq!(h.state().session.active().unwrap().revision, revision, "dismissing must not edit the document");
+    }
+}
+
+#[test]
+fn blocked_finger_can_choose_an_item_in_the_stylus_menu() {
+    use egui_kittest::kittest::Queryable;
+    let mut h = harness();
+    open_stylus_menu(&mut h, crate::state::Tool::RectMarquee);
+    let p = h.get_by_label("Select All").rect().center();
+    h.input_mut().events.extend([egui::Event::PointerMoved(p), pointer_button(p, true), touch(1, egui::TouchPhase::Start, p)]);
+    h.run_steps(1);
+    assert!(h.query_by_label("Select All").is_some(), "menu items must stay visible while a finger is down");
+    h.input_mut().events.extend([pointer_button(p, false), touch(1, egui::TouchPhase::End, p)]);
+    h.run_steps(4);
+    assert!(!canvas_menu_open(h.state()));
+    assert!(h.state().session.active().unwrap().doc.selection.is_some(), "finger tap must run the menu command");
+}
+
+#[test]
+fn pen_contact_dismisses_menu_without_painting_then_next_contact_paints() {
+    let mut h = harness();
+    open_stylus_menu(&mut h, crate::state::Tool::Brush);
+    h.state_mut().stylus.feed.report(crate::stylus::PointerSource::Pen, Some(crate::stylus::PenSample::default()));
+    let p = h.state().last_canvas_rect.center() - vec2(120.0, 30.0);
+    let moved = p + vec2(50.0, -20.0);
+    let revision = h.state().session.active().unwrap().revision;
+    h.event(egui::Event::PointerMoved(p));
+    h.event(pointer_button(p, true));
+    h.run_steps(1);
+    assert!(!canvas_menu_open(h.state()), "pen-down outside the menu closes it");
+    h.event(egui::Event::PointerMoved(moved));
+    h.run_steps(3);
+    assert!(h.state().drag.is_none(), "the dismissing contact must not start a stroke after the menu closes");
+    h.event(pointer_button(moved, false));
+    h.run_steps(3);
+    assert_eq!(h.state().session.active().unwrap().revision, revision, "pen dismissal must not paint");
+    // A new contact is no longer owned by the dismissed menu.
+    h.event(pointer_button(p, true));
+    h.run_steps(1);
+    h.event(egui::Event::PointerMoved(moved));
+    h.run_steps(1);
+    h.event(pointer_button(moved, false));
+    h.run_steps(3);
+    assert!(h.state().session.active().unwrap().revision > revision, "the next pen contact must paint normally");
+}
+
+#[test]
+fn two_fingers_pan_the_canvas_and_do_not_paint() {
+    let mut h = harness();
+    h.state_mut().ui.tool = crate::state::Tool::Brush;
+    let _ = h.state_mut().run("tools.setBrush", json!({"brush": {"size": 40, "hardness": 1.0}}));
+    let r = h.state().last_canvas_rect;
+    let a = r.center();
+    let b = a + vec2(48.0, 0.0);
+    h.hover_at(a);
+    h.run_steps(1);
+    let (rev0, c0) = (h.state().session.active().unwrap().revision, h.state().ui.views[0].center);
+    h.input_mut().events.extend([pointer_button(a, true), touch(1, egui::TouchPhase::Start, a), touch(2, egui::TouchPhase::Start, b)]);
+    h.run_steps(1);
+    let moved = a + vec2(36.0, 24.0);
+    h.input_mut().events.extend([
+        egui::Event::PointerMoved(moved),
+        touch(1, egui::TouchPhase::Move, moved),
+        touch(2, egui::TouchPhase::Move, b + vec2(36.0, 24.0)),
+    ]);
+    h.run_steps(2);
+    h.input_mut().events.extend([pointer_button(moved, false), touch(1, egui::TouchPhase::End, moved), touch(2, egui::TouchPhase::End, b + vec2(36.0, 24.0))]);
+    h.run_steps(2);
+    assert_eq!(h.state().session.active().unwrap().revision, rev0, "two fingers must not commit a tool");
+    let c1 = h.state().ui.views[0].center;
+    assert!((c1[0] - c0[0]).abs() > 1.0 || (c1[1] - c0[1]).abs() > 1.0, "two fingers pan: {c0:?} -> {c1:?}");
+}
+
+#[test]
+fn wheel_scroll_owns_mixed_pointer_input_and_never_paints() {
+    for delta in [vec2(-80.0, 0.0), vec2(80.0, 0.0), vec2(0.0, -80.0), vec2(0.0, 80.0)] {
+        for touch_compat in [false, true] {
+            let mut h = harness();
+            h.state_mut().ui.tool = crate::state::Tool::Brush;
+            let p = h.state().last_canvas_rect.center();
+            h.hover_at(p);
+            h.run_steps(1);
+            let revision = h.state().session.active().unwrap().revision;
+            let center = h.state().ui.views[0].center;
+            // A scroll can arrive with compatibility pointer events or a button still held. It
+            // must own the whole gesture, including frames after egui's wheel smoothing settles.
+            h.input_mut().events.extend([
+                pointer_button(p, true),
+                egui::Event::PointerMoved(p + delta),
+                egui::Event::MouseWheel { unit: egui::MouseWheelUnit::Point, delta, phase: egui::TouchPhase::Move, modifiers: Modifiers::NONE },
+            ]);
+            if touch_compat {
+                h.event(touch(1, egui::TouchPhase::Start, p));
+            }
+            h.run_steps(40);
+            assert!(h.state().drag.is_none(), "wheel navigation must never start a brush stroke");
+            h.event(egui::Event::PointerMoved(p + delta * 1.5));
+            h.run_steps(2);
+            h.event(pointer_button(p + delta * 1.5, false));
+            if touch_compat {
+                h.event(touch(1, egui::TouchPhase::End, p + delta * 1.5));
+            }
+            h.run_steps(3);
+            assert_eq!(h.state().session.active().unwrap().revision, revision, "scrolling {delta:?} must not paint");
+            let end = h.state().ui.views[0].center;
+            if delta.x != 0.0 {
+                assert!((end[0] - center[0]) * delta.x < 0.0, "horizontal wheel must pan: {center:?} -> {end:?}");
+                assert_eq!(end[1], center[1]);
+            } else {
+                assert!((end[1] - center[1]) * delta.y < 0.0, "vertical wheel must pan: {center:?} -> {end:?}");
+                assert_eq!(end[0], center[0]);
+            }
+            // Normal mouse/pen drawing resumes after release.
+            h.event(pointer_button(p, true));
+            h.event(pointer_button(p, false));
+            h.run_steps(3);
+            assert!(h.state().session.active().unwrap().revision > revision);
+        }
+    }
+}
+
+#[test]
+fn a_second_finger_aborts_an_in_progress_stroke() {
+    let mut h = harness();
+    h.state_mut().ui.tool = crate::state::Tool::Brush;
+    let _ = h.state_mut().run("tools.setBrush", json!({"brush": {"size": 40, "hardness": 1.0}}));
+    let r = h.state().last_canvas_rect;
+    let a = r.center();
+    h.hover_at(a);
+    h.run_steps(1);
+    let rev0 = h.state().session.active().unwrap().revision;
+    h.input_mut().events.extend([pointer_button(a, true), touch(1, egui::TouchPhase::Start, a)]);
+    h.run_steps(1);
+    h.input_mut().events.extend([egui::Event::PointerMoved(a + vec2(20.0, 0.0)), touch(1, egui::TouchPhase::Move, a + vec2(20.0, 0.0))]);
+    h.run_steps(1);
+    h.input_mut().events.push(touch(2, egui::TouchPhase::Start, a + vec2(40.0, 8.0)));
+    h.run_steps(1);
+    h.input_mut().events.extend([
+        pointer_button(a + vec2(20.0, 0.0), false),
+        touch(1, egui::TouchPhase::End, a + vec2(20.0, 0.0)),
+        touch(2, egui::TouchPhase::End, a + vec2(40.0, 8.0)),
+    ]);
+    h.run_steps(2);
+    assert_eq!(h.state().session.active().unwrap().revision, rev0, "the interrupted stroke must not commit");
+}
+
+#[test]
+fn one_finger_still_paints() {
+    let mut h = harness();
+    h.state_mut().ui.tool = crate::state::Tool::Brush;
+    let _ = h.state_mut().run("tools.setBrush", json!({"brush": {"size": 40, "hardness": 1.0}}));
+    let a = h.state().last_canvas_rect.center();
+    h.hover_at(a);
+    h.run_steps(1);
+    let rev0 = h.state().session.active().unwrap().revision;
+    h.event(pointer_button(a, true));
+    h.event(egui::Event::PointerMoved(a + vec2(40.0, 0.0)));
+    h.event(pointer_button(a + vec2(40.0, 0.0), false));
+    h.run_steps(2);
+    assert!(h.state().session.active().unwrap().revision > rev0, "one finger still paints");
+}
+
+#[test]
+fn two_fingers_can_pinch_zoom() {
+    let mut h = harness();
+    let r = h.state().last_canvas_rect;
+    let mid = r.center();
+    let a = mid - vec2(20.0, 0.0);
+    let b = mid + vec2(20.0, 0.0);
+    h.hover_at(mid);
+    h.run_steps(1);
+    let z0 = zoom(&h);
+    h.input_mut().events.extend([pointer_button(a, true), touch(1, egui::TouchPhase::Start, a), touch(2, egui::TouchPhase::Start, b)]);
+    h.run_steps(1);
+    // Spread the fingers: egui's pinch zoom is the change in distance, not Event::Zoom
+    // (Event::Zoom is ignored while two touches are down).
+    let a2 = mid - vec2(40.0, 0.0);
+    let b2 = mid + vec2(40.0, 0.0);
+    h.hover_at(mid);
+    h.input_mut().events.extend([egui::Event::PointerMoved(a2), touch(1, egui::TouchPhase::Move, a2), touch(2, egui::TouchPhase::Move, b2)]);
+    h.run_steps(2);
+    assert!(zoom(&h) > z0, "pinch zooms the canvas: {z0} -> {}", zoom(&h));
+}
+
+#[test]
+fn blocking_finger_input_pans_with_one_finger_and_does_not_paint() {
+    let mut h = harness();
+    h.state_mut().ui.tool = crate::state::Tool::Brush;
+    h.state_mut().session.edit_prefs(|p| p.tools.block_finger_input = true);
+    h.state_mut().stylus.feed.report(crate::stylus::PointerSource::Touch, None);
+    let _ = h.state_mut().run("tools.setBrush", json!({"brush": {"size": 40, "hardness": 1.0}}));
+    let a = h.state().last_canvas_rect.center();
+    h.hover_at(a);
+    h.run_steps(1);
+    let (rev0, c0) = (h.state().session.active().unwrap().revision, h.state().ui.views[0].center);
+    h.input_mut().events.extend([pointer_button(a, true), touch(1, egui::TouchPhase::Start, a)]);
+    h.run_steps(1);
+    let moved = a + vec2(40.0, 16.0);
+    h.input_mut().events.extend([egui::Event::PointerMoved(moved), touch(1, egui::TouchPhase::Move, moved)]);
+    h.run_steps(2);
+    h.input_mut().events.extend([pointer_button(moved, false), touch(1, egui::TouchPhase::End, moved)]);
+    h.run_steps(2);
+    assert_eq!(h.state().session.active().unwrap().revision, rev0, "a blocked finger must not paint");
+    let c1 = h.state().ui.views[0].center;
+    assert!((c1[0] - c0[0]).abs() > 1.0 || (c1[1] - c0[1]).abs() > 1.0, "one finger pans: {c0:?} -> {c1:?}");
+}
+
+#[test]
+fn blocking_finger_input_still_lets_the_pen_paint() {
+    let mut h = harness();
+    h.state_mut().ui.tool = crate::state::Tool::Brush;
+    h.state_mut().session.edit_prefs(|p| p.tools.block_finger_input = true);
+    h.state_mut()
+        .stylus
+        .feed
+        .report(crate::stylus::PointerSource::Pen, Some(crate::stylus::PenSample { pressure: 0.8, tilt_x: 0.0, tilt_y: 0.0, rotation: 0.0, eraser: false }));
+    let _ = h.state_mut().run("tools.setBrush", json!({"brush": {"size": 40, "hardness": 1.0}}));
+    let a = h.state().last_canvas_rect.center();
+    h.hover_at(a);
+    h.run_steps(1);
+    let rev0 = h.state().session.active().unwrap().revision;
+    h.event(pointer_button(a, true));
+    h.event(egui::Event::PointerMoved(a + vec2(40.0, 0.0)));
+    h.event(pointer_button(a + vec2(40.0, 0.0), false));
+    h.run_steps(2);
+    assert!(h.state().session.active().unwrap().revision > rev0, "the pen still paints");
+}
+
 #[test]
 fn type_tool_alt_arrows_kern_the_pair() {
     use photocraft_doc::text::Kerning;

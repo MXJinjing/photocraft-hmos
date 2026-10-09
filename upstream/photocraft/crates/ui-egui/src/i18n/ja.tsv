@@ -1667,7 +1667,9 @@
 	Std Dev:	標準偏差:
 	Studio (Dark)	スタジオ(ダーク)
 	Studio (Light)	スタジオ(ライト)
+	Stylus	スタイラス
 	Stylus Wheel	スタイラスホイール
+	Block finger input	指の入力を無効にする
 	Subtract	減算
 	Tabloid	タブロイド
 	Text Replacement	テキストの置き換え
@@ -2116,3 +2118,8 @@ cameraRaw	Color	カラー
 	% of all commits	全コミットに占める割合 (%)
 	Lines +/−	行数 +/−
 	@{login}: {prs} PRs, {commits} commits, +{added} / −{deleted} lines (Δ {delta}), +{binAdded} / −{binDeleted} binary assets, {first} – {last}	@{login}: PR {prs} 件、コミット {commits} 件、行 +{added} / −{deleted} (Δ {delta})、バイナリ +{binAdded} / −{binDeleted}、{first} – {last}
+	Double-tap pen body	ペン軸をダブルタップ
+	Current tool and Eraser	現在のツールと消しゴム
+	Previous tool	前のツール
+	Long-press pen body	ペン軸を長押し
+	Show or hide context menu	コンテキストメニューの表示/非表示
