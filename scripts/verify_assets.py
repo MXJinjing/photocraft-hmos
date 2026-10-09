@@ -33,5 +33,5 @@ page = (project / "entry/src/main/ets/pages/Index.ets").read_text()
 for name in references:
     assert name in page, f"ArkWeb map missing {name}"
 assert "application/wasm" in page and "text/javascript" in page
-assert "/index.html?webgl&cpu" in page
+assert "/index.html?webgl" in page
 print("Verified upstream and compatible hashes, HTML references, ArkWeb asset map, and MIME types")

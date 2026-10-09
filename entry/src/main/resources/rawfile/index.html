@@ -5,37 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
   <title>PhotoCraft</title>
   
-<script>
-const nativeConsoleError = console.error.bind(console);
-window.lastPhotoCraftPanic = '';
-console.error = (...args) => {
-  nativeConsoleError(...args);
-  if (typeof args[0] === 'string' && args[0].startsWith('PhotoCraft panic:')) {
-    window.lastPhotoCraftPanic = args.join(' ');
-  }
-};
-window.addEventListener('error', (event) => {
-  const detail = event.error?.stack || event.message || 'Unknown error';
-  console.error('PhotoCraft startup error:', detail);
-  document.getElementById('photocraft_loading').textContent = window.lastPhotoCraftPanic + '\nPhotoCraft startup error: ' + detail;
-});
-window.addEventListener('unhandledrejection', (event) => {
-  const detail = event.reason?.stack || String(event.reason);
-  console.error('PhotoCraft startup rejection:', detail);
-  document.getElementById('photocraft_loading').textContent = 'PhotoCraft startup rejection: ' + detail;
-});
-</script>
 <script type="module">
-import init, * as bindings from './photocraft-web-a705b2188e2fccf8.js';
-let wasm;
-try {
-  wasm = await init({ module_or_path: './photocraft-web-a705b2188e2fccf8_bg.wasm' });
-} catch (error) {
-  const detail = error instanceof Error ? (error.stack || error.message) : String(error);
-  console.error('PhotoCraft WASM initialization failed:', detail);
-  document.getElementById('photocraft_loading').textContent = 'PhotoCraft initialization failed: ' + detail;
-  throw error;
-}
+import init, * as bindings from './photocraft-web-a339036ca6e7497f.js';
+const wasm = await init({ module_or_path: './photocraft-web-a339036ca6e7497f_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -56,7 +28,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
     #photocraft_stalled { color: #8c8c8c; visibility: hidden; animation: photocraft-stalled 0s 20s forwards; }
     @keyframes photocraft-stalled { to { visibility: visible; } }
   </style>
-<link rel="modulepreload" href="./photocraft-web-a705b2188e2fccf8.js" crossorigin="anonymous" integrity="sha384-XxjYUHhLs2915FZnj8OsOLfuuJC6NKQmaTCs4lvrhqqF+ZcsAw1OxNSpKvxTevOt"><link rel="preload" href="./photocraft-web-a705b2188e2fccf8_bg.wasm" crossorigin="anonymous" integrity="sha384-hqFoRa/kHDeat7ltnBuFGIBfIhNmso7MTu8PSB1HBDSEJM8CQXntZv/7XWdyJm9O" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./photocraft-web-a339036ca6e7497f.js" crossorigin="anonymous" integrity="sha384-2mcBOTHtLHkOXFOdNumFD9jfCKjam11YbAwlad8MqpmDja2tQcWI5M95gHn2Nom9"><link rel="preload" href="./photocraft-web-a339036ca6e7497f_bg.wasm" crossorigin="anonymous" integrity="sha384-VHYeNHfkOR1Lb0DSa3rlEzFIRbqH8MOUZQTRfvAU8X+CyXvmnoYqDvnfLP49Wcpd" as="fetch" type="application/wasm"></head>
 <body>
   <canvas id="photocraft_canvas"></canvas>
   <div id="photocraft_loading">

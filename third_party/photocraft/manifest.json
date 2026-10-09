@@ -15,17 +15,18 @@
     "source": "https://github.com/storytold/photocraft/archive/refs/tags/v0.3.0.tar.gz",
     "source_archive_sha256": "40a4810f2fc474fdfd2b300771c4630d2c3da06ba4b64a5a55cd63304ac1c45b",
     "patch": "third_party/photocraft/photocraft-source.patch",
-    "reason": "Clamp the WebGL shader limit, tolerate optimized-out uniform blocks, and use CPU canvas composition on HarmonyOS API 20 emulator.",
+    "reason": "Offline web build of the workspace PhotoCraft sources, including the HarmonyOS WebGL fixes, packaged by scripts/package_offline.sh.",
     "files": {
-      "index.html": "82305f0010543a54b785f62c76889bd14d22de6ecd69960fbd3512bbb08738c2",
-      "photocraft-web-a705b2188e2fccf8.js": "4d32c8c78439ac6b200ae326f4362202a86684d987becfe669ea6d02723d0318",
-      "photocraft-web-a705b2188e2fccf8_bg.wasm": "8729a0f4e7e76835a2f35454516a7c72a903866e9b49b20f3cc4d38f5c256d44"
+      "index.html": "969cd0996d25393ab074da0a5e796bd62ecf4fda35bb5da32c01974d9d8d4139",
+      "photocraft-web-a339036ca6e7497f.js": "25d6df8706195a193899eaf9b12af77cca6504bd849ed5a1c541602b87fdbdad",
+      "photocraft-web-a339036ca6e7497f_bg.wasm": "9cc46db2113562ec3ee5adee9292f67151adab42ec93de24811a260fcdcda60d"
     },
     "patch_sha256": "218e72386f3f1dde2690e159a6c06bab59359e2b7e9285b128b200ab646b7dbc",
     "html_error_handler": "Logs WebAssembly startup errors and displays them on the loading page.",
     "dependency_patch": "third_party/photocraft/wgpu-hal-uniform-block.patch",
     "dependency_patch_sha256": "e5ecf0e090826f9d6aa4e6184c7d952ecbd7fb1956a5e5add758288650191acb",
     "dependency_crate": "https://static.crates.io/crates/wgpu-hal/wgpu-hal-30.0.1.crate",
-    "dependency_crate_sha256": "b6b7fb58561a792bc237628ba0792e332de418fefe145f13b5ed8201e6d52f58"
+    "dependency_crate_sha256": "b6b7fb58561a792bc237628ba0792e332de418fefe145f13b5ed8201e6d52f58",
+    "photocraft_version": "0.5.0"
   }
 }
