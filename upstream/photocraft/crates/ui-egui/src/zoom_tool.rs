@@ -34,6 +34,11 @@ fn id() -> egui::Id {
     egui::Id::new("pc-zoom-tool-drag")
 }
 
+/// Drop an in-progress Zoom-tool drag without applying it.
+pub fn abort(ctx: &egui::Context) {
+    ctx.data_mut(|d| d.remove::<ZoomDrag>(id()));
+}
+
 /// The scrubby zoom for a horizontal drag of `dx` points from a press at zoom `zoom0`.
 pub fn scrub_zoom(zoom0: f32, dx: f32) -> f32 {
     // ±40 doublings already span far more than the zoom range; it keeps the power finite.

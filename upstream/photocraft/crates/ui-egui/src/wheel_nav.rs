@@ -86,6 +86,25 @@ pub fn read(ctx: &Context, zoom_with_wheel: bool) -> Option<Wheel> {
     classify(Input { scroll, zoom_delta, alt, zoom_with_wheel, notch })
 }
 
+/// Wheel/trackpad navigation must not also become a stroke from compatibility pointer events
+/// or a button still held. Keep ownership through release, including after wheel smoothing.
+pub fn blocks_tool_input(ctx: &Context, navigated: bool) -> bool {
+    let down = ctx.input(|i| i.pointer.any_down() || i.any_touches());
+    let frame = ctx.cumulative_frame_nr();
+    let id = Id::new("pc-wheel-contact");
+    ctx.data_mut(|d| {
+        let previous = d.get_temp::<(u64, bool, bool)>(id);
+        if let Some((at, blocked, _)) = previous
+            && at == frame
+        {
+            return blocked;
+        }
+        let blocked = navigated || previous.is_some_and(|(_, _, held)| held);
+        d.insert_temp(id, (frame, blocked, blocked && down));
+        blocked
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

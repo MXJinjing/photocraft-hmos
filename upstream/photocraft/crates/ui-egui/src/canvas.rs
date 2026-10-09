@@ -1721,17 +1721,24 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
     // Under an open dialog the canvas widget is inert, but the image still pans and zooms.
     let under_dialog = !app.ui.dialogs.is_empty();
     let free_hover = under_dialog && crate::dialogs::free_pointer_over(&ctx, rect).is_some();
+    let menu_input = primary && crate::canvas_tool_menu::canvas_input_blocked(app, &ctx);
     // Navigation (wheel_nav.rs): scroll pans; pinch, ⌘-scroll and ⌥-scroll zoom around the pointer.
     let wheel = crate::wheel_nav::read(&ctx, app.session.prefs().general.zoom_with_scroll_wheel);
     // The wheel also scrolls over the scrollbars drawn on top of the canvas (last frame's hover).
     let bars_id = egui::Id::new(("pc-canvas-bars-hover", idx));
     let over_bars = ctx.data(|d| d.get_temp::<bool>(bars_id)).unwrap_or(false);
-    if response.hovered() || free_hover || over_bars {
-        let pointer = ui.input(|i| i.pointer.hover_pos());
+    let pinching = crate::touch_nav::touch_count(&ctx) >= 2;
+    let wheel_over_canvas = !menu_input && (response.hovered() || free_hover || over_bars || pinching);
+    if wheel_over_canvas {
+        let pointer = ui.input(|i| i.pointer.hover_pos()).or(response.interact_pointer_pos());
         match (wheel, pointer) {
             (Some(crate::wheel_nav::Wheel::Zoom(f)), Some(p)) => {
                 let nz = (view.zoom * f).clamp(0.01, 64.0);
                 zoom_about(&mut view, &xf, p, nz);
+            }
+            (Some(crate::wheel_nav::Wheel::Zoom(f)), None) if pinching => {
+                let nz = (view.zoom * f).clamp(0.01, 64.0);
+                zoom_about(&mut view, &xf, rect.center(), nz);
             }
             (Some(crate::wheel_nav::Wheel::Pan(scroll)), _) => {
                 view.center[0] -= scroll.x / view.zoom * if flip { -1.0 } else { 1.0 };
@@ -1740,6 +1747,13 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
             _ => {}
         }
     }
+    // Touchscreen pinch still shares navigation with its centroid pan below. Mouse wheel and
+    // trackpad events own the pointer instead, so their compatibility drags cannot paint.
+    let wheel_navigation = wheel_over_canvas
+        && wheel.is_some()
+        && ctx.input(|i| !i.any_touches() || i.events.iter().any(|e| matches!(e, egui::Event::MouseWheel { .. } | egui::Event::Zoom(_))));
+    let wheel_input = primary && crate::wheel_nav::blocks_tool_input(&ctx, wheel_navigation);
+    let navigation_input = menu_input || wheel_input;
 
     // Pen pressure/tilt for this frame's tool events (mouse = 1.0), unless Preferences › Tools ›
     // Use Tablet Pressure is off; the pen's eraser end selects the Eraser.
@@ -1772,8 +1786,16 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
         Some(crate::hold_keys::Temporary::ZoomIn) => false,
         _ => alt,
     };
+    // Two-or-more fingers: only pan/pinch-zoom the canvas; never start or commit a tool.
+    let touch_nav = if navigation_input {
+        app.touch_nav = false;
+        crate::touch_nav::abort_tools(app, &ctx);
+        false
+    } else {
+        crate::touch_nav::update(app, &ctx)
+    };
 
-    if under_dialog {
+    if under_dialog && !navigation_input {
         // With the Color Picker on top the image is its eyedropper, whatever the tool; Space and
         // the middle button still pan (`color_picker_ui::sample_at`).
         let picking = primary && crate::color_picker_ui::top(app).is_some();
@@ -1798,11 +1820,16 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
             }
         }
     }
-    if tool == Tool::Hand && response.dragged() {
+    if touch_nav {
+        ctx.set_cursor_icon(egui::CursorIcon::Grabbing);
+        let d = crate::touch_nav::pan_delta(&ctx).unwrap_or_else(|| if response.dragged() { response.drag_delta() } else { Vec2::ZERO });
+        view.center[0] -= d.x / view.zoom * if flip { -1.0 } else { 1.0 };
+        view.center[1] -= d.y / view.zoom;
+    } else if !navigation_input && tool == Tool::Hand && response.dragged() {
         let d = response.drag_delta();
         view.center[0] -= d.x / view.zoom * if flip { -1.0 } else { 1.0 };
         view.center[1] -= d.y / view.zoom;
-    } else if primary {
+    } else if primary && !navigation_input {
         let mods = ui.input(|i| i.modifiers);
         // Tools follow the left button; the right one opens the Brush Preset picker or erases
         // (Preferences › Tools, `paint_mouse`).
@@ -1954,6 +1981,8 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
         if tool.is_type() && response.double_clicked() {
             crate::type_tool::select_word(app);
         }
+    }
+    if primary {
         if app.ui.extras.grid && app.ui.view.extras {
             crate::rulers::draw_grid(app, &painter, &xf, &doc);
         }
@@ -1964,9 +1993,6 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
         crate::zoom_tool::draw(&ctx, &painter);
         let resizing = crate::brush_resize::draw(app, &painter, &xf);
         draw_transform_controls(app, &painter, &xf);
-        crate::paint_mouse::show_picker(app, &ctx);
-        crate::layer_pick_ui::show(app, &ctx);
-        crate::canvas_tool_menu::show(app, &ctx);
         crate::snap_ui::draw(app, &painter, &xf);
         if border == photocraft_engine::prefs::CanvasBorder::Line {
             painter.rect_stroke(img_rect, 0.0, Stroke::new(1.0, Color32::from_gray(20)), egui::StrokeKind::Outside);
@@ -2089,6 +2115,13 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
             // ⇧ after a stroke: the straight line a click would paint (#257).
             crate::stroke_constraint::draw_line_preview(app, &painter, &xf, p, tool, held.shift);
         }
+    }
+    // Menus must also receive finger input during canvas navigation. Skipping them while a
+    // blocked finger is down only hides them; their state survives and they reappear on lift.
+    if primary {
+        crate::paint_mouse::show_picker(app, &ctx);
+        crate::layer_pick_ui::show(app, &ctx);
+        crate::canvas_tool_menu::show(app, &ctx);
     }
     // Scrollbars (scrollbars.rs): drawn over the canvas edges, they take the pointer there.
     let t0 = crate::gpu_canvas::now_ms();

@@ -127,6 +127,7 @@ mod timeline_ui;
 mod titlebar;
 pub mod tone;
 pub mod tool_feedback;
+pub mod touch_nav;
 pub mod transform_tex;
 pub mod transform_tool;
 pub mod type_panels_ui;
@@ -304,6 +305,8 @@ pub struct PhotocraftApp {
     /// Display profile readings (#569).
     monitors: monitor_status::State,
     checker: Option<egui::TextureHandle>,
+    /// Two-or-more-finger canvas pan/zoom is in progress (`touch_nav`).
+    touch_nav: bool,
     drag: Option<canvas::Drag>,
     /// Brush/Eraser stroke being drawn, rendered by the engine (see `canvas::LiveStroke`).
     live_stroke: Option<canvas::LiveStroke>,
@@ -465,6 +468,7 @@ impl PhotocraftApp {
             canvases: HashMap::new(),
             monitors: Default::default(),
             checker: None,
+            touch_nav: false,
             drag: None,
             live_stroke: None,
             trail: None,
