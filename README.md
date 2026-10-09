@@ -1,6 +1,18 @@
 # PhotoCraft（ArkWeb 原型）
 
-本工程把 [PhotoCraft v0.3.0](https://github.com/storytold/photocraft/releases/tag/v0.3.0) 网页版封装为 HarmonyOS 6.0 / API 20 平板和 PC/2in1 应用。已在 HarmonyOS 6.0(20) 平板模拟器完成启动、绘图、File → Save／Save As 保存 PSD、PNG 导出及从本地重新打开的基本测试；PC/2in1 尚待设备验证。测试详情见 [TEST_REPORT.md](TEST_REPORT.md)。
+本工程把 [PhotoCraft v0.5.0](https://github.com/storytold/photocraft/releases/tag/v0.5.0) 源码封装为 HarmonyOS 6.0 / API 20 平板和 PC/2in1 应用。已在 HarmonyOS 6.0(20) 平板模拟器完成启动、绘图、File → Save／Save As 保存 PSD、PNG 导出及从本地重新打开的基本测试；PC/2in1 尚待设备验证。测试详情见 [TEST_REPORT.md](TEST_REPORT.md)。
+
+## 运行截图
+
+![screenshot_20261009_134545_io.github.storytold.photocraft.hmos.jpg](docs/assets/screenshot_20261009_134545_io.github.storytold.photocraft.hmos.jpg)
+
+![screenshot_20261009_140506_io.github.storytold.photocraft.hmos.jpg](docs/assets/screenshot_20261009_140506_io.github.storytold.photocraft.hmos.jpg)
+
+## 适配功能
+
+文件功能适配：允许调用鸿蒙原生文件选择器DocumentViewPicker打开或保存文件，适配文件全生命周期管理。当前每次点 Save 都会再次选择保存位置，尚未记录目标文件以直接覆盖。
+
+手写笔适配：支持Huawei M-pencil pro的压感、双击笔身切换橡皮擦、轻捏笔身显示右键菜单功能，支持设置使用手写笔时屏蔽手指输入。HarmonyOS 的 Pen Kit／InputKit 封装在独立适配器中；其他平台可接入相同协议。
 
 ## 构建和运行
 
@@ -10,7 +22,7 @@
 
 ## 脚本
 
-仓库自带两个 shell 脚本，都在 `scripts/`。它们按脚本自身位置找仓库根目录，当前工作目录不限。请直接执行，或用 `bash` 执行。不要用 `zsh 脚本路径` 去跑 `scripts/dev.sh`：那个文件使用 bash 的 `BASH_SOURCE`。`scripts/package_offline.sh` 则 bash 和 zsh 都可以。
+仓库自带两个 shell 脚本，都在 `scripts/`。它们按脚本自身位置找仓库根目录，当前工作目录不限。请直接执行，或用 `bash` 执行。
 
 两个脚本都会读取 Git 忽略的 `scripts/dev.local.env`。新机器若 Trunk、hdc 或 hvigor 不在默认位置，复制 `scripts/dev.local.env.example` 为 `scripts/dev.local.env` 并填写路径。可设置的变量：
 
@@ -18,7 +30,7 @@
 - `PHOTOCRAFT_HDC`：默认 `/Applications/DevEco-Studio.app/Contents/sdk/default/openharmony/toolchains/hdc`。
 - `PHOTOCRAFT_HVIGOR`：默认 `/Applications/DevEco-Studio.app/Contents/tools/hvigor/bin/hvigorw`。
 
-运行前用 `hdc list targets` 确认只连着要安装的那一台设备。模拟器和实机同时在线时，脚本不会选择设备。
+运行前用 `hdc list targets` 确认只连着要安装的那一台设备。如果有模拟器在线，请断开连接。
 
 ### `scripts/dev.sh`
 
@@ -44,19 +56,11 @@ scripts/dev.sh launch
 
 ### `scripts/package_offline.sh`
 
-把当前源码打成可离线运行的完整版本。它编译 release 网页包，替换 `entry/src/main/resources/rawfile`，更新 `Index.ets` 里的 JS/WASM 文件名，再运行 `scripts/verify_assets.py`。默认还会打出已签名的 debug HAP。磁盘上未提交的鸿蒙源码改动会一起编进去。第一次编译可能要十几分钟。
-
 ```bash
 scripts/package_offline.sh
 ```
 
-编译、替换资源、校验并打包 HAP。产物是 `entry/build/default/outputs/default/entry-default-signed.hap`。之后从平板桌面打开，不要带 `photocraft.dev`。
-
-```bash
-scripts/package_offline.sh --assets-only
-```
-
-只替换离线资源并校验，不打 HAP。然后可以在 DevEco 里点 Run。
+把当前源码打成可离线运行的完整版本。它编译 release 网页包，替换 `entry/src/main/resources/rawfile`，更新 `Index.ets` 里的 JS/WASM 文件名，再运行 `scripts/verify_assets.py`。默认还会打出已签名的 debug HAP。磁盘上未提交的鸿蒙源码改动会一起编进去。第一次编译可能要十几分钟。
 
 ```bash
 scripts/package_offline.sh --skip-build
@@ -72,30 +76,6 @@ scripts/package_offline.sh --install
 
 ## 源码
 
-完整 PhotoCraft Rust 源码位于 `upstream/photocraft/`，已通过未压缩历史的 Git subtree 从 v0.3.0 更新到 v0.5.0。`git remote -v` 可看到当前目录的 `upstream` 远程，`git log v0.5.0` 可查看原版提交记录。Git 远程配置不会随克隆传播；在新克隆中执行 `git remote add upstream https://github.com/storytold/photocraft.git` 即可继续跟踪。鸿蒙适配改动直接写在这份源码中；`third_party/wgpu-hal-30.0.1/` 包含已打补丁的依赖源码。
+完整的 PhotoCraft Rust 源码位于 `upstream/photocraft/`，通过未压缩历史的 Git subtree 从 v0.3.0 导入并更新到 v0.5.0，`git log v0.5.0` 可以看到上游的原始提交。仓库的 `upstream` 远程指向 `https://github.com/storytold/photocraft.git`；Git 远程配置不会随克隆传播，在新克隆中执行 `git remote add upstream https://github.com/storytold/photocraft.git` 即可继续跟踪上游。鸿蒙适配改动直接写在这份源码里，仓库不再维护单独的适配补丁文件。
 
-## 文件操作
-
-- “打开”调用系统 `DocumentViewPicker`，所选文件 URI 交给 ArkWeb。模拟器中已从系统“文档”重新打开导出的 PNG。
-- 在 PhotoCraft 菜单点 File → Save 或 Save As 后，ArkWeb 收到网页生成的 PSD 下载，自动打开鸿蒙系统保存界面。选定目录并点“保存”即可写入本地。模拟器中已保存并重新打开含两层和笔迹的 `Untitled-1.psd`（约 267 KB）；Save As 也已保存到另一个本地目录。
-- File → Export 中的 PNG 等下载同样自动进入系统保存界面。模拟器中已保存 `Untitled-1.png`（约 18 KB）并重新打开。
-- Help、Discord 等外链交给系统默认浏览器打开，避免在离线 ArkWeb 页面中显示 Blocked。
-- 界面语言跟随系统：简体中文、繁体中文、日语等已支持语言会在 Preferences › Interface › Language 为 Auto 时自动选用；也可在首选项里手动指定。
-- File → 退出会关闭应用。系统返回键发给网页 Esc（取消工具、关闭对话框），不再直接回到桌面。
-- 取消系统保存界面即放弃本次保存，文件不会写入目标目录，界面也不再出现重试提示。当前每次点 Save 都会再次选择保存位置，尚未记录目标文件以直接覆盖。网页状态栏会先显示 Saved，即使系统保存仍在进行或被取消；判断是否成功请以系统文件中出现作品为准。
-
-## 手写笔与工具栏
-
-- 手写笔输入、笔身动作和连接状态使用[统一接口](upstream/photocraft/docs/stylus-input.md)。HarmonyOS 的 Pen Kit／InputKit 封装在独立适配器中；其他平台可接入相同协议。当前未实现 Android／iPadOS 原生适配器，仅保留新版手写笔桥接事件。
-- 顶部“手写笔”菜单与 Preferences › Tools › 手写笔共用设置：屏蔽手指输入、双击笔身动作和长按笔身动作。菜单修改立即生效；首选项中点 Apply 或 OK 后生效，设置会保留到下次启动。
-- 工具栏高度不足时自动使用双列；仍放不下的内容可通过滚轮、触控板、拖动或滚动条纵向滚动。
-
-## 资源来源与重建
-
-当前离线适配版在 `entry/src/main/resources/rawfile`，由 `scripts/package_offline.sh` 从 `upstream/photocraft/` 源码构建；开发时以源码为准，应用包不再附带独立的官方静态发布包。`scripts/verify_assets.py` 校验 HTML 引用、`rawfile` 文件集合、ArkWeb 资源映射和 MIME 类型。
-
-上游静态包在模拟器上因 WebGL shader 上限与驱动行为无法直接启动，因此离线包改用本仓库源码构建：设备上限兼容、按设备限制设置 shader 参数、网页端禁用 GPU 文档合成与画布 mipmap、WASM 错误日志等改动都已直接写入 `upstream/photocraft/`。依赖修复在 `third_party/wgpu-hal-30.0.1/`，Cargo 路径覆盖已配置。离线包更新见上面的 `scripts/package_offline.sh`。许可证见根目录 `LICENSE`（Apache-2.0）与 `upstream/photocraft/LICENSE-*`。
-
-## 下一阶段
-
-模拟器无法验证 HUAWEI Pencil 的压感、倾角、悬停、橡皮擦和手掌防误触；这些项目须在用户连接 HarmonyOS 6.0 Pad 后测试。JPEG 导入、多指缩放、偏好持久化及大画布性能也尚未完成验收。系统文件选择器内修改文件名、已有文件覆盖及中文文件名仍待补测。网页仍采用桌面布局。
+`third_party/wgpu-hal-30.0.1/` 存放随仓库固定的 wgpu-hal 30.0.1 依赖源码，来自上游 gfx-rs/wgpu，随仓库提供以保证构建可复现。它带有一处 WebGL 补丁：uniform block 被着色器链接器优化掉后跳过绑定，不再解引用空索引，否则 PhotoCraft 会在模拟器 WebGL 适配器上启动失败。`upstream/photocraft/Cargo.toml` 通过 `path` 覆盖直接引用这份源码，因此该修复无需等待上游发布；只有升级 wgpu-hal 版本时，才需要重新打补丁。

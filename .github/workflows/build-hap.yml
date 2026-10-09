@@ -1,0 +1,458 @@
+name: Build unsigned HAP
+
+# Manual, version-confirmed builds of the HarmonyOS wrapper.
+#
+# Huawei serves the DevEco command-line tools only to signed-in developer accounts, so a
+# GitHub-hosted job cannot download them from the official site (that returns 403). Pick
+# one of the two supported sources with the `runner` input:
+#
+#   ubuntu-latest  downloads the tools from the `commandline_tools_url` input, which must be
+#                  a fresh link from
+#                  https://developer.huawei.com/consumer/cn/download/command-line-tools-for-hmos
+#                  (sign in required). The link is signed and time-limited, so it is supplied
+#                  per run and never stored in the repository; it is masked in the logs and
+#                  the tool cache is keyed by its hash.
+#   self-hosted    uses the SDK and hvigorw already installed on the runner (DevEco
+#                  Studio), exactly like scripts/dev.sh does on the development Mac.
+#
+# The build is intentionally unsigned (`entry-default-unsigned.hap`): the signing
+# material stays local, as it does for scripts/dev.sh and scripts/package_offline.sh.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_name:
+        description: "versionName written into AppScope/app.json5; digits and dots only, e.g. 0.5.0.1"
+        required: true
+        type: string
+      version_code:
+        description: "versionCode; leave empty to use the workflow run number"
+        required: false
+        default: ""
+        type: string
+      build_mode:
+        description: "Build mode"
+        required: true
+        default: release
+        type: choice
+        options:
+          - release
+          - debug
+      runner:
+        description: "ubuntu-latest downloads the DevEco tools; self-hosted uses the runner's DevEco Studio"
+        required: true
+        default: ubuntu-latest
+        type: choice
+        options:
+          - ubuntu-latest
+          - self-hosted
+      commandline_tools_url:
+        description: "DevEco command-line-tools zip URL from the Huawei download page (required for the hosted runner)"
+        required: false
+        default: ""
+        type: string
+      publish:
+        description: "Publish the HAP to a GitHub release"
+        required: true
+        default: none
+        type: choice
+        options:
+          - none
+          - prerelease
+          - release
+      release_tag:
+        description: "Release tag; empty uses v<version_name>. Add a channel marker here, e.g. v0.5.0.1-hmos.alpha"
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  # write, so the optional publish step can create the release and upload the HAP.
+  contents: write
+
+concurrency:
+  group: build-hap-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build ${{ inputs.build_mode }} HAP on ${{ inputs.runner }}
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 40
+    env:
+      INPUT_VERSION_NAME: ${{ inputs.version_name }}
+      INPUT_VERSION_CODE: ${{ inputs.version_code }}
+      INPUT_BUILD_MODE: ${{ inputs.build_mode }}
+      INPUT_RUNNER: ${{ inputs.runner }}
+      INPUT_TOOLS_URL: ${{ inputs.commandline_tools_url }}
+      INPUT_PUBLISH: ${{ inputs.publish }}
+      INPUT_RELEASE_TAG: ${{ inputs.release_tag }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: zulu
+          java-version: "17"
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Resolve and validate inputs
+        id: cfg
+        run: |
+          set -euo pipefail
+
+          version="$INPUT_VERSION_NAME"
+          if [ -z "$version" ]; then
+            echo "::error::version_name is required"
+            exit 1
+          fi
+          # HarmonyOS accepts digits and dots only here; a suffix such as -hmos.1 or
+          # -alpha.1 passes the loose SDK regex but risks review rejection.
+          if ! printf '%s' "$version" | grep -Eq '^[0-9]+(\.[0-9]+){1,3}$'; then
+            echo "::error::version_name must be 2 to 4 dot-separated numbers, e.g. 0.5.0.1 (got '$version')"
+            exit 1
+          fi
+
+          code="$INPUT_VERSION_CODE"
+          if [ -z "$code" ]; then
+            code="$GITHUB_RUN_NUMBER"
+          fi
+          if ! printf '%s' "$code" | grep -Eq '^[0-9]{1,10}$' || [ "$code" -lt 1 ] || [ "$code" -gt 2147483647 ]; then
+            echo "::error::version_code must be an integer between 1 and 2147483647 (got '$code')"
+            exit 1
+          fi
+
+          url="$INPUT_TOOLS_URL"
+          if [ "$INPUT_RUNNER" = "ubuntu-latest" ] && [ -z "$url" ]; then
+            echo "::error::The hosted runner needs commandline_tools_url. Sign in at https://developer.huawei.com/consumer/cn/download/command-line-tools-for-hmos, generate a fresh download link for Linux x64 and paste it here, or run with runner=self-hosted."
+            exit 1
+          fi
+
+          # The Huawei download links carry a signature, so treat the URL as a credential
+          # and mask it before anything can print it.
+          if [ -n "$url" ]; then
+            echo "::add-mask::$url"
+          fi
+
+          # A fresh link is generated for every run, but its path still ends in the archive
+          # name, which is stable per tool version. Key the tool cache on that name so a new
+          # link for the same version still hits, falling back to a URL hash when there is none.
+          name="$(basename "${url%%\?*}")"
+          if [ -z "$name" ] || [ "$name" = "." ]; then
+            name="$(printf '%s' "$url" | sha256sum | cut -c1-16)"
+          fi
+
+          # Default to v<version_name>; a tag is also where the channel marker that versionName
+          # cannot hold belongs, e.g. v0.5.0.1 or v0.5.0.1-hmos.alpha.
+          tag="$INPUT_RELEASE_TAG"
+          if [ -z "$tag" ]; then
+            tag="v$version"
+          fi
+          if ! printf '%s' "$tag" | grep -Eq '^[0-9A-Za-z][0-9A-Za-z._/-]{0,127}$' || printf '%s' "$tag" | grep -q '\.\.'; then
+            echo "::error::release_tag '$tag' is not a valid Git tag name"
+            exit 1
+          fi
+
+          {
+            echo "version_name=$version"
+            echo "version_code=$code"
+            echo "build_mode=$INPUT_BUILD_MODE"
+            echo "runner=$INPUT_RUNNER"
+            echo "tools_url=$url"
+            echo "tools_name=$name"
+            echo "release_tag=$tag"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "Building version $version (code $code) in $INPUT_BUILD_MODE mode on $INPUT_RUNNER"
+          if [ "$INPUT_PUBLISH" != "none" ]; then
+            echo "Will publish the HAP as ${INPUT_PUBLISH} release $tag"
+          fi
+
+      - name: Cache command-line tools
+        if: inputs.runner == 'ubuntu-latest'
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/deveco-tools
+          key: deveco-tools-${{ runner.os }}-${{ steps.cfg.outputs.tools_name }}
+
+      - name: Download DevEco command-line tools
+        if: inputs.runner == 'ubuntu-latest'
+        env:
+          TOOLS_URL: ${{ steps.cfg.outputs.tools_url }}
+        run: |
+          set -euo pipefail
+
+          dir="$RUNNER_TEMP/deveco-tools"
+          if [ -x "$dir/bin/hvigorw" ]; then
+            echo "Reusing the cached command-line tools."
+          else
+            rm -rf "$dir" "$RUNNER_TEMP/tools-unpacked"
+            mkdir -p "$dir"
+
+            zip="$RUNNER_TEMP/commandline-tools.zip"
+            echo "Downloading the command-line tools archive."
+            curl -fL --retry 3 --retry-delay 5 -o "$zip" "$TOOLS_URL" || {
+              status=$?
+              echo "::error::downloading the command-line tools failed (curl exit $status). A 403 usually means the link expired or was not generated for a signed-in account: sign in at https://developer.huawei.com/consumer/cn/download/command-line-tools-for-hmos, generate a fresh link and rerun, or use runner=self-hosted."
+              exit $status
+            }
+
+            unzip -q "$zip" -d "$RUNNER_TEMP/tools-unpacked"
+            inner="$(find "$RUNNER_TEMP/tools-unpacked" -maxdepth 2 -type d -name command-line-tools -print -quit)"
+            if [ -z "$inner" ]; then
+              inner="$(find "$RUNNER_TEMP/tools-unpacked" -maxdepth 1 -mindepth 1 -type d -print -quit)"
+            fi
+            if [ -z "$inner" ]; then
+              echo "::error::the command-line-tools archive has an unexpected layout"
+              exit 1
+            fi
+            cp -a "$inner/." "$dir/"
+          fi
+
+          echo "Tools installed at $dir:"
+          ls -la "$dir"
+
+      - name: Configure tools, SDK and PATH
+        run: |
+          set -euo pipefail
+
+          if [ "$INPUT_RUNNER" = "self-hosted" ]; then
+            # Match scripts/dev.sh: machine-specific paths may live in the ignored
+            # scripts/dev.local.env, which a persistent runner may keep in its checkout.
+            if [ -f scripts/dev.local.env ]; then
+              # shellcheck disable=SC1091
+              . scripts/dev.local.env
+            fi
+
+            dir=""
+            sdk="${DEVECO_SDK_HOME:-${HOS_SDK_HOME:-}}"
+            if [ -z "$sdk" ] && [ -d /Applications/DevEco-Studio.app/Contents/sdk ]; then
+              sdk="/Applications/DevEco-Studio.app/Contents/sdk"
+            fi
+
+            hvigor="${PHOTOCRAFT_HVIGOR:-}"
+            if [ -z "$hvigor" ] && [ -x "/Applications/DevEco-Studio.app/Contents/tools/hvigor/bin/hvigorw" ]; then
+              hvigor="/Applications/DevEco-Studio.app/Contents/tools/hvigor/bin/hvigorw"
+            fi
+            if [ -z "$hvigor" ]; then
+              hvigor="$(command -v hvigorw || true)"
+            fi
+
+            echo "SDK:    ${sdk:-<unset>}"
+            echo "hvigor: ${hvigor:-<unset>}"
+
+            if [ -z "$sdk" ] || [ -z "$hvigor" ]; then
+              echo "::error::self-hosted runner needs DevEco Studio. Install it, set DEVECO_SDK_HOME and PHOTOCRAFT_HVIGOR, or put them in scripts/dev.local.env."
+              exit 1
+            fi
+
+            {
+              echo "DEVECO_SDK_HOME=$sdk"
+              echo "HOS_SDK_HOME=$sdk"
+              echo "PHOTOCRAFT_HVIGOR=$hvigor"
+            } >> "$GITHUB_ENV"
+          else
+            dir="$RUNNER_TEMP/deveco-tools"
+            sdk="$(find "$dir" -maxdepth 3 -type d -name sdk -print -quit)"
+
+            if [ -z "$sdk" ] && [ -x "$dir/sdkmanager/bin/sdkmgr" ]; then
+              echo "No bundled SDK; asking sdkmgr for the HarmonyOS toolchains."
+              export JAVA_TOOL_OPTIONS="${JAVA_TOOL_OPTIONS:-} -Duser.country=CN"
+              "$dir/sdkmanager/bin/sdkmgr" install toolchains --accept-license
+              sdk="$(find "$dir" -maxdepth 3 -type d -name sdk -print -quit)"
+            fi
+
+            if [ -z "$sdk" ]; then
+              echo "::error::no HarmonyOS SDK found under the command-line tools; check the archive version"
+              exit 1
+            fi
+
+            echo "SDK: $sdk"
+            {
+              echo "DEVECO_SDK_HOME=$sdk"
+              echo "HOS_SDK_HOME=$sdk"
+              echo "PATH=$dir/bin:$dir/ohpm/bin:${PATH}"
+            } >> "$GITHUB_ENV"
+          fi
+
+      - name: Prepare project
+        env:
+          VERSION_NAME: ${{ steps.cfg.outputs.version_name }}
+          VERSION_CODE: ${{ steps.cfg.outputs.version_code }}
+        run: |
+          set -euo pipefail
+
+          # build-profile.json5 is git-ignored because it holds local signing material;
+          # the unsigned CI build starts from the committed example.
+          cp build-profile.example.json5 build-profile.json5
+
+          python3 - <<'PY'
+          import json
+          import os
+          import re
+          from pathlib import Path
+
+          name = os.environ["VERSION_NAME"]
+          code = os.environ["VERSION_CODE"]
+
+          app = Path("AppScope/app.json5")
+          text = app.read_text(encoding="utf-8")
+
+          text, n_name = re.subn(r'("versionName"\s*:\s*)"[^"]*"', lambda m: m.group(1) + json.dumps(name), text, count=1)
+          text, n_code = re.subn(r'("versionCode"\s*:\s*)\d+', lambda m: m.group(1) + code, text, count=1)
+          if n_name != 1 or n_code != 1:
+              raise SystemExit("could not set versionName/versionCode in AppScope/app.json5")
+
+          app.write_text(text, encoding="utf-8")
+          print(text)
+          PY
+
+      - name: Resolve ohpm dependencies
+        # The project declares no third-party dependencies, so a failure here is not fatal.
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          if command -v ohpm >/dev/null 2>&1; then
+            ohpm install
+          else
+            echo "ohpm not on PATH; skipping dependency resolution"
+          fi
+
+      - name: Build HAP
+        env:
+          BUILD_MODE: ${{ steps.cfg.outputs.build_mode }}
+        run: |
+          set -euo pipefail
+
+          hvigor="${PHOTOCRAFT_HVIGOR:-}"
+          if [ -z "$hvigor" ]; then
+            hvigor="$(command -v hvigorw || true)"
+          fi
+          if [ -z "$hvigor" ]; then
+            hvigor="$RUNNER_TEMP/deveco-tools/bin/hvigorw"
+          fi
+          if [ ! -x "$hvigor" ]; then
+            echo "::error::hvigorw not found; check the DevEco tools or PHOTOCRAFT_HVIGOR"
+            exit 1
+          fi
+
+          "$hvigor" --version || true
+          "$hvigor" assembleHap --mode module -p product=default -p buildMode="$BUILD_MODE" --no-daemon
+
+      - name: Collect artifact
+        id: collect
+        env:
+          VERSION_NAME: ${{ steps.cfg.outputs.version_name }}
+          BUILD_MODE: ${{ steps.cfg.outputs.build_mode }}
+        run: |
+          set -euo pipefail
+
+          echo "Build outputs:"
+          find entry/build -type f -name '*.hap' -print 2>/dev/null || true
+
+          pick() { find entry/build -type f -name "$1" -print -quit 2>/dev/null || true; }
+
+          source_hap="$(pick "*${BUILD_MODE}-unsigned.hap")"
+          if [ -z "$source_hap" ]; then
+            source_hap="$(pick '*-unsigned.hap')"
+          fi
+          if [ -z "$source_hap" ]; then
+            source_hap="$(pick '*.hap')"
+          fi
+          if [ -z "$source_hap" ]; then
+            echo "::error::no HAP produced"
+            exit 1
+          fi
+
+          out="$RUNNER_TEMP/photocraft-hmos-${VERSION_NAME}-${BUILD_MODE}-unsigned.hap"
+          cp "$source_hap" "$out"
+          echo "hap=$out" >> "$GITHUB_OUTPUT"
+          echo "Collected $(basename "$source_hap") -> $(basename "$out")"
+          sha256sum "$out" | tee "$RUNNER_TEMP/hap.sha256"
+
+      - name: Upload HAP
+        uses: actions/upload-artifact@v4
+        with:
+          name: photocraft-hmos-${{ steps.cfg.outputs.version_name }}-${{ steps.cfg.outputs.build_mode }}-unsigned
+          path: ${{ steps.collect.outputs.hap }}
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish release
+        if: inputs.publish != 'none'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION_NAME: ${{ steps.cfg.outputs.version_name }}
+          VERSION_CODE: ${{ steps.cfg.outputs.version_code }}
+          BUILD_MODE: ${{ steps.cfg.outputs.build_mode }}
+          RELEASE_TAG: ${{ steps.cfg.outputs.release_tag }}
+          PUBLISH: ${{ inputs.publish }}
+          HAP: ${{ steps.collect.outputs.hap }}
+        run: |
+          set -euo pipefail
+
+          # The resolve step defaults this to version_name; keep a guard so an empty value can
+          # never reach `gh release create`.
+          if [ -z "$RELEASE_TAG" ]; then
+            RELEASE_TAG="v$VERSION_NAME"
+          fi
+
+          sha="$(cut -d' ' -f1 "$RUNNER_TEMP/hap.sha256")"
+          notes="$RUNNER_TEMP/release-notes.md"
+          {
+            echo "Unsigned HarmonyOS HAP built from ${GITHUB_SHA:0:7} by [workflow run #${GITHUB_RUN_NUMBER}](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID})."
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| versionName | \`$VERSION_NAME\` |"
+            echo "| versionCode | \`$VERSION_CODE\` |"
+            echo "| build mode | \`$BUILD_MODE\` |"
+            echo "| signed | no (unsigned) |"
+            echo "| sha256 | \`$sha\` |"
+            echo
+            echo "Unsigned, so it installs on a simulator only. Sign it locally before putting it on a device."
+          } > "$notes"
+
+          if [ "$PUBLISH" = "prerelease" ]; then
+            kind=(--prerelease)
+          else
+            kind=(--prerelease=false)
+          fi
+
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "Release $RELEASE_TAG exists; replacing its asset and notes."
+            gh release upload "$RELEASE_TAG" "$HAP" --clobber
+            gh release edit "$RELEASE_TAG" --title "$RELEASE_TAG" --notes-file "$notes" "${kind[@]}"
+          else
+            gh release create "$RELEASE_TAG" "$HAP" --title "$RELEASE_TAG" --notes-file "$notes" --target "$GITHUB_SHA" "${kind[@]}"
+          fi
+
+          echo "Published: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/tag/$RELEASE_TAG"
+
+      - name: Summary
+        env:
+          VERSION_NAME: ${{ steps.cfg.outputs.version_name }}
+          VERSION_CODE: ${{ steps.cfg.outputs.version_code }}
+          BUILD_MODE: ${{ steps.cfg.outputs.build_mode }}
+          RUNNER_INPUT: ${{ steps.cfg.outputs.runner }}
+        run: |
+          set -euo pipefail
+          {
+            echo "## PhotoCraft HarmonyOS HAP"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| versionName | \`$VERSION_NAME\` |"
+            echo "| versionCode | \`$VERSION_CODE\` |"
+            echo "| build mode | \`$BUILD_MODE\` |"
+            echo "| runner | \`$RUNNER_INPUT\` |"
+            echo "| signed | no (unsigned) |"
+            echo "| sha256 | \`$(cut -d' ' -f1 "$RUNNER_TEMP/hap.sha256")\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
