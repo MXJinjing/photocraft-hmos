@@ -1,6 +1,6 @@
 # PhotoCraft（ArkWeb 原型）
 
-本工程把 [PhotoCraft v0.3.0](https://github.com/storytold/photocraft/releases/tag/v0.3.0) 网页版封装为 HarmonyOS 6.0 / API 20 平板和 PC/2in1 应用。已在 HarmonyOS 6.0(20) 平板模拟器完成启动、绘图、File → Save／Save As 保存 PSD、PNG 导出及从本地重新打开的基本测试；PC/2in1 尚待设备验证。测试详情见 [TEST_REPORT.md](TEST_REPORT.md)，实施计划见 [PLAN.md](PLAN.md)。
+本工程把 [PhotoCraft v0.3.0](https://github.com/storytold/photocraft/releases/tag/v0.3.0) 网页版封装为 HarmonyOS 6.0 / API 20 平板和 PC/2in1 应用。已在 HarmonyOS 6.0(20) 平板模拟器完成启动、绘图、File → Save／Save As 保存 PSD、PNG 导出及从本地重新打开的基本测试；PC/2in1 尚待设备验证。测试详情见 [TEST_REPORT.md](TEST_REPORT.md)。
 
 ## 构建和运行
 
