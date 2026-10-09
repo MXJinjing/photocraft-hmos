@@ -109,6 +109,7 @@ pub mod rasterize_prompt;
 pub mod retouch_ui;
 mod rgb_histogram;
 pub mod rulers;
+pub mod save_dialog;
 pub mod scrollbars;
 pub mod shortcut_dispatch;
 pub mod shortcuts;
@@ -136,6 +137,8 @@ pub mod type_tool;
 mod variables_ui;
 pub mod vector_ui;
 pub mod view_cmds;
+#[cfg(target_arch = "wasm32")]
+pub mod web_host;
 pub mod wheel_nav;
 pub mod wide_angle_ui;
 pub mod widgets;
@@ -249,6 +252,10 @@ pub struct Services {
     pub pick_save: Option<PickSaveFn>,
     /// Write bytes to a path (native) or trigger a download (web).
     pub write: Option<WriteFn>,
+    /// When set, Save from the unsaved-changes prompt is not finished when `write` returns. The
+    /// HarmonyOS wrapper shows a system save picker after the download; quitting before it closes
+    /// throws the save away. Absent on native and in a plain browser, where `write` is the save.
+    pub save_dialog: Option<save_dialog::SaveDialog>,
     /// File access used only by control/MCP requests. Interactive dialogs keep
     /// using `pick_open`, `pick_save` and `write` with the user's authority.
     pub automation_read: Option<AutomationReadFn>,
@@ -1006,6 +1013,8 @@ impl eframe::App for PhotocraftApp {
         // maximize it into the work area once (#315).
         work_area::fit_window(ctx);
         discard_ui::guard_window_close(self, ctx);
+        #[cfg(target_arch = "wasm32")]
+        web_host::on_close_requested(self, ctx);
         // Background jobs: apply finished ones, keep frames coming, Esc cancels (before the
         // shortcuts see Esc).
         jobs_ui::tick(self, ctx);

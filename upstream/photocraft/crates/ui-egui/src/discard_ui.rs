@@ -4,12 +4,17 @@
 //! egui is immediate-mode, so the action is parked in [`Prompt`] while the modal is up and re-run
 //! once every affected document has been answered. Cancel at any point drops it. Documents are
 //! tracked by id, not tab index, so closing one elsewhere while the prompt is up can't retarget it.
+//!
+//! On HarmonyOS, Save starts a download and the wrapper shows the system save picker afterwards.
+//! The parked action waits for that picker: quitting as soon as `write` returns destroys the
+//! picker, so the file is never written. Cancelling the picker leaves the document dirty.
 
 use egui::Key;
 use photocraft_doc::DocId;
 use serde_json::{Value, json};
 
 use crate::PhotocraftApp;
+use crate::save_dialog::SaveConfirm;
 use crate::widgets::{ButtonRole, DialogButton};
 
 const EXIT: &str = "file.exit";
@@ -21,6 +26,21 @@ pub struct Prompt {
     /// The document the command was aimed at (`document` param, else the active one), if it has one.
     target: Option<DocId>,
     docs: Vec<DocId>,
+    /// Generation of a host save picker still open for the document just answered Save. Quitting
+    /// before it closes loses the file (HarmonyOS `terminateSelf`).
+    pub(crate) awaiting_save: Option<u64>,
+    /// Dirty mark to keep if the picker is cancelled. `write` marks the document saved immediately.
+    save_undo: Option<SaveMark>,
+    /// Mark to apply once the picker confirms the write.
+    save_commit: Option<SaveMark>,
+}
+
+/// Path and saved revision around a save, so a host picker can undo the optimistic mark.
+#[derive(Clone)]
+struct SaveMark {
+    doc: DocId,
+    path: Option<String>,
+    saved_revision: u64,
 }
 
 fn index_of(app: &PhotocraftApp, id: DocId) -> Option<usize> {
@@ -65,7 +85,7 @@ pub fn intercept(app: &mut PhotocraftApp, id: &str, params: &Value) -> bool {
     if docs.is_empty() {
         return false;
     }
-    let prompt = Prompt { id: id.to_string(), params: params.clone(), target, docs };
+    let prompt = Prompt { id: id.to_string(), params: params.clone(), target, docs, awaiting_save: None, save_undo: None, save_commit: None };
     match &app.discard {
         None => app.discard = Some(prompt),
         // Quitting overrides whatever is pending: it covers every document, so nothing is lost.
@@ -133,7 +153,104 @@ fn save(app: &mut PhotocraftApp, ctx: &egui::Context, doc: DocId) -> bool {
     }
 }
 
+fn save_mark(app: &PhotocraftApp, doc: DocId) -> Option<SaveMark> {
+    let st = app.session.documents().get(index_of(app, doc)?)?;
+    Some(SaveMark { doc, path: st.path.clone(), saved_revision: st.saved_revision })
+}
+
+fn apply_mark(app: &mut PhotocraftApp, mark: SaveMark) {
+    let Some(i) = index_of(app, mark.doc) else { return };
+    if !app.session.set_active(i) {
+        return;
+    }
+    if let Some(st) = app.session.active_mut() {
+        st.path = mark.path;
+        st.saved_revision = mark.saved_revision;
+    }
+    app.ui.status.clear();
+    app.ui.status_error = false;
+    app.sync_views();
+}
+
+/// Save was chosen. When a host save picker is still open, park the action instead of quitting.
+fn accept_save(app: &mut PhotocraftApp, ctx: &egui::Context, doc: DocId) {
+    let armed = app.services.save_dialog.is_some();
+    let ticket = app.services.save_dialog.as_mut().map(|d| d.arm()).unwrap_or(0);
+    let before = save_mark(app, doc);
+    if !save(app, ctx, doc) {
+        if let Some(d) = app.services.save_dialog.as_mut() {
+            d.disarm();
+        }
+        return;
+    }
+    let after = save_mark(app, doc);
+    let confirm = if armed { app.services.save_dialog.as_mut().map(|d| d.poll(ticket)).unwrap_or(SaveConfirm::NotStarted) } else { SaveConfirm::NotStarted };
+    match confirm {
+        SaveConfirm::Pending => {
+            if let Some(before) = before.clone() {
+                apply_mark(app, before);
+            }
+            if let Some(p) = app.discard.as_mut() {
+                p.awaiting_save = Some(ticket);
+                p.save_undo = before;
+                p.save_commit = after;
+            }
+            ctx.request_repaint_after(std::time::Duration::from_millis(32));
+        }
+        SaveConfirm::Finished(false) => {
+            if let Some(before) = before {
+                apply_mark(app, before);
+            }
+            if let Some(d) = app.services.save_dialog.as_mut() {
+                d.disarm();
+            }
+        }
+        SaveConfirm::Finished(true) | SaveConfirm::NotStarted => {
+            if let Some(d) = app.services.save_dialog.as_mut() {
+                d.disarm();
+            }
+            advance(app, ctx);
+        }
+    }
+}
+
+/// `true` when the prompt should not be drawn (the parked action just ran, or there is nothing to ask).
+fn settle_host_save(app: &mut PhotocraftApp, ctx: &egui::Context) -> bool {
+    let Some(ticket) = app.discard.as_ref().and_then(|p| p.awaiting_save) else { return false };
+    let confirm = app.services.save_dialog.as_mut().map(|d| d.poll(ticket)).unwrap_or(SaveConfirm::Pending);
+    match confirm {
+        SaveConfirm::Pending => {
+            ctx.request_repaint_after(std::time::Duration::from_millis(32));
+            false
+        }
+        SaveConfirm::Finished(true) => {
+            let commit = app.discard.as_mut().and_then(|p| {
+                p.awaiting_save = None;
+                p.save_undo = None;
+                p.save_commit.take()
+            });
+            if let Some(commit) = commit {
+                apply_mark(app, commit);
+            }
+            advance(app, ctx);
+            true
+        }
+        SaveConfirm::Finished(false) => {
+            if let Some(p) = app.discard.as_mut() {
+                p.awaiting_save = None;
+                p.save_undo = None;
+                p.save_commit = None;
+            }
+            false
+        }
+        SaveConfirm::NotStarted => false,
+    }
+}
+
 pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
+    if settle_host_save(app, ctx) {
+        return;
+    }
     let Some(p) = &app.discard else { return };
     let Some(&doc) = p.docs.first() else { return };
     let (exits, reverts) = (p.id == EXIT, p.id == "file.revert");
@@ -193,10 +310,16 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
     if answer.is_none() && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, Key::Enter)) {
         answer = buttons.iter().find(|b| b.0 == ButtonRole::Default).map(|b| b.4);
     }
+    // While the system save picker is up, another Yes would start a second download and No would
+    // quit before the file is written. Cancel still backs out of quitting.
+    let awaiting = app.discard.as_ref().is_some_and(|p| p.awaiting_save.is_some());
+    if awaiting {
+        answer = answer.filter(|a| matches!(a, Answer::Cancel));
+    }
     match answer {
         Some(Answer::Cancel) => app.discard = None,
         Some(Answer::Discard) => advance(app, ctx),
-        Some(Answer::Save) if save(app, ctx, doc) => advance(app, ctx),
+        Some(Answer::Save) => accept_save(app, ctx, doc),
         _ => {}
     }
 }
@@ -468,6 +591,73 @@ mod tests {
         make_dirty(&mut app, 0);
         app.allow_close = true;
         assert!(!press_window_close(&mut app));
+        assert!(app.discard.is_none());
+    }
+
+    /// File › Exit › Yes must not quit while the host save picker is still open, and cancelling
+    /// that picker must leave the document dirty.
+    fn app_with_host_save() -> (PhotocraftApp, std::sync::Arc<crate::save_dialog::HostSaveGate>, std::sync::Arc<std::sync::Mutex<String>>) {
+        use std::sync::{Arc, Mutex};
+        let gate = crate::save_dialog::HostSaveGate::new();
+        let written = Arc::new(Mutex::new(String::new()));
+        let write_gate = Arc::clone(&gate);
+        let write_name = Arc::clone(&written);
+        let mut app = app_with_docs(1);
+        make_dirty(&mut app, 0);
+        app.services.export = Some(Box::new(|_, _, _| Ok((vec![1, 2, 3], Vec::new()))));
+        app.services.pick_save = Some(Box::new(|name| Some(name.to_string())));
+        app.services.write = Some(Box::new(move |path, _| {
+            *write_name.lock().unwrap_or_else(|e| e.into_inner()) = path.to_string();
+            let name = std::path::Path::new(path).file_name().and_then(|n| n.to_str()).unwrap_or(path);
+            write_gate.note_if_armed(name);
+            Ok(())
+        }));
+        app.services.save_dialog = Some(gate.dialog());
+        (app, gate, written)
+    }
+
+    #[test]
+    fn quit_yes_waits_for_the_host_save_picker() {
+        let (mut app, gate, written) = app_with_host_save();
+        let ctx = egui::Context::default();
+        assert!(intercept(&mut app, EXIT, &Value::Null));
+        let doc = doc_id(&app, 0);
+        accept_save(&mut app, &ctx, doc);
+        assert!(app.discard.as_ref().is_some_and(|p| p.awaiting_save.is_some()), "still asking until the picker finishes");
+        assert!(!app.allow_close, "must not quit while the save picker is open");
+        assert!(app.session.documents()[0].is_dirty(), "the download is not a completed save");
+        let name = std::path::Path::new(&*written.lock().unwrap_or_else(|e| e.into_inner()))
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("Untitled.psd")
+            .to_string();
+
+        assert!(gate.finish(&name, false));
+        assert!(!settle_host_save(&mut app, &ctx));
+        assert!(!app.allow_close);
+        assert!(app.session.documents()[0].is_dirty(), "cancelling the picker keeps the changes");
+        assert!(app.discard.as_ref().is_some_and(|p| p.awaiting_save.is_none()));
+
+        accept_save(&mut app, &ctx, doc);
+        assert!(!app.allow_close);
+        assert!(gate.finish(&name, true));
+        assert!(settle_host_save(&mut app, &ctx));
+        assert!(app.allow_close, "quit proceeds once the file has been written");
+        assert!(!app.session.documents()[0].is_dirty());
+    }
+
+    #[test]
+    fn quit_yes_without_a_host_picker_still_exits() {
+        let mut app = app_with_docs(1);
+        make_dirty(&mut app, 0);
+        app.services.export = Some(Box::new(|_, _, _| Ok((vec![1], Vec::new()))));
+        app.services.pick_save = Some(Box::new(|name| Some(name.to_string())));
+        app.services.write = Some(Box::new(|_, _| Ok(())));
+        let ctx = egui::Context::default();
+        assert!(intercept(&mut app, EXIT, &Value::Null));
+        let doc = doc_id(&app, 0);
+        accept_save(&mut app, &ctx, doc);
+        assert!(app.allow_close);
         assert!(app.discard.is_none());
     }
 }

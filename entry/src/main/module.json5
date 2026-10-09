@@ -21,10 +21,30 @@
         "startWindowIcon": "$media:app_icon",
         "startWindowBackground": "$color:start_window_background",
         "exported": true,
+        "launchType": "singleton",
         "skills": [
           {
             "entities": ["entity.system.home"],
             "actions": ["ohos.want.action.home"]
+          },
+          {
+            "actions": ["ohos.want.action.viewData"],
+            "uris": [
+              { "scheme": "file", "utd": "general.image", "maxFileSupported": 1 },
+              { "scheme": "file", "utd": "general.jpeg", "maxFileSupported": 1 },
+              { "scheme": "file", "utd": "general.png", "maxFileSupported": 1 },
+              { "scheme": "file", "utd": "general.tiff", "maxFileSupported": 1 },
+              { "scheme": "file", "utd": "general.gif", "maxFileSupported": 1 },
+              { "scheme": "file", "utd": "general.raw-image", "maxFileSupported": 1 },
+              { "scheme": "file", "utd": "com.microsoft.bmp", "maxFileSupported": 1 },
+              { "scheme": "file", "utd": "com.microsoft.ico", "maxFileSupported": 1 },
+              { "scheme": "file", "utd": "com.truevision.tga-image", "maxFileSupported": 1 },
+              { "scheme": "file", "utd": "com.ilm.openexr-image", "maxFileSupported": 1 },
+              { "scheme": "file", "utd": "com.adobe.photoshop-image", "maxFileSupported": 1 },
+              { "scheme": "file", "utd": "io.github.storytold.photocraft.webp", "maxFileSupported": 1 },
+              { "scheme": "file", "utd": "io.github.storytold.photocraft.heif", "maxFileSupported": 1 },
+              { "scheme": "file", "utd": "io.github.storytold.photocraft.psb", "maxFileSupported": 1 }
+            ]
           }
         ]
       }

@@ -51,6 +51,12 @@ impl ThemeKind {
         let i = Self::ALL.iter().position(|k| *k == self).unwrap_or(0);
         Self::ALL[(i + 1) % Self::ALL.len()]
     }
+    /// `#RRGGBB` of the window chrome (title bar and status bar). A host uses it to colour the
+    /// system status bar and navigation indicator so they meet the app edge.
+    pub fn chrome_css(self) -> String {
+        let c = Tokens::for_kind(self).chrome;
+        format!("#{:02X}{:02X}{:02X}", c.r(), c.g(), c.b())
+    }
     pub fn from_name(s: &str) -> Option<Self> {
         match s.to_ascii_lowercase().replace([' ', '_', '-', '(', ')'], "").as_str() {
             "pro" | "prodark" | "photoshop" | "dark" => Some(ThemeKind::Pro),
@@ -581,6 +587,11 @@ mod tests {
         let m = Tokens::for_kind(ThemeKind::ProMedium);
         assert!(m.pro && m.dark() && m.kind == ThemeKind::ProMedium && m.card == Color32::from_rgb(83, 83, 83));
         assert_eq!(ThemeKind::from_name("neon"), None);
+        assert_eq!(ThemeKind::Pro.chrome_css(), "#323232");
+        assert_eq!(ThemeKind::ProMedium.chrome_css(), "#535353");
+        assert_eq!(ThemeKind::Studio.chrome_css(), "#141415");
+        assert_eq!(ThemeKind::StudioLight.chrome_css(), "#F6F6F8");
+        assert_eq!(ThemeKind::Classic.chrome_css(), "#D4D0C8");
     }
 
     #[test]

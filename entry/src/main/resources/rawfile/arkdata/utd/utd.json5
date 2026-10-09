@@ -1,0 +1,28 @@
+{
+  "UniformDataTypeDeclarations": [
+    {
+      "TypeId": "io.github.storytold.photocraft.webp",
+      "BelongingToTypes": ["general.image"],
+      "FilenameExtensions": [".webp"],
+      "MIMETypes": ["image/webp"],
+      "Description": "WebP image",
+      "ReferenceURL": ""
+    },
+    {
+      "TypeId": "io.github.storytold.photocraft.heif",
+      "BelongingToTypes": ["general.image"],
+      "FilenameExtensions": [".heic", ".heif", ".hif"],
+      "MIMETypes": ["image/heic", "image/heif"],
+      "Description": "HEIF image",
+      "ReferenceURL": ""
+    },
+    {
+      "TypeId": "io.github.storytold.photocraft.psb",
+      "BelongingToTypes": ["general.image"],
+      "FilenameExtensions": [".psb", ".psdt"],
+      "MIMETypes": ["image/vnd.adobe.photoshop", "application/x-photoshop"],
+      "Description": "Adobe Photoshop large document",
+      "ReferenceURL": ""
+    }
+  ]
+}
