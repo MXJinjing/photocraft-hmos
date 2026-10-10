@@ -188,3 +188,5 @@ API 20 模拟器使用独立 touchorigintest 包完成启动/新建文档/菜单
 验证：默认 UI/engine/text 单元、集成及文档测试共 2,872 passed / 28 ignored；harmonyos-ui 单元测试 1,527 passed / 8 ignored，另新增裁剪恢复测试通过；最终原生适配器 26 项通过。共享三个 crate 以及鸿蒙 UI all-targets 严格 Clippy、ARM64 原生库严格 Clippy、offline metadata、分层、L0–L6 wasm 与 photocraft-web wasm 编译通过。全部 12 个 ArkTS 回归脚本及 4 个 Python/C++ 回归脚本通过。
 
 ARM64 release Rust 库与本地 debug HAP 构建、verify_native.py 通过。API 20 ARM64 模拟器完成最终 signed HAP 安装/启动，目视确认欢迎页正常渲染；未部署真实 Pad。两张截图均为 2880×1920：[v0.5.0](docs/native/upstream-v050-home.jpeg)、[v0.6.0](docs/native/upstream-v060-home.jpeg)。文件服务/输入行为由平台脚本与真实编辑器集成测试覆盖，本轮模拟器只完成启动页烟测。
+
+完整 `cargo xtask test-corpus` 最终通过：2,467 passed / 22 ignored，共 106 个测试组。首次 `--local` 因没有 authoring clone 失败，随后通过常规命令取得已固定 commit/SHA-256 的 OpenEXR、Affinity 等 corpus 并完成 release 测试。最终 signed HAP 的 SHA-256 为 `9651ae5c3191d344b816fdd4ba1a67f0135f64c5d530b79e795aaecd0eb1a23b`，包内所有原生库 ABI 均为 `arm64-v8a`。
