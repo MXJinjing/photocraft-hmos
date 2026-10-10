@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Check both native ABIs and ensure the HAP contains no web runtime snapshot."""
 import argparse
+import os
 import json
 import struct
 import zipfile
@@ -39,13 +40,17 @@ def verify_file_open(config: dict, utds: dict) -> None:
 def verify(path: Path) -> None:
     with zipfile.ZipFile(path) as archive:
         names = archive.namelist()
-        for abi, machine in [('arm64-v8a', 183), ('x86_64', 62)]:
+        abis = os.environ.get('PHOTOCRAFT_ABIS', 'arm64-v8a x86_64').split()
+        for abi, machine in [(a, {'arm64-v8a': 183, 'x86_64': 62}[a]) for a in abis]:
             name = f'libs/{abi}/libphotocraft.so'
             if name not in names:
                 raise ValueError(f'missing {name}')
             data = archive.read(name)
             if data[:5] != b'\x7fELF\x02' or struct.unpack_from('<H', data, 18)[0] != machine:
                 raise ValueError(f'incorrect ELF architecture: {name}')
+        extra = sorted({n.split('/')[1] for n in names if n.startswith('libs/') and n.count('/') >= 2} - set(abis))
+        if extra:
+            raise ValueError(f'unexpected ABIs in HAP: {extra}')
         forbidden = [name for name in names if name.lower().endswith(('.wasm', '.html', '.js'))]
         if forbidden:
             raise ValueError(f'web assets remain: {forbidden}')

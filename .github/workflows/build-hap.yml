@@ -327,10 +327,16 @@ jobs:
       - name: Set up Rust for native HarmonyOS
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-unknown-linux-ohos,x86_64-unknown-linux-ohos
+          targets: aarch64-unknown-linux-ohos
 
-      - name: Build Rust native libraries
-        run: scripts/build_native.sh
+      - name: Build Rust native libraries (arm64-v8a only)
+        env:
+          PHOTOCRAFT_NATIVE_TARGETS: aarch64-unknown-linux-ohos
+        run: |
+          scripts/build_native.sh
+          # Release HAPs ship real-device arm64 only; local builds keep x86_64 for the simulator.
+          sed -i 's/"abiFilters": \[[^]]*\]/"abiFilters": ["arm64-v8a"]/' entry/build-profile.json5
+          grep abiFilters entry/build-profile.json5
 
       - name: Build HAP
         env:
@@ -354,6 +360,8 @@ jobs:
           "$hvigor" assembleHap --mode module -p product=default -p buildMode="$BUILD_MODE" --no-daemon
 
       - name: Verify native HAP
+        env:
+          PHOTOCRAFT_ABIS: arm64-v8a
         run: python3 scripts/verify_native.py entry/build/default/outputs/default/entry-default-unsigned.hap
 
       - name: Collect artifact
@@ -424,10 +432,11 @@ jobs:
             echo "| versionName | \`$VERSION_NAME\` |"
             echo "| versionCode | \`$VERSION_CODE\` |"
             echo "| build mode | \`$BUILD_MODE\` |"
+            echo "| ABI | arm64-v8a（真机） |"
             echo "| signed | no (unsigned) |"
             echo "| sha256 | \`$sha\` |"
             echo
-            echo "Unsigned, so it installs on a simulator only. Sign it locally before putting it on a device."
+            echo "arm64-v8a only (real devices); no x86_64 simulator build. Unsigned: sign it locally, or install via a debugging helper, before putting it on a device."
           } > "$notes"
 
           if [ "$PUBLISH" = "prerelease" ]; then
