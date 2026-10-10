@@ -16,6 +16,8 @@ scripts/dev.sh run
 
 `scripts/build_native.sh` builds the ARM64 static library. hvigor/CMake links it into `libphotocraft.so`. Local DevEco debug signing remains in the ignored root build profile. `scripts/verify_native.py <HAP>` verifies the ARM64 ELF architecture and rejects packaged HTML, JavaScript or WASM.
 
+After each successful Rust build, `scripts/build_native.sh` runs `scripts/clean_rust_debug.py` to clear `native/rust/target/debug`, including host dependencies, incremental data and fingerprints. The Cargo lock file, ARM64 outputs and release cache are preserved; an active Cargo lock skips cleanup. This applies to `dev.sh`, offline packaging and CI. Direct `cargo test` commands do not trigger cleanup. Clearing the cache means host build dependencies and local tests need recompilation on their next run.
+
 The scripts read the existing ignored `scripts/dev.local.env`. Set `PHOTOCRAFT_NATIVE_SDK` to the SDK's `openharmony/native` directory when necessary. `PHOTOCRAFT_NATIVE_TARGETS` can select one Rust target for standalone build experiments; a full HAP build requires both. `PHOTOCRAFT_RUST_PROFILE` is release by default; standalone debug libraries do not satisfy the default CMake release path.
 
 Native Rust and ArkTS/C++ changes require rebuilding and installing the HAP. `scripts/dev.sh` supports `build`, `run` and `launch`; every entry uses the native Rust host. Save work before relaunch or deployment, which restart the app. File Wants are forwarded to the current native editor. Imported upstream Web sources remain in the subtree history and are outside the HarmonyOS build/development workflow.

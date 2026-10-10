@@ -26,3 +26,6 @@ for target in $TARGETS; do
       "CARGO_TARGET_${upper}_LINKER=$compiler" \
       cargo build --locked --manifest-path "$ROOT/native/rust/Cargo.toml" --target "$target" "${ARGS[@]}"
 done
+# Cargo is finished: clear its host debug cache, retaining ARM64 build outputs.
+# This also covers dev.sh, offline packaging and CI, which use this script.
+python3 "$ROOT/scripts/clean_rust_debug.py" || echo 'Warning: host debug cache cleanup failed' >&2

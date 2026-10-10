@@ -17,14 +17,17 @@ import { NativeImeAdapter, NativeImeState } from '../input/NativeImeAdapter';
 import { NativeCursorAdapter } from '../input/NativeCursorAdapter';
 import { moveWindow, toggleWindowMaximize } from '../WindowChrome';
 import { window } from '@kit.ArkUI';
+import { configureDisplayColor } from '../DisplayColor';
 
 class NativeConfig {
   files: string;
   documents: string;
   scale: number;
   language: string;
-  constructor(files: string, documents: string, scale: number, language: string) {
+  displayP3: boolean;
+  constructor(files: string, documents: string, scale: number, language: string, displayP3: boolean) {
     this.files = files; this.documents = documents; this.scale = scale; this.language = language;
+    this.displayP3 = displayP3;
   }
 }
 class NativeMessage { kind: string = ''; text: string = ''; }
@@ -99,7 +102,9 @@ struct Index {
       this.documents = new LocalDocuments(documents, this.context.filesDir);
       this.documentUri = uri;
       let scale: number = this.getUIContext().vp2px(1);
-      native.init(JSON.stringify(new NativeConfig(this.context.filesDir, documents, scale, i18n.System.getSystemLanguage())),
+      const displayP3 = await configureDisplayColor(this.context);
+      if (!this.alive || generation !== this.generation) { return; }
+      native.init(JSON.stringify(new NativeConfig(this.context.filesDir, documents, scale, i18n.System.getSystemLanguage(), displayP3)),
         (id: number, message: string, data: ArrayBuffer) => { this.receive(id, message, data); });
       this.initialized = true;
       this.onTitlebarChanged();

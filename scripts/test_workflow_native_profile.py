@@ -44,6 +44,15 @@ class NativeProfileTests(unittest.TestCase):
                 path = Path(directory)
                 (path / 'scripts').mkdir()
                 shutil.copyfile(ROOT / 'scripts/build_native.sh', path / 'scripts/build_native.sh')
+                shutil.copyfile(ROOT / 'scripts/clean_rust_debug.py', path / 'scripts/clean_rust_debug.py')
+                debug = path / 'native/rust/target/debug'
+                (debug / 'deps').mkdir(parents=True)
+                (debug / 'deps/stale.rlib').write_bytes(b'x' * 8192)
+                (debug / '.fingerprint').mkdir()
+                (debug / '.fingerprint/stale').write_text('stale')
+                arm64 = path / f'native/rust/target/aarch64-unknown-linux-ohos/{mode}'
+                arm64.mkdir(parents=True)
+                library = arm64 / 'libphotocraft_hmos.a'
                 bin_dir = path / 'bin'
                 bin_dir.mkdir()
                 sdk = path / 'sdk'
@@ -54,17 +63,21 @@ class NativeProfileTests(unittest.TestCase):
                     (path / 'sysroot/lib/rustlib' / target).mkdir(parents=True)
                 for name, body in {
                     'rustc': '#!/bin/sh\nprintf "%s\\n" "$TEST_SYSROOT"\n',
-                    'cargo': '#!/bin/sh\nprintf "%s\\n" "$*" >> "$TEST_CARGO_LOG"\n',
+                    'cargo': '#!/bin/sh\n[ -f "$TEST_DEBUG_ARTIFACT" ] || exit 1\nprintf "%s\\n" "$*" >> "$TEST_CARGO_LOG"\nprintf library > "$TEST_ARM64_LIBRARY"\n',
                 }.items():
                     (bin_dir / name).write_text(body)
                     (bin_dir / name).chmod(0o755)
                 log = path / 'cargo.log'
                 env = dict(os.environ, PATH=str(bin_dir) + os.pathsep + os.environ['PATH'],
                            PHOTOCRAFT_NATIVE_SDK=str(sdk), PHOTOCRAFT_RUST_PROFILE=mode,
-                           TEST_SYSROOT=str(path / 'sysroot'), TEST_CARGO_LOG=str(log))
+                           TEST_SYSROOT=str(path / 'sysroot'), TEST_CARGO_LOG=str(log),
+                           TEST_DEBUG_ARTIFACT=str(debug / 'deps/stale.rlib'),
+                           TEST_ARM64_LIBRARY=str(library))
                 env.pop('PHOTOCRAFT_NATIVE_TARGETS', None)
                 result = subprocess.run(['bash', str(path / 'scripts/build_native.sh')], env=env, capture_output=True, text=True)
                 self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(list(debug.iterdir()), [debug / '.cargo-lock'])
+                self.assertEqual(library.read_text(), 'library')
                 calls = log.read_text().splitlines()
                 self.assertEqual(len(calls), 1)
                 for call, target in zip(calls, ('aarch64-unknown-linux-ohos',)):

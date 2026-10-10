@@ -11,6 +11,21 @@
 #include <mutex>
 #include <string>
 #include <vector>
+#include "display_color.h"
+
+// Called exclusively on the Rust render worker, after EGL creates/configures the surface.
+// Read back the declaration so the editor never emits P3 into an untagged surface.
+extern "C" int32_t pc_set_window_color_space(void* window, bool p3) {
+    auto* nativeWindow = static_cast<OHNativeWindow*>(window);
+    const auto requested = p3 ? OH_COLORSPACE_P3_FULL : OH_COLORSPACE_SRGB_FULL;
+    int32_t result = OH_NativeWindow_SetColorSpace(nativeWindow, requested);
+    OH_NativeBuffer_ColorSpace actual = OH_COLORSPACE_NONE;
+    if (result == 0) result = OH_NativeWindow_GetColorSpace(nativeWindow, &actual);
+    OH_LOG_Print(LOG_APP, LOG_INFO, 0xD001, "PhotoCraft",
+        "Native output requested %{public}d actual %{public}d result %{public}d",
+        static_cast<int>(requested), static_cast<int>(actual), result);
+    return result != 0 ? result : (PhotoCraftOutputMatches(p3, actual) ? 0 : -1);
+}
 
 extern "C" {
 using Notify = void (*)(uint64_t,const uint8_t*,size_t,const uint8_t*,size_t);

@@ -2,6 +2,8 @@
 
 当前开发分支 `dev` 将 PhotoCraft v0.6.0 作为 Rust 原生库运行，通过 XComponent / NativeWindow 和 wgpu GLES/EGL 绘制原有 egui UI。鸿蒙入口统一使用原生 Rust。HAP 不包含网页或 WASM 快照。文档画布暂使用 CPU 合成。
 
+原生宿主会查询窗口广色域能力，并协商 Display P3 输出；系统不支持或拒绝时使用明确标记的 sRGB。PhotoCraft 的自动显示配置文件表示应用输出空间，鸿蒙负责最终的屏幕色彩映射，不是实测屏幕 ICC。画布按文档 ICC 转换，普通 egui 界面颜色从 sRGB 转到同一输出空间；窗口重建、尺寸变化和 EGL surface 恢复后重新声明色彩空间。此接入支持 SDR 广色域显示，预览仍为 8-bit，不包含 HDR 图片增益图或 HDR 屏幕输出。
+
 ```bash
 scripts/dev.sh build   # ARM64 Rust 库 + 本地 debug HAP
 scripts/dev.sh run     # 构建、安装到唯一连接的模拟器/设备并启动

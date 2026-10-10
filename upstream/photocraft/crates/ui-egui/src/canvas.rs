@@ -59,7 +59,10 @@ fn draw_clone_preview(app: &mut PhotocraftApp, painter: &egui::Painter, xf: &Vie
                 cache.texture.set(image, TextureOptions::LINEAR);
                 cache.key = key;
             }
-            None => app.clone_preview = Some(ClonePreviewCache { key, texture: painter.ctx().load_texture("clone-preview", image, TextureOptions::LINEAR) }),
+            None => {
+                app.clone_preview =
+                    Some(ClonePreviewCache { key, texture: load_display_texture(painter.ctx(), "clone-preview", image, TextureOptions::LINEAR) })
+            }
         }
     }
     let Some(cache) = &app.clone_preview else { return };
@@ -737,6 +740,14 @@ fn display_image(display: Option<&photocraft_engine::display_color::CanvasDispla
     }
 }
 
+/// Texture-name namespace for CPU images already transformed to the display's output
+/// profile. Native hosts converting ordinary egui sRGB textures must leave these alone.
+pub const DISPLAY_TEXTURE_PREFIX: &str = "photocraft-display:";
+
+fn load_display_texture(ctx: &egui::Context, name: impl std::fmt::Display, image: egui::ColorImage, options: TextureOptions) -> egui::TextureHandle {
+    ctx.load_texture(format!("{DISPLAY_TEXTURE_PREFIX}{name}"), image, options)
+}
+
 /// The canvas display of `doc` on `display` (`None`: the main window's) and a key that changes
 /// with it (folded into the canvas caches' preview keys, so a monitor or profile change
 /// re-renders).
@@ -908,7 +919,7 @@ pub fn navigator_texture(app: &mut PhotocraftApp, ctx: &egui::Context, idx: usiz
             t.set(image, TextureOptions::LINEAR);
             t
         }
-        None => ctx.load_texture(format!("navigator-{}", id.0), image, TextureOptions::LINEAR),
+        None => load_display_texture(ctx, format!("navigator-{}", id.0), image, TextureOptions::LINEAR),
     };
     app.perf.span("navigator", crate::gpu_canvas::now_ms() - t0);
     app.navigator_textures.insert(id, (snapshot, preview_key, tex.clone()));
@@ -970,7 +981,7 @@ pub fn ensure_texture(app: &mut PhotocraftApp, ctx: &egui::Context, idx: usize, 
             let (img, scale) = (display_image(display.as_deref(), &full), 1.0 / factor as f32);
             match cache.texture.as_mut() {
                 Some(t) if t.size() == img.size => t.set(img, TextureOptions::LINEAR),
-                _ => cache.texture = Some(ctx.load_texture(format!("canvas-{}-{}", id.0, cache_key(id, output).1), img, TextureOptions::LINEAR)),
+                _ => cache.texture = Some(load_display_texture(ctx, format!("canvas-{}-{}", id.0, cache_key(id, output).1), img, TextureOptions::LINEAR)),
             }
             cache.scale = scale;
             app.perf.record("full", doc.size.width as u64 * doc.size.height as u64, t1 - t0, crate::gpu_canvas::now_ms() - t1);
@@ -3306,7 +3317,7 @@ fn draw_beyond_canvas(app: &mut PhotocraftApp, painter: &egui::Painter, xf: &Vie
                     let up = |v: i32| v.div_euclid(k) + i32::from(v.rem_euclid(k) != 0);
                     let p = DRect::new(b.x0.div_euclid(k), b.y0.div_euclid(k), up(b.x1), up(b.y1));
                     let buf = photocraft_compose::render_reduced_rect(src, p, p.width(), p.height());
-                    let tex = ctx.load_texture("crop-beyond-canvas", display_image(display.as_deref(), &buf), opts);
+                    let tex = load_display_texture(&ctx, "crop-beyond-canvas", display_image(display.as_deref(), &buf), opts);
                     (b, DRect::new(p.x0.saturating_mul(k), p.y0.saturating_mul(k), p.x1.saturating_mul(k), p.y1.saturating_mul(k)), tex)
                 })
                 .collect();

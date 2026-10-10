@@ -13,6 +13,8 @@ mod chrome;
 #[cfg(any(target_env = "ohos", test))]
 mod cursor;
 #[cfg(any(target_env = "ohos", test))]
+mod display_color;
+#[cfg(any(target_env = "ohos", test))]
 mod documents;
 #[cfg(any(target_env = "ohos", test))]
 mod ime;
@@ -44,6 +46,8 @@ struct Config {
     scale: f32,
     #[serde(default)]
     language: String,
+    #[serde(default, rename = "displayP3")]
+    display_p3: bool,
 }
 fn default_scale() -> f32 {
     1.
@@ -389,7 +393,9 @@ fn worker(config: Config, rx: mpsc::Receiver<Message>) {
                         if let Some(r) = render.as_mut() {
                             r.bind(render::Window(ptr), w, h)?;
                         } else {
-                            let r = render::Render::new(render::Window(ptr), w, h)?;
+                            let r =
+                                render::Render::new(render::Window(ptr), w, h, config.display_p3)?;
+                            r.color.install(&mut app.session.color);
                             app.perf.gpu_info.set_adapter(&r.adapter.get_info());
                             render = Some(r);
                         }
@@ -401,7 +407,7 @@ fn worker(config: Config, rx: mpsc::Receiver<Message>) {
                     Message::Resize(w, h) => {
                         visible = w > 0 && h > 0;
                         if let Some(r) = render.as_mut() {
-                            r.resize(w, h);
+                            r.resize(w, h)?;
                         }
                         deadline = Some(Instant::now());
                     }

@@ -190,3 +190,16 @@ API 20 模拟器使用独立 touchorigintest 包完成启动/新建文档/菜单
 ARM64 release Rust 库与本地 debug HAP 构建、verify_native.py 通过。API 20 ARM64 模拟器完成最终 signed HAP 安装/启动，目视确认欢迎页正常渲染；未部署真实 Pad。两张截图均为 2880×1920：[v0.5.0](docs/native/upstream-v050-home.jpeg)、[v0.6.0](docs/native/upstream-v060-home.jpeg)。文件服务/输入行为由平台脚本与真实编辑器集成测试覆盖，本轮模拟器只完成启动页烟测。
 
 完整 `cargo xtask test-corpus` 最终通过：2,467 passed / 22 ignored，共 106 个测试组。首次 `--local` 因没有 authoring clone 失败，随后通过常规命令取得已固定 commit/SHA-256 的 OpenEXR、Affinity 等 corpus 并完成 release 测试。最终 signed HAP 的 SHA-256 为 `9651ae5c3191d344b816fdd4ba1a67f0135f64c5d530b79e795aaecd0eb1a23b`，包内所有原生库 ABI 均为 `arm64-v8a`。
+
+
+## 2026-10-10 HarmonyOS SDR Display P3 色彩管理接入
+
+宿主通过屏幕色彩空间列表和 `isWindowSupportWideGamut()` 查询能力，协商并读取窗口的 WIDE_GAMUT 状态。在 EGL surface 配置后设置并读取 NativeWindow 的完整色彩空间；支持 sRGB/P3 FULL 与 DISPLAY_* 的等价返回值，拒绝不匹配、未标记、有限范围及 HDR 编码。P3 设置失败时请求明确标记的 sRGB，窗口重绑、resize、Outdated/Lost 恢复后重新声明。
+
+自动显示配置文件采用已协商的 sRGB 或 Display P3 标准输出配置，名称明确为 HarmonyOS system-managed output；它不表示实测面板 ICC，鸿蒙负责最后的屏幕映射。文档 ICC 保持不变。普通 egui 顶点/纹理从 sRGB 转到 P3；已完成文档→输出转换的 CPU 画布、导航器、仿制预览及裁剪扩展纹理带独立命名标记，跳过第二次转换。纹理更新支持部分更新，保留 alpha 和中性颜色，并缓存界面颜色转换。
+
+验证：原生 31 项通过（新增 5 项覆盖 P3 同配置不截断色域、sRGB 回退、文档 ICC 不变、UI 标准红转换/alpha、画布不重复转换、实际 CPU 画布标记和旧配置兼容）；上游 UI 完整测试 1612 passed / 8 ignored（22 组），包含 GPU/CPU 色彩管理回归。ArkTS 模拟测试覆盖窗口能力、空色彩列表、设置失败和状态读取；SDK 枚举 C++ 测试覆盖两组等价名称及错误编码拒绝。全部平台 CJS 回归、共享 UI all-targets 严格 Clippy、ARM64 native release 严格 Clippy、offline metadata、29 crates 分层、完整 WASM 检查、`cargo xtask perf --quick` 均通过。依赖配置与构建使用 `scripts/dev.local.env` 指定的工具链；GPU UI 测试和性能基准在允许访问本机 GPU 的环境中执行。
+
+ARM64 release Rust 库、debug HAP 和 verify_native.py 通过。仅在无文档状态的 API 20 模拟器 `127.0.0.1:5555` 安装/启动；真实 Pad 未部署。模拟器的屏幕色彩列表为空，但窗口广色域查询返回 true，最终声明 P3_FULL=12、读取 DISPLAY_P3_SRGB=26，应用正常渲染，后台恢复正常；之前的 sRGB 声明亦验证 FULL=11→DISPLAY_SRGB=25。前后截图均为 2880×1920：[修改前](docs/native/display-color-before.jpeg)、[修改后](docs/native/display-color-after.jpeg)。截图用于确认界面布局和渲染，不证明物理面板色准或截图本身具有正确 ICC 标记。
+
+仍待验收：TGR-W10 真机 P3 图片与系统图库对比、不同显示模式下的系统映射；当前 CPU 预览仍为 8-bit SDR，未实现 HDR 增益图、HDR 输出或实测面板 ICC 读取。
