@@ -1,12 +1,12 @@
 # HarmonyOS native self-drawing host
 
-The experimental `codex/hmos-native-selfdraw` branch runs PhotoCraft as a Rust native library inside the HAP. XComponent supplies a NativeWindow; wgpu's GLES/EGL backend and egui-wgpu draw the original editor. The document compositor remains on the CPU in this first iteration.
+This repository runs PhotoCraft v0.6.0 as a Rust native library inside the HAP. XComponent supplies a NativeWindow; wgpu's GLES/EGL backend and egui-wgpu draw the original editor. The document compositor remains on the CPU in this first iteration.
 
 The adapter is a separate Cargo workspace, outside the upstream subtree. Upstream algorithms and documents are reused through path dependencies. Its lockfile pins the same dependency versions as the upstream lockfile; do not regenerate it wholesale when updating upstream. Both workspaces use the verified wgpu-hal path patch.
 
 ## Build
 
-Install a Rust toolchain satisfying upstream's rust-version and both targets:
+Install a Rust toolchain satisfying upstream's rust-version and the ARM64 target:
 
 ```sh
 rustup target add aarch64-unknown-linux-ohos
@@ -18,7 +18,7 @@ scripts/dev.sh run
 
 After each successful Rust build, `scripts/build_native.sh` runs `scripts/clean_rust_debug.py` to clear `native/rust/target/debug`, including host dependencies, incremental data and fingerprints. The Cargo lock file, ARM64 outputs and release cache are preserved; an active Cargo lock skips cleanup. This applies to `dev.sh`, offline packaging and CI. Direct `cargo test` commands do not trigger cleanup. Clearing the cache means host build dependencies and local tests need recompilation on their next run.
 
-The scripts read the existing ignored `scripts/dev.local.env`. Set `PHOTOCRAFT_NATIVE_SDK` to the SDK's `openharmony/native` directory when necessary. `PHOTOCRAFT_NATIVE_TARGETS` can select one Rust target for standalone build experiments; a full HAP build requires both. `PHOTOCRAFT_RUST_PROFILE` is release by default; standalone debug libraries do not satisfy the default CMake release path.
+The scripts read the existing ignored `scripts/dev.local.env`. Set `PHOTOCRAFT_NATIVE_SDK` to the SDK's `openharmony/native` directory when necessary. `PHOTOCRAFT_NATIVE_TARGETS` accepts only `aarch64-unknown-linux-ohos`; local and CI HAPs both contain only ARM64 libraries. `PHOTOCRAFT_RUST_PROFILE` is release by default; standalone debug libraries do not satisfy the default CMake release path.
 
 Native Rust and ArkTS/C++ changes require rebuilding and installing the HAP. `scripts/dev.sh` supports `build`, `run` and `launch`; every entry uses the native Rust host. Save work before relaunch or deployment, which restart the app. File Wants are forwarded to the current native editor. Imported upstream Web sources remain in the subtree history and are outside the HarmonyOS build/development workflow.
 

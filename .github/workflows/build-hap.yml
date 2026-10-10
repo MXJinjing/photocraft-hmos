@@ -344,6 +344,7 @@ jobs:
       - name: Build Rust native libraries
         env:
           PHOTOCRAFT_RUST_PROFILE: ${{ steps.cfg.outputs.build_mode }}
+          PHOTOCRAFT_NATIVE_TARGETS: aarch64-unknown-linux-ohos
         run: scripts/build_native.sh
 
       - name: Build HAP
@@ -433,15 +434,16 @@ jobs:
           {
             echo "Unsigned HarmonyOS HAP built from ${GITHUB_SHA:0:7} by [workflow run #${GITHUB_RUN_NUMBER}](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID})."
             echo
-            echo "| | |"
+            echo "| 项目 | 值 |"
             echo "|---|---|"
             echo "| versionName | \`$VERSION_NAME\` |"
             echo "| versionCode | \`$VERSION_CODE\` |"
             echo "| build mode | \`$BUILD_MODE\` |"
+            echo "| ABI | arm64-v8a |"
             echo "| signed | no (unsigned) |"
             echo "| sha256 | \`$sha\` |"
             echo
-            echo "Unsigned, so it installs on a simulator only. Sign it locally before putting it on a device."
+            echo "arm64-v8a only; supports ARM64 devices and simulators, no x86_64 build. Unsigned: sign it locally, or install via a debugging helper, before putting it on a device."
           } > "$notes"
 
           if [ "$PUBLISH" = "prerelease" ]; then
@@ -471,7 +473,7 @@ jobs:
           {
             echo "## PhotoCraft HarmonyOS HAP"
             echo
-            echo "| | |"
+            echo "| 项目 | 值 |"
             echo "|---|---|"
             echo "| versionName | \`$VERSION_NAME\` |"
             echo "| versionCode | \`$VERSION_CODE\` |"

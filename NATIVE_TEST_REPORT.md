@@ -203,3 +203,9 @@ ARM64 release Rust 库与本地 debug HAP 构建、verify_native.py 通过。API
 ARM64 release Rust 库、debug HAP 和 verify_native.py 通过。仅在无文档状态的 API 20 模拟器 `127.0.0.1:5555` 安装/启动；真实 Pad 未部署。模拟器的屏幕色彩列表为空，但窗口广色域查询返回 true，最终声明 P3_FULL=12、读取 DISPLAY_P3_SRGB=26，应用正常渲染，后台恢复正常；之前的 sRGB 声明亦验证 FULL=11→DISPLAY_SRGB=25。前后截图均为 2880×1920：[修改前](docs/native/display-color-before.jpeg)、[修改后](docs/native/display-color-after.jpeg)。截图用于确认界面布局和渲染，不证明物理面板色准或截图本身具有正确 ICC 标记。
 
 仍待验收：TGR-W10 真机 P3 图片与系统图库对比、不同显示模式下的系统映射；当前 CPU 预览仍为 8-bit SDR，未实现 HDR 增益图、HDR 输出或实测面板 ICC 读取。
+
+## 2026-10-10 合并远程 main 更新并晋升 v0.6.0
+
+用户反馈 v0.6.0 适配测试稳定后，将远程 main 的 4 个提交（截至 974ab8a5）合入 dev，保留用户向 README、四张截图、发布说明表头和 ARM64 限制。版本保持 0.6.0.1 / 60001；CI 同时保留 Rust/CMake debug 与 release 配置同步。包校验拒绝所有非 ARM64 库，新增额外 x86_64 运行时库回归测试。原生宿主、Display P3 与共享 Rust 源码相对已测试的 dev 未变更，完整 subtree 历史保留。
+
+本轮验证：9 项 Python/C++ 回归和全部 13 个平台 CJS 脚本通过；ARM64 release Rust 库、本地 debug HAP 构建及 unsigned/signed 包校验通过，CompileArkTS 正常完成。未重复部署设备；此前模拟器验证和用户本轮稳定性反馈作为设备验证依据。签名材料与本地工具路径继续忽略。

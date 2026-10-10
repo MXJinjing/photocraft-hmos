@@ -46,9 +46,9 @@ def verify(path: Path) -> None:
             data = archive.read(name)
             if data[:5] != b'\x7fELF\x02' or struct.unpack_from('<H', data, 18)[0] != machine:
                 raise ValueError(f'incorrect ELF architecture: {name}')
-        native_libraries = {name for name in names if name.startswith('libs/') and name.endswith('/libphotocraft.so')}
-        if native_libraries != {'libs/arm64-v8a/libphotocraft.so'}:
-            raise ValueError(f'non-ARM64 native libraries remain: {native_libraries}')
+        extra = sorted({name.split('/')[1] for name in names if name.startswith('libs/') and name.count('/') >= 2} - {'arm64-v8a'})
+        if extra:
+            raise ValueError(f'unexpected ABIs in HAP: {extra}')
         forbidden = [name for name in names if name.lower().endswith(('.wasm', '.html', '.js'))]
         if forbidden:
             raise ValueError(f'web assets remain: {forbidden}')

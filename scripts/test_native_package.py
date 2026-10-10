@@ -42,6 +42,15 @@ class NativePackageTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     verify(path)
 
+    def test_extra_runtime_library_architecture_fails(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'native.hap'
+            self.package(path, [('arm64-v8a', 183)])
+            with zipfile.ZipFile(path, 'a') as archive:
+                archive.writestr('libs/x86_64/libc++_shared.so', b'foreign runtime')
+            with self.assertRaisesRegex(ValueError, 'unexpected ABIs'):
+                verify(path)
+
 
 if __name__ == '__main__':
     unittest.main()
