@@ -323,8 +323,10 @@ pub fn title_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let custom = app.custom_titlebar;
     let left = if cfg!(target_os = "macos") && app.integrated_titlebar { 78 } else { 10 };
     let right = if custom { 0 } else { 10 };
+    let default_height: f32 = if t.pro { 32.0 } else { 38.0 };
+    let bar_height = default_height.max(app.host_titlebar.y);
     let bar = egui::Panel::top("title_bar")
-        .exact_size(if t.pro { 32.0 } else { 38.0 })
+        .exact_size(bar_height)
         .frame(egui::Frame::NONE.fill(t.chrome).inner_margin(egui::Margin { left, right, top: 0, bottom: 0 }))
         .show(ui, |ui| {
             let full = ui.max_rect();
@@ -355,7 +357,8 @@ pub fn title_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                 menus_right = if app.services.native_menu.is_some() { ui.cursor().left() } else { crate::menus::menu_bar(app, ui) };
                 // The menu bar takes the whole row, so the right-hand group gets its own rect:
                 // from the menus to the bar's end, or to the caption buttons.
-                let right_edge = if custom { full.right() - crate::titlebar::WIDTH - 4.0 } else { full.right() };
+                let native_button_room = if app.host_titlebar.x > 0.0 { app.host_titlebar.x + 4.0 } else { 0.0 };
+                let right_edge = if custom { full.right() - crate::titlebar::WIDTH - 4.0 } else { (full.right() - native_button_room).max(full.left()) };
                 let group = egui::Rect::from_min_max(egui::pos2((menus_right + TITLE_GAP).min(right_edge), full.top()), egui::pos2(right_edge, full.bottom()));
                 let mut group_ui = ui.new_child(egui::UiBuilder::new().max_rect(group).layout(egui::Layout::right_to_left(egui::Align::Center)));
                 controls_left = {
@@ -373,7 +376,8 @@ pub fn title_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                     // A narrow bar drops what is also in a menu, Discord first (below), then
                     // the theme toggle (Preferences), then search (Edit › Search), and narrows
                     // the switcher (Window › Workspace) before anything runs over.
-                    let room = ui.available_width();
+                    let stylus_room = if app.stylus.feed.ever_connected() { crate::chrome_ui::stylus_menu_width(ui) + 16.0 } else { 0.0 };
+                    let room = (ui.available_width() - stylus_room).max(0.0);
                     let icons_shown: u8 = if room >= WORKSPACE_MIN + 2.0 * ICON_SLOT {
                         2
                     } else if room >= WORKSPACE_MIN + ICON_SLOT {
@@ -398,7 +402,7 @@ pub fn title_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                     }
                     // The community Discord, one click away while the bar has room for it
                     // (narrow windows drop it first; it is also Help › Discord).
-                    if ui.available_width() >= DISCORD_ROOM {
+                    if ui.available_width() - stylus_room >= DISCORD_ROOM {
                         let discord = egui::Button::image_and_text(
                             icons::image("message-square", 14.0, t.text_dim),
                             egui::RichText::new(tl!("Discord")).color(t.text_dim).size(12.0),
@@ -407,7 +411,11 @@ pub fn title_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                         if ui.add(discord).on_hover_text(format!("Join the ArtCraft Discord ({})", crate::links::DISCORD)).clicked() {
                             crate::links::open(app, ui.ctx(), crate::links::DISCORD);
                         }
+                        if stylus_room > 0.0 {
+                            ui.add_space(10.0);
+                        }
                     }
+                    crate::chrome_ui::stylus_menu(app, ui);
                     ui.min_rect().left()
                 };
             });
@@ -482,17 +490,11 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
             let r = ui.max_rect();
             ui.painter().line_segment([r.left_top(), r.right_top()], Stroke::new(1.0, t.separator));
             ui.painter().line_segment([r.left_bottom(), r.right_bottom()], Stroke::new(1.0, t.separator));
-            // Stylus menu stays at the right end, whatever tool options are showing.
-            let labeled = r.width() >= 560.0;
-            let slot_w = crate::chrome_ui::stylus_menu_width(ui, labeled);
-            let gap = 8.0;
-            let split = (r.right() - slot_w - gap).max(r.left());
-            let content = Rect::from_min_max(r.min, pos2(split, r.bottom()));
-            let stylus = Rect::from_min_max(pos2((r.right() - slot_w).max(r.left()), r.top()), r.max);
+            let content = r;
             let mut content_ui = ui.new_child(egui::UiBuilder::new().max_rect(content));
             content_ui.set_clip_rect(content.intersect(ui.clip_rect()));
             // A narrow window (a Pad in portrait, or panels open) clips the tool options.
-            // Scroll sideways instead of hiding the rest; the stylus control stays pinned.
+            // Scroll sideways instead of hiding the rest.
             egui::ScrollArea::horizontal()
                 .id_salt("pc-options-bar")
                 .auto_shrink([false, false])
@@ -959,11 +961,6 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                 crate::brush_picker::apply(app, ui.ctx(), picked);
                     });
                 });
-            if split > r.left() + 8.0 {
-                ui.painter().line_segment([pos2(split + gap * 0.5, r.top() + 8.0), pos2(split + gap * 0.5, r.bottom() - 8.0)], Stroke::new(1.0, t.separator));
-            }
-            let mut stylus_ui = ui.new_child(egui::UiBuilder::new().max_rect(stylus).layout(egui::Layout::right_to_left(egui::Align::Center)));
-            crate::chrome_ui::stylus_menu(app, &mut stylus_ui);
         });
 }
 

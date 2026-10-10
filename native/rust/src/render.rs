@@ -105,6 +105,7 @@ impl Render {
         }
     }
     pub fn detach(&mut self) {
+        // 先释放借用窗口的 surface，再释放原生窗口引用；GPU device 保留供下次绑定使用。
         self.surface = None;
         self.window = None;
     }

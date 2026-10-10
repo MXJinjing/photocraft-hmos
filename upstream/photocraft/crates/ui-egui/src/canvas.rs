@@ -1733,10 +1733,11 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
     // The wheel also scrolls over the scrollbars drawn on top of the canvas (last frame's hover).
     let bars_id = egui::Id::new(("pc-canvas-bars-hover", idx));
     let over_bars = ctx.data(|d| d.get_temp::<bool>(bars_id)).unwrap_or(false);
-    let pinching = crate::touch_nav::touch_count(&ctx) >= 2;
-    let wheel_over_canvas = !menu_input && (response.hovered() || free_hover || over_bars || pinching);
+    let touch_eligible = crate::touch_nav::eligible(&ctx, &response, under_dialog);
+    let pinching = touch_eligible && crate::touch_nav::touch_count(&ctx) >= 2;
+    let wheel_over_canvas = !menu_input && (!ctx.input(|i| i.any_touches()) || touch_eligible) && (response.hovered() || free_hover || over_bars || pinching);
     if wheel_over_canvas {
-        let pointer = ui.input(|i| i.pointer.hover_pos()).or(response.interact_pointer_pos());
+        let pointer = ui.input(|i| i.multi_touch().map(|m| m.center_pos).or_else(|| i.pointer.hover_pos())).or(response.interact_pointer_pos());
         match (wheel, pointer) {
             (Some(crate::wheel_nav::Wheel::Zoom(f)), Some(p)) => {
                 let nz = (view.zoom * f).clamp(0.01, 64.0);
@@ -1798,7 +1799,7 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
         crate::touch_nav::abort_tools(app, &ctx);
         false
     } else {
-        crate::touch_nav::update(app, &ctx)
+        crate::touch_nav::update(app, &ctx, touch_eligible)
     };
 
     if under_dialog && !navigation_input {
@@ -2016,7 +2017,10 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
             let d = xf.to_doc(p);
             crate::rulers::guide_at(app, d[0], d[1])
         });
-        if let Some((vertical, _)) = guide_hover {
+        if app.stylus.is_finger() || touch_nav {
+            // Finger contact has no hover cursor: keep the tool tip for mouse/pen only.
+            ui.ctx().set_cursor_icon(egui::CursorIcon::None);
+        } else if let Some((vertical, _)) = guide_hover {
             ui.ctx().set_cursor_icon(if vertical { egui::CursorIcon::ResizeHorizontal } else { egui::CursorIcon::ResizeVertical });
         } else if let Some(c) = response.hover_pos().and_then(|p| crate::transform_tool::cursor(app, xf.to_doc(p), ui.input(|i| i.modifiers.alt))) {
             ui.ctx().set_cursor_icon(c);

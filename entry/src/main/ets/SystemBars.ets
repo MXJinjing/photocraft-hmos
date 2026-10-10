@@ -1,4 +1,4 @@
-import { common } from '@kit.AbilityKit';
+import { common, ConfigurationConstant } from '@kit.AbilityKit';
 import { window } from '@kit.ArkUI';
 import { BusinessError } from '@kit.BasicServicesKit';
 
@@ -41,6 +41,19 @@ function lightIcons(argb: string): boolean {
   return y < 160;
 }
 
+// HarmonyOS 2-in-1 caption buttons can follow the app chrome when the API is available.
+// Older devices keep their system-selected button style.
+function paintDecorButtons(win: window.Window, dark: boolean): void {
+  try {
+    win.setDecorButtonStyle({
+      colorMode: dark ? ConfigurationConstant.ColorMode.COLOR_MODE_DARK : ConfigurationConstant.ColorMode.COLOR_MODE_LIGHT
+    });
+  } catch (error) {
+    let failure = error as BusinessError;
+    console.info(`Decoration button style unavailable: ${failure.code} ${failure.message}`);
+  }
+}
+
 export function paintWindow(win: window.Window, color: string): void {
   let argb: string = normalizeChrome(color);
   if (argb.length === 0) {
@@ -48,6 +61,7 @@ export function paintWindow(win: window.Window, color: string): void {
   }
   let content: string = lightIcons(argb) ? '#FFFFFFFF' : '#FF1A1A1A';
   let light: boolean = content === '#FFFFFFFF';
+  paintDecorButtons(win, light);
   try {
     win.setWindowBackgroundColor(argb);
   } catch (error) {

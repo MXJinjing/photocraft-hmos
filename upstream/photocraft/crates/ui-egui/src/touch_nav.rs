@@ -4,7 +4,7 @@
 //! until every finger is lifted. One finger still drives the current tool. Pinch zoom itself is
 //! applied by [`crate::wheel_nav`].
 
-use egui::{Context, Vec2};
+use egui::{Context, Event, Pos2, TouchPhase, Vec2};
 
 use crate::PhotocraftApp;
 
@@ -24,10 +24,61 @@ pub fn touch_count(ctx: &Context) -> usize {
     ctx.input(|i| i.multi_touch().map_or(usize::from(i.any_touches()), |m| m.num_touches))
 }
 
+/// Origin eligibility belongs to a canvas, and remains fixed until all contacts are lifted.
+#[derive(Clone, Default)]
+struct Origins {
+    contacts: Vec<(egui::TouchDeviceId, egui::TouchId)>,
+    blocked: bool,
+}
+
+impl Origins {
+    fn frame(&mut self, events: &[Event], free: impl Fn(Pos2) -> bool) -> bool {
+        let mut eligible = !self.contacts.is_empty() && !self.blocked;
+        for event in events {
+            if let Event::Touch { device_id, id, phase, pos, .. } = event {
+                let key = (*device_id, *id);
+                match phase {
+                    TouchPhase::Start => {
+                        if self.contacts.is_empty() {
+                            self.blocked = false;
+                        }
+                        if !self.contacts.contains(&key) {
+                            self.contacts.push(key);
+                            self.blocked |= !free(*pos);
+                        }
+                        eligible = !self.blocked;
+                    }
+                    TouchPhase::Move => {}
+                    TouchPhase::End | TouchPhase::Cancel => self.contacts.retain(|k| *k != key),
+                }
+            }
+        }
+        eligible && !self.blocked
+    }
+}
+
+/// Both fingers must start on this canvas's unobstructed surface. Moving in from a panel or
+/// dialog cannot acquire it; a gesture that started here can continue outside the canvas.
+pub fn eligible(ctx: &Context, response: &egui::Response, under_dialog: bool) -> bool {
+    let id = response.id.with("touch-origins");
+    let mut origins = ctx.data(|d| d.get_temp::<Origins>(id)).unwrap_or_default();
+    let events = ctx.input(|i| i.events.clone());
+    let eligible = origins.frame(&events, |p| {
+        response.rect.contains(p)
+            && if under_dialog {
+                crate::dialogs::free_position(ctx, response.rect, p)
+            } else {
+                ctx.layer_id_at(p).is_none_or(|layer| layer == response.layer_id)
+            }
+    });
+    ctx.data_mut(|d| d.insert_temp(id, origins));
+    eligible
+}
+
 /// Update the latch, drop any in-progress tool, and return whether this frame is navigation-only.
-pub fn update(app: &mut PhotocraftApp, ctx: &Context) -> bool {
+pub fn update(app: &mut PhotocraftApp, ctx: &Context, eligible: bool) -> bool {
     // A pen owns the canvas: leftover finger-nav must not abort the stroke.
-    if app.stylus.is_pen() {
+    if app.stylus.is_pen() || !eligible {
         app.touch_nav = false;
         return false;
     }
@@ -68,6 +119,34 @@ pub fn abort_tools(app: &mut PhotocraftApp, ctx: &Context) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn touch(id: u64, phase: TouchPhase, x: f32) -> Event {
+        Event::Touch { device_id: egui::TouchDeviceId(0), id: egui::TouchId(id), phase, pos: egui::pos2(x, 50.0), force: None }
+    }
+
+    #[test]
+    fn outside_origins_cannot_acquire_canvas_after_moving_inside() {
+        let mut origins = Origins::default();
+        let free = |p: Pos2| p.x >= 100.0 && p.x <= 500.0;
+        assert!(!origins.frame(&[touch(1, TouchPhase::Start, 50.0)], free));
+        assert!(!origins.frame(&[touch(1, TouchPhase::Move, 200.0), touch(2, TouchPhase::Start, 300.0)], free));
+        assert!(!origins.frame(&[touch(1, TouchPhase::End, 200.0)], free));
+        assert!(!origins.frame(&[touch(3, TouchPhase::Start, 400.0)], free));
+        assert!(!origins.frame(&[touch(2, TouchPhase::Cancel, 300.0), touch(3, TouchPhase::End, 400.0)], free));
+        assert!(origins.frame(&[touch(1, TouchPhase::Start, 200.0), touch(2, TouchPhase::Start, 300.0)], free));
+        assert!(origins.frame(&[touch(1, TouchPhase::Move, 10.0), touch(2, TouchPhase::Move, 600.0)], free));
+        assert!(origins.frame(&[touch(1, TouchPhase::End, 10.0), touch(2, TouchPhase::End, 600.0)], free));
+        assert!(!origins.frame(&[], free));
+    }
+
+    #[test]
+    fn second_finger_on_overlay_rejects_even_when_centroid_is_on_canvas() {
+        let mut origins = Origins::default();
+        let free = |p: Pos2| p.x < 300.0;
+        assert!(origins.frame(&[touch(1, TouchPhase::Start, 100.0)], free));
+        assert!(!origins.frame(&[touch(2, TouchPhase::Start, 350.0)], free));
+        assert!(!origins.frame(&[touch(2, TouchPhase::Move, 150.0)], free));
+    }
 
     #[test]
     fn a_second_finger_enters_navigation() {

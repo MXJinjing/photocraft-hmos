@@ -1,5 +1,7 @@
 # PhotoCraft Pad 测试记录
 
+此文件记录历史 ArkWeb 版本。当前原生分支的构建与验收以 `NATIVE_TEST_REPORT.md` 为准；历史 Web 命令和资源校验脚本已移除。
+
 ## 环境与产物（2026-10-08）
 
 - 工具：DevEco Studio 26.0.0.851，内置 HarmonyOS SDK 26.0.0.105，Hvigor 6.26.8。

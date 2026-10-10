@@ -329,6 +329,26 @@ fn do_print(s: &mut Session, p: &Value, cmd: &str) -> Result<Value> {
     let pdf = print_pdf(&page);
     let output = p.get("output").and_then(Value::as_str).filter(|v| !v.is_empty()).map(str::to_string);
     let send = p.get("send").and_then(Value::as_bool).unwrap_or(output.is_none());
+    let dry = p.get("dryRun").and_then(Value::as_bool).unwrap_or(false);
+    if send
+        && !dry
+        && let Some(service) = s.print_service
+    {
+        let copies = crate::commands::int(p, "copies").unwrap_or(1).clamp(1, 999);
+        let metadata = json!({"name": doc.name, "paper": [pw, ph], "copies": copies, "printer": p.get("printer").and_then(Value::as_str).unwrap_or("")});
+        let spool = service(&pdf, &metadata).map_err(other)?;
+        let mut remembered = p.clone();
+        if let Some(o) = remembered.as_object_mut() {
+            o.remove("output");
+            o.remove("dryRun");
+            o.remove("send");
+        }
+        s.file_menu.last_print = Some(remembered);
+        crate::automate_cmds::fire_event(s, "print");
+        return Ok(
+            json!({"pdf": null, "bytes": pdf.len(), "paper": [pw, ph], "imageRect": [x, y, w, h], "scale": scale * 100.0, "copies": copies, "command": null, "sent": false, "previewOpened": true, "spooler": spool, "color": color}),
+        );
+    }
     let pdf_path = match &output {
         Some(o) => o.clone(),
         None => {
@@ -339,7 +359,13 @@ fn do_print(s: &mut Session, p: &Value, cmd: &str) -> Result<Value> {
             join(&tmp, &format!("{}-print-{}-{n}.pdf", crate::file_cmds::sanitize(&stem(&doc.name)), std::process::id()))
         }
     };
-    write_file(&pdf_path, &pdf)?;
+    if output.is_some()
+        && let Some(save) = s.print_save_service
+    {
+        save(&pdf_path, &pdf).map_err(other)?;
+    } else {
+        write_file(&pdf_path, &pdf)?;
+    }
     let copies = crate::commands::int(p, "copies").unwrap_or(1).clamp(1, 999);
     let mut argv: Vec<String> = vec!["lp".into()];
     if let Some(pr) = p.get("printer").and_then(Value::as_str).filter(|v| !v.is_empty()) {
@@ -349,7 +375,6 @@ fn do_print(s: &mut Session, p: &Value, cmd: &str) -> Result<Value> {
         argv.extend(["-n".into(), copies.to_string()]);
     }
     argv.extend(["-t".into(), doc.name.clone(), pdf_path.clone()]);
-    let dry = p.get("dryRun").and_then(Value::as_bool).unwrap_or(false);
     let mut sent = false;
     let mut spool = Value::Null;
     if send && !dry {
@@ -360,6 +385,9 @@ fn do_print(s: &mut Session, p: &Value, cmd: &str) -> Result<Value> {
     if let Some(o) = remembered.as_object_mut() {
         o.remove("output");
         o.remove("dryRun");
+        if s.print_save_service.is_some() {
+            o.remove("send");
+        }
     }
     s.file_menu.last_print = Some(remembered);
     crate::automate_cmds::fire_event(s, "print");

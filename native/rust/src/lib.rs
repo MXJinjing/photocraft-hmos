@@ -8,9 +8,19 @@
     clippy::unreachable
 )]
 mod bridge;
+#[cfg(any(target_env = "ohos", test))]
+mod chrome;
+#[cfg(any(target_env = "ohos", test))]
+mod cursor;
+#[cfg(any(target_env = "ohos", test))]
+mod documents;
+#[cfg(any(target_env = "ohos", test))]
+mod ime;
 mod input;
 #[cfg(target_env = "ohos")]
 mod render;
+#[cfg(any(target_env = "ohos", test))]
+mod working_directory;
 #[cfg(target_env = "ohos")]
 use photocraft_ui_egui::PhotocraftApp;
 #[cfg(target_env = "ohos")]
@@ -28,6 +38,8 @@ use std::time::Instant;
 #[cfg_attr(not(target_env = "ohos"), allow(dead_code))]
 struct Config {
     files: String,
+    #[serde(default)]
+    documents: String,
     #[serde(default = "default_scale")]
     scale: f32,
     #[serde(default)]
@@ -56,11 +68,14 @@ fn send(message: Message) {
     }
 }
 #[cfg(target_env = "ohos")]
-fn services(files: &str) -> Services {
+fn services(
+    files: &str,
+    documents: std::sync::Arc<std::sync::Mutex<documents::Documents>>,
+) -> Services {
     let load = std::path::Path::new(files).join("native-preferences.json");
     let save = load.clone();
     Services {
-        import: Some(Box::new(|name, bytes| {
+        import: Some(Box::new(move |name, bytes| {
             photocraft_io::import(name, bytes)
                 .map(|r| (r.document, r.warnings))
                 .map_err(|e| e.to_string())
@@ -78,12 +93,30 @@ fn services(files: &str) -> Services {
                 .map(|r| (r.bytes, r.warnings))
                 .map_err(|e| e.to_string())
         })),
-        pick_open: Some(Box::new(|| match bridge::request("open", "", &[]) {
+        pick_open: Some(Box::new(move || match bridge::request("open", "", &[]) {
             Ok((name, bytes)) => Some((name, Ok(bytes))),
             Err(e) if e == "cancelled" => None,
             Err(e) => Some(("file".into(), Err(e))),
         })),
         always_pick_save: true,
+        default_save: Some(Box::new(move |doc| {
+            if let Some(path) = documents
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .target(doc.id.0)
+            {
+                return Ok(path);
+            }
+            let stem = doc
+                .name
+                .rsplit_once('.')
+                .map_or(doc.name.as_str(), |(stem, _)| stem);
+            let (name, _) = bridge::request("local_save", &format!("{stem}.psd"), &[])?;
+            documents
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .select(doc.id.0, &name)
+        })),
         pick_save: Some(Box::new(|suggested| {
             match bridge::request("save_select", suggested, &[]) {
                 Ok((name, _)) => Some(name),
@@ -95,7 +128,7 @@ fn services(files: &str) -> Services {
                 }
             }
         })),
-        write: Some(Box::new(|name, bytes| {
+        write: Some(Box::new(move |name, bytes| {
             bridge::request("write", name, bytes).map(|_| ())
         })),
         open_url: Some(Box::new(|url| {
@@ -255,12 +288,40 @@ unsafe extern "C" {
 #[cfg(target_env = "ohos")]
 fn worker(config: Config, rx: mpsc::Receiver<Message>) {
     bridge::notify(0, "stage", "Rust worker entered", &[]);
+    let working_directory = match working_directory::initialize(&config.files) {
+        Ok(path) => format!("Current working directory: {}", path.display()),
+        Err(error) => {
+            bridge::notify(0, "error", &error, &[]);
+            return;
+        }
+    };
+    bridge::notify(0, "diagnostic", &working_directory, &[]);
     photocraft_ui_egui::i18n::set_host_locale(&config.language);
     photocraft_text::cjk::set_ui_locale(Some(&config.language));
+    let document_files = if config.documents.is_empty() {
+        &config.files
+    } else {
+        &config.documents
+    };
+    let documents = std::sync::Arc::new(std::sync::Mutex::new(documents::Documents::new(
+        document_files,
+    )));
     let ctx = egui::Context::default();
     PhotocraftApp::setup_context(&ctx, Default::default());
     bridge::notify(0, "stage", "egui context ready", &[]);
-    let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), services(&config.files));
+    let mut app = PhotocraftApp::new(
+        photocraft_engine::Session::new(),
+        services(&config.files, documents.clone()),
+    );
+    app.session.print_service = Some(|pdf, metadata| {
+        bridge::request("print", &metadata.to_string(), pdf).map(|(message, _)| message)
+    });
+    app.session.print_save_service =
+        Some(|target, pdf| bridge::request("write", target, pdf).map(|_| ()));
+
+    // Apply the app's initial style/font configuration before the host registers
+    // system fonts. This startup pass has no user input.
+    let _startup = ctx.run_logic(&egui::RawInput::default(), |ctx| app.host_logic(ctx));
 
     bridge::notify(0, "stage", "editor ready", &[]);
     // Host CJK registration inspects the font definitions. egui makes them
@@ -290,7 +351,13 @@ fn worker(config: Config, rx: mpsc::Receiver<Message>) {
     let started = Instant::now();
     let mut events = vec![];
     let mut input = input::State::default();
+    input.feed = app.stylus.feed.clone();
+    let mut ime = ime::ImeSync::default();
     let mut close = false;
+    let mut chrome = chrome::ChromeSync::default();
+    let mut titlebar_pixels = egui::Vec2::ZERO;
+    // 输入、窗口生命周期和帧消息共用一个队列，编辑器状态仅在 worker 上修改。
+    let mut cursor = cursor::CursorSync::default();
     loop {
         let wait = deadline.map(|d| d.saturating_duration_since(Instant::now()));
         let message = match wait {
@@ -316,6 +383,8 @@ fn worker(config: Config, rx: mpsc::Receiver<Message>) {
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| -> Result<(), String> {
                 match message {
                     Message::Attach(ptr, w, h) => {
+                        chrome.invalidate();
+                        cursor.invalidate();
                         bridge::notify(0, "stage", "creating native GPU surface", &[]);
                         if let Some(r) = render.as_mut() {
                             r.bind(render::Window(ptr), w, h)?;
@@ -337,6 +406,7 @@ fn worker(config: Config, rx: mpsc::Receiver<Message>) {
                         deadline = Some(Instant::now());
                     }
                     Message::Detach => {
+                        ime.suspend();
                         if let Some(r) = render.as_mut() {
                             r.detach();
                         }
@@ -347,15 +417,28 @@ fn worker(config: Config, rx: mpsc::Receiver<Message>) {
                     Message::Active(value) => {
                         active = value;
                         if active {
+                            chrome.invalidate();
+                            cursor.invalidate();
                             bridge::resume();
                             deadline = Some(Instant::now());
                         } else {
+                            ime.suspend();
                             deadline = None;
                             input.cancel(egui::Pos2::ZERO, &mut events);
                         }
                     }
                     Message::Input(value) => {
-                        input.push(value, ctx.pixels_per_point(), &mut events);
+                        if value.kind == "titlebar" {
+                            titlebar_pixels = egui::vec2(value.dx, value.dy);
+                        }
+                        if value.kind == "blur" {
+                            cursor.invalidate();
+                        }
+                        if value.kind.starts_with("ime_") {
+                            ime.input(&ctx, Some(&mut app), value, &mut events);
+                        } else {
+                            input.push(value, ctx.pixels_per_point(), &mut events);
+                        }
                         deadline = Some(Instant::now());
                     }
                     Message::Open(name, data) => {
@@ -407,18 +490,32 @@ fn worker(config: Config, rx: mpsc::Receiver<Message>) {
                             close = false;
                         }
                         app.host_input(&ctx, &mut raw);
-                        let logic = ctx.run_logic(&raw, |ctx| app.host_logic(ctx));
-                        let mut output = ctx.run_ui(raw, |ui| app.host_ui(ui));
+                        // 保存物理像素而非换算结果，确保界面缩放后仍正确避让系统三键。
+                        app.host_titlebar = chrome::titlebar_geometry(
+                            titlebar_pixels.x,
+                            titlebar_pixels.y,
+                            config.scale * ctx.zoom_factor(),
+                        );
+                        ime.pointer_input(&raw.events);
+                        let mut output = editor_frame(&ctx, &mut app, raw);
+                        // Preferences and menu actions have applied the theme by this point.
+                        if let Some(color) = chrome.update(app.ui.theme) {
+                            bridge::notify(0, "chrome", &color, &[]);
+                        }
                         if !initial_textures.is_empty() {
                             initial_textures.append(std::mem::take(&mut output.textures_delta));
                             output.textures_delta = std::mem::take(&mut initial_textures);
                         }
-                        output.platform_output.append(logic.platform_output);
-                        let mut commands = logic
-                            .viewport_commands
-                            .get(&egui::ViewportId::ROOT)
-                            .cloned()
-                            .unwrap_or_default();
+                        if let Some(icon) = cursor.update(output.platform_output.cursor_icon) {
+                            bridge::notify(0, "cursor", &icon, &[]);
+                        }
+                        if ime::reveal_canvas_caret(&mut app, &output.platform_output) {
+                            ctx.request_repaint();
+                        }
+                        if let Some(state) = ime.update(&ctx, &output.platform_output, Some(&app)) {
+                            bridge::notify(0, "ime", &state, &[]);
+                        }
+                        let mut commands = Vec::new();
                         if let Some(v) = output.viewport_output.get(&egui::ViewportId::ROOT) {
                             commands.extend(v.commands.clone());
                         }
@@ -507,55 +604,25 @@ fn initialize_font_context(ctx: &egui::Context) -> egui::TexturesDelta {
     warm.drop_without_applying_deltas();
     textures
 }
-#[cfg(test)]
-mod host_tests {
-    #[test]
-    fn direct_egui_close_is_returned_to_unsaved_guard_before_termination() {
-        use photocraft_ui_egui::{PhotocraftApp, Services};
-        let ctx = egui::Context::default();
-        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), Services::default());
-        app.run("file.new", serde_json::json!({"width": 16, "height": 16}))
-            .unwrap();
-        app.run("layer.new.layer", serde_json::json!({})).unwrap();
-        assert_eq!(
-            super::close_action(false, &[egui::ViewportCommand::Close]),
-            super::CloseAction::Request
-        );
-        let mut raw = egui::RawInput::default();
-        raw.viewports
-            .get_mut(&egui::ViewportId::ROOT)
-            .unwrap()
-            .events
-            .push(egui::ViewportEvent::Close);
-        let logic = ctx.run_logic(&raw, |ctx| app.host_logic(ctx));
-        let mut output = ctx.run_ui(raw, |ui| app.host_ui(ui));
-        let mut commands = logic
-            .viewport_commands
-            .get(&egui::ViewportId::ROOT)
-            .cloned()
-            .unwrap_or_default();
-        commands.extend(
-            output
-                .viewport_output
-                .get(&egui::ViewportId::ROOT)
-                .unwrap()
-                .commands
-                .clone(),
-        );
-        output.textures_delta.clear();
-        assert_eq!(
-            super::close_action(true, &commands),
-            super::CloseAction::Cancel
-        );
-        assert!(app.session.active().unwrap().is_dirty());
-        assert_eq!(super::close_action(true, &[]), super::CloseAction::Confirm);
-    }
-    #[test]
-    fn custom_host_exposes_font_definitions_before_platform_registration() {
-        let ctx = egui::Context::default();
-        photocraft_ui_egui::PhotocraftApp::setup_context(&ctx, Default::default());
-        let mut textures = super::initialize_font_context(&ctx);
-        textures.clear();
-        assert!(ctx.fonts(|fonts| !fonts.definitions().font_data.is_empty()));
-    }
+
+/// run_logic only updates viewport metadata; it does not ingest this frame's
+/// keyboard input. Run editor logic after begin_pass, once even if egui requests
+/// another layout pass, so shortcuts see the new keys and commands are not repeated.
+#[cfg(any(target_env = "ohos", test))]
+fn editor_frame(
+    ctx: &egui::Context,
+    app: &mut photocraft_ui_egui::PhotocraftApp,
+    raw: egui::RawInput,
+) -> egui::FullOutput {
+    let mut first_pass = true;
+    ctx.run_ui(raw, |ui| {
+        if first_pass {
+            first_pass = false;
+            app.host_logic(ui.ctx());
+        }
+        app.host_ui(ui);
+    })
 }
+#[cfg(test)]
+#[path = "../tests/unit/host.rs"]
+mod host_tests;

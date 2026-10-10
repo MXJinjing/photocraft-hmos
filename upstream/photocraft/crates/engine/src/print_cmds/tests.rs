@@ -169,3 +169,54 @@ fn paths_export_as_illustrator_postscript() {
     assert_eq!(r["paths"], 1);
     assert!(s.execute("file.export.pathsToIllustrator", json!({"paths": "Nope"})).is_err());
 }
+
+#[test]
+fn native_print_handoff_preserves_pdf_and_does_not_claim_completion() {
+    let mut s = session("rgb", 16);
+    s.print_service = Some(|pdf, metadata| {
+        assert!(pdf.starts_with(b"%PDF-"));
+        assert_eq!(metadata["name"], "Print Me.psd");
+        assert_eq!(metadata["copies"], 1);
+        Ok("HarmonyOS".into())
+    });
+    let r = s.execute("file.print", json!({"paper": "a4"})).unwrap();
+    assert_eq!(r["previewOpened"], true);
+    assert_eq!(r["sent"], false);
+    assert!(r["pdf"].is_null());
+    assert!(r["command"].is_null());
+    let repeated = s.execute("file.printOneCopy", json!({})).unwrap();
+    assert_eq!(repeated["paper"], r["paper"]);
+    // Explicit PDF output bypasses the platform service.
+    s.print_service = Some(|_, _| Err("must not be called".into()));
+    let output = format!("{}/saved.pdf", tmp("native-output"));
+    s.execute("file.print", json!({"output": output})).unwrap();
+    assert!(std::fs::read(output).unwrap().starts_with(b"%PDF-"));
+}
+
+#[test]
+fn failed_native_print_keeps_previous_settings_and_rejects_bad_layout() {
+    let mut s = session("gray", 32);
+    s.file_menu.last_print = Some(json!({"paper": "a5"}));
+    s.print_service = Some(|_, _| Err("print service unavailable".into()));
+    assert!(s.execute("file.print", json!({"paper": "a4"})).unwrap_err().to_string().contains("unavailable"));
+    assert_eq!(s.file_menu.last_print, Some(json!({"paper": "a5"})));
+    assert!(s.execute("file.print", json!({"paper": "invalid"})).is_err());
+    assert!(Session::new().execute("file.print", json!({})).is_err());
+}
+
+#[test]
+fn print_pdf_uses_host_authorized_writer_without_opening_a_path() {
+    let mut s = session("rgb", 8);
+    s.print_save_service = Some(|target, bytes| {
+        assert_eq!(target, "save-as/42/画.pdf");
+        assert!(bytes.starts_with(b"%PDF-"));
+        Ok(())
+    });
+    let r = s.execute("file.print", json!({"output": "save-as/42/画.pdf"})).unwrap();
+    assert_eq!(r["pdf"], "save-as/42/画.pdf");
+    assert_eq!(r["sent"], false);
+    let previous = s.file_menu.last_print.clone();
+    s.print_save_service = Some(|_, _| Err("write permission denied".into()));
+    assert!(s.execute("file.print", json!({"output": "revoked.pdf"})).is_err());
+    assert_eq!(s.file_menu.last_print, previous);
+}

@@ -190,6 +190,8 @@ pub type PickOpenFn = Box<dyn FnMut() -> Option<(String, Result<Vec<u8>, String>
 /// File › Open's multi-file picker: the selected paths, `None` when cancelled.
 pub type PickOpenPathsFn = Box<dyn FnMut() -> Option<Vec<String>>>;
 pub type PickSaveFn = Box<dyn FnMut(&str) -> Option<String>>;
+/// Host-owned destination for ordinary Save.
+pub type DefaultSaveFn = Box<dyn FnMut(&Document) -> Result<String, String>>;
 pub type WriteFn = Box<dyn FnMut(&str, &[u8]) -> Result<(), String>>;
 /// Read bytes through the desktop control session's authorized read root.
 pub type AutomationReadFn = Box<dyn FnMut(&str) -> Result<(String, Vec<u8>), String>>;
@@ -255,6 +257,8 @@ pub struct Services {
     /// write authority. They also export through these services instead of
     /// the engine's filesystem-based quick export.
     pub always_pick_save: bool,
+    /// Optional host policy for ordinary Save. Save As still uses the picker.
+    pub default_save: Option<DefaultSaveFn>,
     /// Write bytes to a path (native) or trigger a download (web).
     pub write: Option<WriteFn>,
     /// When set, Save from the unsaved-changes prompt is not finished when `write` returns. The
@@ -364,6 +368,9 @@ pub struct PhotocraftApp {
     styled: bool,
     /// Whether the window uses an integrated (transparent) macOS title bar.
     pub integrated_titlebar: bool,
+    /// Native 2-in-1 title-bar geometry in egui points: right-side caption-button width and
+    /// title-bar height. Zero means the host has no integrated system title bar.
+    pub host_titlebar: egui::Vec2,
     /// Windows and Linux: the window has no OS decorations and the app's top bar is the title bar
     /// (caption buttons, window dragging and edge resizing, `titlebar`).
     pub custom_titlebar: bool,
@@ -504,6 +511,7 @@ impl PhotocraftApp {
             frame: 0,
             styled: false,
             integrated_titlebar: false,
+            host_titlebar: egui::Vec2::ZERO,
             custom_titlebar: false,
             fonts_ready: false,
             last_canvas_rect: egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0)),
@@ -843,6 +851,25 @@ impl PhotocraftApp {
         Some(bytes.map(|b| (name.clone(), b)).map_err(|e| format!("{}: {e}", file_open::display_name(&name))))
     }
 
+    /// Ordinary Save may use a host-owned working directory without a system picker.
+    pub fn save(&mut self, path: Option<String>) -> Result<(String, Vec<String>), String> {
+        if self.session.is_enabled("layer.smartObjects.saveContents") {
+            return self.save_as(None);
+        }
+        if let Some(select) = self.services.default_save.as_mut() {
+            let active = self.session.active().ok_or("no document")?;
+            let doc = &active.doc;
+            let extension = doc.name.rsplit_once('.').map(|(_, ext)| ext).unwrap_or_default();
+            // Viewing an unmodified Photoshop document must not allocate a local copy.
+            if !active.is_dirty() && (extension.eq_ignore_ascii_case("psd") || extension.eq_ignore_ascii_case("psb")) {
+                return Ok((active.path.clone().unwrap_or_else(|| doc.name.clone()), Vec::new()));
+            }
+            let target = select(doc)?;
+            return self.write_document(target, &ExportSettings::default());
+        }
+        self.save_as(path)
+    }
+
     /// Save the active document to `path` (or a path chosen in the save dialog); returns the path
     /// and the export warnings (also shown to the user).
     pub fn save_as(&mut self, path: Option<String>) -> Result<(String, Vec<String>), String> {
@@ -877,6 +904,7 @@ impl PhotocraftApp {
         let write = self.services.write.as_mut().ok_or("no writer configured")?;
         write(&path, &bytes)?;
         if let Some(st) = self.session.active_mut() {
+            std::sync::Arc::make_mut(&mut st.doc).name = file_open::display_name(&path);
             st.path = Some(path.clone());
             st.saved_revision = st.revision;
         }
@@ -1648,6 +1676,36 @@ impl eframe::App for PhotocraftApp {
 mod native_host_tests {
     use super::*;
     #[test]
+    fn viewing_photoshop_files_creates_no_copy_until_an_edit_is_saved() {
+        use std::sync::{Arc, Mutex};
+        for name in ["view.psd", "view.PSB"] {
+            let calls = Arc::new(Mutex::new(Vec::new()));
+            let seen = calls.clone();
+            let mut app = PhotocraftApp::new(
+                Session::new(),
+                Services {
+                    default_save: Some(Box::new(move |_| {
+                        seen.lock().unwrap().push("select");
+                        Ok("/local/view.psd".into())
+                    })),
+                    export: Some(Box::new(|_, _, _| Ok((vec![1], Vec::new())))),
+                    write: Some(Box::new(|_, _| Ok(()))),
+                    ..Default::default()
+                },
+            );
+            app.run("file.new", serde_json::json!({"width": 16, "height": 16})).unwrap();
+            let active = app.session.active_mut().unwrap();
+            Arc::make_mut(&mut active.doc).name = name.into();
+            active.saved_revision = active.revision;
+            assert!(!active.is_dirty());
+            app.save(None).unwrap();
+            assert!(calls.lock().unwrap().is_empty());
+            app.run("layer.new.layer", serde_json::json!({})).unwrap();
+            app.save(None).unwrap();
+            assert_eq!(calls.lock().unwrap().as_slice(), &["select"]);
+        }
+    }
+    #[test]
     fn custom_host_draws_editor_without_eframe_frame() {
         let ctx = egui::Context::default();
         let mut app = PhotocraftApp::new(Session::new(), Services::default());
@@ -1690,12 +1748,14 @@ mod native_host_tests {
         assert!(app.session.active().unwrap().is_dirty());
         app.save_as(Some("original.psd".into())).unwrap();
         assert_eq!(picked.lock().unwrap().as_slice(), &["original.psd"]);
+        assert_eq!(app.session.active().unwrap().doc.name, "renamed.psd");
         assert_eq!(app.session.active().unwrap().path.as_deref(), Some("renamed.psd"));
         assert!(!app.session.active().unwrap().is_dirty());
         app.services.pick_save = Some(Box::new(|_| None));
         app.run("layer.new.layer", serde_json::json!({})).unwrap();
         assert_eq!(app.save_as(Some("renamed.psd".into())), Err("cancelled".into()));
         assert!(app.session.active().unwrap().is_dirty());
+        assert_eq!(app.session.active().unwrap().doc.name, "renamed.psd");
         assert_eq!(app.session.active().unwrap().path.as_deref(), Some("renamed.psd"));
     }
     #[test]
@@ -1710,10 +1770,82 @@ mod native_host_tests {
             app.run("file.new", serde_json::json!({"width": 16, "height": 16})).unwrap();
             app.run("layer.new.layer", serde_json::json!({"name": "second"})).unwrap();
             let old = app.session.active().unwrap().saved_revision;
+            let old_name = app.session.active().unwrap().doc.name.clone();
             assert_eq!(app.save_as(Some("test.psd".into())), Err(failure.into()));
             assert_eq!(app.session.active().unwrap().saved_revision, old);
+            assert_eq!(app.session.active().unwrap().doc.name, old_name);
             assert!(app.session.active().unwrap().path.is_none());
             assert!(app.session.active().unwrap().is_dirty());
         }
+    }
+    #[test]
+    fn first_local_save_updates_name_only_after_success() {
+        for target in ["/Download/test/新名称.psd", "/Download/test/新名称1.psd"] {
+            let mut app = PhotocraftApp::new(
+                Session::new(),
+                Services {
+                    default_save: Some(Box::new(move |_| Ok(target.into()))),
+                    export: Some(Box::new(|_, _, _| Ok((vec![1], Vec::new())))),
+                    write: Some(Box::new(|_, _| Ok(()))),
+                    ..Default::default()
+                },
+            );
+            app.run("file.new", serde_json::json!({"width": 16, "height": 16})).unwrap();
+            let original = app.session.active().unwrap().doc.clone();
+            app.services.default_save = Some(Box::new(|_| Err("cancelled".into())));
+            assert_eq!(app.save(None), Err("cancelled".into()));
+            assert_eq!(app.session.active().unwrap().doc.name, original.name);
+            app.services.default_save = Some(Box::new(move |_| Ok(target.into())));
+            app.services.write = Some(Box::new(|_, _| Err("disk full".into())));
+            assert_eq!(app.save(None), Err("disk full".into()));
+            assert_eq!(app.session.active().unwrap().doc.name, original.name);
+            assert!(app.session.active().unwrap().path.is_none());
+            app.services.write = Some(Box::new(|_, _| Ok(())));
+            app.save(None).unwrap();
+            let active = app.session.active().unwrap();
+            assert_eq!(active.doc.name, file_open::display_name(target));
+            assert_eq!(active.path.as_deref(), Some(target));
+            assert!(!active.is_dirty());
+            // Renaming the current document must not mutate an earlier history snapshot.
+            assert_ne!(active.doc.name, original.name);
+            app.run("layer.new.layer", serde_json::json!({})).unwrap();
+            app.save(None).unwrap();
+            assert_eq!(app.session.active().unwrap().doc.name, file_open::display_name(target));
+        }
+    }
+    #[test]
+    fn host_local_save_and_external_save_as_use_separate_destinations() {
+        use std::sync::{Arc, Mutex};
+        let written = Arc::new(Mutex::new(Vec::new()));
+        let seen = written.clone();
+        let mut app = PhotocraftApp::new(
+            Session::new(),
+            Services {
+                always_pick_save: true,
+                default_save: Some(Box::new(|_| Ok("/local/photo.psd".into()))),
+                pick_save: Some(Box::new(|_| Some("save-as/42/renamed.psd".into()))),
+                export: Some(Box::new(|_, _, _| Ok((vec![1], Vec::new())))),
+                write: Some(Box::new(move |name, _| {
+                    seen.lock().unwrap().push(name.to_owned());
+                    Ok(())
+                })),
+                ..Default::default()
+            },
+        );
+        app.run("file.new", serde_json::json!({"width": 16, "height": 16})).unwrap();
+        let ctx = egui::Context::default();
+        menus::invoke_unguarded(&mut app, &ctx, "file.save", serde_json::json!({})).unwrap();
+        assert_eq!(app.session.active().unwrap().doc.name, "photo.psd");
+        menus::invoke_unguarded(&mut app, &ctx, "file.saveAs", serde_json::json!({})).unwrap();
+        assert_eq!(app.session.active().unwrap().doc.name, "renamed.psd");
+        app.run("layer.new.layer", serde_json::json!({})).unwrap();
+        menus::invoke_unguarded(&mut app, &ctx, "file.save", serde_json::json!({})).unwrap();
+        assert_eq!(app.session.active().unwrap().doc.name, "photo.psd");
+        assert_eq!(*written.lock().unwrap(), ["/local/photo.psd", "save-as/42/renamed.psd", "/local/photo.psd"]);
+        app.run("layer.new.layer", serde_json::json!({})).unwrap();
+        app.services.default_save = Some(Box::new(|_| Err("cancelled".into())));
+        assert_eq!(app.save(None), Err("cancelled".into()));
+        assert!(app.session.active().unwrap().is_dirty());
+        assert_eq!(written.lock().unwrap().len(), 3);
     }
 }

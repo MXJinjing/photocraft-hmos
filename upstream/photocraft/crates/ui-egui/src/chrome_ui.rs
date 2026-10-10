@@ -1,7 +1,7 @@
 //! Photoshop 2026 window chrome details: the status bar's info field and its "Show" menu, and the
 //! Home button at the start of the options bar.
 
-use egui::{Align2, Rect, RichText, Sense, Stroke, pos2, vec2};
+use egui::{RichText, Sense, Stroke, pos2, vec2};
 use photocraft_doc::{Document, LayerContent};
 use serde::{Deserialize, Serialize};
 
@@ -21,7 +21,7 @@ pub struct ChromeState {
 
 pub use photocraft_engine::prefs::{StylusDoubleTap, StylusLongPress};
 
-/// Shared choices for the options-bar menu and Preferences › Tools.
+/// Shared choices for the title-bar menu and Preferences › Tools.
 pub const STYLUS_DOUBLE_TAP_OPTIONS: &[(StylusDoubleTap, &str)] =
     &[(StylusDoubleTap::Eraser, "Current tool and Eraser"), (StylusDoubleTap::Previous, "Previous tool"), (StylusDoubleTap::Off, "Off")];
 pub const STYLUS_LONG_PRESS_OPTIONS: &[(StylusLongPress, &str)] = &[(StylusLongPress::ContextMenu, "Show or hide context menu"), (StylusLongPress::Off, "Off")];
@@ -166,48 +166,32 @@ pub fn status_bar_pro(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
 }
 
 /// Chevron width of the options-bar stylus control. The menu opens from this end.
-const STYLUS_CHEVRON_W: f32 = 22.0;
-
-/// Width of the options-bar stylus menu. `labeled` includes the title (`Stylus` / 手写笔).
-pub fn stylus_menu_width(ui: &egui::Ui, labeled: bool) -> f32 {
-    if !labeled {
-        return 28.0 + STYLUS_CHEVRON_W;
-    }
-    let font = egui::TextStyle::Body.resolve(ui.style());
-    let text_w = ui.painter().layout_no_wrap(tl!("Stylus").to_string(), font, egui::Color32::WHITE).size().x;
-    // Left pad, pencil, gap, title, gap, menu chevron.
-    8.0 + 16.0 + 6.0 + text_w + 4.0 + STYLUS_CHEVRON_W
+/// Width reserved for the title-bar stylus control, using the menu button font.
+pub fn stylus_menu_width(ui: &egui::Ui) -> f32 {
+    let font = egui::TextStyle::Button.resolve(ui.style());
+    let text_w = ui.painter().layout_no_wrap(tl!("Stylus").to_string(), font, Tokens::get(ui.ctx()).text_dim).size().x;
+    12.0 + 14.0 + ui.spacing().icon_spacing + 2.0 + text_w
 }
 
-/// Options-bar stylus menu, right-aligned. Title is `Stylus` (简体中文：手写笔). The menu holds
+/// Title-bar stylus menu, immediately left of Discord. The menu holds
 /// Block finger input: fingers then only pan or pinch-zoom; the pen still paints.
 pub fn stylus_menu(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
-    let t = Tokens::get(ui.ctx());
-    let labeled = ui.available_width() + 0.5 >= stylus_menu_width(ui, true);
-    let width = stylus_menu_width(ui, labeled);
-    let height = if t.pro { 26.0 } else { 28.0 };
-    let (rect, resp) = ui.allocate_exact_size(vec2(width, height), Sense::click());
-    if resp.hovered() {
-        ui.painter().rect_filled(rect, t.radius_sm, t.hover);
+    if !app.stylus.feed.ever_connected() {
+        return;
     }
-    let tint = if resp.hovered() { t.text } else { t.text_dim };
-    let icon_x = if labeled { rect.left() + 16.0 } else { rect.left() + (rect.width() - STYLUS_CHEVRON_W) / 2.0 };
-    let icon = Rect::from_center_size(pos2(icon_x, rect.center().y), vec2(16.0, 16.0));
-    icons::paint(ui, icon, "pencil", 15.0, tint);
+    let t = Tokens::get(ui.ctx());
+    let resp = ui
+        .scope(|ui| {
+            ui.spacing_mut().button_padding = vec2(6.0, 3.0);
+            ui.spacing_mut().icon_spacing += 2.0;
+            ui.add(egui::Button::image_and_text(icons::image("pencil", 14.0, t.text_dim), RichText::new(tl!("Stylus")).color(t.text_dim)).frame(false))
+        })
+        .inner;
     if app.stylus.feed.connected() {
-        // Bottom-right of the glyph: a presence dot, not a selected-button highlight.
-        let c = icon.right_bottom() + vec2(-1.0, -1.0);
+        let c = pos2(resp.rect.left() + 13.0, resp.rect.center().y + 6.0);
         ui.painter().circle_filled(c, 3.2, t.chrome);
         ui.painter().circle_filled(c, 2.2, t.online);
     }
-    if labeled {
-        let font = egui::TextStyle::Body.resolve(ui.style());
-        ui.painter().text(pos2(icon.right() + 6.0, rect.center().y), Align2::LEFT_CENTER, tl!("Stylus"), font, t.text);
-    }
-    let chev = Rect::from_min_max(pos2(rect.right() - STYLUS_CHEVRON_W, rect.top()), rect.max);
-    ui.painter().line_segment([pos2(chev.left(), rect.top() + 6.0), pos2(chev.left(), rect.bottom() - 6.0)], Stroke::new(1.0, t.separator));
-    icons::paint(ui, Rect::from_center_size(chev.center(), vec2(12.0, 12.0)), "chevron-down", 10.0, tint);
-    // English source `Stylus`; zh-Hans catalog renders it as 手写笔.
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), "Stylus"));
     let resp = resp.on_hover_text(tl!("Stylus"));
     egui::Popup::menu(&resp).show(|ui| {
@@ -502,7 +486,7 @@ mod tests {
     }
 
     #[test]
-    fn stylus_menu_sits_at_the_right_of_the_options_bar_and_toggles_block_finger() {
+    fn stylus_menu_sits_left_of_discord_in_the_title_bar_and_toggles_block_finger() {
         use egui_kittest::{Harness, kittest::Queryable};
 
         let app = crate::PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
@@ -511,14 +495,34 @@ mod tests {
                 if !ui.ctx().fonts(|f| f.families().contains(&egui::FontFamily::Name("medium".into()))) {
                     return;
                 }
+                crate::panels::title_bar(app, ui);
                 crate::panels::options_bar(app, ui);
             },
             app,
         );
         crate::PhotocraftApp::setup_context(&h.ctx, crate::theme::ThemeKind::Studio);
         h.run_steps(4);
+        assert!(h.query_by_label("Stylus").is_none(), "hidden before connection");
+        h.state().stylus.feed.report(crate::stylus::PointerSource::Pen, None);
+        h.run_steps(2);
+        assert!(h.query_by_label("Stylus").is_none(), "contact does not reveal settings");
+        h.state().stylus.feed.set_connected(true);
+        h.run_steps(2);
+        h.state().stylus.feed.set_connected(false);
+        h.run_steps(2);
         let stylus = h.get_by_label("Stylus").rect();
-        assert!(stylus.right() > 1300.0, "stylus menu is right-aligned, rect {stylus:?}");
+        let discord = h.get_by_label("Discord").rect();
+        let file = h.get_by_label("File").rect();
+        assert!(discord.left() - stylus.right() >= 16.0, "stylus has breathing room left of Discord");
+        assert!((stylus.center().y - file.center().y).abs() < 1.0, "stylus is in the menu row");
+        assert_eq!(h.query_all_by_label("Stylus").count(), 1, "options bar has no duplicate entry");
+        if let Some(path) = std::env::var_os("PHOTOCRAFT_STYLUS_SCREENSHOT") {
+            h.state().stylus.feed.set_connected(true);
+            h.run_steps(2);
+            h.render().expect("render menu bar").save(path).expect("save menu bar screenshot");
+            h.state().stylus.feed.set_connected(false);
+            h.run_steps(2);
+        }
         assert!(!h.state().session.prefs().tools.block_finger_input);
         h.get_by_label("Stylus").click();
         h.run_steps(2);
@@ -534,7 +538,7 @@ mod tests {
         assert_eq!(crate::i18n::tr(zh, "Stylus"), "手写笔");
         assert_eq!(crate::i18n::tr(crate::i18n::Lang::EN, "Stylus"), "Stylus");
         assert_eq!(crate::i18n::tr(zh, "Double-tap pen body"), "双击笔身");
-        assert_eq!(crate::i18n::tr(zh, "Long-press pen body"), "长按笔身");
+        assert_eq!(crate::i18n::tr(zh, "Long-press pen body"), "轻捏笔身");
 
         let app = crate::PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
         let mut status = Harness::builder().with_size(egui::vec2(1400.0, 80.0)).build_ui_state(

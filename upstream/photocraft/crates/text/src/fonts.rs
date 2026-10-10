@@ -365,6 +365,9 @@ fn system_font_dirs() -> Vec<std::path::PathBuf> {
         if let Some(h) = &home {
             v.push(h.join("Library/Fonts"));
         }
+    } else if cfg!(target_env = "ohos") {
+        // HarmonyOS exposes its installed fonts here, rather than Linux's /usr/share/fonts.
+        v.push(PathBuf::from("/system/fonts"));
     } else if cfg!(target_os = "windows") {
         let windir = std::env::var_os("WINDIR").map_or_else(|| PathBuf::from("C:\\Windows"), PathBuf::from);
         v.push(windir.join("Fonts"));
@@ -407,7 +410,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(target_os = "linux")]
+    #[cfg(all(target_os = "linux", not(target_env = "ohos")))]
     fn scans_flatpak_host_fonts() {
         let dirs = super::system_font_dirs();
         assert!(dirs.iter().any(|d| d.ends_with("run/host/fonts")));
@@ -442,6 +445,41 @@ mod tests {
             let missing: String = letters.chars().filter(|c| cmap.map(*c).is_none_or(|g| g.to_u32() == 0)).collect();
             assert!(missing.is_empty(), "{name} lacks French glyphs: {missing:?}");
         }
+    }
+
+    #[test]
+    #[cfg(target_env = "ohos")]
+    fn harmonyos_scans_the_system_font_library() {
+        assert_eq!(super::system_font_dirs(), [std::path::PathBuf::from("/system/fonts")]);
+    }
+
+    #[test]
+    fn directory_fonts_are_available_for_family_and_style_selection() {
+        use super::*;
+        let dir = std::env::temp_dir().join(format!("photocraft-font-scan-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("nested")).unwrap();
+        std::fs::write(dir.join("Regular.TTF"), INTER_REGULAR).unwrap();
+        std::fs::write(dir.join("nested/Medium.ttf"), INTER_MEDIUM).unwrap();
+        std::fs::write(dir.join("nested/Semibold.otf"), INTER_SEMIBOLD).unwrap();
+        std::fs::write(dir.join("Mono.ttf"), JETBRAINS_MONO_REGULAR).unwrap();
+        std::fs::write(dir.join("broken.ttf"), b"not a font").unwrap();
+        std::fs::write(dir.join("config.json"), b"{}").unwrap();
+        let mut files = Vec::new();
+        collect_font_files(&dir, 0, &mut files);
+        assert_eq!(files.len(), 5);
+        let mut db = FontDb::new();
+        // An empty collection proves the files were discovered, rather than using bundled faces.
+        db.fcx.collection = Collection::new(CollectionOptions { shared: false, system_fonts: false });
+        for path in files {
+            db.fcx.collection.load_fonts_from_paths([path]);
+        }
+        assert_eq!(db.families(), ["Inter", "JetBrains Mono"]);
+        let mut weights: Vec<_> = db.faces("Inter").into_iter().map(|face| face.weight as u32).collect();
+        weights.sort();
+        assert_eq!(weights, [400, 500, 600]);
+        assert_eq!(db.faces("JetBrains Mono").len(), 1);
+        assert_eq!(db.resolve_postscript("Inter-SemiBold").family, "Inter");
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

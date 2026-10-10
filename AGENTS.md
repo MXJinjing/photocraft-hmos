@@ -6,9 +6,9 @@ PhotoCraft's own source specific guidance is in `upstream/photocraft/AGENTS.md`;
 
 ## Repository layout
 
-- `upstream/photocraft/` is the PhotoCraft v0.5.0 Rust source, imported as a Git subtree **without squashing history** and updated from v0.3.0 without squashing. Its own `AGENTS.md` applies to PhotoCraft code. This branch's native self-drawing HarmonyOS host is an intentional user requested integration.
+- `upstream/photocraft/` is the PhotoCraft v0.5.0 Rust source, imported as a Git subtree **without squashing history** and updated from v0.3.0 without squashing. Its own `AGENTS.md` applies to PhotoCraft code. This branch's native self-drawing HarmonyOS host is the user requested integration.
 - `third_party/wgpu-hal-30.0.1/` is the verified wgpu-hal 30.0.1 crate with the WebGL uniform block fix. The path override is in `upstream/photocraft/Cargo.toml`.
-- `entry/` is the HarmonyOS ArkTS/C++ host. `rawfile` contains only file-type metadata; do not restore the web snapshot.
+- `entry/` is the native HarmonyOS ArkTS/C++ host. `rawfile` contains only file-type metadata; do not restore the web snapshot.
 - `native/rust/` is an independent native adapter workspace. FFI and NativeWindow unsafe code stay here; upstream continues to forbid unsafe. Its lockfile and wgpu-hal patch must stay compatible with upstream.
 
 ## Git ancestry and upstream updates
@@ -24,8 +24,8 @@ PhotoCraft's own source specific guidance is in `upstream/photocraft/AGENTS.md`;
 1. Edit shared Rust code under `upstream/photocraft/`, native adapter code under `native/rust/`, and platform code under `entry/`.
 2. Install `aarch64-unknown-linux-ohos` and `x86_64-unknown-linux-ohos` for the configured Rust toolchain.
 3. Run `scripts/dev.sh build` for a dual-architecture native HAP, `scripts/dev.sh run` to build/install/launch on exactly one connected simulator/device, or `scripts/dev.sh launch` for an already installed HAP. Tool paths remain in ignored `scripts/dev.local.env`.
-4. Rust and ArkTS edits require HAP rebuild/deployment. There is no ArkWeb, Trunk development server or hdc reverse-port mapping in this branch.
-5. `scripts/package_offline.sh` builds the native HAP; `--install` also installs it. Verify with `scripts/verify_native.py <HAP>`. Upstream Web sources remain for regression checks.
+4. Rust and ArkTS/C++ edits require HAP rebuild/deployment. All builds and launches use the native host; there is no ArkWeb page, Trunk server, Web build command or hdc reverse-port mapping. Save documents before scripted relaunch/deployment.
+5. `scripts/package_offline.sh` builds the native HAP; `--install` also installs it. Verify with `scripts/verify_native.py <HAP>`. Preserve imported upstream Web sources and history; they are not part of the HarmonyOS build/development workflow.
 
 ## Version numbers
 
@@ -52,6 +52,14 @@ The HarmonyOS SDK is absent from GitHub-hosted images, and Huawei serves the Dev
 
 ## Verification
 
-- Run `cargo metadata --offline` from `upstream/photocraft/`, then a Trunk Web build for Rust changes. For wrapper changes, build the HAP and verify on the simulator before connecting a real Pad.
+### Native Rust test file locations
+
+- Put native adapter unit tests in `native/rust/tests/unit/<module>.rs`; use `native/rust/tests/unit/host.rs` for tests of `src/lib.rs`. Do not add inline test bodies or test-only helpers under `native/rust/src/`.
+- In the corresponding source module, load its test file with `#[cfg(test)]`, `#[path = "../tests/unit/<module>.rs"]`, and `mod tests;` (`mod host_tests;` in `lib.rs`). These remain unit tests within the original module, so private access and existing test names are preserved. Keep test-only lint allowances on this module or in its test file.
+- Put helpers used by one test module in that test file. Keep these unit-test files inside the `tests/unit/` subdirectory: top-level `tests/*.rs` are automatically discovered by Cargo as separate integration-test crates. Do not expose production internals just to relocate tests.
+- Keep the exact child-test name used by the working-directory subprocess test in sync with its module path; changing it can silently skip the child test.
+- Verify migrations by comparing `cargo test --offline --manifest-path native/rust/Cargo.toml --lib -- --list` before and after, then run `cargo test --offline --manifest-path native/rust/Cargo.toml`. Native builds must continue to exclude test code.
+
+- Run `cargo metadata --offline` from `upstream/photocraft/` for Rust changes; validate the HarmonyOS branch with native builds. For wrapper changes, build the HAP and verify on the simulator before connecting a real Pad.
 - Native host changes require tests, dual-target Rust builds, a HAP build and simulator verification. Use fixed-size before/after screenshots for UI comparisons.
 - Preserve the existing Save/Save As picker and system browser external link behavior during wrapper changes.

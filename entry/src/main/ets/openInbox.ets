@@ -15,6 +15,7 @@ export class OpenedFile {
   }
 }
 
+// 冷启动的打开请求可能早于编辑器初始化，先保留文件内容，待页面就绪后统一消费。
 let queued: Array<OpenedFile> = [];
 let listener: (() => void) | null = null;
 

@@ -1066,7 +1066,7 @@ fn section_fields(ui: &mut egui::Ui, section: &str, obj: &mut Map<String, Value>
     }
 }
 
-/// The draft uses the same preference keys and choices as the options-bar Stylus menu.
+/// The draft uses the same preference keys and choices as the title-bar Stylus menu.
 fn stylus_fields(ui: &mut egui::Ui, obj: &mut Map<String, Value>) {
     let t = Tokens::get(ui.ctx());
     ui.add_space(10.0);
@@ -1837,6 +1837,7 @@ mod tests {
         use egui_kittest::{Harness, kittest::Queryable};
 
         let (mut app, store) = app_with_store();
+        app.stylus.feed.set_connected(true);
         app.run("file.new", json!({"width": 400, "height": 300})).unwrap();
         app.session.edit_prefs(|p| {
             p.interface.language = "en".into();

@@ -2,15 +2,18 @@ import native from 'libphotocraft.so';
 import { AbilityConstant, UIAbility, Want } from '@kit.AbilityKit';
 import { window } from '@kit.ArkUI';
 import { BusinessError } from '@kit.BasicServicesKit';
-import { LOADING_CHROME, paintWindow } from '../SystemBars';
+import { applySystemBars, LOADING_CHROME, paintWindow } from '../SystemBars';
+import { restorePointerVisibility } from '../input/NativeCursorAdapter';
 import { acceptOpenWant } from '../openInbox';
 import { requestWindowClose, resetCloseGuard } from '../closeGuard';
+import { WindowChrome } from '../WindowChrome';
 
 export default class EntryAbility extends UIAbility {
+  private windowChrome: WindowChrome | undefined = undefined;
   onCreate(want: Want, _launchParam: AbilityConstant.LaunchParam): void {
     resetCloseGuard();
     this.noteWant(want);
-    console.info('PhotoCraft ability created');
+    console.info('PhotoCraft native ability created');
   }
 
   onNewWant(want: Want): void {
@@ -21,13 +24,20 @@ export default class EntryAbility extends UIAbility {
     acceptOpenWant(want);
   }
 
-  onForeground(): void { native.active(true); }
+  onForeground(): void {
+    // 系统窗口在后台可能改变装饰和颜色，恢复前台时重新查询并唤醒渲染 worker。
+    this.windowChrome?.refresh();
+    applySystemBars(this.context, AppStorage.get<string>('photocraftChrome') ?? LOADING_CHROME);
+    native.active(true);
+  }
 
-  onBackground(): void { native.active(false); }
+  onBackground(): void { restorePointerVisibility(); native.active(false); }
 
   onWindowStageCreate(windowStage: window.WindowStage): void {
     windowStage.on('windowStageClose', () => requestWindowClose());
-    AppStorage.setOrCreate('photocraftChrome', LOADING_CHROME);
+    if (AppStorage.get<string>('photocraftChrome') === undefined) {
+      AppStorage.setOrCreate('photocraftChrome', LOADING_CHROME);
+    }
     windowStage.loadContent('pages/Index', (error: BusinessError) => {
       if (error.code) {
         console.error(`PhotoCraft page failed: ${error.code} ${error.message}`);
@@ -36,11 +46,17 @@ export default class EntryAbility extends UIAbility {
       // The page does not draw into the status-bar and navigation-indicator avoid areas. Colour
       // those from the window, then let the page replace this with the theme chrome.
       try {
-        paintWindow(windowStage.getMainWindowSync(), LOADING_CHROME);
+        let win = windowStage.getMainWindowSync();
+        paintWindow(win, AppStorage.get<string>('photocraftChrome') ?? LOADING_CHROME);
+        this.windowChrome?.stop();
+        this.windowChrome = new WindowChrome(win);
+        this.windowChrome.start();
       } catch (err) {
         let failure = err as BusinessError;
         console.error(`System bars failed: ${failure.code} ${failure.message}`);
       }
     });
   }
+
+  onWindowStageDestroy(): void { this.windowChrome?.stop(); this.windowChrome = undefined; }
 }

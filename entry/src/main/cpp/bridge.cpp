@@ -5,6 +5,8 @@
 #include <hilog/log.h>
 #include <arkui/ui_input_event.h>
 #include <atomic>
+#include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <mutex>
 #include <string>
@@ -31,7 +33,10 @@ OH_NativeVSync* vsync = nullptr;
 std::atomic<bool> framePending(false);
 std::atomic<bool> attached(false);
 std::atomic<int32_t> touchId(-1);
+std::atomic<bool> penContact(false);
+std::atomic<bool> fingerContact(false);
 struct Request {uint64_t id;std::string json;std::vector<uint8_t> data;};
+// 在 ArkTS 线程消费并释放请求；Rust 回调中的借用数据已由 NotifyRust 复制。
 void CallJS(napi_env env,napi_value callback,void*,void* ptr) {
     auto* r=static_cast<Request*>(ptr);
     if (env && callback) {
@@ -53,8 +58,11 @@ void CallJS(napi_env env,napi_value callback,void*,void* ptr) {
     delete r;
 }
 void NotifyRust(uint64_t id,const uint8_t* json,size_t n,const uint8_t* data,size_t size) {
+    // Rust worker 不直接调用 JS，通过线程安全队列将平台请求交给 ArkTS 主线程。
     auto* r=new Request{id,std::string(reinterpret_cast<const char*>(json),n),{}};
-    OH_LOG_Print(LOG_APP, LOG_INFO, 0xD001, "PhotoCraft", "Rust notification %{public}s", r->json.c_str());
+    // IME snapshots contain user text and can arrive on every cursor movement.
+    if(r->json.find("\"kind\":\"ime\"")==std::string::npos)
+        OH_LOG_Print(LOG_APP, LOG_INFO, 0xD001, "PhotoCraft", "Rust notification %{public}s", r->json.c_str());
     if(size) r->data.assign(data,data+size);
     std::lock_guard<std::mutex> lock(notifyMutex);
     if(!notifyFn || napi_call_threadsafe_function(notifyFn,r,napi_tsfn_nonblocking)!=napi_ok) {
@@ -62,6 +70,7 @@ void NotifyRust(uint64_t id,const uint8_t* json,size_t n,const uint8_t* data,siz
         if(id) {const std::string error="cancelled";pc_reply(id,false,reinterpret_cast<const uint8_t*>(error.data()),error.size(),nullptr,0);}
     }
 }
+// VSync 只发帧消息，实际 egui 更新和 GPU 绘制仍由 Rust worker 串行执行。
 void Vsync(long long,void*) {framePending=false;if(attached)pc_frame();}
 std::string String(napi_env env,napi_value v) {
     size_t len=0;
@@ -79,6 +88,7 @@ void SurfaceCreated(OH_NativeXComponent* c,void* window) {
     auto ref=OH_NativeWindow_NativeObjectReference(window);
     OH_LOG_Print(LOG_APP, LOG_INFO, 0xD001, "PhotoCraft", "Window %{public}llu x %{public}llu reference %{public}d", static_cast<unsigned long long>(w),static_cast<unsigned long long>(h),ref);
     if(ref!=0)return;
+    // 将取得的原生窗口引用转交 Rust 的 Window；后者负责在 surface 释放后解除引用。
     attached=true;
     pc_attach(reinterpret_cast<uintptr_t>(window),static_cast<uint32_t>(w),static_cast<uint32_t>(h));
 }
@@ -86,19 +96,68 @@ void SurfaceChanged(OH_NativeXComponent* c,void* window) {
     uint64_t w=0,h=0;
     if(OH_NativeXComponent_GetXComponentSize(c,window,&w,&h)==OH_NATIVEXCOMPONENT_RESULT_SUCCESS)pc_resize(static_cast<uint32_t>(w),static_cast<uint32_t>(h));
 }
-void SurfaceDestroyed(OH_NativeXComponent*,void*) {attached=false;touchId=-1;pc_detach();}
+void SurfaceDestroyed(OH_NativeXComponent*,void*) {attached=false;touchId=-1;penContact=false;fingerContact=false;pc_detach();}
 void Touch(OH_NativeXComponent* c,void* window) {
     OH_NativeXComponent_TouchEvent e{};
     if(OH_NativeXComponent_GetTouchEvent(c,window,&e)!=OH_NATIVEXCOMPONENT_RESULT_SUCCESS)return;
+    uint32_t index=0;
+    while(index<e.numPoints && index<OH_NATIVE_XCOMPONENT_MAX_TOUCH_POINTS_NUMBER && e.touchPoints[index].id!=e.id)++index;
+    OH_NativeXComponent_TouchPointToolType tool=OH_NATIVEXCOMPONENT_TOOL_TYPE_FINGER;
+    if(index<e.numPoints && index<OH_NATIVE_XCOMPONENT_MAX_TOUCH_POINTS_NUMBER)
+        OH_NativeXComponent_GetTouchPointToolType(c,index,&tool);
+    bool pen=tool==OH_NATIVEXCOMPONENT_TOOL_TYPE_PEN || tool==OH_NATIVEXCOMPONENT_TOOL_TYPE_RUBBER ||
+             tool==OH_NATIVEXCOMPONENT_TOOL_TYPE_BRUSH || tool==OH_NATIVEXCOMPONENT_TOOL_TYPE_PENCIL ||
+             tool==OH_NATIVEXCOMPONENT_TOOL_TYPE_AIRBRUSH;
+    if(!pen) {
+        if(e.type==OH_NATIVEXCOMPONENT_CANCEL) {
+            fingerContact=false;
+            if(!penContact)Json("{\"kind\":\"blur\"}");
+            return;
+        }
+        std::string points;
+        for(uint32_t i=0;i<e.numPoints && i<OH_NATIVE_XCOMPONENT_MAX_TOUCH_POINTS_NUMBER;++i) {
+            const auto& point=e.touchPoints[i];
+            OH_NativeXComponent_TouchPointToolType pointTool=OH_NATIVEXCOMPONENT_TOOL_TYPE_FINGER;
+            OH_NativeXComponent_GetTouchPointToolType(c,i,&pointTool);
+            // isPressed is false on MOVE in the simulator; use event phases for contact lifetime.
+            if(pointTool!=OH_NATIVEXCOMPONENT_TOOL_TYPE_FINGER ||
+               point.type==OH_NATIVEXCOMPONENT_UP || point.type==OH_NATIVEXCOMPONENT_CANCEL ||
+               (point.id==e.id && e.type==OH_NATIVEXCOMPONENT_UP) ||
+               !std::isfinite(point.x) || !std::isfinite(point.y))continue;
+            if(!points.empty())points+=",";
+            points+="{\"id\":"+std::to_string(static_cast<uint32_t>(point.id))+",\"x\":"+std::to_string(point.x)+",\"y\":"+std::to_string(point.y)+"}";
+        }
+        fingerContact=!points.empty();
+        Json("{\"kind\":\"touch\",\"points\":["+points+"]}");
+        return;
+    }
     int action=2;
-    if(e.type==OH_NATIVEXCOMPONENT_DOWN){if(touchId!=-1)return;touchId=e.id;action=0;}
+    if(e.type==OH_NATIVEXCOMPONENT_DOWN){
+        if(touchId!=-1) {
+            if(!pen || penContact)return;
+            // A palm must never prevent a pen from taking ownership of the canvas.
+            Json("{\"kind\":\"pointer\",\"action\":3}");
+        }
+        touchId=e.id;penContact=pen;action=0;
+    }
     else if(e.type==OH_NATIVEXCOMPONENT_UP)action=1;
     else if(e.type==OH_NATIVEXCOMPONENT_CANCEL)action=3;
     if(touchId!=e.id)return;
-    Json("{\"kind\":\"pointer\",\"action\":"+std::to_string(action)+",\"x\":"+std::to_string(e.x)+",\"y\":"+std::to_string(e.y)+"}");
-    if(action==1||action==3)touchId=-1;
+    float tiltX=0,tiltY=0;
+    if(pen && index<e.numPoints && index<OH_NATIVE_XCOMPONENT_MAX_TOUCH_POINTS_NUMBER) {
+        OH_NativeXComponent_GetTouchPointTiltX(c,index,&tiltX);
+        OH_NativeXComponent_GetTouchPointTiltY(c,index,&tiltY);
+    }
+    auto finite=[](float value,float fallback){return std::isfinite(value)?value:fallback;};
+    std::string sample=pen ? "{\"pressure\":"+std::to_string(std::clamp(finite(e.force,1),0.0f,1.0f))+
+        ",\"tiltX\":"+std::to_string(finite(tiltX,0))+",\"tiltY\":"+std::to_string(finite(tiltY,0))+
+        ",\"eraser\":"+(tool==OH_NATIVEXCOMPONENT_TOOL_TYPE_RUBBER?"true":"false")+"}" : "null";
+    Json("{\"kind\":\"pointer\",\"source\":\""+std::string(pen?"pen":"touch")+"\",\"sample\":"+sample+
+         ",\"action\":"+std::to_string(action)+",\"x\":"+std::to_string(e.x)+",\"y\":"+std::to_string(e.y)+"}");
+    if(action==1||action==3){touchId=-1;penContact=false;}
 }
 void Mouse(OH_NativeXComponent* c,void* window) {
+    if(penContact || fingerContact)return;
     OH_NativeXComponent_MouseEvent e{};
     if(OH_NativeXComponent_GetMouseEvent(c,window,&e)!=OH_NATIVEXCOMPONENT_RESULT_SUCCESS)return;
     int action=e.action==OH_NATIVEXCOMPONENT_MOUSE_PRESS?0:e.action==OH_NATIVEXCOMPONENT_MOUSE_RELEASE?1:2;
@@ -138,13 +197,19 @@ bool Key(OH_NativeXComponent* c,void*) {
     return true;
 }
 void Axis(OH_NativeXComponent*,ArkUI_UIInputEvent* event,ArkUI_UIInputEvent_Type type) {
-    if(!event||type!=ARKUI_UIINPUTEVENT_TYPE_AXIS)return;
+    if(!event||type!=ARKUI_UIINPUTEVENT_TYPE_AXIS || penContact)return;
     double x=-OH_ArkUI_AxisEvent_GetHorizontalAxisValue(event);
     double y=-OH_ArkUI_AxisEvent_GetVerticalAxisValue(event);
-    Json("{\"kind\":\"wheel\",\"x\":"+std::to_string(x)+",\"y\":"+std::to_string(y)+"}");
+    double zoom=OH_ArkUI_AxisEvent_GetPinchAxisScaleValue(event);
+    float px=OH_ArkUI_PointerEvent_GetX(event),py=OH_ArkUI_PointerEvent_GetY(event);
+    if(!std::isfinite(x)||!std::isfinite(y)||!std::isfinite(px)||!std::isfinite(py))return;
+    if(!std::isfinite(zoom)||zoom<0)zoom=0;
+    Json("{\"kind\":\"axis\",\"action\":"+std::to_string(OH_ArkUI_AxisEvent_GetAxisAction(event))+
+         ",\"x\":"+std::to_string(px)+",\"y\":"+std::to_string(py)+",\"dx\":"+std::to_string(x)+
+         ",\"dy\":"+std::to_string(y)+",\"zoom\":"+std::to_string(zoom)+"}");
 }
-void Blur(OH_NativeXComponent*,void*) {Json("{\"kind\":\"blur\"}");}
-void Hover(OH_NativeXComponent*,bool isHover) {if(!isHover)Json("{\"kind\":\"blur\"}");}
+void Blur(OH_NativeXComponent*,void*) {touchId=-1;penContact=false;fingerContact=false;Json("{\"kind\":\"blur\"}");}
+void Hover(OH_NativeXComponent*,bool isHover) {if(!isHover && !penContact && !fingerContact)Json("{\"kind\":\"blur\"}");}
 OH_NativeXComponent_Callback callbacks{SurfaceCreated,SurfaceChanged,SurfaceDestroyed,Touch};
 OH_NativeXComponent_MouseEvent_Callback mouseCallbacks{Mouse,Hover};
 

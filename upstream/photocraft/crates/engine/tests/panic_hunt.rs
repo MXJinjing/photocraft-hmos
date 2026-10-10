@@ -20,7 +20,7 @@ fn fresh() -> Session {
 /// or timeout, `Ok` otherwise (whether the command returned Ok or a graceful Err).
 fn run_guarded(id: &str, p: &Value) -> Result<(), String> {
     let (tx, rx) = mpsc::channel();
-    let (id, p) = (id.to_string(), p.clone());
+    let (id, p) = (id.to_string(), test_params(id, p));
     std::thread::spawn(move || {
         let r = catch_unwind(AssertUnwindSafe(|| {
             let mut s = fresh();
@@ -33,6 +33,31 @@ fn run_guarded(id: &str, p: &Value) -> Result<(), String> {
         Ok(false) => Err("panicked".into()),
         Err(_) => Err("hung (>4s)".into()),
     }
+}
+
+// Registry fuzzing must never send documents to the contributor's default printer.
+// Render the PDF and exercise layout validation, but suppress every spooler call.
+fn test_params(id: &str, p: &Value) -> Value {
+    let mut p = p.clone();
+    if matches!(id, "file.print" | "file.printOneCopy")
+        && let Some(fields) = p.as_object_mut()
+    {
+        fields.insert("dryRun".into(), json!(true));
+        fields.insert("send".into(), json!(false));
+    }
+    p
+}
+
+#[test]
+fn print_fuzzing_always_renders_pdf_without_spooling() {
+    for id in ["file.print", "file.printOneCopy"] {
+        for params in [json!({}), json!({"send": true, "dryRun": false})] {
+            let safe = test_params(id, &params);
+            assert_eq!(safe["send"], false);
+            assert_eq!(safe["dryRun"], true);
+        }
+    }
+    assert_eq!(test_params("file.new", &json!({})), json!({}));
 }
 
 #[test]

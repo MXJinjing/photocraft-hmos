@@ -259,6 +259,11 @@ impl Default for ToolState {
     }
 }
 
+/// Native PDF handoff; the platform owns preview and eventual job completion.
+pub type PrintService = fn(&[u8], &Value) -> std::result::Result<String, String>;
+/// Write a print PDF to a host-authorized target (which may be an opaque URI token).
+pub type PrintSaveService = fn(&str, &[u8]) -> std::result::Result<(), String>;
+
 #[derive(Default)]
 pub struct Session {
     docs: Vec<DocState>,
@@ -298,6 +303,10 @@ pub struct Session {
     /// File menu state: Lock Slices, Image Assets, last Print / Save for Web settings, script
     /// event log (see `automate_cmds`).
     pub file_menu: automate_cmds::FileMenuState,
+    /// Optional native print service. Receives the composed PDF and job metadata;
+    /// success means the system accepted the preview, not that paper was printed.
+    pub print_service: Option<PrintService>,
+    pub print_save_service: Option<PrintSaveService>,
     /// Persistent brush preset store (desktop only; `None` keeps presets session-only, as in
     /// headless and test sessions). See `preset_store`. The same store holds the Actions list.
     pub preset_store: Option<preset_store::PresetStore>,

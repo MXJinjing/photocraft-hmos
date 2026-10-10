@@ -1,7 +1,5 @@
 // Platform-independent host contract. Keep in sync with docs/stylus-input.md.
-export const STYLUS_HOST_EVENT: string = 'photocraft-stylus-input';
 export const STYLUS_PROTOCOL_VERSION: number = 1;
-export const STYLUS_STATE_PROPERTY: string = '__photocraftStylusState';
 
 export enum StylusEventType {
   Pointer = 'pointer',
@@ -74,14 +72,6 @@ export class StylusPacket {
 export interface StylusAdapter {
   start(): void;
   stop(): void;
-  // Publish current connection state again after the web consumer reloads.
+  // Publish current connection state again after the native consumer reconnects.
   publishState(): void;
-}
-
-export function stylusPacketScript(packet: StylusPacket): string {
-  // Connection can arrive before WASM installs its listener. Cache just the latest state for
-  // replay by the consumer; gestures are never replayed after startup.
-  return '(function(){let packet=' + JSON.stringify(packet) +
-    ';if(packet.type==="connection"){window.' + STYLUS_STATE_PROPERTY + '=packet;}' +
-    'window.dispatchEvent(new CustomEvent("' + STYLUS_HOST_EVENT + '",{detail:packet}));})()';
 }

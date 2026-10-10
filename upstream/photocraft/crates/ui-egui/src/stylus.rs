@@ -162,11 +162,20 @@ struct Slot {
     last_gesture: Option<(PenGesture, f64)>,
     /// Attachment reported by an adapter, distinct from contact with the screen.
     connected: bool,
+    ever_connected: bool,
 }
 
 impl Default for Slot {
     fn default() -> Self {
-        Self { sample: None, source: PointerSource::Mouse, gestures: Vec::new(), barrel: BarrelWatch::default(), last_gesture: None, connected: false }
+        Self {
+            sample: None,
+            source: PointerSource::Mouse,
+            gestures: Vec::new(),
+            barrel: BarrelWatch::default(),
+            last_gesture: None,
+            connected: false,
+            ever_connected: false,
+        }
     }
 }
 
@@ -250,11 +259,16 @@ impl StylusFeed {
         let Ok(mut g) = self.0.lock() else { return false };
         let changed = g.connected != on;
         g.connected = on;
+        g.ever_connected |= on;
         changed
     }
     /// A stylus is attached right now. False until the platform says otherwise.
     pub fn connected(&self) -> bool {
         self.0.lock().is_ok_and(|g| g.connected)
+    }
+    /// Keep stylus settings available after the first reported connection in this app lifetime.
+    pub fn ever_connected(&self) -> bool {
+        self.0.lock().is_ok_and(|g| g.ever_connected)
     }
     /// Gestures queued since the last take, oldest first.
     pub fn take_gestures(&self) -> Vec<PenGesture> {
@@ -605,11 +619,16 @@ mod tests {
     fn connection_starts_off_and_only_the_platform_sets_it() {
         let feed = StylusFeed::default();
         assert!(!feed.connected());
+        assert!(!feed.ever_connected());
+        feed.report(PointerSource::Pen, Some(PenSample::default()));
+        assert!(!feed.ever_connected(), "contact alone is not a connection report");
         assert!(feed.set_connected(true));
         assert!(feed.connected());
+        assert!(feed.ever_connected());
         assert!(!feed.set_connected(true), "unchanged");
         assert!(feed.set_connected(false));
         assert!(!feed.connected());
+        assert!(feed.ever_connected(), "disconnect keeps settings available");
     }
 
     #[test]

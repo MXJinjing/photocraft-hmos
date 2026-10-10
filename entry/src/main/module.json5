@@ -9,6 +9,9 @@
     "installationFree": false,
     "pages": "$profile:main_pages",
     "requestPermissions": [
+      {
+        "name": "ohos.permission.PRINT"
+      },
       { "name": "ohos.permission.INTERNET" }
     ],
     "abilities": [
@@ -30,20 +33,27 @@
           {
             "actions": ["ohos.want.action.viewData"],
             "uris": [
-              { "scheme": "file", "utd": "general.image", "maxFileSupported": 1 },
-              { "scheme": "file", "utd": "general.jpeg", "maxFileSupported": 1 },
-              { "scheme": "file", "utd": "general.png", "maxFileSupported": 1 },
-              { "scheme": "file", "utd": "general.tiff", "maxFileSupported": 1 },
-              { "scheme": "file", "utd": "general.gif", "maxFileSupported": 1 },
-              { "scheme": "file", "utd": "general.raw-image", "maxFileSupported": 1 },
-              { "scheme": "file", "utd": "com.microsoft.bmp", "maxFileSupported": 1 },
-              { "scheme": "file", "utd": "com.microsoft.ico", "maxFileSupported": 1 },
-              { "scheme": "file", "utd": "com.truevision.tga-image", "maxFileSupported": 1 },
-              { "scheme": "file", "utd": "com.ilm.openexr-image", "maxFileSupported": 1 },
-              { "scheme": "file", "utd": "com.adobe.photoshop-image", "maxFileSupported": 1 },
-              { "scheme": "file", "utd": "io.github.storytold.photocraft.webp", "maxFileSupported": 1 },
-              { "scheme": "file", "utd": "io.github.storytold.photocraft.heif", "maxFileSupported": 1 },
-              { "scheme": "file", "utd": "io.github.storytold.photocraft.psb", "maxFileSupported": 1 }
+              {"scheme": "file", "type": "general.jpeg", "linkFeature": "FileOpen"},
+              {"scheme": "file", "type": "general.png", "linkFeature": "FileOpen"},
+              {"scheme": "file", "type": "general.tiff", "linkFeature": "FileOpen"},
+              {"scheme": "file", "type": "general.gif", "linkFeature": "FileOpen"},
+              {"scheme": "file", "type": "general.raw-image", "linkFeature": "FileOpen"},
+              {"scheme": "file", "type": "general.pbm-image", "linkFeature": "FileOpen"},
+              {"scheme": "file", "type": "general.pgm-image", "linkFeature": "FileOpen"},
+              {"scheme": "file", "type": "general.ppm-image", "linkFeature": "FileOpen"},
+              {"scheme": "file", "type": "com.microsoft.bmp", "linkFeature": "FileOpen"},
+              {"scheme": "file", "type": "com.microsoft.ico", "linkFeature": "FileOpen"},
+              {"scheme": "file", "type": "com.truevision.tga-image", "linkFeature": "FileOpen"},
+              {"scheme": "file", "type": "com.ilm.openexr-image", "linkFeature": "FileOpen"},
+              {"scheme": "file", "type": "com.adobe.photoshop-image", "linkFeature": "FileOpen"},
+              {"scheme": "file", "type": "io.github.storytold.photocraft.hmos.pcraft", "linkFeature": "FileOpen"},
+              {"scheme": "file", "type": "io.github.storytold.photocraft.hmos.webp", "linkFeature": "FileOpen"},
+              {"scheme": "file", "type": "io.github.storytold.photocraft.hmos.heif", "linkFeature": "FileOpen"},
+              {"scheme": "file", "type": "io.github.storytold.photocraft.hmos.psb", "linkFeature": "FileOpen"},
+              {"scheme": "file", "type": "io.github.storytold.photocraft.hmos.qoi", "linkFeature": "FileOpen"},
+              {"scheme": "file", "type": "io.github.storytold.photocraft.hmos.hdr", "linkFeature": "FileOpen"},
+              {"scheme": "file", "type": "io.github.storytold.photocraft.hmos.portable-image", "linkFeature": "FileOpen"},
+              {"scheme": "file", "type": "io.github.storytold.photocraft.hmos.camera-raw", "linkFeature": "FileOpen"}
             ]
           }
         ]

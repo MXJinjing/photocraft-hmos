@@ -58,10 +58,12 @@ pub fn fall_back(app: &mut PhotocraftApp, fault: &photocraft_gpu::Fault) {
     app.ui.status_error = true;
 }
 
+// Rust's OHOS targets report target_os = "linux"; the environment identifies OHOS.
+const PLATFORM_OS: &str = if cfg!(target_env = "ohos") { "OpenHarmony/OHOS" } else { std::env::consts::OS };
+
 /// Help › System Info: version, platform and the graphics state.
 pub fn system_info(app: &PhotocraftApp) -> Vec<String> {
-    let mut v =
-        vec![format!("PhotoCraft {}", photocraft_engine::build_info::long_version()), format!("Platform: {} {}", std::env::consts::OS, std::env::consts::ARCH)];
+    let mut v = vec![format!("PhotoCraft {}", photocraft_engine::build_info::long_version()), format!("Platform: {} {}", PLATFORM_OS, std::env::consts::ARCH)];
     v.extend(app.perf.gpu_info.lines());
     v.extend(crate::monitor_status::summary_lines(app));
     v
@@ -71,7 +73,7 @@ pub fn system_info(app: &PhotocraftApp) -> Vec<String> {
 pub fn system_info_json(app: &PhotocraftApp) -> serde_json::Value {
     json!({
         "version": photocraft_engine::build_info::long_version(),
-        "os": std::env::consts::OS,
+        "os": PLATFORM_OS,
         "arch": std::env::consts::ARCH,
         "gpu": app.perf.gpu_info,
         "monitor": app.session.color.monitor_status(),

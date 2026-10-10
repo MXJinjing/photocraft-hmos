@@ -32,6 +32,7 @@ pub fn notify(id: u64, kind: &str, text: &str, data: &[u8]) {
     }
 }
 pub fn request(kind: &str, text: &str, data: &[u8]) -> Reply {
+    // 先登记应答通道再通知平台，避免快速应答找不到请求；等待时不持有 pending 锁。
     let id = NEXT.fetch_add(1, Ordering::Relaxed);
     let (tx, rx) = mpsc::channel();
     {
@@ -55,6 +56,7 @@ pub fn reply(id: u64, result: Reply) {
     }
 }
 pub fn cancel() {
+    // 生命周期中断时唤醒全部等待者，防止 worker 永久卡在已关闭的系统选择器上。
     let mut map = pending().lock().unwrap_or_else(|p| p.into_inner());
     CANCELLED.store(true, Ordering::Release);
     for (_, tx) in map.drain() {
@@ -66,16 +68,5 @@ pub fn resume() {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn cancellation_wakes_waiters_and_rejects_new_requests() {
-        let (tx, rx) = mpsc::channel();
-        pending().lock().unwrap().insert(42, tx);
-        cancel();
-        assert_eq!(rx.recv().unwrap(), Err("cancelled".into()));
-        assert_eq!(request("save", "x.psd", &[]), Err("cancelled".into()));
-        reply(42, Ok(("late".into(), vec![]))); // Late picker completions are ignored.
-        resume();
-    }
-}
+#[path = "../tests/unit/bridge.rs"]
+mod tests;

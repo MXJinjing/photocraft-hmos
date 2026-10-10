@@ -18,12 +18,13 @@ fn rects(ctx: &egui::Context) -> Vec<egui::Rect> {
 /// image can still be panned and zoomed under it. The pointer position when it is over `canvas`
 /// and not over a dialog or one of its popups.
 pub fn free_pointer_over(ctx: &egui::Context, canvas: egui::Rect) -> Option<egui::Pos2> {
-    if egui::Popup::is_any_open(ctx) {
-        return None;
-    }
     let p = ctx.pointer_hover_pos()?;
-    let rects = rects(ctx);
-    (canvas.contains(p) && !rects.iter().any(|r| r.contains(p))).then_some(p)
+    free_position(ctx, canvas, p).then_some(p)
+}
+
+/// Hit-test each touch origin, rather than the compatibility pointer or gesture centroid.
+pub(crate) fn free_position(ctx: &egui::Context, canvas: egui::Rect, p: egui::Pos2) -> bool {
+    !egui::Popup::is_any_open(ctx) && canvas.contains(p) && !rects(ctx).iter().any(|r| r.contains(p))
 }
 
 /// Pan drag under an open dialog: Space-drag, middle-drag, or a drag with the Hand tool, started on

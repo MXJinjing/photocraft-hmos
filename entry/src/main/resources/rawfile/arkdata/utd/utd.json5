@@ -1,27 +1,129 @@
 {
   "UniformDataTypeDeclarations": [
     {
-      "TypeId": "io.github.storytold.photocraft.webp",
-      "BelongingToTypes": ["general.image"],
-      "FilenameExtensions": [".webp"],
-      "MIMETypes": ["image/webp"],
+      "TypeId": "io.github.storytold.photocraft.hmos.pcraft",
+      "BelongingToTypes": [
+        "general.image"
+      ],
+      "FilenameExtensions": [
+        ".pcraft"
+      ],
+      "MIMETypes": [
+        "application/x-photocraft"
+      ],
+      "Description": "PhotoCraft document",
+      "ReferenceURL": ""
+    },
+    {
+      "TypeId": "io.github.storytold.photocraft.hmos.webp",
+      "BelongingToTypes": [
+        "general.image"
+      ],
+      "FilenameExtensions": [
+        ".webp"
+      ],
+      "MIMETypes": [
+        "image/webp"
+      ],
       "Description": "WebP image",
       "ReferenceURL": ""
     },
     {
-      "TypeId": "io.github.storytold.photocraft.heif",
-      "BelongingToTypes": ["general.image"],
-      "FilenameExtensions": [".heic", ".heif", ".hif"],
-      "MIMETypes": ["image/heic", "image/heif"],
+      "TypeId": "io.github.storytold.photocraft.hmos.heif",
+      "BelongingToTypes": [
+        "general.image"
+      ],
+      "FilenameExtensions": [
+        ".heic",
+        ".heif",
+        ".hif"
+      ],
+      "MIMETypes": [
+        "image/heic",
+        "image/heif"
+      ],
       "Description": "HEIF image",
       "ReferenceURL": ""
     },
     {
-      "TypeId": "io.github.storytold.photocraft.psb",
-      "BelongingToTypes": ["general.image"],
-      "FilenameExtensions": [".psb", ".psdt"],
-      "MIMETypes": ["image/vnd.adobe.photoshop", "application/x-photoshop"],
-      "Description": "Adobe Photoshop large document",
+      "TypeId": "io.github.storytold.photocraft.hmos.psb",
+      "BelongingToTypes": [
+        "com.adobe.photoshop-image"
+      ],
+      "FilenameExtensions": [
+        ".psb",
+        ".psdt"
+      ],
+      "MIMETypes": [
+        "image/vnd.adobe.photoshop",
+        "application/x-photoshop"
+      ],
+      "Description": "Photoshop large document and template",
+      "ReferenceURL": ""
+    },
+    {
+      "TypeId": "io.github.storytold.photocraft.hmos.qoi",
+      "BelongingToTypes": [
+        "general.image"
+      ],
+      "FilenameExtensions": [
+        ".qoi"
+      ],
+      "MIMETypes": [
+        "image/qoi"
+      ],
+      "Description": "Quite OK Image",
+      "ReferenceURL": ""
+    },
+    {
+      "TypeId": "io.github.storytold.photocraft.hmos.hdr",
+      "BelongingToTypes": [
+        "general.image"
+      ],
+      "FilenameExtensions": [
+        ".hdr"
+      ],
+      "MIMETypes": [
+        "image/vnd.radiance"
+      ],
+      "Description": "Radiance HDR image",
+      "ReferenceURL": ""
+    },
+    {
+      "TypeId": "io.github.storytold.photocraft.hmos.portable-image",
+      "BelongingToTypes": [
+        "general.image"
+      ],
+      "FilenameExtensions": [
+        ".pam",
+        ".pfm"
+      ],
+      "MIMETypes": [
+        "image/x-portable-arbitrarymap",
+        "image/x-portable-floatmap"
+      ],
+      "Description": "Portable image",
+      "ReferenceURL": ""
+    },
+    {
+      "TypeId": "io.github.storytold.photocraft.hmos.camera-raw",
+      "BelongingToTypes": [
+        "general.raw-image"
+      ],
+      "FilenameExtensions": [
+        ".dng",
+        ".cr2",
+        ".cr3",
+        ".nef",
+        ".nrw",
+        ".arw",
+        ".pef",
+        ".orf",
+        ".rw2",
+        ".raf"
+      ],
+      "MIMETypes": [],
+      "Description": "Camera RAW image",
       "ReferenceURL": ""
     }
   ]

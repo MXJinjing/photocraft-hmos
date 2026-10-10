@@ -41,18 +41,6 @@ const fixture = JSON.parse(fs.readFileSync(path.join(root,
   'upstream/photocraft/crates/ui-egui/tests/fixtures/stylus-packets.json'), 'utf8'));
 assert.deepEqual(plain(factoryPackets), fixture, 'ArkTS factories must match the Rust protocol fixture');
 
-// Execute the actual injection script, including early connection delivery before WASM starts.
-const events = [];
-const window = { dispatchEvent: event => events.push({ type: event.type, detail: plain(event.detail) }) };
-function CustomEvent(type, options) { this.type = type; this.detail = options.detail; }
-for (const packet of factoryPackets) {
-  vm.runInNewContext(protocol.stylusPacketScript(packet), { window, CustomEvent });
-}
-assert.equal(events.length, factoryPackets.length);
-assert.ok(events.every(event => event.type === 'photocraft-stylus-input'));
-assert.deepEqual(events.map(event => event.detail), fixture);
-assert.deepEqual(plain(window[protocol.STYLUS_STATE_PROPERTY]), fixture[0], 'only connection is cached for startup replay');
-
 function setup(failedGesture) {
   const gestures = new Map();
   const devices = new Map();

@@ -144,7 +144,7 @@ pub fn ok_label(f: &Map<String, Value>) -> Option<&'static str> {
     if f.contains_key("__web") {
         Some(tl!("Save…"))
     } else if f.contains_key("__print") {
-        Some(tl!("Print"))
+        Some(if b(f, "__save_pdf", false) { tl!("Save…") } else { tl!("Print") })
     } else {
         None
     }
@@ -548,6 +548,13 @@ pub fn open_print(app: &mut PhotocraftApp) -> u64 {
     ] {
         f.entry(k.to_string()).or_insert(v);
     }
+    if app.session.print_service.is_some() {
+        f.insert("printer".into(), json!(""));
+        f.insert("copies".into(), json!(1));
+        if app.session.file_menu.last_print.is_none() {
+            f.insert("paper".into(), json!("a4"));
+        }
+    }
     app.ui.open_dialog(DialogKind::Command, f)
 }
 
@@ -623,14 +630,18 @@ fn print_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Va
                 ui.label(egui::RichText::new(s).font(crate::theme::semibold(12.0)).color(t.text));
             };
             head(ui, tl!("Printer Setup"));
-            ui.horizontal(|ui| {
-                ui.label(egui::RichText::new(tl!("Printer")).color(t.text_dim));
-                let mut pr = s(f, "printer", "");
-                if ui.add(egui::TextEdit::singleline(&mut pr).hint_text(tl!("Default printer")).desired_width(180.0)).changed() {
-                    f.insert("printer".into(), json!(pr));
-                }
-            });
-            number(ui, f, "copies", tl!("Copies"), 1.0..=999.0, "", 1.0);
+            if app.session.print_service.is_some() {
+                ui.label(tl!("Choose printer, copies and duplex in the system print dialog."));
+            } else {
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new(tl!("Printer")).color(t.text_dim));
+                    let mut pr = s(f, "printer", "");
+                    if ui.add(egui::TextEdit::singleline(&mut pr).hint_text(tl!("Default printer")).desired_width(180.0)).changed() {
+                        f.insert("printer".into(), json!(pr));
+                    }
+                });
+                number(ui, f, "copies", tl!("Copies"), 1.0..=999.0, "", 1.0);
+            }
             ui.horizontal(|ui| {
                 let papers: Vec<(&str, &str)> = photocraft_engine::print_cmds::PAPERS.iter().map(|p| (p.0, p.0)).collect();
                 dropdown_str(ui, "print-paper", f, "paper", &papers, 110.0);
@@ -703,19 +714,40 @@ fn print_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Va
                 check(ui, f, "description", tl!("Description"), false);
                 check(ui, f, "labels", tl!("Labels"), false);
             });
-            head(ui, tl!("Save as PDF"));
-            let mut out = s(f, "output", "");
-            if ui.add(egui::TextEdit::singleline(&mut out).hint_text(tl!("(print to the printer)")).desired_width(300.0)).changed() {
-                f.insert("output".into(), json!(out));
+            if app.session.print_save_service.is_some() {
+                check(ui, f, "__save_pdf", tl!("Save as PDF"), false);
+            } else {
+                head(ui, tl!("Save as PDF"));
+                let mut out = s(f, "output", "");
+                if ui.add(egui::TextEdit::singleline(&mut out).hint_text(tl!("(print to the printer)")).desired_width(300.0)).changed() {
+                    f.insert("output".into(), json!(out));
+                }
             }
         });
     });
 }
 
 fn print_confirm(app: &mut PhotocraftApp, f: &Map<String, Value>) -> Result<Value, String> {
-    let r = app.run("file.print", params(f))?;
-    app.ui.status = if r["sent"] == json!(true) {
+    let mut p = params(f);
+    if app.session.print_save_service.is_some() {
+        if let Some(fields) = p.as_object_mut() {
+            fields.remove("output");
+            fields.remove("send");
+        }
+        if b(f, "__save_pdf", false) {
+            let suggested = format!("{}.pdf", doc_stem(app));
+            let target = app.services.pick_save.as_mut().and_then(|pick| pick(&suggested)).ok_or("cancelled")?;
+            p["output"] = json!(target);
+            p["send"] = json!(false);
+        }
+    }
+    let r = app.run("file.print", p)?;
+    app.ui.status = if r["previewOpened"] == json!(true) {
+        tl!("System print preview opened").into()
+    } else if r["sent"] == json!(true) {
         format!("Sent to the printer ({})", r["spooler"].as_str().unwrap_or(""))
+    } else if app.session.print_save_service.is_some() {
+        format!("PDF: {}", r["pdf"].as_str().unwrap_or("").rsplit('/').next().unwrap_or(""))
     } else {
         format!("Printed to {}", r["pdf"].as_str().unwrap_or(""))
     };
@@ -750,6 +782,29 @@ mod tests {
         let d = app.ui.dialog_mut(r["dialog"].as_u64().unwrap()).unwrap();
         assert_eq!(d.fields["format"], "gif");
         assert!(!d.fields.contains_key("path"));
+    }
+
+    #[test]
+    fn pdf_save_uses_picker_token_and_cancel_does_not_print() {
+        let (mut app, _) = app();
+        app.session.print_save_service = Some(|target, bytes| {
+            assert_eq!(target, "save-as/42/web.pdf");
+            assert!(bytes.starts_with(b"%PDF-"));
+            Ok(())
+        });
+        app.services.pick_save = Some(Box::new(|suggested| {
+            assert_eq!(suggested, "web.pdf");
+            Some("save-as/42/web.pdf".into())
+        }));
+        let mut f = Map::new();
+        f.insert("__save_pdf".into(), json!(true));
+        let r = print_confirm(&mut app, &f).unwrap();
+        assert_eq!(r["pdf"], "save-as/42/web.pdf");
+        assert_eq!(r["sent"], false);
+        app.services.pick_save = Some(Box::new(|_| None));
+        let last = app.session.file_menu.last_print.clone();
+        assert_eq!(print_confirm(&mut app, &f), Err("cancelled".into()));
+        assert_eq!(app.session.file_menu.last_print, last);
     }
 
     #[test]

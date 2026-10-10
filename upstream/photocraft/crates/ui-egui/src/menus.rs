@@ -233,7 +233,7 @@ pub(crate) fn invoke_unguarded(app: &mut PhotocraftApp, ctx: &egui::Context, id:
                 .and_then(Value::as_str)
                 .map(str::to_string)
                 .or_else(|| app.session.active().and_then(|d| d.path.clone()).filter(|p| photocraft_engine::file_cmds::saves_in_place(p)));
-            app.save_as(path).map(|(p, w)| json!({"path": p, "warnings": w}))
+            app.save(path).map(|(p, w)| json!({"path": p, "warnings": w}))
         }
         "file.exit" => {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
@@ -794,36 +794,54 @@ pub fn menu_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> f32 {
             nav.bar_bottom = Some(ui.max_rect().bottom());
             let mut buttons = Vec::with_capacity(TOP_MENUS.len());
             for top in TOP_MENUS {
-                let label = egui::RichText::new(crate::i18n::tr(lang, top)).color(t.text_dim);
-                // ArkWeb (mouse and touch) reports the press and release as one click outside the
-                // popup. v0.5.0's press-open path replaces `menu_button`'s click toggle, so the
-                // menu closes before it is painted. The web build keeps 0.3.0's click-to-open.
-                #[cfg(target_arch = "wasm32")]
-                let title = ui.menu_button(label, |ui| show_top_menu(ui, app_ref, top, &items, &mut clicked, &mut nav)).response;
-                #[cfg(not(target_arch = "wasm32"))]
-                let title = {
-                    // egui's menu_button toggles on release; these titles open on the press (one
-                    // gesture can press, drag to an item and release), so each drives its popup.
-                    let title = ui.add(egui::Button::new(label));
-                    // The bar's close behaviour and style, as a menu (not bar) config so submenus inside
-                    // render as submenus.
-                    let bar = egui::containers::menu::MenuConfig::find(ui);
-                    let config = egui::containers::menu::MenuConfig::new().close_behavior(bar.close_behavior).style(bar.style.clone());
-                    let open = title_press(ui.ctx(), &title);
+                // egui's menu_button toggles on release; these titles open on the press (one
+                // gesture can press, drag to an item and release), so each drives its popup.
+                let title = ui.add(egui::Button::new(egui::RichText::new(crate::i18n::tr(lang, top)).color(t.text_dim)));
+                // The bar's close behaviour and style, as a menu (not bar) config so submenus inside
+                // render as submenus.
+                let bar = egui::containers::menu::MenuConfig::find(ui);
+                let config = egui::containers::menu::MenuConfig::new().close_behavior(bar.close_behavior).style(bar.style.clone());
+                // Help begins a text-editing session. Open it on the completed click,
+                // so the title's release cannot immediately surrender the search focus.
+                let open = if top == "Help" { title.clicked().then_some(egui::SetOpenCommand::Toggle) } else { title_press(ui.ctx(), &title) };
+                // The release ending the press that opened this menu is a click "outside" the
+                // popup: it must not close it again.
+                let opening = if top == "Help" {
+                    title.clicked()
+                } else {
                     let gesture = ui.ctx().data(|d| d.get_temp::<bool>(press_gesture_id())).unwrap_or(false);
-                    let open = menu_open_command(open, title.clicked(), gesture);
-                    // The release ending the press that opened this menu is a click "outside" the
-                    // popup: it must not close it again.
-                    let opening = gesture && (title.clicked() || ui.input(|i| i.pointer.primary_released()));
-                    let close = if opening { egui::PopupCloseBehavior::IgnoreClicks } else { config.close_behavior };
-                    egui::Popup::menu(&title)
-                        .open_memory(open)
-                        .close_behavior(close)
-                        .style(config.style.clone())
-                        .info(egui::UiStackInfo::new(egui::UiKind::Menu).with_tag_value(egui::containers::menu::MenuConfig::MENU_CONFIG_TAG, config))
-                        .show(|ui| show_top_menu(ui, app_ref, top, &items, &mut clicked, &mut nav));
-                    title
+                    gesture && (title.clicked() || ui.input(|i| i.pointer.primary_released()))
                 };
+                let close = if opening {
+                    egui::PopupCloseBehavior::IgnoreClicks
+                } else if top == "Help" {
+                    // Search input must keep its popup; command rows close explicitly.
+                    egui::PopupCloseBehavior::CloseOnClickOutside
+                } else {
+                    config.close_behavior
+                };
+                egui::Popup::menu(&title)
+                    .open_memory(open)
+                    .close_behavior(close)
+                    .style(config.style.clone())
+                    .info(egui::UiStackInfo::new(egui::UiKind::Menu).with_tag_value(egui::containers::menu::MenuConfig::MENU_CONFIG_TAG, config))
+                    .show(|ui| {
+                        let items = items.get_or_init(|| menu_items(app_ref));
+                        let mine: Vec<&MenuItem> = items.iter().filter(|i| i.path.first().map(String::as_str) == Some(top)).collect();
+                        ui.set_min_width(220.0);
+                        if mine.is_empty() {
+                            ui.weak(crate::i18n::tr(lang, "(coming soon)"));
+                        }
+                        if top == "Help" {
+                            // The search field scrolls with the rows, as part of the menu's content.
+                            crate::menu_nav::level(ui, 1, &mut nav, |ui, nav| {
+                                help_search(ui, items, &mut clicked, nav);
+                                render_level_rows(ui, &mine, 1, &mut clicked, nav);
+                            });
+                        } else {
+                            render_level(ui, &mine, 1, &mut clicked, &mut nav);
+                        }
+                    });
                 buttons.push(title);
             }
             right = buttons.iter().map(|b| b.rect.right()).fold(right, f32::max);
@@ -847,39 +865,8 @@ pub fn menu_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> f32 {
     right
 }
 
-fn show_top_menu(
-    ui: &mut egui::Ui,
-    app: &PhotocraftApp,
-    top: &str,
-    items: &std::cell::OnceCell<Vec<MenuItem>>,
-    clicked: &mut Option<String>,
-    nav: &mut crate::menu_nav::Nav,
-) {
-    let items = items.get_or_init(|| menu_items(app));
-    let mine: Vec<&MenuItem> = items.iter().filter(|i| i.path.first().map(String::as_str) == Some(top)).collect();
-    ui.set_min_width(220.0);
-    if mine.is_empty() {
-        ui.weak(crate::i18n::tr(crate::i18n::current(), "(coming soon)"));
-    }
-    if top == "Help" {
-        // The search field scrolls with the rows, as part of the menu's content.
-        crate::menu_nav::level(ui, 1, nav, |ui, nav| {
-            help_search(ui, items, clicked, nav);
-            render_level_rows(ui, &mine, 1, clicked, nav);
-        });
-    } else {
-        render_level(ui, &mine, 1, clicked, nav);
-    }
-}
-
 fn press_gesture_id() -> egui::Id {
     egui::Id::new("menu-press-gesture")
-}
-
-/// What to tell the popup this frame. A press-open wins. A bare click toggles, which is how a
-/// touch tap arrives. The click that ends a press-drag gesture does not toggle.
-fn menu_open_command(press: Option<egui::SetOpenCommand>, clicked: bool, gesture: bool) -> Option<egui::SetOpenCommand> {
-    press.or_else(|| (clicked && !gesture).then_some(egui::SetOpenCommand::Toggle))
 }
 
 /// A menu title's open/close command this frame, the press opens a closed menu (and
@@ -1153,11 +1140,30 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_click_without_a_press_still_toggles_the_menu() {
-        assert_eq!(menu_open_command(None, true, false), Some(egui::SetOpenCommand::Toggle));
-        assert_eq!(menu_open_command(Some(egui::SetOpenCommand::Bool(true)), true, true), Some(egui::SetOpenCommand::Bool(true)));
-        assert_eq!(menu_open_command(None, true, true), None, "the release of a press-open must not toggle it shut");
-        assert_eq!(menu_open_command(None, false, false), None);
+    fn help_click_keeps_search_focus_through_resize_and_input() {
+        use egui_kittest::{Harness, kittest::Queryable};
+        let app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        let mut harness = Harness::builder().with_size(egui::vec2(1200.0, 700.0)).build_ui_state(
+            |ui, app| {
+                menu_bar(app, ui);
+            },
+            app,
+        );
+        PhotocraftApp::setup_context(&harness.ctx, crate::theme::ThemeKind::ALL[0]);
+        harness.run_steps(3);
+        harness.get_by_label("Help").click();
+        harness.run_steps(3);
+        let id = egui::Id::new("help-menu-search").with("field");
+        assert_eq!(harness.ctx.memory(|m| m.focused()), Some(id));
+        harness.set_size(egui::vec2(1200.0, 400.0));
+        harness.run_steps(3);
+        assert_eq!(harness.ctx.memory(|m| m.focused()), Some(id), "keyboard resize must retain search focus");
+        harness.query_all_by_role(egui::accesskit::Role::TextInput).next().expect("Help search").click();
+        harness.run_steps(3);
+        assert_eq!(harness.ctx.memory(|m| m.focused()), Some(id));
+        harness.query_all_by_role(egui::accesskit::Role::TextInput).next().expect("Help search").type_text("你好");
+        harness.run_steps(3);
+        assert_eq!(harness.ctx.data(|d| d.get_temp::<String>(egui::Id::new("help-menu-search"))), Some("你好".into()));
     }
 
     #[test]
