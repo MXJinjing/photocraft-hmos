@@ -56,8 +56,8 @@ pub const TRANSFORM_MENU: &[Row] = &[
 ];
 
 /// Photoshop's selection-tool context menu with an active selection, in its order. Its Generative
-/// Fill and Delete and Fill Selection rows have no PhotoCraft command and are left out. Rows
-/// stay visible and grey out exactly like their menu-bar twins.
+/// Fill row has no PhotoCraft command and is left out. Rows stay visible and grey out exactly like
+/// their menu-bar twins.
 pub const SELECTION_MENU: &[Row] = &[
     Some(("Deselect", "select.deselect")),
     Some(("Select Inverse", "select.inverse")),
@@ -76,6 +76,7 @@ pub const SELECTION_MENU: &[Row] = &[
     Some(("Distort", "edit.transform.distort")),
     Some(("Perspective", "edit.transform.perspective")),
     None,
+    Some(("Delete and Fill Selection", "edit.deleteAndFillSelection")),
     Some(("Fill…", "edit.fill")),
     Some(("Stroke…", "edit.stroke")),
     Some(("Content-Aware Fill…", "edit.contentAwareFill")),
@@ -218,7 +219,7 @@ pub fn entry_enabled(app: &PhotocraftApp, menu: &CanvasToolMenu, command: &str) 
         "path.style.pasteFill" => !pending && shape && app.session.path_fill_clipboard.is_some(),
         "path.style.pasteStroke" => !pending && shape && app.session.path_stroke_clipboard.is_some(),
         "select.isolateLayers" => layer.is_some(),
-        "paint.symmetryDisable" => st.symmetry_path.is_some(),
+        "paint.symmetryDisable" => st.symmetry.is_some(),
         _ => false,
     }
 }
@@ -468,6 +469,7 @@ mod tests {
                 Some("Distort"),
                 Some("Perspective"),
                 None,
+                Some("Delete and Fill Selection"),
                 Some("Fill…"),
                 Some("Stroke…"),
                 Some("Content-Aware Fill…"),

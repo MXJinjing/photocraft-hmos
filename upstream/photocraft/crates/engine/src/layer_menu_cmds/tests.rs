@@ -203,6 +203,101 @@ fn blend_if_rejects_bad_params() {
 }
 
 #[test]
+fn blending_options_advanced_blending() {
+    use photocraft_doc::{AdvancedBlending, Knockout};
+    for depth in DEPTHS {
+        let mut s = session(depth, "rgb");
+        paint(&mut s, |x, _| if x < 20 { [0.0, 0.0, 1.0, 1.0] } else { [0.0; 4] });
+        assert!(active(&s).advanced.is_default());
+        s.execute(
+            "layer.layerStyle.blendingOptions",
+            json!({
+                "knockout": "deep",
+                "fillOpacity": 0,
+                "blendInteriorEffectsAsGroup": true,
+                "blendClippedLayersAsGroup": false,
+                "transparencyShapesLayer": false,
+                "layerMaskHidesEffects": true,
+                "vectorMaskHidesEffects": true,
+                "channels": [true, false, true],
+            }),
+        )
+        .unwrap();
+        let l = active(&s);
+        assert_eq!(
+            l.advanced,
+            AdvancedBlending {
+                knockout: Knockout::Deep,
+                blend_interior: true,
+                blend_clipped: false,
+                transparency_shapes: false,
+                layer_mask_hides_effects: true,
+                vector_mask_hides_effects: true,
+            }
+        );
+        assert_eq!(l.excluded_channels, 0b010);
+        // A deep knockout at fill 0 with no Background reveals transparency where the layer has
+        // pixels.
+        let p = photocraft_compose::flatten(doc(&s)).get(5, 5);
+        assert!(p[3] < 2.0 / 255.0, "{depth}: {p:?}");
+        // Inspect reports the switches; omitted keys keep their values; one undo step each.
+        let info = crate::inspect::layer(active(&s));
+        assert_eq!(info["advancedBlending"]["knockout"], json!("deep"), "{info}");
+        s.execute("layer.layerStyle.blendingOptions", json!({"knockout": "Shallow"})).unwrap();
+        assert_eq!(active(&s).advanced.knockout, Knockout::Shallow);
+        assert!(!active(&s).advanced.blend_clipped);
+        s.execute("edit.undo", json!({})).unwrap();
+        assert_eq!(active(&s).advanced.knockout, Knockout::Deep);
+        s.execute("edit.undo", json!({})).unwrap();
+        assert!(active(&s).advanced.is_default());
+        assert_eq!(active(&s).excluded_channels, 0);
+    }
+}
+
+#[test]
+fn blending_options_advanced_rejects_bad_params() {
+    let mut s = session(8, "rgb");
+    paint(&mut s, |_, _| [1.0; 4]);
+    let steps = s.active().unwrap().history.past_len();
+    for bad in [
+        json!({"knockout": "medium"}),
+        json!({"knockout": 2}),
+        json!({"knockout": true}),
+        json!({"blendInteriorEffectsAsGroup": "yes"}),
+        json!({"blendClippedLayersAsGroup": 1}),
+        json!({"transparencyShapesLayer": []}),
+        json!({"layerMaskHidesEffects": {}}),
+        json!({"vectorMaskHidesEffects": 0.5}),
+        json!({"channels": [true, true, true, true, true]}),
+        json!({"channels": [1, 0, 1]}),
+        json!({"channels": "rgb"}),
+        // A bad key fails the whole call: nothing else is applied.
+        json!({"fillOpacity": 10, "knockout": "nope"}),
+    ] {
+        assert!(s.execute("layer.layerStyle.blendingOptions", bad.clone()).is_err(), "{bad}");
+    }
+    assert!(active(&s).advanced.is_default());
+    assert_eq!(active(&s).fill_opacity, 1.0);
+    assert_eq!(s.active().unwrap().history.past_len(), steps);
+    // `null` keeps the current value.
+    s.execute("layer.layerStyle.blendingOptions", json!({"knockout": null, "channels": null})).unwrap();
+    assert!(active(&s).advanced.is_default());
+}
+
+#[test]
+fn copy_paste_layer_style_carries_advanced_blending() {
+    let mut s = session(8, "rgb");
+    paint(&mut s, |_, _| [1.0; 4]);
+    s.execute("layer.layerStyle.blendingOptions", json!({"knockout": "shallow", "blendClippedLayersAsGroup": false})).unwrap();
+    let a = active(&s).advanced;
+    s.execute("layer.layerStyle.copyLayerStyle", json!({})).unwrap();
+    s.execute("layer.new.layer", json!({})).unwrap();
+    assert!(active(&s).advanced.is_default());
+    s.execute("layer.layerStyle.pasteLayerStyle", json!({})).unwrap();
+    assert_eq!(active(&s).advanced, a);
+}
+
+#[test]
 fn blend_if_channel_names_follow_the_mode() {
     let mut s = session(8, "cmyk");
     s.execute("layer.layerStyle.blendingOptions", json!({"blendIf": {"channel": "black", "underlying": [0, 128]}})).unwrap();
@@ -430,4 +525,57 @@ fn load_files_into_stack_as_smart_object_then_median() {
     let px = photocraft_compose::render(doc(&s), Rect::from_xywh(2, 2, 1, 1)).px[0];
     assert!((px[0] - 0.2).abs() < 2.0 / 255.0, "{px:?}");
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn transfer_effects_moves_or_copies_between_layers() {
+    let mut s = session(8, "rgb");
+    s.execute("layer.new.layer", json!({})).unwrap();
+    let a = active(&s).id;
+    s.execute("layer.layerStyle.dropShadow", json!({})).unwrap();
+    s.execute("layer.layerStyle.colorOverlay", json!({"color": "#ff8000"})).unwrap();
+    s.execute("layer.new.layer", json!({})).unwrap();
+    let b = active(&s).id;
+    let layer = |s: &Session, id| s.active().unwrap().doc.layer(id).unwrap().clone();
+    let labels = |l: &Layer| l.effects.items.iter().map(Effect::label).collect::<Vec<_>>();
+    let both = labels(&layer(&s, a));
+    assert_eq!(both.len(), 2);
+
+    // Alt-drag of the whole fx row copies: both layers have the style.
+    s.execute("layer.layerStyle.transferEffects", json!({"from": a.0, "to": b.0, "copy": true})).unwrap();
+    assert_eq!(labels(&layer(&s, a)), both);
+    assert_eq!(labels(&layer(&s, b)), both);
+
+    // Dragging one effect row moves just that effect.
+    s.execute("layer.new.layer", json!({})).unwrap();
+    let c = active(&s).id;
+    s.execute("layer.layerStyle.transferEffects", json!({"from": a.0, "to": c.0, "effect": 1})).unwrap();
+    assert_eq!(labels(&layer(&s, a)), both[..1]);
+    assert_eq!(labels(&layer(&s, c)), both[1..]);
+
+    // Dragging the whole fx row moves everything and leaves the source without a style.
+    s.execute("layer.layerStyle.transferEffects", json!({"from": b.0, "to": a.0})).unwrap();
+    assert!(layer(&s, b).effects.items.is_empty());
+    assert_eq!(labels(&layer(&s, a)), both);
+
+    // One history step per drop.
+    let steps = s.active().unwrap().history.past_len();
+    s.execute("layer.layerStyle.transferEffects", json!({"from": a.0, "to": b.0})).unwrap();
+    assert_eq!(s.active().unwrap().history.past_len(), steps + 1);
+    s.execute("edit.undo", json!({})).unwrap();
+    assert_eq!(labels(&layer(&s, a)), both);
+    assert!(layer(&s, b).effects.items.is_empty());
+
+    // Bad input is an error and changes nothing.
+    for bad in [
+        json!({"from": a.0, "to": a.0}),
+        json!({"from": a.0}),
+        json!({"from": a.0, "to": 9999}),
+        json!({"from": a.0, "to": b.0, "effect": 7}),
+        json!({"from": a.0, "to": b.0, "effect": -1}),
+        json!({"from": b.0, "to": a.0}),
+    ] {
+        assert!(s.execute("layer.layerStyle.transferEffects", bad.clone()).is_err(), "{bad}");
+    }
+    assert_eq!(s.active().unwrap().history.past_len(), steps);
 }

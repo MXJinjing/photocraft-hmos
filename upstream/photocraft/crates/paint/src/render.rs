@@ -97,8 +97,10 @@ fn prepare_pattern(b: &BrushSettings) -> Option<Arc<PatternImage>> {
     }
     let mut img = match &t.pattern {
         Pattern::Procedural { style, size, seed } => crate::procedural::pattern(*style, *size, *seed),
-        Pattern::Tile(g) if g.is_valid() => PatternImage { width: g.width as usize, height: g.height as usize, data: g.to_f32() },
-        Pattern::Tile(_) => return None,
+        p => match p.bitmap() {
+            Some(g) if g.is_valid() => PatternImage { width: g.width as usize, height: g.height as usize, data: g.to_f32() },
+            _ => return None,
+        },
     };
     let (br, ct) = (t.brightness.clamp(-1.0, 1.0), t.contrast.clamp(-1.0, 1.0));
     for v in &mut img.data {
@@ -109,11 +111,20 @@ fn prepare_pattern(b: &BrushSettings) -> Option<Arc<PatternImage>> {
     Some(Arc::new(img))
 }
 
+/// The pixel rectangle `reach` (plus 1 px of anti-aliasing slack) around a dab's centre. The casts
+/// saturate and the arithmetic saturates, so a far or non-finite centre or reach from a direct
+/// caller gives a (possibly empty) rectangle instead of an `i32` overflow (#977).
+pub(crate) fn rect_around(d: &Dab, reach: f32) -> Rect {
+    let rr = (reach.ceil() as i32).saturating_add(1);
+    let (cx, cy) = (d.center.x.floor() as i32, d.center.y.floor() as i32);
+    Rect::new(cx.saturating_sub(rr), cy.saturating_sub(rr), cx.saturating_add(rr).saturating_add(1), cy.saturating_add(rr).saturating_add(1))
+}
+
 impl BrushContext {
     pub fn new(brush: &BrushSettings) -> Self {
         let brush = brush.bounded_for_render();
-        let mips = |t: &TipShape| match t {
-            TipShape::Sampled(g) if g.is_valid() => Some(Arc::new(Mips::new(g))),
+        let mips = |t: &TipShape| match t.bitmap() {
+            Some(g) if g.is_valid() => Some(Arc::new(Mips::new(g))),
             _ => None,
         };
         Self {
@@ -145,9 +156,7 @@ impl BrushContext {
     pub fn dab_rect(&self, d: &Dab, dual: bool) -> Rect {
         let sampled = if dual { self.dual_tip.is_some() } else { self.tip.is_some() };
         let reach = if sampled { d.radius * std::f32::consts::SQRT_2 } else { d.radius };
-        let rr = reach.ceil() as i32 + 1;
-        let (cx, cy) = (d.center.x.floor() as i32, d.center.y.floor() as i32);
-        Rect::new(cx - rr, cy - rr, cx + rr + 1, cy + rr + 1)
+        rect_around(d, reach)
     }
 
     /// Rasterise a dab over `rect` into `out` (tip shape × noise × per-tip texture × wet edges × flow).
@@ -416,10 +425,24 @@ impl StrokeRenderer {
     /// Composite the union of this stroke and a mirrored pass as one stroke. This keeps
     /// overlapping dabs on a symmetry axis under one opacity ceiling at every bit depth.
     pub fn composite_union(&self, other: &Self, pre: &Surface, target: &mut Surface, selection: Option<&Surface>, lock_transparency: bool) -> Rect {
+        self.composite_union_many(std::iter::once(other), pre, target, selection, lock_transparency)
+    }
+
+    /// Combine all symmetry passes before applying brush opacity and selection once.
+    pub fn composite_union_many<'a>(
+        &self,
+        others: impl IntoIterator<Item = &'a Self>,
+        pre: &Surface,
+        target: &mut Surface,
+        selection: Option<&Surface>,
+        lock_transparency: bool,
+    ) -> Rect {
         let mut merged = self.clone();
-        merged.cov.union_max(&other.cov);
-        if let (Some(to), Some(from)) = (&mut merged.dual, &other.dual) {
-            to.union_max(from);
+        for other in others {
+            merged.cov.union_max(&other.cov);
+            if let (Some(to), Some(from)) = (&mut merged.dual, &other.dual) {
+                to.union_max(from);
+            }
         }
         merged.composite(pre, target, selection, lock_transparency, true)
     }
@@ -494,6 +517,11 @@ impl StrokeRenderer {
         self.dual_buf = duals;
     }
 
+    /// See [`DabGenerator::wants_time`].
+    pub fn wants_time(&self) -> bool {
+        self.generator.wants_time()
+    }
+
     /// Feed input points (any chunking gives the same result).
     pub fn push(&mut self, pts: &[StrokePoint]) {
         self.generator.push(pts, &mut self.dab_buf, &mut self.dual_buf);
@@ -565,6 +593,27 @@ impl StrokeRenderer {
                 }
             }
         }
+    }
+
+    /// The coverage tiles touched since the last call (or `composite`), as one rectangle clipped to
+    /// the stroke bounds, and forget them: what a live preview that composites its own paint has
+    /// to redraw.
+    pub fn take_dirty_rect(&mut self) -> Rect {
+        let r = self
+            .cov
+            .take_dirty()
+            .into_iter()
+            .fold(Rect::EMPTY, |acc, (tx, ty)| acc.union(&Rect::new(tx * COV_TILE, ty * COV_TILE, (tx + 1) * COV_TILE, (ty + 1) * COV_TILE)));
+        if let Some(d) = self.dual.as_mut() {
+            d.dirty.clear();
+        }
+        r.intersect(&self.bounds())
+    }
+
+    /// Final coverage over `r`, one value per pixel in rows (as [`dense_coverage`](Self::dense_coverage)
+    /// over its bounds).
+    pub fn coverage_in(&self, r: Rect) -> Vec<f32> {
+        (r.y0..r.y1).flat_map(|y| (r.x0..r.x1).map(move |x| (x, y))).map(|(x, y)| self.coverage_at(x, y)).collect()
     }
 
     /// Final stroke coverage at a pixel (stroke-level masks applied, before opacity/selection).

@@ -21,6 +21,8 @@ class NativeProfileTests(unittest.TestCase):
         python = textwrap.dedent(prepare.split("          python3 - <<'PY'\n", 1)[1].split('\n          PY', 1)[0])
         rust_step = workflow.split('      - name: Build Rust native libraries\n', 1)[1].split('      - name:', 1)[0]
         self.assertIn('PHOTOCRAFT_RUST_PROFILE: ${{ steps.cfg.outputs.build_mode }}', rust_step)
+        self.assertIn('targets: aarch64-unknown-linux-ohos\n', workflow)
+        self.assertNotIn('x86_64-unknown-linux-ohos', workflow)
         cmake = (ROOT / 'entry/src/main/cpp/CMakeLists.txt').read_text()
         self.assertIn('${RUST_TARGET}/${PHOTOCRAFT_RUST_PROFILE}/libphotocraft_hmos.a', cmake)
         for mode in ('debug', 'release'):
@@ -34,8 +36,9 @@ class NativeProfileTests(unittest.TestCase):
                 subprocess.run(['python3', '-c', python], cwd=path, env=env, check=True, capture_output=True)
                 config = json.loads((path / 'entry/build-profile.json5').read_text())
                 self.assertIn(f'-DPHOTOCRAFT_RUST_PROFILE={mode}', config['buildOption']['externalNativeOptions']['arguments'])
+                self.assertEqual(config['buildOption']['externalNativeOptions']['abiFilters'], ['arm64-v8a'])
 
-    def test_native_script_selects_cargo_profile_for_both_targets(self):
+    def test_native_script_selects_cargo_profile_for_arm64(self):
         for mode in ('debug', 'release'):
             with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
                 path = Path(directory)
@@ -47,7 +50,7 @@ class NativeProfileTests(unittest.TestCase):
                 (sdk / 'llvm/bin').mkdir(parents=True)
                 (sdk / 'llvm/bin/clang').write_text('#!/bin/sh\nexit 0\n')
                 (sdk / 'llvm/bin/clang').chmod(0o755)
-                for target in ('aarch64-unknown-linux-ohos', 'x86_64-unknown-linux-ohos'):
+                for target in ('aarch64-unknown-linux-ohos',):
                     (path / 'sysroot/lib/rustlib' / target).mkdir(parents=True)
                 for name, body in {
                     'rustc': '#!/bin/sh\nprintf "%s\\n" "$TEST_SYSROOT"\n',
@@ -63,8 +66,8 @@ class NativeProfileTests(unittest.TestCase):
                 result = subprocess.run(['bash', str(path / 'scripts/build_native.sh')], env=env, capture_output=True, text=True)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 calls = log.read_text().splitlines()
-                self.assertEqual(len(calls), 2)
-                for call, target in zip(calls, ('aarch64-unknown-linux-ohos', 'x86_64-unknown-linux-ohos')):
+                self.assertEqual(len(calls), 1)
+                for call, target in zip(calls, ('aarch64-unknown-linux-ohos',)):
                     self.assertIn('--target ' + target, call)
                     self.assertEqual('--release' in call.split(), mode == 'release')
 

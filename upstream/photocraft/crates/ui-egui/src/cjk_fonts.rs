@@ -285,7 +285,6 @@ fn register_host_text_font(bytes: &[u8]) {
     let mut engine = photocraft_text::shared().lock().unwrap_or_else(|e| e.into_inner());
     engine.fonts.register_font_data(bytes.to_vec());
     drop(engine);
-    crate::type_tool::forget_families();
 }
 
 /// Add the stored host faces again. `set_fonts` drops them; language changes call that.
@@ -411,7 +410,7 @@ mod tests {
         ctx.run_ui(Default::default(), |_| {}).textures_delta.clear();
         crate::theme::set_ui_font_size(&ctx, UiFontSize::Large);
         let name = "test-lazy-fallback".to_string();
-        add_to_all_families(&ctx, name.clone(), FontData::from_static(photocraft_text::fonts::INTER_REGULAR));
+        add_to_all_families(&ctx, name.clone(), FontData::from_static(photocraft_text::fonts::INTER_REGULAR.as_slice()));
         for (size, scale) in [(UiFontSize::Large, 16.0 / 12.0), (UiFontSize::Tiny, 10.0 / 12.0), (UiFontSize::Small, 1.0)] {
             crate::theme::set_ui_font_size(&ctx, size);
             for _ in 0..2 {

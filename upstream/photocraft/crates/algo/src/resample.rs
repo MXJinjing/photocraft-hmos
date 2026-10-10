@@ -85,7 +85,7 @@ fn taps(dst0: i32, dst1: i32, scale: f64, filter: Resample, edge: Option<(i32, i
     (dst0..dst1)
         .map(|o| {
             let u = (o as f64 + 0.5) / scale - 0.5;
-            if filter == Resample::Nearest && scale >= 1.0 {
+            if filter == Resample::Nearest {
                 let i = clamp((u + 0.5).floor() as i32);
                 return if (content.0..=content.1).contains(&i) {
                     Taps { start: i, weights: vec![1.0], outside: 0.0 }
@@ -148,6 +148,41 @@ pub fn resize_surface_in_canvas(s: &Surface, sx: f64, sy: f64, filter: Resample,
 /// Samples one source read may hold (64 MB of `f32`); larger windows are read in row chunks.
 const READ_BUDGET: usize = 1 << 24;
 
+// Preserve tap order and edge weights while exposing the common channel counts to LLVM.
+fn horizontal_fixed<const N: usize>(row: &[f32], out: &mut [f32], taps: &[Taps], x_lo: i32, def: &[f32]) {
+    let pixels = row.as_chunks::<N>().0;
+    for (t, d) in taps.iter().zip(out.as_chunks_mut::<N>().0) {
+        let mut acc = [0.0f32; N];
+        for (k, w) in t.weights.iter().enumerate() {
+            if let Some(sp) = pixels.get((t.start + k as i32 - x_lo) as usize) {
+                for c in 0..N {
+                    acc[c] += sp[c] * w;
+                }
+            }
+        }
+        for (c, v) in acc.iter_mut().enumerate() {
+            *v += def.get(c).copied().unwrap_or(0.0) * t.outside;
+        }
+        *d = acc;
+    }
+}
+
+fn horizontal_dynamic(row: &[f32], out: &mut [f32], taps: &[Taps], x_lo: i32, def: &[f32], n: usize) {
+    for (t, d) in taps.iter().zip(out.chunks_exact_mut(n)) {
+        for (k, w) in t.weights.iter().enumerate() {
+            let sx_ = (t.start + k as i32 - x_lo) as usize;
+            if let Some(sp) = row.get(sx_ * n..(sx_ + 1) * n) {
+                for c in 0..n {
+                    d[c] += sp[c] * w;
+                }
+            }
+        }
+        for c in 0..n {
+            d[c] += def[c] * t.outside;
+        }
+    }
+}
+
 fn resize(s: &Surface, sx: f64, sy: f64, filter: Resample, edge: Option<Rect>) -> Surface {
     resize_with_budget(s, sx, sy, filter, edge, READ_BUDGET)
 }
@@ -174,20 +209,13 @@ fn resize_with_budget(s: &Surface, sx: f64, sy: f64, filter: Resample, edge: Opt
     const BAND: usize = 64;
     let bands: Vec<(usize, usize)> = (0..vy.len()).step_by(BAND).map(|b| (b, (b + BAND).min(vy.len()))).collect();
     // Horizontal pass of one source row (`row` spans `x_lo..x_hi`) into `dw` samples.
-    let horizontal = |row: &[f32], out: &mut [f32]| {
-        for (t, d) in hx.iter().zip(out.chunks_exact_mut(n)) {
-            for (k, w) in t.weights.iter().enumerate() {
-                let sx_ = (t.start + k as i32 - x_lo) as usize;
-                if let Some(sp) = row.get(sx_ * n..(sx_ + 1) * n) {
-                    for c in 0..n {
-                        d[c] += sp[c] * w;
-                    }
-                }
-            }
-            for c in 0..n {
-                d[c] += def[c] * t.outside;
-            }
-        }
+    let horizontal = |row: &[f32], out: &mut [f32]| match n {
+        1 => horizontal_fixed::<1>(row, out, &hx, x_lo, &def),
+        2 => horizontal_fixed::<2>(row, out, &hx, x_lo, &def),
+        3 => horizontal_fixed::<3>(row, out, &hx, x_lo, &def),
+        4 => horizontal_fixed::<4>(row, out, &hx, x_lo, &def),
+        5 => horizontal_fixed::<5>(row, out, &hx, x_lo, &def),
+        _ => horizontal_dynamic(row, out, &hx, x_lo, &def, n),
     };
     // A source row of nothing but the default pixel, after the horizontal pass.
     let def_row = {
@@ -266,15 +294,23 @@ fn resize_with_budget(s: &Surface, sx: f64, sy: f64, filter: Resample, edge: Opt
         unpremultiply(&mut res, n, alpha);
         (Rect::new(dst.x0, dst.y0 + b0 as i32, dst.x1, dst.y0 + b1 as i32), res)
     };
+    // Bands go into the output a group at a time, so the `f32` rows held at once are bounded by
+    // the group, not by the whole destination (#1544).
     #[cfg(not(target_arch = "wasm32"))]
-    let parts: Vec<(Rect, Vec<f32>)> = {
-        use rayon::prelude::*;
-        bands.par_iter().map(run).collect()
-    };
+    let group = rayon::current_num_threads().max(1) * 2;
     #[cfg(target_arch = "wasm32")]
-    let parts: Vec<(Rect, Vec<f32>)> = bands.iter().map(run).collect();
-    for (r, d) in parts {
-        out.write_region(r, &d);
+    let group = 1;
+    for chunk in bands.chunks(group) {
+        #[cfg(not(target_arch = "wasm32"))]
+        let parts: Vec<(Rect, Vec<f32>)> = {
+            use rayon::prelude::*;
+            chunk.par_iter().map(run).collect()
+        };
+        #[cfg(target_arch = "wasm32")]
+        let parts: Vec<(Rect, Vec<f32>)> = chunk.iter().map(run).collect();
+        for (r, d) in parts {
+            out.write_region(r, &d);
+        }
     }
     if filter == Resample::PreserveDetails && (sx > 1.0 || sy > 1.0) {
         let p = crate::FilterParams::UnsharpMask { amount: 30.0, radius: 0.6 * sx.max(sy) as f32, threshold: 0.0 };
@@ -287,12 +323,7 @@ fn resize_with_budget(s: &Surface, sx: f64, sy: f64, filter: Resample, edge: Opt
 
 /// Moves a surface by whole pixels (default pixel kept).
 pub fn translate_surface(s: &Surface, dx: i32, dy: i32) -> Surface {
-    let mut out = Surface::with_default(s.format(), &s.default_pixel());
-    let r = s.content_bounds();
-    if !r.is_empty() {
-        out.write_interleaved(r.translate(dx, dy), &s.to_interleaved(r));
-    }
-    out
+    s.translated(dx, dy, s.content_bounds())
 }
 
 /// Keeps only the pixels inside `keep` (others become the default pixel).
@@ -316,6 +347,31 @@ mod tests {
         let v: Vec<f32> = (0..32).flat_map(|_| (0..64).flat_map(|x| [x as f32 / 63.0, 0.5, 1.0 - x as f32 / 63.0, 1.0])).collect();
         s.write_region(r, &v);
         s
+    }
+
+    #[test]
+    fn fixed_channel_rows_match_dynamic_resampling() {
+        fn check<const N: usize>() {
+            for scale in [0.12, 0.5, 1.0, 2.3] {
+                for filter in [Resample::Nearest, Resample::Bilinear, Resample::Bicubic, Resample::Lanczos] {
+                    for clamp in [None, Some((-3, 31))] {
+                        let ts = taps(-5, 41, scale, filter, clamp, (-3, 31));
+                        let row: Vec<f32> = (0..35 * N).map(|i| ((i * 73) % 251) as f32 / 250.0).collect();
+                        let def: Vec<f32> = (0..N).map(|i| i as f32 / 7.0).collect();
+                        let mut expected = vec![0.0; ts.len() * N];
+                        let mut actual = expected.clone();
+                        horizontal_dynamic(&row, &mut expected, &ts, -3, &def, N);
+                        horizontal_fixed::<N>(&row, &mut actual, &ts, -3, &def);
+                        assert_eq!(actual, expected, "N={N} scale={scale} filter={filter:?} clamp={clamp:?}");
+                    }
+                }
+            }
+        }
+        check::<1>();
+        check::<2>();
+        check::<3>();
+        check::<4>();
+        check::<5>();
     }
 
     #[test]
@@ -483,5 +539,25 @@ mod tests {
         assert_eq!(t.pixel(15, 7), s.pixel(10, 10));
         let c = crop_surface(&s, Rect::new(0, 0, 10, 10));
         assert_eq!(c.content_bounds(), Rect::new(0, 0, 10, 10));
+    }
+
+    /// #1114: nearest neighbor reduction must sample single source pixels, never average.
+    #[test]
+    fn nearest_neighbor_reduction_does_not_average() {
+        let mut s = Surface::new(PixelFormat::GRAY8);
+        for y in 0..8 {
+            for x in 0..8 {
+                if (x + y) % 2 == 0 {
+                    s.fill_rect(Rect::new(x, y, x + 1, y + 1), &[1.0]);
+                }
+            }
+        }
+        let reduced = resize_surface(&s, 0.5, 0.5, Resample::Nearest);
+        for y in 0..4 {
+            for x in 0..4 {
+                let p = reduced.pixel(x, y)[0];
+                assert!(p == 0.0 || p == 1.0, "nearest produced an averaged value {p} at ({x}, {y})");
+            }
+        }
     }
 }

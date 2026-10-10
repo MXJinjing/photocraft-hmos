@@ -83,11 +83,6 @@ fn undo_redo_and_last_document_state() {
     assert_eq!(doc(&s).layer_comps[0].name, "Layer Comp 1");
     s.execute("layer.translate", json!({"layer": a.0, "dx": 3, "dy": 0})).unwrap();
     // A fresh document state (not a comp) is remembered when a comp is applied over it.
-    s.edit("forget", |d, _| {
-        d.last_applied_comp = None;
-        Ok(())
-    })
-    .unwrap();
     s.execute("layerComp.apply", json!({})).unwrap();
     assert_eq!(pos(&s, a), Some((4, 4)));
     assert!(doc(&s).last_document_state.is_some());
@@ -105,6 +100,60 @@ fn undo_redo_and_last_document_state() {
     assert!(doc(&s).layer_comps.is_empty());
     assert!(s.undo());
     assert_eq!(doc(&s).layer_comps.len(), 1);
+}
+
+#[test]
+fn ordinary_layout_edits_become_the_last_document_state() {
+    for depth in [8, 16, 32] {
+        for (command, mut params) in [
+            ("layer.translate", json!({"dx": 9, "dy": 3})),
+            ("layer.setProps", json!({"visible": false})),
+            ("layer.setProps", json!({"opacity": 0.25})),
+            ("layer.setProps", json!({"blend": "multiply"})),
+        ] {
+            let (mut s, a, _) = session(depth);
+            s.execute("layerComp.new", json!({})).unwrap();
+            params["layer"] = json!(a.0);
+            s.execute(command, params).unwrap();
+            let edited = capture_states(doc(&s));
+            s.execute("layerComp.apply", json!({})).unwrap();
+            assert_ne!(capture_states(doc(&s)), edited);
+            assert!(s.is_enabled("layerComp.restoreLastDocumentState"));
+            s.execute("layerComp.restoreLastDocumentState", json!({})).unwrap();
+            assert_eq!(capture_states(doc(&s)), edited, "{depth}-bit");
+        }
+    }
+}
+
+#[test]
+fn cycling_comps_keeps_the_latest_edited_layout() {
+    let (mut s, a, _) = session(8);
+    let one = s.execute("layerComp.new", json!({"name": "One"})).unwrap()["comp"].clone();
+    s.execute("layer.translate", json!({"layer": a.0, "dx": 10, "dy": 0})).unwrap();
+    let two = s.execute("layerComp.new", json!({"name": "Two"})).unwrap()["comp"].clone();
+    for dx in [7, 13] {
+        s.execute("layer.translate", json!({"layer": a.0, "dx": dx, "dy": 0})).unwrap();
+        let edited = capture_states(doc(&s));
+        s.execute("layerComp.apply", json!({"comp": one})).unwrap();
+        s.execute("layerComp.apply", json!({"comp": two})).unwrap();
+        s.execute("layerComp.apply", json!({"comp": two})).unwrap();
+        s.execute("layerComp.restoreLastDocumentState", json!({})).unwrap();
+        assert_eq!(capture_states(doc(&s)), edited);
+    }
+}
+
+#[test]
+fn unrecorded_properties_do_not_replace_the_backup_on_reapply() {
+    let (mut s, a, _) = session(8);
+    s.execute("layerComp.new", json!({"position": false, "appearance": false})).unwrap();
+    s.execute("layer.translate", json!({"layer": a.0, "dx": 10, "dy": 0})).unwrap();
+    s.execute("layer.setProps", json!({"layer": a.0, "visible": false, "opacity": 0.5})).unwrap();
+    let edited = capture_states(doc(&s));
+    s.execute("layerComp.apply", json!({})).unwrap();
+    assert!(doc(&s).layer(a).unwrap().visible);
+    s.execute("layerComp.apply", json!({})).unwrap();
+    s.execute("layerComp.restoreLastDocumentState", json!({})).unwrap();
+    assert_eq!(capture_states(doc(&s)), edited);
 }
 
 #[test]
@@ -224,4 +273,34 @@ fn out_of_range_comp_ids_are_rejected_not_wrapped() {
     let r = s.execute("file.export.layerCompsToFiles", json!({"dir": dir.to_string_lossy(), "comps": [wrapped]}));
     assert!(r.is_err());
     let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn unreachable_comp_positions_leave_the_layer_in_place() {
+    // #1017: a recorded position whose distance from the layer's current one leaves i32 range
+    // (e.g. from a file) panicked on apply. The move is skipped; visibility still applies.
+    for target in [(i32::MIN, 4), (4, i32::MIN)] {
+        let (mut s, a, b) = session(8);
+        let comp = LayerComp {
+            id: 1,
+            name: "Far".into(),
+            comment: String::new(),
+            apply_visibility: true,
+            apply_position: true,
+            apply_appearance: false,
+            states: vec![
+                CompLayerState { layer: a, visible: Some(false), position: Some(target), appearance: None },
+                // Control: an ordinary position on another layer still moves it.
+                CompLayerState { layer: b, visible: None, position: Some((31, 22)), appearance: None },
+            ],
+        };
+        s.edit("far", |d, _| {
+            apply_comp(d, &comp, false);
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(pos(&s, a), Some((4, 4)), "{target:?}");
+        assert!(!doc(&s).layer(a).unwrap().visible);
+        assert_eq!(pos(&s, b), Some((31, 22)));
+    }
 }

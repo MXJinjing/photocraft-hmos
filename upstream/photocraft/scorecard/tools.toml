@@ -59,14 +59,14 @@ id = "TOOL-213-8"
 target = "Clone Source: W/H link, drawn overlay (opacity/blend/clip/auto-hide), Alt target cursor"
 status = "partial"
 issue = 213
-note = "Panel W/H + overlay settings (preset_panels.rs:946-1015); no link, overlay never drawn"
+note = "Clone Source overlay drawn with opacity, inversion, circular clipping and auto-hide; W/H link, custom-tip clipping and overlay blend modes remain missing"
 
 [[item]]
 id = "TOOL-213-9"
 target = "Eyedropper comparison ring (new colour above, current below) while sampling"
-status = "missing"
+status = "done"
 issue = 213
-note = "sample_eyedropper (canvas.rs:1552) draws no ring"
+note = "eyedropper_ring (canvas.rs): the sampled colour on the upper arc, the foreground below, drawn for the Eyedropper and Alt-sampling while the button is held; the Precise-cursor preference keeps the crosshair"
 
 [[item]]
 id = "TOOL-213-10"
@@ -92,9 +92,9 @@ note = "Only brush.defineFromSelection and brush.presets.importAbr"
 [[item]]
 id = "TOOL-213-13"
 target = "Brush regression tests: no seams, hard edge, zero-scatter defaults, ABR never black"
-status = "partial"
+status = "done"
 issue = 213
-note = "Missing-pattern ABR test (abr_map/tests.rs:181), hardness test; no seam/black tests"
+note = "Seam, hard-edge and zero-scatter tests in brush_tests.rs; ABR tip colour test in abr_map/tests.rs"
 
 [[item]]
 id = "TOOL-213-14"
@@ -102,6 +102,13 @@ target = "Tablet: no OS arrow cursor over the canvas on macOS, Windows and Linux
 status = "partial"
 issue = 213
 note = "Brush tools set CursorIcon::None (canvas.rs:1259-1275); not verified per OS"
+
+[[item]]
+id = "TOOL-213-18"
+target = "Pattern Stamp tool: sibling of Clone Stamp in the S flyout"
+status = "done"
+issue = 213
+note = "Tool::PatternStamp in the S group; paint.patternStamp stamps the Patterns-panel tile with Aligned and Impressionist (an approximation: it jitters each dab's tile phase, not Photoshop's smeared impressionist look); engine tests cover depths, seams, hostile input"
 
 [[item]]
 id = "TOOL-214-1"
@@ -164,7 +171,7 @@ id = "TOOL-214-9"
 target = "Crop: W x H x Resolution with units, saved crop presets, Straighten in the options bar"
 status = "partial"
 issue = 214
-note = "Ratio dropdown and fields only (panels.rs:551-579)"
+note = "Ratio dropdown and fields, Straighten (TOOL-214-21); no W x H x Resolution with units or saved presets"
 
 [[item]]
 id = "TOOL-214-10"
@@ -214,3 +221,59 @@ target = "Liquify: redo (Cmd+Shift+Z)"
 status = "done"
 issue = 214
 note = "liquify_ui.rs supports bounded redo through Cmd+Shift+Z and the control channel; new strokes clear redo"
+
+[[item]]
+id = "TOOL-213-17"
+target = "Red Eye tool: click a pupil to neutralize the red reflection"
+status = "done"
+issue = 213
+note = "paint.redEye (redeye_cmds.rs) + Tool::RedEye in the J flyout; Pupil Size and Darken Amount; catchlights kept; a miss is an error"
+
+[[item]]
+id = "TOOL-214-17"
+target = "Rotate View tool: drag to turn the view, Reset View, Match Rotation copies the angle"
+status = "done"
+issue = 214
+note = "Tool::RotateView in the Hand flyout; view.rotateView / view.resetView; Match Rotation copies views[].rotation; enhanced_controls.rotate_view_with_trackpad is read"
+
+[[item]]
+id = "TOOL-1649-1"
+target = "Eyedropper Sample Size (Point, 3×3 … 101×101 Average), Sample layers, Show Sampling Ring"
+status = "done"
+issue = 1649
+note = "document.sampleColor (sample_cmds.rs): average of the square clipped to the canvas, in the document's model and depth; eyedropper_ui.rs options bar; shared with Alt-click, dialog eyedroppers and the Info panel; ui.set eyedropperSampleSize/eyedropperSample/eyedropperRing. Color Sampler tool still missing"
+
+[[item]]
+id = "TOOL-214-20"
+target = "Crop overlay options: Rule of Thirds, Grid, Diagonal, Triangle, Golden Ratio, Golden Spiral; Auto / Always / Never Show Overlay; O cycles the overlay, Shift+O its orientation"
+status = "done"
+issue = 1919
+note = "crop_overlay.rs: unit-square guides shared by upright and turned frames (canvas.rs), options-bar menu, O / Shift+O ahead of the tool keys in shortcuts.rs; ToolOptions crop_overlay / crop_overlay_show / crop_overlay_orientation, ui.set cropOverlay / cropOverlayShow / cropOverlayOrientation"
+
+[[item]]
+id = "TOOL-214-18"
+target = "Crop: drag outside the frame to rotate it (Shift 15 deg steps, angle readout); Enter rotates and crops in one step"
+status = "done"
+issue = 1792
+note = "image.crop angle param (image_cmds.rs: Image Rotation > Arbitrary + crop, one undo step); crop_ui.rs turns, moves and resizes the frame along its axes (Classic Mode visuals); UiState.crop_angle"
+
+[[item]]
+id = "TOOL-214-19"
+target = "Crop: arrow keys nudge the crop box (Shift 10 px), X swaps portrait/landscape, W x H readout while drawing or resizing"
+status = "done"
+issue = 1919
+note = "crop_ui.rs keys/nudge/swap_orientation (ahead of the selection nudge and tools.swapColors in shortcuts.rs; X also swaps the options-bar ratio) and sizing (canvas.rs draws it with the marquee readout); turned frames included"
+
+[[item]]
+id = "TOOL-214-21"
+target = "Crop: Straighten button in the options bar and Cmd/Ctrl-drag draw a line; the frame turns so the line ends up level (or plumb when nearer vertical), with an angle readout"
+status = "done"
+issue = 1919
+note = "crop_straighten.rs: one-shot options-bar button, Cmd/Ctrl held is a temporary Straighten (ui.pointer command flag); the Ruler's straighten_angle convention; the frame is fitted to the largest of its proportions inside the image (Classic Mode); a pending edit committed by Enter"
+
+[[item]]
+id = "TOOL-214-22"
+target = "Crop gear menu: Show Cropped Area (H), Enable Crop Shield with Match Canvas / custom colour, opacity and Auto Adjust Opacity"
+status = "done"
+issue = 1919
+note = "crop_shield.rs: fill() resolves the shield (canvas.rs paints it around upright and turned frames), gear popup in the options bar, H ahead of the Hand key in shortcuts.rs, Custom… opens the Color Picker; ToolOptions crop_shield, ui.set cropShield. No Classic Mode / Auto Center Preview (PhotoCraft is always Classic Mode)"

@@ -1,14 +1,14 @@
 # PhotoCraft HarmonyOS 原生自绘实验
 
-当前分支 `codex/hmos-native-selfdraw` 将 PhotoCraft v0.5.0 作为 Rust 原生库运行，通过 XComponent / NativeWindow 和 wgpu GLES/EGL 绘制原有 egui UI。鸿蒙入口统一使用原生 Rust。HAP 不包含网页或 WASM 快照。文档画布暂使用 CPU 合成。
+当前开发分支 `dev` 将 PhotoCraft v0.6.0 作为 Rust 原生库运行，通过 XComponent / NativeWindow 和 wgpu GLES/EGL 绘制原有 egui UI。鸿蒙入口统一使用原生 Rust。HAP 不包含网页或 WASM 快照。文档画布暂使用 CPU 合成。
 
 ```bash
-scripts/dev.sh build   # 双架构 Rust 库 + 本地 debug HAP
+scripts/dev.sh build   # ARM64 Rust 库 + 本地 debug HAP
 scripts/dev.sh run     # 构建、安装到唯一连接的模拟器/设备并启动
 scripts/dev.sh launch  # 重新启动已安装应用，进入原生模式
 ```
 
-需要 HarmonyOS 6.0 / API 20 SDK、Rust OHOS 编译目标，以及本地调试签名。工具路径沿用被忽略的 `scripts/dev.local.env`，参考 `scripts/dev.local.env.example`。版本保持 `0.5.0.1`，本轮不发布 release。
+需要 HarmonyOS 6.0 / API 20 SDK、Rust OHOS 编译目标，以及本地调试签名。工具路径沿用被忽略的 `scripts/dev.local.env`，参考 `scripts/dev.local.env.example`。当前版本为 `0.6.0.1`（versionCode `60001`）。
 
 鸿蒙构建启用 `photocraft-ui-egui/harmonyos-ui`：标题栏、启动页和帮助菜单隐藏 Discord 及项目官网入口；帮助菜单保留 GitHub 与问题反馈，分别指向 `MXJinjing/photocraft-hmos` fork 及其 Issues；“关于”仅保留简介、版本与技术栈，不显示链接、贡献者和模型页签。上游桌面/Web 默认界面不受影响。
 
@@ -16,7 +16,7 @@ scripts/dev.sh launch  # 重新启动已安装应用，进入原生模式
 
 首轮范围是完整 UI 与基本编辑、PSD/PNG 打开保存闭环。Open Recent 的持久 URI 授权仍待补齐，重开文件请使用系统选择器。Save / Save As / 导出使用系统保存选择器，外链交给系统应用。中文输入法、系统剪贴板、完整手写笔能力、自动恢复和真机性能验收不在首轮范围。
 
-详细架构与构建说明见 [native/README.md](native/README.md)，验证记录见 [NATIVE_TEST_REPORT.md](NATIVE_TEST_REPORT.md)。完整旧 ArkWeb 版本保留在 `main` 与 Git 历史中。
+详细架构与构建说明见 [native/README.md](native/README.md)，验证记录见 [NATIVE_TEST_REPORT.md](NATIVE_TEST_REPORT.md)。完整旧 ArkWeb 版本保留在 Git 历史中。
 
 签名证书、私钥和密码只能保留在本地，不能提交；CI 继续手动触发并输出 unsigned HAP。
 

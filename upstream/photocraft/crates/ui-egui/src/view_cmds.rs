@@ -94,6 +94,12 @@ pub struct ViewOptions {
     /// and the Middle Eastern & South Asian composer.
     pub language_features: String,
     pub middle_eastern_composer: bool,
+    /// Parameters from the last successfully applied New Guide Layout dialog.
+    pub guide_layout: Value,
+}
+
+fn default_guide_layout() -> Value {
+    json!({"columns": 8, "gutter": 20, "rows": 0, "rowGutter": 0, "margin": 0, "centerColumns": false, "clearExisting": false})
 }
 
 impl Default for ViewOptions {
@@ -112,6 +118,7 @@ impl Default for ViewOptions {
             font_preview_size: "medium".into(),
             language_features: "defaultFeatures".into(),
             middle_eastern_composer: false,
+            guide_layout: default_guide_layout(),
         }
     }
 }
@@ -126,6 +133,10 @@ impl ViewOptions {
     }
     pub fn hides_tabs(&self) -> bool {
         self.screen_mode != "standard"
+    }
+    /// Photoshop's full screen modes show no scroll bars.
+    pub fn shows_scrollbars(&self) -> bool {
+        self.screen_mode == "standard"
     }
 }
 
@@ -278,6 +289,8 @@ pub fn handles(id: &str) -> bool {
             | "view.pixelAspectRatioCorrection"
             | "view.patternPreview"
             | "view.pixelArtPreview"
+            | "view.rotateView"
+            | "view.resetView"
             | "window.panel.layers"
             | "window.panel.history"
             | "window.panel.navigator"
@@ -304,7 +317,7 @@ pub fn is_enabled(app: &PhotocraftApp, id: &str) -> Option<bool> {
     let doc = app.session.active().is_some();
     Some(match id {
         "view.screenMode.cycle" => app.ui.text_edit.is_none(),
-        "view.twoHundredPercent" | "view.printSize" | "view.fitLayersOnScreen" => doc,
+        "view.twoHundredPercent" | "view.printSize" | "view.fitLayersOnScreen" | "view.rotateView" | "view.resetView" => doc,
         "view.fitArtboardOnScreen" => app.session.active().is_some_and(|d| d.doc.has_artboards()),
         i if i.starts_with("window.arrange.") => match &i["window.arrange.".len()..] {
             "consolidateAllToTabs" => true,
@@ -431,6 +444,8 @@ fn wraps(id: &str) -> bool {
             | "view.newGuideLayout"
             | "type.warpText"
             | "type.pasteLoremIpsum"
+            | "image.applyImage"
+            | "image.calculations"
     )
 }
 
@@ -472,6 +487,12 @@ fn run(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str, p: &Value) -> Res
             crate::dock::reveal(app, g);
         }
         return Ok(json!({"panel": panel, "tab": tab, "visible": visible}));
+    }
+    if id == "view.rotateView" {
+        return crate::rotate_view::command(app, p);
+    }
+    if id == "view.resetView" {
+        return crate::rotate_view::reset(app);
     }
     let o = &mut app.ui.view;
     if let Some(k) = id.strip_prefix("view.show.") {
@@ -555,10 +576,13 @@ fn run(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str, p: &Value) -> Res
         }
         "view.twoHundredPercent" | "view.printSize" => {
             let i = app.session.active_index().ok_or("no document")?;
-            // Print Size assumes Photoshop's default 72 ppi screen resolution.
+            // Print Size shows the document at its print size for the screen resolution
+            // (Preferences ▸ Units & Rulers: Screen Resolution, 72 ppi by default).
             let dpi = app.session.active().map_or(72.0, |d| d.doc.resolution_dpi.max(1.0));
-            let z = if id == "view.twoHundredPercent" { 2.0 } else { 72.0 / dpi };
-            app.ui.views[i].zoom = z.clamp(0.01, 64.0);
+            let size = app.session.active().map_or([0, 0], |d| [d.doc.size.width, d.doc.size.height]);
+            let screen = app.session.prefs().units_and_rulers.screen_resolution.max(1.0) as f32;
+            let z = if id == "view.twoHundredPercent" { 2.0 } else { screen / dpi };
+            app.ui.views[i].zoom = crate::zoom_levels::clamp(z, size);
             Ok(json!({"zoom": app.ui.views[i].zoom}))
         }
         "view.fitLayersOnScreen" => fit_layers(app),
@@ -580,10 +604,14 @@ fn fit_layers(app: &mut PhotocraftApp) -> Result<Value, String> {
     if b.is_empty() {
         b = st.doc.bounds();
     }
+    let size = [st.doc.size.width, st.doc.size.height];
     let area = app.last_canvas_rect.size();
     let area = if area.x > 50.0 { area } else { egui::vec2(1200.0, 800.0) };
+    // The area is in egui points; the stored zoom is device pixels per document pixel.
+    let ppp = app.canvas_ppp();
+    let points = ((area.x - 40.0) / b.width().max(1) as f32).min((area.y - 40.0) / b.height().max(1) as f32);
     let v = &mut app.ui.views[i];
-    v.zoom = ((area.x - 40.0) / b.width().max(1) as f32).min((area.y - 40.0) / b.height().max(1) as f32).clamp(0.01, 64.0);
+    v.zoom = crate::zoom_levels::clamp(points * ppp, size);
     v.center = [(b.x0 + b.x1) as f32 / 2.0, (b.y0 + b.y1) as f32 / 2.0];
     v.fit_pending = false;
     Ok(json!({"zoom": v.zoom, "bounds": [b.x0, b.y0, b.x1, b.y1]}))
@@ -621,8 +649,9 @@ fn arrange(app: &mut PhotocraftApp, k: &str) -> Result<Value, String> {
         }
         "matchZoom" | "matchLocation" | "matchRotation" | "matchAll" => {
             let i = app.session.active_index().ok_or("no document")?;
-            let src = app.ui.views[i].clone();
-            let (zoom, loc) = (matches!(k, "matchZoom" | "matchAll"), matches!(k, "matchLocation" | "matchAll"));
+            let src = app.ui.views.get(i).cloned().ok_or("no document")?;
+            let (zoom, loc, rot) =
+                (matches!(k, "matchZoom" | "matchAll"), matches!(k, "matchLocation" | "matchAll"), matches!(k, "matchRotation" | "matchAll"));
             let apply = |v: &mut crate::state::View| {
                 if zoom {
                     v.zoom = src.zoom;
@@ -630,12 +659,14 @@ fn arrange(app: &mut PhotocraftApp, k: &str) -> Result<Value, String> {
                 if loc {
                     v.center = src.center;
                 }
+                if rot {
+                    v.rotation = src.rotation;
+                }
                 v.fit_pending = false;
             };
             app.ui.views.iter_mut().for_each(apply);
             app.ui.windows.iter_mut().for_each(|w| apply(&mut w.view));
-            // Views never rotate in Photocraft, so Match Rotation has nothing to align.
-            Ok(json!({"zoom": src.zoom, "center": src.center, "rotation": 0}))
+            Ok(json!({"zoom": src.zoom, "center": src.center, "rotation": src.rotation}))
         }
         _ => Err(format!("unknown arrangement {k}")),
     }
@@ -814,18 +845,19 @@ fn front(app: &mut PhotocraftApp, id: &str, params: &Value) -> Option<Result<Val
     let label = photocraft_engine::commands::find(id).map_or(id, |c| c.label);
     let dialog = |app: &mut PhotocraftApp, fields: Value, choices: Value| Some(Ok(json!({"dialog": form(app, id, label, fields, choices)})));
     match id {
-        "file.openAs" => {
-            app.open_dialog_file();
-            Some(Ok(Value::Null))
-        }
+        "file.openAs" => Some(app.open_dialog_file()),
         "file.saveACopy" => Some(save_a_copy(app)),
         "file.placeEmbedded" | "file.placeLinked" => {
-            let (name, bytes) = match app.pick_file_bytes()? {
-                Ok(picked) => picked,
+            let doc = match app.active_doc_id() {
+                Ok(doc) => doc,
                 Err(e) => return Some(Err(e)),
             };
-            let linked = (id == "file.placeLinked").then(|| name.clone());
-            Some(app.place_bytes(&name, bytes, linked))
+            let linked = id == "file.placeLinked";
+            Some(app.pick_file_bytes(move |app, name, bytes| {
+                app.refocus(doc)?;
+                let linked = linked.then(|| name.clone());
+                app.place_bytes(&name, bytes, linked)
+            }))
         }
         "file.fileInfo" => {
             let info = app.session.execute("file.fileInfo", json!({})).ok()?;
@@ -846,7 +878,8 @@ fn front(app: &mut PhotocraftApp, id: &str, params: &Value) -> Option<Result<Val
             json!({"from": ["any", "rgb", "grayscale", "cmyk", "lab", "indexed", "bitmap", "duotone", "multichannel"], "to": ["rgb", "grayscale", "cmyk", "lab"]}),
         ),
         "view.newGuideLayout" => {
-            dialog(app, json!({"columns": 8, "gutter": 20, "rows": 0, "rowGutter": 0, "margin": 0, "centerColumns": false, "clearExisting": false}), json!({}))
+            let fields = app.ui.view.guide_layout.clone();
+            dialog(app, fields, json!({}))
         }
         "type.warpText" => {
             let styles: Vec<&str> = std::iter::once("none").chain(photocraft_text::warp::STYLES.iter().map(|(_, s)| *s)).collect();
@@ -891,7 +924,18 @@ fn front(app: &mut PhotocraftApp, id: &str, params: &Value) -> Option<Result<Val
         "file.export.colorLookupTables" => {
             let (_, _, name) = doc?;
             let stem = name.rsplit_once('.').map_or(name.as_str(), |(a, _)| a).to_string();
-            dialog(app, json!({"path": format!("{dir}/{stem}.cube"), "size": 33, "title": stem}), json!({}))
+            // A selected adjustment is a common use case, but existing no-selection exports
+            // continue to bake the entire visible stack. The scope remains explicit in the UI.
+            let selected_adjustments = app.session.active().is_some_and(|st| {
+                let chosen = st.selected_layers();
+                !chosen.is_empty()
+                    && chosen.iter().all(|id| {
+                        st.doc.layers.iter().any(|root| root.id == *id)
+                            && st.doc.layer(*id).is_some_and(|layer| layer.visible && matches!(layer.content, photocraft_doc::LayerContent::Adjustment(_)))
+                    })
+            });
+            let scope = if selected_adjustments { "selected" } else { "all" };
+            dialog(app, json!({"path": format!("{dir}/{stem}.cube"), "size": 33, "title": stem, "scope": scope}), json!({"scope": ["all", "selected"]}))
         }
         "file.scripts.loadFilesIntoStack" => dialog(app, json!({"paths": dir}), json!({})),
         // Photography automation (photo_cmds / lens_cmds): a folder (or the open documents).
@@ -995,19 +1039,20 @@ fn front(app: &mut PhotocraftApp, id: &str, params: &Value) -> Option<Result<Val
 /// File › Save a Copy: pick a name, encode with the export service, write; the document's path
 /// and saved state are untouched.
 fn save_a_copy(app: &mut PhotocraftApp) -> Result<Value, String> {
-    let st = app.session.active().ok_or("no document")?;
-    let stem = st.doc.name.rsplit_once('.').map_or(st.doc.name.as_str(), |(a, _)| a).to_string();
-    let suggested = format!("{stem} copy.psd");
-    let path = app.services.pick_save.as_mut().and_then(|f| f(&suggested)).ok_or("cancelled")?;
-    let export = app.services.export.as_ref().ok_or("no exporter configured")?;
     let doc = app.session.active().ok_or("no document")?.doc.clone();
-    let (bytes, warnings) = export(&doc, &path, &crate::ExportSettings::default())?;
-    let write = app.services.write.as_mut().ok_or("no writer configured")?;
-    write(&path, &bytes)?;
-    app.ui.status = format!("Saved a copy as {path}");
-    app.ui.status_error = false;
-    crate::notices::io_warnings(app, &format!("Saved a copy as {}", crate::file_open::display_name(&path)), &warnings);
-    Ok(json!({"path": path, "warnings": warnings}))
+    let stem = doc.name.rsplit_once('.').map_or(doc.name.as_str(), |(a, _)| a);
+    let suggested = format!("{stem} copy.psd");
+    // The copy is of the document as it was when asked.
+    app.pick_save(&suggested, move |app, path| {
+        let export = app.services.export.as_ref().ok_or("no exporter configured")?;
+        let (bytes, warnings) = export(&doc, &path, &crate::ExportSettings::default())?;
+        let write = app.services.write.as_mut().ok_or("no writer configured")?;
+        write(&path, &bytes)?;
+        app.ui.status = format!("Saved a copy as {path}");
+        app.ui.status_error = false;
+        crate::notices::io_warnings(app, &format!("Saved a copy as {}", crate::file_open::display_name(&path)), &warnings);
+        Ok(json!({"path": path, "warnings": warnings}))
+    })
 }
 
 #[cfg(test)]

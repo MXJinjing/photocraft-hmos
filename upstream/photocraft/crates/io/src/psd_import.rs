@@ -84,8 +84,8 @@ fn selected_real_mask(rec: &LayerRecord) -> Option<photocraft_psd::RealMask> {
 
 /// The fill of a plain shape layer (fill block + vector path, no stroke) to import as a fill layer
 /// with a vector mask: when its mask parameters give the vector mask a density below 100 % or a
-/// feather, or when it stores no pixels and fills with a pattern.
-fn soft_shape_fill(rec: &LayerRecord, has_vector: bool, fill_key: Option<&[u8; 4]>) -> Option<photocraft_doc::Fill> {
+/// feather (`.1` true), or when it fills with a pattern.
+fn soft_shape_fill(rec: &LayerRecord, has_vector: bool, fill_key: Option<&[u8; 4]>) -> Option<(photocraft_doc::Fill, bool)> {
     if !has_vector || rec.block(b"vstk").is_some() || rec.block(b"vscg").is_some() {
         return None;
     }
@@ -93,10 +93,12 @@ fn soft_shape_fill(rec: &LayerRecord, has_vector: bool, fill_key: Option<&[u8; 4
     let fill = rec.block(k).and_then(|b| blocks::parse_fill(k, &b.data))?;
     let p = rec.layer_mask().and_then(|m| m.parameters);
     let soft = p.is_some_and(|p| p.vector_density.is_some_and(|d| d < 255) || p.vector_feather.is_some_and(|f| f > 0.0));
-    // Without stored pixels a pattern-filled shape cannot be rasterized on its own (the
-    // compositor resolves the document's patterns for fill layers).
-    let unrendered_pattern = (rec.rect.is_empty() || rec.rect.size().is_err()) && matches!(fill, photocraft_doc::Fill::Pattern { .. });
-    (soft || unrendered_pattern).then_some(fill)
+    // A pattern-filled shape can't be rasterized on its own (the compositor resolves the
+    // document's patterns for fill layers), and its stored pixels may be the unclipped fill
+    // (our own export writes fill layers so, #1907): it is a pattern fill layer seen through
+    // its vector mask.
+    let pattern = matches!(fill, photocraft_doc::Fill::Pattern { .. });
+    (soft || pattern).then_some((fill, soft))
 }
 
 impl Ctx<'_> {
@@ -131,6 +133,12 @@ impl Ctx<'_> {
         // warning says. Filling in for it would paint an opaque black layer over the document.
         let ids = (0..self.cc as i16).chain([CHANNEL_TRANSPARENCY]);
         if ids.zip(&planes).any(|(id, p)| p.is_none() && rec.channel(id).is_some()) {
+            return Surface::new(self.fmt);
+        }
+        // Only decoded channel data justifies a buffer: the decoders bound their output by the
+        // bytes in the file, but a bare rectangle can declare 300000² pixels in a few bytes (#755).
+        if planes.iter().all(Option::is_none) {
+            self.warn(format!("layer \"{name}\": no channel data for its {w}x{h} bounds; treated as empty"));
             return Surface::new(self.fmt);
         }
         let refs: Vec<Option<&[u8]>> = planes.iter().map(|p| p.as_deref()).collect();
@@ -240,6 +248,9 @@ impl Ctx<'_> {
         if let Some(b) = rec.block(b"brst") {
             l.excluded_channels = crate::blocks::parse_brst(&b.data);
         }
+        // Advanced Blending (`knko`, `infx`, `clbl`, `tsly`, `lmgm`, `vmgm`); the blocks stay in
+        // `psd_blocks`, where export rewrites them from the field in place.
+        l.advanced = crate::blocks::advanced_from_blocks(|k| rec.block(k).map(|b| b.data.as_slice()));
         // Blend If lives in the layer record's blending ranges.
         l.blend_if = crate::blocks::blend_if_from_ranges(&rec.blending_ranges);
         l.psd_id = rec.layer_id();
@@ -261,7 +272,7 @@ impl Ctx<'_> {
         let content = if let Some(k) = adj_key {
             let data = rec.block(k).map(|b| b.data.clone()).unwrap_or_default();
             let cged = rec.block(b"CgEd").map(|b| &b.data[..]);
-            LayerContent::Adjustment(adjust_map::parse(
+            let adj = adjust_map::parse(
                 k,
                 &data,
                 cged,
@@ -272,7 +283,17 @@ impl Ctx<'_> {
                     ColorMode::Lab => adjust_map::Channels::Lab,
                     _ => adjust_map::Channels::Other,
                 },
-            ))
+            );
+            // Kept verbatim for saving, but it renders as nothing: say so rather than open the
+            // layer silently without its effect (#1763).
+            if matches!(adj, photocraft_doc::Adjustment::Unsupported { .. }) {
+                let why = adjust_map::unreadable_reason(k, &data).map(|r| format!(" ({r})")).unwrap_or_default();
+                self.warn(format!(
+                    "layer \"{name}\": its {} settings could not be read{why}; the layer is kept as saved but has no effect",
+                    adjust_map::label(k)
+                ));
+            }
+            LayerContent::Adjustment(adj)
         } else if rec.block(b"TySh").is_some() {
             // Typed model from TySh/EngineData (photocraft-text); Photoshop's pixels stay the cache.
             let data = rec.block(b"TySh").map(|b| b.data.clone()).unwrap_or_default();
@@ -283,7 +304,15 @@ impl Ctx<'_> {
             if let Some(txt2) = &self.txt2 {
                 photocraft_text::psd::apply_txt2(&mut t, &data, txt2);
             }
-            t.cache = Some(self.record_surface(rec, &name));
+            // Photoshop's pixels are the cache only when the file has some: ag-psd, GIMP and
+            // other writers leave type layers without image data (Photoshop re-renders them on
+            // open), and an empty cache would show nothing until the layer is edited; the import
+            // renders such a layer from its model instead (`text_import::prepare`). When the
+            // engine text itself is blank, Photoshop draws nothing either: keep the empty pixels
+            // (corpus: text/path-wave-open.psd).
+            let cache = self.record_surface(rec, &name);
+            let drawn = !cache.content_bounds().is_empty() || photocraft_text::psd::engine_text_is_blank(&data);
+            t.cache = drawn.then_some(cache);
             t.psd_raw = principal(b"TySh");
             LayerContent::Text(t)
         } else if let Some(k) = smart_key {
@@ -308,10 +337,14 @@ impl Ctx<'_> {
                 // Distort / Perspective: the fourth corner (the affine `transform` drops it).
                 perspective: rec.block(k).and_then(|b| blocks::parse_smart_perspective(k, &b.data)),
             })
-        } else if let Some(f) = soft_shape_fill(rec, vector_key.is_some(), fill_key) {
+        } else if let Some((f, soft)) = soft_shape_fill(rec, vector_key.is_some(), fill_key) {
             // A shape whose vector mask has a density or feather is a fill layer seen through a
             // soft vector mask: the fill shows beyond the path, which the stored pixels (the
-            // shape alone) lack. Import it as exactly that.
+            // shape alone) lack. Import it as exactly that. A pattern fill keeps the stored
+            // pixels as its rendering (a soft mask's pixels lack the fill beyond the path).
+            if !soft && matches!(f, photocraft_doc::Fill::Pattern { .. }) && !rec.rect.is_empty() {
+                fill_cache = Some(FillCache { fill: f.clone(), surface: self.record_surface(rec, &name) });
+            }
             LayerContent::Fill(f)
         } else if (vector_key.is_some() && (fill_key.is_some() || rec.block(b"vstk").is_some())) || rec.block(b"vscg").is_some() {
             let fill = fill_key.and_then(|k| rec.block(k).and_then(|b| blocks::parse_fill(k, &b.data)));
@@ -523,8 +556,10 @@ pub fn psd_to_document_with(file: &PsdFile, ctl: &photocraft_raster::Interrupt) 
         match r.id {
             ids::RESOLUTION_INFO => {
                 if let Ok(ri) = photocraft_psd::ResolutionInfo::from_bytes(&r.data) {
-                    let f = if ri.h_res_unit == 2 { 2.54 } else { 1.0 };
-                    doc.resolution_dpi = (ri.h_res() * f) as f32;
+                    let ppi = |res: f64, unit: u16| if unit == 2 { res * 2.54 } else { res };
+                    let (x, y) = (ppi(ri.h_res(), ri.h_res_unit), ppi(ri.v_res(), ri.v_res_unit));
+                    doc.resolution_dpi = x as f32;
+                    warnings.extend(crate::unequal_resolution_warning(x, y));
                 }
             }
             ids::ICC_PROFILE => doc.icc_profile = Some(Arc::new(r.data.clone())),
@@ -569,6 +604,9 @@ pub fn psd_to_document_with(file: &PsdFile, ctl: &photocraft_raster::Interrupt) 
     doc.patterns = crate::pattern_map::from_global_blocks(&doc);
     // Notes (`Anno`) and the measurement scale (resource 1074); raw data stays for verbatim export.
     doc.notes = crate::annotations_map::notes_from_blocks(&doc);
+    if crate::annotations_map::anno_unreadable(&doc) {
+        warnings.push("the notes (Anno block) could not be read; they are kept unchanged on PSD save unless a note is added".into());
+    }
     if let Some(scale) = crate::annotations_map::raw_scale(&doc) {
         doc.measurement.scale = scale;
     }
@@ -768,7 +806,10 @@ pub fn psd_to_document_with(file: &PsdFile, ctl: &photocraft_raster::Interrupt) 
 
     // Layer comps (resource 1065 + per-layer `cmls`); the raw data stays for verbatim export.
     let raw_comps = doc.metadata.psd_resources.iter().find(|(id, _, _)| *id == crate::comps_map::LAYER_COMPS).map(|(_, _, d)| d.clone());
-    (doc.layer_comps, doc.last_applied_comp, doc.last_document_state) = crate::comps_map::comps_from_psd(raw_comps.as_deref().map(Vec::as_slice), &doc);
+    let comp_warnings;
+    (doc.layer_comps, doc.last_applied_comp, doc.last_document_state, comp_warnings) =
+        crate::comps_map::decode_comps(raw_comps.as_deref().map(Vec::as_slice), &doc);
+    cx.warnings.extend(comp_warnings);
     // Slices (resource 1050), after layer ids are known; the raw data stays for verbatim export.
     crate::slices_map::import(&mut doc);
     // Character and paragraph styles from the type layers' engine data.

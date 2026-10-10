@@ -84,9 +84,19 @@ pub fn elided(ui: &Ui, text: &str, font: egui::FontId, color: egui::Color32, max
     ui.painter().layout_job(job)
 }
 
+/// Context-menu action chosen on a dock tab.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TabContextAction {
+    Close(usize),
+    CloseGroup,
+}
+
 /// What a strip reported this frame.
 pub struct StripOut {
+    /// A tab was activated, including a choice from the overflow menu.
+    pub clicked: bool,
     pub double_clicked: bool,
+    pub context: Option<TabContextAction>,
     /// Rects of the tabs on the strip, `(tab index, rect)`.
     pub tabs: Vec<(usize, Rect)>,
     /// The » overflow button, when some tabs didn't fit.
@@ -94,7 +104,31 @@ pub struct StripOut {
 }
 
 /// Width of the » overflow button.
-const CHEVRON_W: f32 = 18.0;
+pub const CHEVRON_W: f32 = 18.0;
+
+/// Draw the » overflow button at `r`: hover tip `tip`, listing the tabs named by `labels` at the
+/// indices in `overflow`. A picked index is left in `picked`.
+pub fn overflow_button(ui: &mut Ui, id: egui::Id, r: Rect, tip: &str, labels: &[&str], overflow: &[usize], picked: &mut Option<usize>) {
+    let t = Tokens::get(ui.ctx());
+    let resp = ui.interact(r, id, Sense::click());
+    if resp.hovered() {
+        ui.painter().rect_filled(r.shrink2(vec2(1.0, 3.0)), t.radius_sm, t.hover.gamma_multiply(0.6));
+    }
+    crate::icons::paint(ui, r, "chevrons-right", 12.0, if resp.hovered() { t.text } else { t.text_dim });
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tip));
+    let resp = resp.on_hover_text(tip);
+    egui::Popup::menu(&resp).show(|ui| {
+        ui.set_min_width(140.0);
+        for &i in overflow {
+            if let Some(name) = labels.get(i)
+                && ui.button(*name).clicked()
+            {
+                *picked = Some(i);
+                ui.close();
+            }
+        }
+    });
+}
 
 /// Draw the tabs of a strip in `area` (the strip minus the menu button). `paint_tab` draws one
 /// tab: (ui, rect, index, label galley, response, active).
@@ -118,7 +152,7 @@ fn tabs_in(
     let natural: Vec<f32> = tabs.iter().map(|n| ui.painter().layout_no_wrap((*n).to_owned(), font.clone(), t.text).size().x + pad).collect();
     let f = fit(&natural, *selected, area.width(), min_w, CHEVRON_W);
     let mut x = area.left();
-    let mut out = StripOut { double_clicked: false, tabs: Vec::with_capacity(f.shown.len()), chevron: None };
+    let mut out = StripOut { clicked: false, double_clicked: false, context: None, tabs: Vec::with_capacity(f.shown.len()), chevron: None };
     for &(i, w) in &f.shown {
         let Some(name) = tabs.get(i) else { continue };
         let r = Rect::from_min_size(pos2(x, area.top()), vec2(w, area.height()));
@@ -130,31 +164,32 @@ fn tabs_in(
         let resp = if cut { resp.on_hover_text(*name) } else { resp };
         out.double_clicked |= resp.double_clicked();
         if resp.clicked() {
+            out.clicked = true;
             *selected = i;
         }
+        // The context menu belongs to the actual tab response, so its normal clicks
+        // and double-click-to-collapse behavior are not intercepted by an overlay.
+        resp.context_menu(|ui| {
+            if ui.button(tl!("Close")).clicked() {
+                out.context = Some(TabContextAction::Close(i));
+                ui.close();
+            }
+            if ui.button(tl!("Close Tab Group")).clicked() {
+                out.context = Some(TabContextAction::CloseGroup);
+                ui.close();
+            }
+        });
         out.tabs.push((i, r));
         x = r.right();
     }
     if !f.overflow.is_empty() {
         let r = Rect::from_min_size(pos2(x, area.top()), vec2(CHEVRON_W, area.height()));
-        let resp = ui.interact(r, id.with("tab-overflow"), Sense::click());
-        if resp.hovered() {
-            ui.painter().rect_filled(r.shrink2(vec2(1.0, 3.0)), t.radius_sm, t.hover.gamma_multiply(0.6));
+        let mut picked = None;
+        overflow_button(ui, id.with("tab-overflow"), r, tl!("More panels"), tabs, &f.overflow, &mut picked);
+        if let Some(i) = picked {
+            out.clicked = true;
+            *selected = i;
         }
-        crate::icons::paint(ui, r, "chevrons-right", 12.0, if resp.hovered() { t.text } else { t.text_dim });
-        resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tl!("More panels")));
-        let resp = resp.on_hover_text(tl!("More panels"));
-        egui::Popup::menu(&resp).show(|ui| {
-            ui.set_min_width(140.0);
-            for &i in &f.overflow {
-                if let Some(name) = tabs.get(i)
-                    && ui.button(*name).clicked()
-                {
-                    *selected = i;
-                    ui.close();
-                }
-            }
-        });
         out.chevron = Some(r);
     }
     out

@@ -222,12 +222,19 @@ pub fn families(script: CjkScript) -> &'static [&'static str] {
     match script {
         CjkScript::Japanese => &["Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic", "Meiryo", "Noto Sans CJK JP", "Noto Sans JP", "IPAexGothic"],
         CjkScript::SimplifiedChinese => &[
-            "HarmonyOS Sans SC", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", "Noto Sans SC", "WenQuanYi Micro Hei", "WenQuanYi Zen Hei",
+            "HarmonyOS Sans SC",
+            "PingFang SC",
+            "Hiragino Sans GB",
+            "Microsoft YaHei",
+            "Noto Sans CJK SC",
+            "Noto Sans SC",
+            "WenQuanYi Micro Hei",
+            "WenQuanYi Zen Hei",
             "Heiti SC",
         ],
         CjkScript::TraditionalChinese => {
             &["HarmonyOS Sans TC", "PingFang TC", "Microsoft JhengHei", "Noto Sans CJK TC", "Noto Sans TC", "Hiragino Sans CNS", "Heiti TC"]
-        },
+        }
         CjkScript::Korean => &["Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans CJK KR", "Noto Sans KR", "NanumGothic", "UnDotum"],
     }
 }
@@ -309,8 +316,28 @@ pub fn font_files(script: CjkScript) -> Vec<FontFile> {
                 f("/usr/share/fonts/un-core/UnDotum.ttf", ""),
             ],
         });
-        v
+        with_flatpak_host_fonts(v)
     }
+}
+
+/// Flatpak mounts the host system font directory outside the runtime's `/usr/share/fonts`.
+/// Preserve the collection face and font preference order when trying that mirror.
+#[cfg(not(target_arch = "wasm32"))]
+fn with_flatpak_host_fonts(files: Vec<FontFile>) -> Vec<FontFile> {
+    let mut candidates = Vec::new();
+    for file in files {
+        let host = if cfg!(target_os = "linux") {
+            file.path
+                .strip_prefix("/usr/share/fonts")
+                .ok()
+                .map(|relative| FontFile { path: std::path::Path::new("/run/host/fonts").join(relative), family: file.family })
+        } else {
+            None
+        };
+        candidates.push(file);
+        candidates.extend(host);
+    }
+    candidates
 }
 
 /// Broad-coverage fonts tried after every script's own fonts (they cover Han, kana and Hangul
@@ -324,7 +351,10 @@ pub fn last_resort_files() -> Vec<FontFile> {
         let dir = std::env::var("WINDIR").unwrap_or_else(|_| "C:\\Windows".into());
         vec![FontFile { path: std::path::Path::new(&dir).join("Fonts").join("ARIALUNI.TTF"), family: "" }]
     } else {
-        vec![f("/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf"), f("/usr/share/fonts/google-droid-sans-fonts/DroidSansFallbackFull.ttf")]
+        with_flatpak_host_fonts(vec![
+            f("/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf"),
+            f("/usr/share/fonts/google-droid-sans-fonts/DroidSansFallbackFull.ttf"),
+        ])
     }
 }
 
@@ -515,5 +545,36 @@ mod tests {
         let sc = face_index_for_family(&bytes, "PingFang SC");
         let tc = face_index_for_family(&bytes, "PingFang TC");
         assert_ne!(sc, tc);
+    }
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod flatpak_tests {
+    use super::*;
+
+    #[test]
+    fn cjk_discovery_includes_host_fonts_with_the_matching_collection_face() {
+        for script in [CjkScript::Japanese, CjkScript::SimplifiedChinese, CjkScript::TraditionalChinese, CjkScript::Korean] {
+            let files = font_files(script);
+            let native = &files[0];
+            let host = &files[1];
+            assert_eq!(native.path, std::path::Path::new("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"));
+            assert_eq!(host.path, std::path::Path::new("/run/host/fonts/opentype/noto/NotoSansCJK-Regular.ttc"));
+            assert_eq!(host.family, families(script).iter().find(|family| family.starts_with("Noto Sans CJK")).copied().unwrap());
+            for pair in files.windows(2) {
+                if let Ok(relative) = pair[0].path.strip_prefix("/usr/share/fonts") {
+                    assert_eq!(pair[1].path, std::path::Path::new("/run/host/fonts").join(relative));
+                    assert_eq!(pair[1].family, pair[0].family);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn last_resort_discovery_includes_the_host_droid_font() {
+        let files = last_resort_files();
+        assert!(
+            files.iter().any(|file| file.path == std::path::Path::new("/run/host/fonts/truetype/droid/DroidSansFallbackFull.ttf") && file.family.is_empty())
+        );
     }
 }

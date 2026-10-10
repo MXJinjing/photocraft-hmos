@@ -23,6 +23,46 @@ fn defaults_match_photoshop() {
 }
 
 #[test]
+fn appearance_defaults_and_legacy_theme_migrate() {
+    let p = Preferences::default();
+    // New users keep Photoshop's default; following the system is opt-in.
+    assert_eq!(p.interface.appearance_mode, AppearanceMode::Dark);
+    assert_eq!(p.interface.dark_theme, DarkTheme::ProMedium);
+    assert_eq!(p.interface.light_theme, LightTheme::StudioLight);
+    for (theme, mode, dark, light) in
+        [("pro", AppearanceMode::Dark, DarkTheme::Pro, LightTheme::StudioLight), ("classic", AppearanceMode::Light, DarkTheme::ProMedium, LightTheme::Classic)]
+    {
+        let mut s = Session::new();
+        s.load_prefs_json(&json!({"interface": {"theme": theme}}).to_string()).unwrap();
+        assert_eq!(s.prefs().interface.appearance_mode, mode);
+        assert_eq!(s.prefs().interface.dark_theme, dark);
+        assert_eq!(s.prefs().interface.light_theme, light);
+    }
+}
+
+#[test]
+fn appearance_choices_validate_and_legacy_theme_still_selects() {
+    let mut s = Session::new();
+    s.execute("prefs.set", json!({"values": {"interface.appearanceMode": "auto", "interface.darkTheme": "studio", "interface.lightTheme": "classic"}}))
+        .unwrap();
+    assert_eq!(s.prefs().interface.appearance_mode, AppearanceMode::Auto);
+    assert_eq!(s.prefs().interface.dark_theme, DarkTheme::Studio);
+    assert_eq!(s.prefs().interface.light_theme, LightTheme::Classic);
+    let mut restarted = Session::new();
+    restarted.load_prefs_json(&s.prefs_to_json()).unwrap();
+    assert_eq!(restarted.prefs().interface, s.prefs().interface);
+    assert!(s.execute("prefs.set", json!({"path": "interface.darkTheme", "value": "classic"})).is_err());
+    s.execute("prefs.set", json!({"path": "interface.theme", "value": "pro"})).unwrap();
+    assert_eq!(s.prefs().interface.appearance_mode, AppearanceMode::Dark);
+    assert_eq!(s.prefs().interface.dark_theme, DarkTheme::Pro);
+    assert_eq!(s.prefs().interface.light_theme, LightTheme::Classic);
+    s.execute("prefs.set", json!({"path": "interface", "value": {"theme": "studioLight"}})).unwrap();
+    assert_eq!(s.prefs().interface.appearance_mode, AppearanceMode::Light);
+    assert_eq!(s.prefs().interface.light_theme, LightTheme::StudioLight);
+    assert_eq!(s.prefs().interface.dark_theme, DarkTheme::Pro);
+}
+
+#[test]
 fn get_set_reset_by_path() {
     let mut s = session();
     assert_eq!(s.execute("prefs.get", json!({"path": "performance.historyStates"})).unwrap(), json!(50));
@@ -55,6 +95,84 @@ fn reset_one_colour_setting() {
     s.execute("prefs.reset", json!({"path": "colorSettings.workingRgb"})).unwrap();
     assert_eq!(s.color.settings, crate::color_cmds::ColorSettings::default());
     assert!(s.execute("prefs.reset", json!({"path": "colorSettings.notAField"})).is_err());
+}
+
+#[test]
+fn reset_one_keyed_override() {
+    let mut s = session();
+    s.execute(
+        "prefs.set",
+        json!({"values": {
+            "shortcuts.edit.undo": "Ctrl+Alt+Z", "shortcuts.edit.redo": "Ctrl+Alt+Y",
+            "menus.colors.edit.fill": "red", "menus.colors.filter.blur.gaussianBlur": "blue",
+            "interface.theme": "studioLight"
+        }}),
+    )
+    .unwrap();
+    let undo = crate::commands::find("edit.undo").unwrap().shortcut;
+    assert_eq!(s.prefs().shortcut("edit.undo", undo), Some("Ctrl+Alt+Z"));
+    for path in ["shortcuts.edit.undo", "menus.colors.filter.blur.gaussianBlur"] {
+        let revision = s.prefs.rev();
+        assert_eq!(s.execute("prefs.reset", json!({"path": path})).unwrap(), Value::Null);
+        assert!(s.prefs.rev() > revision);
+        assert!(s.execute("prefs.get", json!({"path": path})).is_err(), "removed override: {path}");
+        let mut restored = Session::new();
+        restored.load_prefs_json(&s.prefs_to_json()).unwrap();
+        assert_eq!(restored.prefs(), s.prefs(), "removal survives saving: {path}");
+    }
+    assert_eq!(s.execute("prefs.get", json!({"path": "shortcuts"})).unwrap(), json!({"edit.redo": "Ctrl+Alt+Y"}));
+    assert_eq!(s.execute("prefs.get", json!({"path": "menus.colors"})).unwrap(), json!({"edit.fill": "red"}));
+    assert_eq!(s.execute("prefs.get", json!({"path": "interface.theme"})).unwrap(), json!("studioLight"));
+    assert_eq!(s.prefs().shortcut("edit.undo", undo), undo);
+}
+
+#[test]
+fn reset_keyed_overrides_is_idempotent_and_restores_disabled_shortcuts() {
+    let mut s = session();
+    s.execute("prefs.set", json!({"path": "shortcuts.edit.undo", "value": ""})).unwrap();
+    let undo = crate::commands::find("edit.undo").unwrap().shortcut;
+    assert_eq!(s.prefs().shortcut("edit.undo", undo), None);
+    for path in ["shortcuts.edit.undo", "menus.colors.edit.fill"] {
+        for _ in 0..2 {
+            assert_eq!(s.execute("prefs.reset", json!({"section": path})).unwrap(), Value::Null);
+        }
+    }
+    assert_eq!(s.prefs().shortcut("edit.undo", undo), undo);
+    assert_eq!(s.prefs(), &Preferences::default());
+}
+
+#[test]
+fn preferences_reset_removes_keyed_overrides() {
+    let mut p = Preferences::default();
+    for (path, value) in [("shortcuts.edit.undo", json!("Ctrl+Z")), ("menus.colors.edit.fill", json!("red"))] {
+        p.set(path, value).unwrap();
+        assert!(p.get(path).is_some());
+        p.reset(Some(path)).unwrap();
+        assert!(p.get(path).is_none());
+        p.reset(Some(path)).unwrap();
+    }
+    assert_eq!(p, Preferences::default());
+}
+
+#[test]
+fn keyed_reset_keeps_section_resets_and_unknown_path_errors() {
+    let mut s = session();
+    s.execute("prefs.set", json!({"values": {"shortcuts.edit.undo": "Ctrl+Z", "menus.colors.edit.fill": "red"}})).unwrap();
+    let saved = s.prefs_value();
+    let revision = s.prefs.rev();
+    for path in ["shortcut.edit.undo", "menus.color.edit.fill", "menus.notAField", "general.notAField"] {
+        assert!(matches!(s.execute("prefs.reset", json!({"path": path})), Err(EngineError::BadParams { .. })));
+        assert_eq!(s.prefs_value(), saved, "rejected reset changes nothing: {path}");
+        assert_eq!(s.prefs.rev(), revision);
+    }
+    assert_eq!(s.execute("prefs.reset", json!({"path": "shortcuts"})).unwrap(), json!({}));
+    assert_eq!(s.execute("prefs.get", json!({"path": "menus.colors"})).unwrap(), json!({"edit.fill": "red"}));
+    assert_eq!(s.execute("prefs.reset", json!({"path": "menus.colors"})).unwrap(), json!({}));
+    s.execute("prefs.set", json!({"path": "shortcuts.edit.undo", "value": "Ctrl+Z"})).unwrap();
+    let all = s.execute("prefs.reset", json!({})).unwrap();
+    assert_eq!(all["shortcuts"], json!({}));
+    assert_eq!(all["menus"]["colors"], json!({}));
+    assert_eq!(s.prefs(), &Preferences::default());
 }
 
 #[test]
@@ -107,6 +225,19 @@ fn json_round_trip_tolerates_unknown_and_missing_keys() {
     assert!(u.prefs().general.beep_when_done);
     assert_eq!(u.prefs().performance.history_states, 50);
     assert!(u.load_prefs_json("not json").is_err());
+}
+
+#[test]
+fn low_resolution_previews_default_on_and_switch_off() {
+    // A preferences file from before the setting keeps the fast previews.
+    let mut s = Session::new();
+    s.load_prefs_json(r#"{"performance": {"historyStates": 20}}"#).unwrap();
+    assert!(s.prefs().performance.low_resolution_previews);
+    s.execute("prefs.set", json!({"path": "performance.lowResolutionPreviews", "value": false})).unwrap();
+    assert!(!s.prefs().performance.low_resolution_previews);
+    let mut t = Session::new();
+    t.load_prefs_json(&s.prefs_to_json()).unwrap();
+    assert!(!t.prefs().performance.low_resolution_previews);
 }
 
 #[test]
@@ -301,4 +432,41 @@ fn stylus_tools_preferences_persist_validate_and_default_for_old_settings() {
     assert!(!restored.prefs().tools.block_finger_input);
     assert_eq!(restored.prefs().tools.stylus_double_tap, StylusDoubleTap::Eraser);
     assert_eq!(restored.prefs().tools.stylus_long_press, StylusLongPress::ContextMenu);
+}
+
+/// #2022: notices auto-hide after a user-set delay by default; both settings round-trip.
+#[test]
+fn notification_autohide_preferences() {
+    let p = Preferences::default();
+    assert!(p.interface.notification_auto_hide);
+    assert_eq!(p.interface.notification_duration_seconds, 6);
+    assert_eq!(range("interface.notificationDurationSeconds"), Some((1.0, 120.0)));
+
+    let mut s = Session::new();
+    s.execute("prefs.set", json!({"path": "interface.notificationAutoHide", "value": false})).unwrap();
+    s.execute("prefs.set", json!({"path": "interface.notificationDurationSeconds", "value": 30})).unwrap();
+    assert!(!s.prefs().interface.notification_auto_hide);
+    assert_eq!(s.prefs().interface.notification_duration_seconds, 30);
+    // Out-of-range and wrong-typed values are rejected and change nothing.
+    for bad in [json!(0), json!(121), json!("soon")] {
+        assert!(s.execute("prefs.set", json!({"path": "interface.notificationDurationSeconds", "value": bad})).is_err());
+    }
+    assert_eq!(s.prefs().interface.notification_duration_seconds, 30);
+
+    let mut t = Session::new();
+    t.load_prefs_json(&s.prefs_to_json()).unwrap();
+    assert!(!t.prefs().interface.notification_auto_hide);
+    assert_eq!(t.prefs().interface.notification_duration_seconds, 30);
+    // Older files without the settings keep the defaults.
+    let mut u = Session::new();
+    u.load_prefs_json(r#"{"interface": {"theme": "studio"}}"#).unwrap();
+    assert!(u.prefs().interface.notification_auto_hide);
+    assert_eq!(u.prefs().interface.notification_duration_seconds, 6);
+}
+
+#[test]
+fn linux_only_preferences_show_only_on_linux() {
+    assert_eq!(is_hidden("performance.linuxDisplayServer"), !cfg!(target_os = "linux"));
+    assert!(!is_hidden("performance.gpuBackend"));
+    assert!(LINUX_ONLY.iter().all(|p| choices(p).is_some()), "every Linux-only preference is a real one");
 }

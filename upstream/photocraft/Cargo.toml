@@ -8,7 +8,7 @@ default-members = ["crates/*", "apps/photocraft", "apps/photocraft-cli", "xtask"
 wgpu-hal = { path = "../../third_party/wgpu-hal-30.0.1" }
 
 [workspace.package]
-version = "0.5.0"
+version = "0.6.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 rust-version = "1.95"
@@ -24,6 +24,7 @@ photocraft-ops = { path = "crates/ops" }
 photocraft-psd = { path = "crates/psd" }
 photocraft-codecs = { path = "crates/codecs" }
 photocraft-raw = { path = "crates/raw" }
+photocraft-affinity = { path = "crates/affinity" }
 photocraft-compose = { path = "crates/compose" }
 photocraft-gpu = { path = "crates/gpu" }
 photocraft-paint = { path = "crates/paint" }

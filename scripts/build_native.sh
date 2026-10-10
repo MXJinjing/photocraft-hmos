@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build both HarmonyOS architectures before invoking hvigor/CMake.
+# Build the ARM64 HarmonyOS library before invoking hvigor/CMake.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 if [[ -f "$ROOT/scripts/dev.local.env" ]]; then source "$ROOT/scripts/dev.local.env"; fi
@@ -11,13 +11,13 @@ if [[ ! -d "$SDK/llvm" ]]; then
   done
 fi
 [[ -x "$SDK/llvm/bin/clang" ]] || { echo "HarmonyOS native SDK not found: $SDK" >&2; exit 1; }
-TARGETS="${PHOTOCRAFT_NATIVE_TARGETS:-aarch64-unknown-linux-ohos x86_64-unknown-linux-ohos}"
+TARGETS="${PHOTOCRAFT_NATIVE_TARGETS:-aarch64-unknown-linux-ohos}"
 PROFILE="${PHOTOCRAFT_RUST_PROFILE:-release}"
 ARGS=()
 # Explicit dev profile also avoids expanding an empty array under macOS Bash 3's nounset.
 case "$PROFILE" in release) ARGS+=(--release);; debug) ARGS+=(--profile dev);; *) echo 'Profile must be release or debug' >&2; exit 2;; esac
 for target in $TARGETS; do
-  case "$target" in aarch64-unknown-linux-ohos|x86_64-unknown-linux-ohos) ;; *) echo "Unsupported target: $target" >&2; exit 2;; esac
+  case "$target" in aarch64-unknown-linux-ohos) ;; *) echo "Unsupported target: $target" >&2; exit 2;; esac
   [[ -d "$(rustc --print sysroot)/lib/rustlib/$target" ]] || { echo "Install target with: rustup target add $target" >&2; exit 1; }
   compiler="$SDK/llvm/bin/$target-clang"
   suffix="${target//-/_}"

@@ -178,3 +178,13 @@ API 20 模拟器使用独立 touchorigintest 包完成启动/新建文档/菜单
 验证：鸿蒙 UI 链接/真实界面 4 项回归、默认上游链接 3 项回归通过；鸿蒙 UI 全量 952 passed / 3 ignored，当前工作区原生 26 项通过。UI all-targets 严格 Clippy、离线 metadata、28 crates 分层与配置工具链 wasm 检查通过。双架构 release 库、HAP 构建和包校验通过；首次构建遇到工作区并行保存接口修改时的暂时签名不一致，接口对齐后重试成功，未改动其他任务的代码。
 
 在无文档状态的 API 20 模拟器 127.0.0.1:5555 安装/启动并目视核对恢复的菜单项，未部署真实 Pad；URL 路由由记录平台 open_url 服务的回归测试验证。2880×1920 帮助菜单对照：[恢复前](docs/native/fork-links-help-before.jpeg)、[恢复后](docs/native/fork-links-help-after.jpeg)。
+
+## 2026-10-10 在 dev 合并 upstream v0.6.0，仅构建 ARM64
+
+通过未 squash 的 subtree 合并导入 v0.6.0（0c72d95425dece90ef9a1cceb49e3315c96e22d5）。重新接入不依赖 eframe 的鸿蒙 host、系统字体、中文输入、同步平台文件服务、保存完成守卫、打印、fork 链接和精简关于页面；保留笔事件与手指导航规则，并接入上游新的笔压队列与旋转视图。修复合并后的重复画笔弹窗和丢失的鸿蒙翻译条目，补全上游新增语言中的平台选项。裁剪旋转被导航打断时恢复原角度，附回归测试。vendored wgpu-hal 30.0.1 补丁保留，两个 workspace 的 lockfile 已同步升级。
+
+应用版本 0.6.0.1 / 60001。原生构建脚本、CMake ABI、Hvigor abiFilters、CI 与包校验统一为 aarch64 / arm64-v8a；额外 x86_64 原生库会被包校验拒绝。ARM64 构建配置及合成 HAP 回归测试通过。原有 ArkTS host-mode/system-bars 测试补齐已存在的 WindowChrome mock。
+
+验证：默认 UI/engine/text 单元、集成及文档测试共 2,872 passed / 28 ignored；harmonyos-ui 单元测试 1,527 passed / 8 ignored，另新增裁剪恢复测试通过；最终原生适配器 26 项通过。共享三个 crate 以及鸿蒙 UI all-targets 严格 Clippy、ARM64 原生库严格 Clippy、offline metadata、分层、L0–L6 wasm 与 photocraft-web wasm 编译通过。全部 12 个 ArkTS 回归脚本及 4 个 Python/C++ 回归脚本通过。
+
+ARM64 release Rust 库与本地 debug HAP 构建、verify_native.py 通过。API 20 ARM64 模拟器完成最终 signed HAP 安装/启动，目视确认欢迎页正常渲染；未部署真实 Pad。两张截图均为 2880×1920：[v0.5.0](docs/native/upstream-v050-home.jpeg)、[v0.6.0](docs/native/upstream-v060-home.jpeg)。文件服务/输入行为由平台脚本与真实编辑器集成测试覆盖，本轮模拟器只完成启动页烟测。

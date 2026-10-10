@@ -28,15 +28,16 @@ pub mod render;
 pub mod replace;
 pub mod retouch;
 pub mod rng;
+pub mod symmetry;
 pub mod tile;
 
 pub use brush::{
-    BrushPreset, BrushSettings, ColorDynamics, Control, DualBrush, Dynamic, MAX_BRUSH_SIZE, MaskMode, Pattern, PatternStyle, Pose, Scattering, SectionLocks,
-    ShapeDynamics, Smoothing, Texture, TipShape, Transfer,
+    BrushPreset, BrushSettings, ColorDynamics, Control, DualBrush, Dynamic, MAX_BRUSH_SIZE, MAX_SCATTER, MaskMode, Pattern, PatternStyle, Pose, Scattering,
+    SectionLocks, ShapeDynamics, Smoothing, Texture, TipShape, Transfer,
 };
 pub use mixer::MixerSettings;
 pub use render::{BrushContext, StrokeRenderer, grid_center, grid_square, render_stroke};
-pub use tile::GrayTile;
+pub use tile::{GrayTile, StoredTile};
 
 /// One input sample. Missing stylus data defaults to "mouse": full pressure, no tilt/rotation.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]

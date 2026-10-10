@@ -2,7 +2,7 @@
 //! unavailable ones are greyed using the same enablement as the main menus. Items marked as menu
 //! invocations (`Value::Null` params) go through `menus::invoke`, so dialogs open like in the menu bar.
 
-use photocraft_doc::{Layer, LayerContent};
+use photocraft_doc::{LabelColor, Layer, LayerContent};
 use serde_json::{Value, json};
 
 /// One entry: label, command id. `None` = separator.
@@ -16,6 +16,21 @@ pub fn add_mask_command(has_selection: bool, alt: bool) -> &'static str {
         (true, true) => "layer.layerMask.hideSelection",
         (false, false) => "layer.layerMask.revealAll",
         (false, true) => "layer.layerMask.hideAll",
+    }
+}
+
+/// What the Layers panel "Add a mask" button does for `layer` (#2075). Like Photoshop it never
+/// replaces a mask: a layer without a layer mask gets one ([`add_mask_command`]); a layer that
+/// already has one gets a vector mask instead (⌥: Hide All); a layer with both (or a shape layer,
+/// whose path is already its vector mask, with a layer mask) gets nothing (`None`).
+pub fn mask_button_command(layer: Option<&Layer>, has_selection: bool, alt: bool) -> Option<&'static str> {
+    let l = layer?;
+    if l.mask.is_none() {
+        Some(add_mask_command(has_selection, alt))
+    } else if l.vector_mask.is_none() && !matches!(l.content, LayerContent::Shape(_)) {
+        Some(if alt { "layer.vectorMask.hideAll" } else { "layer.vectorMask.revealAll" })
+    } else {
+        None
     }
 }
 
@@ -118,9 +133,79 @@ pub fn show(app: &crate::PhotocraftApp, ui: &mut egui::Ui, l: &Layer, on_set: bo
             rename = true;
             ui.close();
         }
+        color_menu(app, ui, l, on_set, actions);
         rename
     })
 }
+
+fn color_name(color: LabelColor) -> &'static str {
+    crate::i18n::tr_ctx(crate::i18n::current(), "layerLabel", color.label())
+}
+
+fn common_color(app: &crate::PhotocraftApp, l: &Layer, on_set: bool) -> Option<LabelColor> {
+    if !on_set {
+        return Some(l.label);
+    }
+    let st = app.session.active()?;
+    let ids = st.selected_layers();
+    let mut labels = ids.iter().filter_map(|id| st.doc.layer(*id).map(|l| l.label));
+    let first = labels.next()?;
+    labels.all(|c| c == first).then_some(first)
+}
+
+fn color_menu(app: &crate::PhotocraftApp, ui: &mut egui::Ui, l: &Layer, on_set: bool, actions: &mut Vec<(String, Value)>) {
+    let current = common_color(app, l, on_set);
+    ui.menu_button(tl!("Color"), |ui| {
+        crate::widgets::menu_scroll(ui, |ui| {
+            ui.set_min_width(170.0);
+            for color in LabelColor::ALL {
+                if color == LabelColor::Red {
+                    ui.separator();
+                }
+                if color_button(ui, color, current == Some(color)).clicked() {
+                    let params = if on_set {
+                        json!({"color": color.id()})
+                    } else {
+                        actions.push(("layer.select".into(), json!({"layer": l.id.0})));
+                        json!({"layer": l.id.0, "color": color.id()})
+                    };
+                    actions.push(("layer.setLabelColor".into(), params));
+                    ui.close();
+                }
+            }
+        });
+    });
+}
+
+fn color_button(ui: &mut egui::Ui, color: LabelColor, checked: bool) -> egui::Response {
+    use egui::{Atom, Rect, Stroke, StrokeKind, vec2};
+    let t = crate::theme::Tokens::get(ui.ctx());
+    let check_id = ui.id().with(("label-check", color.id()));
+    let swatch_id = ui.id().with(("label-swatch", color.id()));
+    let name = color_name(color);
+    let button = egui::Button::new((Atom::custom(check_id, vec2(14.0, 16.0)), Atom::custom(swatch_id, vec2(16.0, 16.0)), name, Atom::grow())).atom_ui(ui);
+    if checked && let Some(rect) = button.rect(check_id) {
+        crate::icons::paint(ui, rect, "check", 14.0, t.icon);
+    }
+    if let Some(rect) = button.rect(swatch_id) {
+        let rect = Rect::from_center_size(rect.center(), vec2(16.0, 16.0));
+        let p = ui.painter();
+        if let Some((swatch, _)) = t.layer_label_colors(color) {
+            p.rect_filled(rect, t.radius_sm, swatch);
+        } else {
+            let stroke = Stroke::new(1.0, t.text_dim);
+            p.rect_stroke(rect, t.radius_sm, stroke, StrokeKind::Inside);
+            let r = rect.shrink(4.0);
+            p.line_segment([r.left_top(), r.right_bottom()], stroke);
+            p.line_segment([r.right_top(), r.left_bottom()], stroke);
+        }
+    }
+    button.response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, ui.is_enabled(), checked, name));
+    button.response
+}
+
+#[cfg(test)]
+mod color_tests;
 
 #[cfg(test)]
 mod tests {
@@ -258,6 +343,56 @@ mod tests {
         let st = s.active().unwrap();
         let mask = &st.doc.layer(st.active_layer.unwrap()).unwrap().mask.as_ref().unwrap().surface;
         assert!(mask.pixel(1, 5)[0] > 0.99 && mask.pixel(8, 5)[0] < 0.01);
+    }
+
+    /// #2075: clicking the mask button again (with or without ⌥) used to replace the layer's
+    /// mask, discarding what was painted into it. Like Photoshop, it now adds a vector mask, and
+    /// does nothing once the layer has both.
+    #[test]
+    fn mask_button_never_replaces_a_mask() {
+        for alt in [false, true] {
+            let mut s = photocraft_engine::Session::new();
+            s.execute("file.new", json!({"width": 10, "height": 10})).unwrap();
+            s.execute("layer.new.layer", json!({})).unwrap();
+            let layer = |s: &photocraft_engine::Session| {
+                let st = s.active().unwrap();
+                st.doc.layer(st.active_layer.unwrap()).unwrap().clone()
+            };
+            let first = mask_button_command(Some(&layer(&s)), false, alt).unwrap();
+            assert_eq!(first, if alt { "layer.layerMask.hideAll" } else { "layer.layerMask.revealAll" });
+            s.execute(first, json!({})).unwrap();
+            // Paint a stroke into the mask.
+            s.edit("paint mask", |doc, active| {
+                let id = (*active).ok_or(photocraft_engine::EngineError::NoDocument)?;
+                let m = doc.layer_mut(id).and_then(|l| l.mask.as_mut()).ok_or(photocraft_engine::EngineError::NoDocument)?;
+                m.surface.fill_rect(photocraft_geom::Rect::new(2, 2, 5, 5), &[0.5]);
+                Ok(())
+            })
+            .unwrap();
+            let painted = layer(&s).mask.unwrap().surface.pixel(3, 3)[0];
+            assert!((painted - 0.5).abs() < 0.01);
+            // Second click: a vector mask (⌥ hides all), the layer mask is untouched.
+            let second = mask_button_command(Some(&layer(&s)), false, alt).unwrap();
+            assert_eq!(second, if alt { "layer.vectorMask.hideAll" } else { "layer.vectorMask.revealAll" });
+            s.execute(second, json!({})).unwrap();
+            let l = layer(&s);
+            assert!(l.vector_mask.is_some(), "alt={alt}");
+            let mask = l.mask.as_ref().unwrap();
+            assert!((mask.surface.pixel(3, 3)[0] - painted).abs() < 1e-6, "alt={alt}: the painted mask was replaced");
+            // Third click: nothing left to add.
+            assert_eq!(mask_button_command(Some(&l), false, alt), None);
+            assert_eq!(mask_button_command(Some(&l), true, alt), None);
+        }
+        // No layer: nothing to do.
+        assert_eq!(mask_button_command(None, false, false), None);
+        // A shape layer's path is already its vector mask: after the layer mask, nothing more.
+        let mut s = photocraft_engine::Session::new();
+        s.execute("file.new", json!({"width": 10, "height": 10})).unwrap();
+        s.execute("shape.create", json!({"kind": "rect", "rect": [0, 0, 5, 5]})).unwrap();
+        s.execute("layer.layerMask.revealAll", json!({})).unwrap();
+        let st = s.active().unwrap();
+        let l = st.doc.layer(st.active_layer.unwrap()).unwrap();
+        assert_eq!(mask_button_command(Some(l), false, false), None);
     }
 
     #[test]

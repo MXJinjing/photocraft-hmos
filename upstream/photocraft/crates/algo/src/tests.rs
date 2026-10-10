@@ -38,8 +38,8 @@ fn all_filters() -> Vec<FilterParams> {
         FilterParams::BoxBlur { radius: 2.0 },
         FilterParams::BoxBlur { radius: 6.0 },
         FilterParams::MotionBlur { angle: 30.0, distance: 7.0 },
-        FilterParams::RadialBlur { amount: 20.0, method: RadialMethod::Spin, center_x: 0.5, center_y: 0.5 },
-        FilterParams::RadialBlur { amount: 30.0, method: RadialMethod::Zoom, center_x: 0.3, center_y: 0.6 },
+        FilterParams::RadialBlur { amount: 20.0, method: RadialMethod::Spin, quality: RadialQuality::Good, center_x: 0.5, center_y: 0.5 },
+        FilterParams::RadialBlur { amount: 30.0, method: RadialMethod::Zoom, quality: RadialQuality::Good, center_x: 0.3, center_y: 0.6 },
         FilterParams::SurfaceBlur { radius: 3.0, threshold: 20.0 },
         FilterParams::UnsharpMask { amount: 150.0, radius: 1.5, threshold: 2.0 },
         FilterParams::SmartSharpen { amount: 100.0, radius: 1.0, reduce_noise: 20.0 },
@@ -75,6 +75,19 @@ fn all_filters() -> Vec<FilterParams> {
         FilterParams::PolarCoordinates { mode: PolarMode::RectangularToPolar },
         FilterParams::PolarCoordinates { mode: PolarMode::PolarToRectangular },
     ]
+}
+
+#[test]
+fn radial_blur_quality_defaults_for_older_serialized_parameters() {
+    let params = serde_json::json!({
+        "filter": "radialBlur",
+        "amount": 20.0,
+        "method": "spin",
+        "centerX": 0.5,
+        "centerY": 0.5
+    });
+    let decoded: FilterParams = serde_json::from_value(params).unwrap();
+    assert_eq!(decoded, FilterParams::RadialBlur { amount: 20.0, method: RadialMethod::Spin, quality: RadialQuality::Good, center_x: 0.5, center_y: 0.5 });
 }
 
 #[test]

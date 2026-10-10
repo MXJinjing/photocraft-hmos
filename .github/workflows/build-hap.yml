@@ -22,7 +22,7 @@ on:
   workflow_dispatch:
     inputs:
       version_name:
-        description: "versionName written into AppScope/app.json5; digits and dots only, e.g. 0.5.0.1"
+        description: "versionName written into AppScope/app.json5; digits and dots only, e.g. 0.6.0.1"
         required: true
         type: string
       version_code:
@@ -61,7 +61,7 @@ on:
           - prerelease
           - release
       release_tag:
-        description: "Release tag; empty uses v<version_name>. Add a channel marker here, e.g. v0.5.0.1-hmos.alpha"
+        description: "Release tag; empty uses v<version_name>. Add a channel marker here, e.g. v0.6.0.1-hmos.alpha"
         required: false
         default: ""
         type: string
@@ -116,7 +116,7 @@ jobs:
           # HarmonyOS accepts digits and dots only here; a suffix such as -hmos.1 or
           # -alpha.1 passes the loose SDK regex but risks review rejection.
           if ! printf '%s' "$version" | grep -Eq '^[0-9]+(\.[0-9]+){1,3}$'; then
-            echo "::error::version_name must be 2 to 4 dot-separated numbers, e.g. 0.5.0.1 (got '$version')"
+            echo "::error::version_name must be 2 to 4 dot-separated numbers, e.g. 0.6.0.1 (got '$version')"
             exit 1
           fi
 
@@ -150,7 +150,7 @@ jobs:
           fi
 
           # Default to v<version_name>; a tag is also where the channel marker that versionName
-          # cannot hold belongs, e.g. v0.5.0.1 or v0.5.0.1-hmos.alpha.
+          # cannot hold belongs, e.g. v0.6.0.1 or v0.6.0.1-hmos.alpha.
           tag="$INPUT_RELEASE_TAG"
           if [ -z "$tag" ]; then
             tag="v$version"
@@ -339,7 +339,7 @@ jobs:
       - name: Set up Rust for native HarmonyOS
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-unknown-linux-ohos,x86_64-unknown-linux-ohos
+          targets: aarch64-unknown-linux-ohos
 
       - name: Build Rust native libraries
         env:

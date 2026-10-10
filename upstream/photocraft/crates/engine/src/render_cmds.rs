@@ -104,8 +104,7 @@ fn draw(s: &mut Session, label: &str, p: &Value, prims: Vec<Prim>, extra: Value)
         if let Some(sel) = &selection {
             clip = clip.intersect(&sel.content_bounds());
         }
-        let l = doc.layer_mut(id).ok_or(EngineError::NoLayer(id))?;
-        let LayerContent::Raster(surf) = &mut l.content else { return Err(EngineError::Other("not a pixel layer".into())) };
+        let surf = crate::commands::paint_surface(doc, id, &Value::Null)?;
         let used = render2::composite(surf, &prims, clip, selection.as_ref());
         surf.prune();
         Ok((id, created, used))
@@ -221,9 +220,10 @@ pub fn specs() -> Vec<CommandSpec> {
 mod tests {
     use super::*;
 
-    fn session(depth: &str) -> Session {
+    fn session(depth: u64) -> Session {
         let mut s = Session::new();
         s.execute("file.new", json!({"width": 160, "height": 120, "depth": depth})).unwrap();
+        assert_eq!(Some(s.active().unwrap().doc.depth), crate::document_preset_cmds::sample_type(depth));
         s.execute("layer.new.layer", json!({})).unwrap();
         s
     }
@@ -239,7 +239,7 @@ mod tests {
 
     #[test]
     fn each_renderer_draws_undoes_and_is_seeded_at_every_depth() {
-        for depth in ["8", "16", "32"] {
+        for depth in [8, 16, 32] {
             for (id, p) in [
                 ("filter.render.flame", json!({})),
                 ("filter.render.tree", json!({"baseTreeType": 7})),
@@ -267,7 +267,7 @@ mod tests {
 
     #[test]
     fn flame_follows_the_work_path() {
-        let mut s = session("8");
+        let mut s = session(8);
         let r = s.execute("filter.render.flame", json!({})).unwrap();
         assert_eq!(r["usedPath"], json!(false));
         s.execute("edit.undo", json!({})).unwrap();
@@ -289,7 +289,7 @@ mod tests {
 
     #[test]
     fn selection_limits_and_new_layer() {
-        let mut s = session("8");
+        let mut s = session(8);
         s.execute("select.rect", json!({"x": 0, "y": 0, "width": 80, "height": 120})).unwrap();
         let r = s.execute("filter.render.tree", json!({"newLayer": true, "baseTreeType": 1, "leavesAmount": 100})).unwrap();
         assert_eq!(r["newLayer"], json!(true));

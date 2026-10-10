@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check both native ABIs and ensure the HAP contains no web runtime snapshot."""
+"""Check the ARM64 native ABI and ensure the HAP contains no web runtime snapshot."""
 import argparse
 import json
 import struct
@@ -39,13 +39,16 @@ def verify_file_open(config: dict, utds: dict) -> None:
 def verify(path: Path) -> None:
     with zipfile.ZipFile(path) as archive:
         names = archive.namelist()
-        for abi, machine in [('arm64-v8a', 183), ('x86_64', 62)]:
+        for abi, machine in [('arm64-v8a', 183)]:
             name = f'libs/{abi}/libphotocraft.so'
             if name not in names:
                 raise ValueError(f'missing {name}')
             data = archive.read(name)
             if data[:5] != b'\x7fELF\x02' or struct.unpack_from('<H', data, 18)[0] != machine:
                 raise ValueError(f'incorrect ELF architecture: {name}')
+        native_libraries = {name for name in names if name.startswith('libs/') and name.endswith('/libphotocraft.so')}
+        if native_libraries != {'libs/arm64-v8a/libphotocraft.so'}:
+            raise ValueError(f'non-ARM64 native libraries remain: {native_libraries}')
         forbidden = [name for name in names if name.lower().endswith(('.wasm', '.html', '.js'))]
         if forbidden:
             raise ValueError(f'web assets remain: {forbidden}')

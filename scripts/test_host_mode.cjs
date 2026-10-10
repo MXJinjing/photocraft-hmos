@@ -28,6 +28,7 @@ function load(name, dependencies) {
       '@kit.AbilityKit': { UIAbility: class {} },
       '@kit.ArkUI': {}, '@kit.BasicServicesKit': {},
       '../SystemBars': { LOADING_CHROME: '#FF262626', paintWindow() {}, applySystemBars() {} },
+      '../WindowChrome': { WindowChrome: class { start() {} stop() {} refresh() {} } },
       '../input/NativeCursorAdapter': { restorePointerVisibility() {} },
       '../openInbox': { acceptOpenWant: want => calls.push(['open', want.uri]) },
       '../closeGuard': { resetCloseGuard() {}, requestWindowClose() {} },

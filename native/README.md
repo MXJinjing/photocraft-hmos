@@ -9,12 +9,12 @@ The adapter is a separate Cargo workspace, outside the upstream subtree. Upstrea
 Install a Rust toolchain satisfying upstream's rust-version and both targets:
 
 ```sh
-rustup target add aarch64-unknown-linux-ohos x86_64-unknown-linux-ohos
+rustup target add aarch64-unknown-linux-ohos
 scripts/dev.sh build
 scripts/dev.sh run
 ```
 
-`scripts/build_native.sh` builds ARM64 and x86_64 static libraries. hvigor/CMake links them into `libphotocraft.so`. Local DevEco debug signing remains in the ignored root build profile. `scripts/verify_native.py <HAP>` verifies the two ELF architectures and rejects packaged HTML, JavaScript or WASM.
+`scripts/build_native.sh` builds the ARM64 static library. hvigor/CMake links it into `libphotocraft.so`. Local DevEco debug signing remains in the ignored root build profile. `scripts/verify_native.py <HAP>` verifies the ARM64 ELF architecture and rejects packaged HTML, JavaScript or WASM.
 
 The scripts read the existing ignored `scripts/dev.local.env`. Set `PHOTOCRAFT_NATIVE_SDK` to the SDK's `openharmony/native` directory when necessary. `PHOTOCRAFT_NATIVE_TARGETS` can select one Rust target for standalone build experiments; a full HAP build requires both. `PHOTOCRAFT_RUST_PROFILE` is release by default; standalone debug libraries do not satisfy the default CMake release path.
 

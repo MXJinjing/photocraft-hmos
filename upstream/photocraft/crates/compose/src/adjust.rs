@@ -6,7 +6,7 @@
 use photocraft_color::SampleType;
 use photocraft_color::convert::{D50, SRGB_TO_XYZ_D50, XYZ_D50_TO_SRGB, mat3_mul, rgb_to_gray, srgb_to_linear};
 use photocraft_doc::Adjustment;
-use photocraft_doc::adjust::{CurvePoint, HueRange, LevelsChannel, ToneSpace};
+use photocraft_doc::adjust::{CurvePoint, HueRange, LevelsChannel, ToneSpace, lut3d_len};
 
 use crate::Buffer;
 
@@ -143,12 +143,8 @@ pub fn apply_depth(adj: &Adjustment, buf: &mut Buffer, transfer: Transfer, depth
         }
         Adjustment::Vibrance { vibrance, saturation } => {
             let (v, s) = (*vibrance / 100.0, *saturation / 100.0);
-            map_rgb(buf, |c| {
-                let (h, sat, l) = rgb_to_hsl(c);
-                let boost = v * (1.0 - sat); // less saturated colours move more
-                let ns = (sat * (1.0 + s) + boost * sat.max(0.1)).clamp(0.0, 1.0);
-                hsl_to_rgb(h, ns, l)
-            })
+            let hi = if depth == Some(SampleType::F32) { f32::INFINITY } else { 1.0 };
+            map_rgb(buf, |c| vibrance_px(c, v, s, transfer, hi))
         }
         Adjustment::ChannelMixer { matrix, monochrome } => map_rgb(buf, |c| {
             let mix = |row: &[f32; 4]| (row[0] * c[0] + row[1] * c[1] + row[2] * c[2] + row[3]).clamp(0.0, 1.0);
@@ -203,7 +199,7 @@ pub fn apply_depth(adj: &Adjustment, buf: &mut Buffer, transfer: Transfer, depth
             }
         }),
         Adjustment::SelectiveColor { relative, adjustments } => map_rgb(buf, |c| selective_color(c, *relative, adjustments)),
-        Adjustment::ColorLookup { lut: Some(table), size, tetrahedral, dither, .. } if *size >= 2 && table.len() >= (*size as usize).pow(3) * 3 => {
+        Adjustment::ColorLookup { lut: Some(table), size, tetrahedral, dither, .. } if lut3d_len(*size).is_some_and(|len| table.len() >= len) => {
             let (n, w, x0, y0) = (*size as usize, buf.rect.width().max(1) as usize, buf.rect.x0, buf.rect.y0);
             for (i, p) in buf.px.iter_mut().enumerate() {
                 if p[3] <= 0.0 {
@@ -222,10 +218,10 @@ pub fn apply_depth(adj: &Adjustment, buf: &mut Buffer, transfer: Transfer, depth
     }
 }
 
-/// Per-channel LUTs of a Levels or Curves adjustment, each channel's record composed with the
-/// master (Photoshop applies the channel curve first, then the composite). Four rows: the three
-/// `per_channel` channels then black (identity unless the space is CMYK). In Lab there is no
-/// composite record, so the master is ignored.
+/// Per-channel LUTs of a Levels or Curves adjustment: each channel's record first, then the
+/// master (composite) record, as Photoshop does (psd-tools levels_rgb.psd and curves_rgb.psd,
+/// #975). Four rows: the three `per_channel` channels then black
+/// (identity unless the space is CMYK). In Lab there is no composite record, so the master is ignored.
 pub fn tone_luts(adj: &Adjustment) -> [Vec<f32>; 4] {
     tone_luts_q(adj, None)
 }
@@ -238,7 +234,7 @@ pub fn tone_luts_q(adj: &Adjustment, quantum: Option<f32>) -> [Vec<f32>; 4] {
         Adjustment::Levels { master, per_channel, space, black } => {
             let ident = LevelsChannel::default();
             let m = if *space == ToneSpace::Lab { &ident } else { master };
-            let row = |c: &LevelsChannel| (0..LUT_SIZE).map(|k| levels_q(c, levels_q(m, x(k), quantum), quantum)).collect();
+            let row = |c: &LevelsChannel| (0..LUT_SIZE).map(|k| levels_q(m, levels_q(c, x(k), quantum), quantum)).collect();
             [row(&per_channel[0]), row(&per_channel[1]), row(&per_channel[2]), row(if *space == ToneSpace::Cmyk { black } else { &ident })]
         }
         Adjustment::Curves { master, per_channel, space, black } => {
@@ -256,7 +252,7 @@ pub fn tone_luts_depth(adj: &Adjustment, depth: Option<SampleType>) -> [Vec<f32>
     match (adj, depth) {
         (Adjustment::Levels { master, per_channel, space: ToneSpace::Rgb, .. }, Some(SampleType::F32)) => {
             let x = |k: usize| k as f32 / (LUT_SIZE - 1) as f32;
-            let row = |c: &LevelsChannel| (0..LUT_SIZE).map(|k| levels_float(c, levels_float(master, x(k))).clamp(0.0, 1.0)).collect();
+            let row = |c: &LevelsChannel| (0..LUT_SIZE).map(|k| levels_float(master, levels_float(c, x(k))).clamp(0.0, 1.0)).collect();
             [row(&per_channel[0]), row(&per_channel[1]), row(&per_channel[2]), (0..LUT_SIZE).map(x).collect()]
         }
         _ => tone_luts_q(adj, depth.and_then(crate::adjustment_quantum)),
@@ -477,6 +473,90 @@ pub fn photo_filter_matrix(color: [f32; 3], density: f32, normalize_y: bool) -> 
     }
     // XYZ_D50_TO_SRGB · diag(s) · SRGB_TO_XYZ_D50
     std::array::from_fn(|r| std::array::from_fn(|c| (0..3).map(|k| XYZ_D50_TO_SRGB[r][k] * s[k] * SRGB_TO_XYZ_D50[k][c]).sum()))
+}
+
+/// Photoshop's Vibrance on one pixel (`v`, `s`: the sliders / 100; `hi`: the sample ceiling).
+///
+/// Measured black-box against Photoshop 25.4 on 7,400-colour charts (8- and 16-bit; sRGB, Adobe RGB
+/// and ProPhoto documents). Both sliders work in linear light through the document's tone curve,
+/// Vibrance first, then Saturation:
+/// - Saturation moves each colour away from (or towards) the grey `0.288 R + 0.712 G` (blue has no
+///   weight, in every profile) by `1 + s`, clipping each channel: within 0.07/255 at every `s`.
+/// - Vibrance is an HSV change in linear light that keeps the hue: see [`vibrance_lin`].
+pub fn vibrance_px(c: [f32; 3], v: f32, s: f32, transfer: Transfer, hi: f32) -> [f32; 3] {
+    let mut l = c.map(|x| transfer.decode(x));
+    if v != 0.0 {
+        l = vibrance_lin(l, v);
+    }
+    if s != 0.0 {
+        let g = VIBRANCE_GREY[0] * l[0] + VIBRANCE_GREY[1] * l[1];
+        l = l.map(|x| (g + (1.0 + s) * (x - g)).clamp(0.0, hi));
+    }
+    l.map(|x| transfer.encode(x.clamp(0.0, hi)))
+}
+
+/// Weights of the grey Photoshop's Vibrance › Saturation desaturates to (R, G; blue has none).
+pub const VIBRANCE_GREY: [f32; 2] = [0.288, 0.712];
+
+/// Positive Vibrance's saturation boost, fitted to the measurements (see [`vibrance_lin`]).
+pub const VIBRANCE_BOOST: [f32; 7] = [0.5001, 0.0887, 0.4374, 0.7573, -0.8113, 0.5154, 2.8026];
+
+/// The Vibrance slider (`v` in [-1, 1]) on a linear-light pixel. With `t = 1 - min/max` (HSV
+/// saturation) and `V = max`:
+/// - below 0 (`a = -v`): `t' = t (1 - a/4) (1 - a + a t (1 + t) / 2)` and
+///   `V' = V - a t (1 - t) (2 - t + t²) V (1 - V)`; exact (0.2/255 mean) except in the deepest
+///   shadows (`V` under 0.05), which Photoshop desaturates less.
+/// - above 0: `V' = V + v/4 t (1 - t) (2 - t + t²) V (1 - V)` (exact) and a saturation boost that
+///   grows as `t` and `V` fall, damped on reds and skin (HSV hue 0–30°, fading out by 45° and in
+///   from 300°): a fit, 0.4 (+10) to 5 (+100) /255 off on average.
+pub fn vibrance_lin(c: [f32; 3], v: f32) -> [f32; 3] {
+    let mx = c[0].max(c[1]).max(c[2]);
+    let mn = c[0].min(c[1]).min(c[2]);
+    if mx <= 0.0 || mx - mn <= 1e-9 {
+        return c;
+    }
+    let t = 1.0 - mn / mx;
+    let shape = t * (1.0 - t) * (2.0 - t + t * t) * mx * (1.0 - mx).max(0.0);
+    let (t2, v2) = if v < 0.0 {
+        let a = -v;
+        (t * (1.0 - a / 4.0) * (1.0 - a + a * t * (1.0 + t) / 2.0), mx - a * shape)
+    } else {
+        let [c0, c1, p, q, r0, ra, rt] = VIBRANCE_BOOST;
+        let w = vibrance_skin(hsv_hue(c, mx, mn));
+        let a = v * (1.0 - w) + 0.64 * v.powf(1.6) * w;
+        let boost = (c0 * a + c1 * a * a) * t.powf(p) * (1.0 - t).powf(q) * ((r0 + ra * a + rt * (1.0 - t)) * (1.0 - mx).max(0.0)).exp();
+        ((t * (1.0 + boost)).min(1.0), mx + v / 4.0 * shape)
+    };
+    let m2 = v2 * (1.0 - t2);
+    let k = (v2 - m2) / (mx - mn);
+    c.map(|x| m2 + (x - mn) * k)
+}
+
+/// How much positive Vibrance treats a hue (degrees) as skin: 1 on 0–30°, fading to 0 by 45° and
+/// in again from 300°.
+fn vibrance_skin(h: f32) -> f32 {
+    if h <= 30.0 {
+        1.0
+    } else if h < 45.0 {
+        (45.0 - h) / 15.0
+    } else if h < 300.0 {
+        0.0
+    } else {
+        (h - 300.0) / 60.0
+    }
+}
+
+/// HSV hue in degrees of `c` (its max `mx` and min `mn` given, `mx > mn`).
+fn hsv_hue(c: [f32; 3], mx: f32, mn: f32) -> f32 {
+    let d = mx - mn;
+    let h = if mx == c[0] {
+        ((c[1] - c[2]) / d).rem_euclid(6.0)
+    } else if mx == c[1] {
+        (c[2] - c[0]) / d + 2.0
+    } else {
+        (c[0] - c[1]) / d + 4.0
+    };
+    h * 60.0
 }
 
 /// Photoshop posterize: `n` equal input bins over 0..=255, output levels
@@ -738,6 +818,70 @@ mod tone_tests {
         let rect = Rect::new(0, 0, 8, 8);
         let px = (0..64).map(|i| [((i % 8) as f32) / 7.0, ((i / 8) as f32) / 7.0, 0.3, 1.0]).collect();
         Buffer { rect, px }
+    }
+
+    #[test]
+    fn color_lookup_with_an_overflowing_stored_size_is_the_identity() {
+        // A stored document's size is untrusted: (2²²)³ × 3 overflows, which once wrapped past
+        // the table-length guard and indexed out of bounds.
+        for size in [1 << 22, u32::MAX] {
+            let a = Adjustment::ColorLookup { name: "x".into(), lut: Some(std::sync::Arc::new(vec![0.5; 24])), size, tetrahedral: false, dither: false };
+            let mut b = ramp();
+            apply(&a, &mut b);
+            assert_eq!(b.px, ramp().px, "size {size}");
+        }
+    }
+
+    #[test]
+    fn levels_and_curves_apply_each_channel_before_the_master() {
+        // These two affine tone adjustments describe the same mapping:
+        // channel(x) = 1 / 2 + x / 2, then master(x) = x / 2, so 0 maps to 0.25.
+        // Levels used to apply the master first (0 mapped to 0.5).
+        let line = |a: f32, b: f32| vec![CurvePoint { input: 0.0, output: a }, CurvePoint { input: 1.0, output: b }];
+        let levels = Adjustment::Levels {
+            master: LevelsChannel { out_white: 0.5, ..Default::default() },
+            per_channel: std::array::from_fn(|_| LevelsChannel { out_black: 0.5, ..Default::default() }),
+            space: ToneSpace::Rgb,
+            black: Default::default(),
+        };
+        let curves =
+            Adjustment::Curves { master: line(0.0, 0.5), per_channel: std::array::from_fn(|_| line(0.5, 1.0)), space: ToneSpace::Rgb, black: Vec::new() };
+        for depth in [None, Some(SampleType::U8), Some(SampleType::U16), Some(SampleType::F32)] {
+            let ll = tone_luts_depth(&levels, depth);
+            let cl = tone_luts_depth(&curves, depth);
+            for channel in 0..3 {
+                for index in [0, LUT_SIZE / 4, LUT_SIZE / 2, 3 * LUT_SIZE / 4, LUT_SIZE - 1] {
+                    assert!(
+                        (ll[channel][index] - cl[channel][index]).abs() < 0.01,
+                        "{depth:?} channel {channel} sample {index}: Levels {} vs Curves {}",
+                        ll[channel][index],
+                        cl[channel][index]
+                    );
+                }
+            }
+            assert!((cl[0][0] - 0.25).abs() < 0.01, "{depth:?}: {}", cl[0][0]);
+
+            // Exercise the compositor's real adjustment path, not only its LUT builder.
+            for adj in [&levels, &curves] {
+                let mut pixel = Buffer { rect: Rect::new(0, 0, 1, 1), px: vec![[0.0, 0.0, 0.0, 1.0]] };
+                apply_depth(adj, &mut pixel, Transfer::Srgb, depth);
+                for channel in 0..3 {
+                    assert!((pixel.px[0][channel] - 0.25).abs() < 0.01, "{depth:?}: {adj:?} rendered {:?}", pixel.px[0]);
+                }
+            }
+        }
+
+        // Lab has no composite/master tone record.
+        let mut lab = curves.clone();
+        let mut lab_without_master = curves;
+        if let Adjustment::Curves { space, .. } = &mut lab {
+            *space = ToneSpace::Lab;
+        }
+        if let Adjustment::Curves { master, space, .. } = &mut lab_without_master {
+            *space = ToneSpace::Lab;
+            *master = line(0.0, 1.0);
+        }
+        assert_eq!(tone_luts(&lab), tone_luts(&lab_without_master));
     }
 
     #[test]

@@ -60,7 +60,15 @@ pub(crate) fn unhex(s: &str) -> Result<Vec<u8>> {
     }
     (0..s.len())
         .step_by(2)
-        .map(|i| u8::from_str_radix(s.get(i..i + 2).unwrap_or("x"), 16).map_err(|_| FormatError::corrupt(format!("bad hex `{s}`"))))
+        .map(|i| {
+            let pair = s.get(i..i + 2).unwrap_or("x");
+            // `from_str_radix` accepts a leading `+`; reject anything that is not
+            // two ASCII hex digits so a malformed string fails as corrupt (#1818).
+            if !pair.bytes().all(|b| b.is_ascii_hexdigit()) {
+                return Err(FormatError::corrupt(format!("bad hex `{s}`")));
+            }
+            u8::from_str_radix(pair, 16).map_err(|_| FormatError::corrupt(format!("bad hex `{s}`")))
+        })
         .collect()
 }
 
@@ -197,6 +205,7 @@ fn layer_m(l: &Layer, sink: &mut dyn Sink) -> LayerM {
         link_group: l.link_group,
         excluded_channels: l.excluded_channels,
         blend_if: l.blend_if.clone(),
+        advanced: l.advanced,
         video: l.video.as_ref().map(|v| video_m(v, sink)),
     }
 }
@@ -223,6 +232,7 @@ pub(crate) fn doc_m(d: &Document, sink: &mut dyn Sink) -> DocM {
         metadata: MetadataM {
             xmp: d.metadata.xmp.clone(),
             exif: opt_blob(&d.metadata.exif, sink),
+            text: d.metadata.text.clone(),
             psd_resources: d.metadata.psd_resources.iter().map(|(id, n, b)| (*id, n.clone(), sink.blob(b))).collect(),
             psd_global_blocks: d.metadata.psd_global_blocks.iter().map(|(s, k, b)| (hex(s), hex(k), sink.blob(b))).collect(),
         },
@@ -309,7 +319,13 @@ impl Loader<'_> {
         swap_to_le(&mut dp, f.sample);
         let mut s = Surface::with_default(f, &decode_pixel(&f, &dp));
         let len = tile_len(&f);
+        // Both edges of a tile's rectangle must fit in i32 (`TileCoord::rect` multiplies by the
+        // tile size): -8388608 ..= 8388606. A damaged manifest can name any index (#938).
+        let fits = |i: i32| i.checked_mul(TILE_SIZE).is_some() && i.checked_add(1).and_then(|e| e.checked_mul(TILE_SIZE)).is_some();
         for t in &m.tiles {
+            if !fits(t.tx) || !fits(t.ty) {
+                return Err(FormatError::corrupt(format!("tile ({}, {}) is outside the coordinate range", t.tx, t.ty)));
+            }
             let c = TileCoord::new(t.tx, t.ty);
             if s.tile(c).is_some() {
                 return Err(FormatError::corrupt(format!("duplicate tile ({}, {})", t.tx, t.ty)));
@@ -488,6 +504,7 @@ impl Loader<'_> {
             link_group: m.link_group,
             excluded_channels: m.excluded_channels,
             blend_if: m.blend_if.clone(),
+            advanced: m.advanced,
             video: m.video.as_ref().map(|v| self.video(v)).transpose()?,
         })
     }
@@ -499,7 +516,13 @@ impl Loader<'_> {
             channels.push(self.channel(c)?);
         }
         let quick_mask = m.quick_mask.as_ref().map(|c| self.channel(c)).transpose()?;
-        let mut md = Metadata { xmp: m.metadata.xmp.clone(), exif: self.opt_blob(&m.metadata.exif)?, psd_resources: Vec::new(), psd_global_blocks: Vec::new() };
+        let mut md = Metadata {
+            xmp: m.metadata.xmp.clone(),
+            exif: self.opt_blob(&m.metadata.exif)?,
+            text: m.metadata.text.clone(),
+            psd_resources: Vec::new(),
+            psd_global_blocks: Vec::new(),
+        };
         for (id, n, h) in &m.metadata.psd_resources {
             md.psd_resources.push((*id, n.clone(), self.fetch.blob(h)?));
         }
@@ -584,4 +607,38 @@ pub(crate) fn reserve_ids_through(max: u64) -> bool {
     }
     photocraft_doc::ensure_ids_above(max);
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unhex_rejects_leading_plus() {
+        // `u8::from_str_radix` accepts a leading `+`; unhex must not (#1818).
+        assert!(unhex("+5").is_err());
+        assert!(unhex("ab+5").is_err());
+        assert!(unhex("+5cd").is_err());
+    }
+
+    #[test]
+    fn unhex_rejects_non_hex_characters() {
+        assert!(unhex("zz").is_err());
+        assert!(unhex(" 1").is_err());
+        assert!(unhex("g0").is_err());
+    }
+
+    #[test]
+    fn unhex_accepts_valid_hex() {
+        assert_eq!(unhex("00").unwrap(), vec![0x00]);
+        assert_eq!(unhex("ff").unwrap(), vec![0xff]);
+        assert_eq!(unhex("0123456789abcdef").unwrap(), vec![0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef]);
+        assert_eq!(unhex("FF").unwrap(), vec![0xff]);
+    }
+
+    #[test]
+    fn unhex_rejects_odd_length() {
+        assert!(unhex("0").is_err());
+        assert!(unhex("abc").is_err());
+    }
 }

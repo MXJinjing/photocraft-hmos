@@ -11,10 +11,15 @@ use photocraft_color::BlendMode;
 use serde::{Deserialize, Serialize};
 
 use crate::mixer::MixerSettings;
-use crate::tile::GrayTile;
+use crate::tile::{GrayTile, StoredTile};
 
 /// Largest brush diameter accepted by the rasterizer and brush controls.
 pub const MAX_BRUSH_SIZE: f32 = 5000.0;
+
+/// Largest Scatter amount (primary and Dual Brush): 10 = 1000 %, the Brush Settings slider's top.
+/// Beyond it a dab could land arbitrarily far away, and an unbounded amount overflowed the dab
+/// centre to infinity (#977).
+pub const MAX_SCATTER: f32 = 10.0;
 
 /// What drives a dynamic parameter (Photoshop's "Control" pop-ups).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -67,7 +72,10 @@ impl Dynamic {
 }
 
 /// The brush tip bitmap source.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+///
+/// A loaded [`TipShape::Stored`] tip serialises as `sampled` (its full bitmap), so tool presets,
+/// recorded actions and `brush.get` see the same JSON as for an embedded tip.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum TipShape {
     /// Computed round/elliptical tip (hardness, angle, roundness).
@@ -75,6 +83,50 @@ pub enum TipShape {
     Round,
     /// Sampled tip: grayscale bitmap where 1 = full paint. Scaled so its larger side equals `size`.
     Sampled(GrayTile),
+    /// A sampled tip its owner (the preset store) keeps outside the settings and loads on demand.
+    Stored(StoredTile),
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+enum TipShapeOut<'a> {
+    Round,
+    Sampled(&'a GrayTile),
+    Stored(&'a StoredTile),
+}
+
+impl Serialize for TipShape {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        match self {
+            TipShape::Round => TipShapeOut::Round,
+            TipShape::Sampled(g) => TipShapeOut::Sampled(g),
+            TipShape::Stored(r) => match r.full.as_deref() {
+                Some(g) => TipShapeOut::Sampled(g),
+                None => TipShapeOut::Stored(r),
+            },
+        }
+        .serialize(s)
+    }
+}
+
+impl TipShape {
+    /// The bitmap a sampled tip paints with (a stored tip's full bitmap, or its preview while it
+    /// isn't loaded); `None` for a computed tip.
+    pub fn bitmap(&self) -> Option<&GrayTile> {
+        match self {
+            TipShape::Round => None,
+            TipShape::Sampled(g) => Some(g),
+            TipShape::Stored(r) => Some(r.bitmap()),
+        }
+    }
+    /// The tip's real pixel size (a stored tip's, not its preview's); `None` for a computed tip.
+    pub fn bitmap_size(&self) -> Option<(u32, u32)> {
+        match self {
+            TipShape::Round => None,
+            TipShape::Sampled(g) => Some((g.width, g.height)),
+            TipShape::Stored(r) => Some((r.width, r.height)),
+        }
+    }
 }
 
 /// Shape Dynamics.
@@ -153,11 +205,52 @@ pub enum PatternStyle {
 }
 
 /// A texture pattern: a procedural generator or an explicit grayscale tile (tiled infinitely).
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+/// A loaded [`Pattern::Stored`] tile serialises as `tile`, like [`TipShape::Stored`].
+#[derive(Clone, Debug, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Pattern {
-    Procedural { style: PatternStyle, size: u32, seed: u32 },
+    Procedural {
+        style: PatternStyle,
+        size: u32,
+        seed: u32,
+    },
     Tile(GrayTile),
+    /// A tile its owner (the preset store) keeps outside the settings and loads on demand.
+    Stored(StoredTile),
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+enum PatternOut<'a> {
+    Procedural { style: PatternStyle, size: u32, seed: u32 },
+    Tile(&'a GrayTile),
+    Stored(&'a StoredTile),
+}
+
+impl Serialize for Pattern {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        match self {
+            Pattern::Procedural { style, size, seed } => PatternOut::Procedural { style: *style, size: *size, seed: *seed },
+            Pattern::Tile(g) => PatternOut::Tile(g),
+            Pattern::Stored(r) => match r.full.as_deref() {
+                Some(g) => PatternOut::Tile(g),
+                None => PatternOut::Stored(r),
+            },
+        }
+        .serialize(s)
+    }
+}
+
+impl Pattern {
+    /// The tile a bitmap pattern textures with (a stored tile's full bitmap, or its preview while
+    /// it isn't loaded); `None` for a procedural pattern.
+    pub fn bitmap(&self) -> Option<&GrayTile> {
+        match self {
+            Pattern::Procedural { .. } => None,
+            Pattern::Tile(g) => Some(g),
+            Pattern::Stored(r) => Some(r.bitmap()),
+        }
+    }
 }
 
 impl Default for Pattern {
@@ -362,7 +455,7 @@ pub struct BrushSettings {
     /// Spacing between dabs as a fraction of the diameter.
     pub spacing: f32,
     /// Photoshop's Spacing checkbox. Off: the pointer's speed sets the spacing (one dab every
-    /// [`crate::dynamics::SPEED_SPACING_MS`] of stroke time; without timestamps, one per input point).
+    /// [`crate::dynamics::SPEED_SPACING_MS`] of stroke time; without timestamps, by distance).
     pub spacing_enabled: bool,
     /// Maximum coverage for the whole stroke.
     pub opacity: f32,
@@ -461,17 +554,23 @@ impl Default for BrushSettings {
 }
 
 impl BrushSettings {
-    /// Copy the settings with the primary and dual diameters constrained for rasterization.
+    /// Copy the settings with the primary and dual diameters and Scatter amounts constrained for
+    /// rasterization.
     ///
     /// Engine commands reject out-of-range values; this is a final guard for direct users of the
-    /// infallible paint API, which must not turn malformed brush dimensions into giant allocations.
+    /// infallible paint API, which must not turn malformed brush dimensions into giant allocations,
+    /// nor a huge Scatter amount into non-finite dab centres (#977).
     pub fn bounded_for_render(&self) -> Self {
         let safe_size = |size: f32| {
             if size.is_finite() { size.clamp(0.5, MAX_BRUSH_SIZE) } else { 0.5 }
         };
+        // NaN scatters nothing (as before: it never passed the `> 0` check); infinity is the maximum.
+        let safe_scatter = |amount: f32| if amount.is_nan() { 0.0 } else { amount.clamp(0.0, MAX_SCATTER) };
         let mut brush = self.clone();
         brush.size = safe_size(brush.size);
         brush.dual_brush.size = safe_size(brush.dual_brush.size);
+        brush.scattering.scatter.jitter = safe_scatter(brush.scattering.scatter.jitter);
+        brush.dual_brush.scatter = safe_scatter(brush.dual_brush.scatter);
         brush
     }
 
@@ -543,4 +642,8 @@ pub struct BrushPreset {
     /// Preset group (folder) in the Brushes panel, e.g. "General" or an imported file's name.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub group: String,
+    /// Folders inside `group`, outermost first (empty = directly in the group), like the nested
+    /// folders of Photoshop's Brushes panel; e.g. an imported `.abr` file's own folders.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub folder: Vec<String>,
 }

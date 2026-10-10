@@ -75,6 +75,34 @@ fn zoom_presets_and_fit_layers() {
     assert!(app.ui.views[0].zoom > 10.0);
 }
 
+/// #1718 review: Print Size and Fit Layers on Screen go through `zoom_levels` too, so they reach
+/// past the old 6400 % cap and stop at 12800 %.
+#[test]
+fn print_size_and_fit_layers_use_the_whole_zoom_range() {
+    let (mut app, ctx) = app_with(1);
+    // 72 / 1 ppi = 7200 %: within the range now (it was cut to 6400 %).
+    app.run("image.imageSize", json!({"resolution": 1, "resample": "none"})).unwrap();
+    menu(&mut app, &ctx, "view.printSize", json!({})).unwrap();
+    assert_eq!(app.ui.views[0].zoom, 72.0);
+    // A 1 px layer fills the view only far beyond 12800 %: Fit stops at the limit.
+    app.run("layer.new.layer", json!({})).unwrap();
+    app.run("select.rect", json!({"x": 40, "y": 30, "width": 1, "height": 1})).unwrap();
+    app.run("edit.fill", json!({"color": "#ff0000"})).unwrap();
+    menu(&mut app, &ctx, "view.fitLayersOnScreen", json!({})).unwrap();
+    assert_eq!(app.ui.views[0].zoom, crate::zoom_levels::MAX);
+}
+
+/// Print Size divides the document's ppi into the Screen Resolution preference
+/// (Units & Rulers), not into a constant 72 ppi.
+#[test]
+fn print_size_uses_the_screen_resolution_preference() {
+    let (mut app, ctx) = app_with(1);
+    app.run("image.imageSize", json!({"resolution": 1, "resample": "none"})).unwrap();
+    app.run("prefs.set", json!({"path": "unitsAndRulers.screenResolution", "value": 96.0})).unwrap();
+    menu(&mut app, &ctx, "view.printSize", json!({})).unwrap();
+    assert_eq!(app.ui.views[0].zoom, 96.0, "96 ppi screen / 1 ppi document = 9600 %");
+}
+
 #[test]
 fn arrange_layouts_floating_windows_and_matching() {
     let (mut app, ctx) = app_with(3);
@@ -171,4 +199,81 @@ fn engine_commands_open_their_dialogs() {
     assert_eq!(app.ui.views[0].zoom, 4.0);
     crate::menus::invoke_unguarded(&mut app, &ctx, "file.closeAll", json!({})).unwrap();
     assert!(app.ui.views.is_empty() && app.session.documents().is_empty());
+}
+
+#[test]
+fn apply_image_and_calculations_open_dialogs_without_editing() {
+    for id in ["image.applyImage", "image.calculations"] {
+        let (mut app, ctx) = app_with(1);
+        let revision = app.session.active().unwrap().revision;
+        let dialog = menu(&mut app, &ctx, id, json!({})).unwrap()["dialog"].as_u64().unwrap_or_else(|| panic!("{id} did not open a dialog"));
+        let fields = &app.ui.dialog_mut(dialog).unwrap().fields;
+        assert_eq!(fields["__command"], id, "{id} opened the wrong dialog");
+        assert_eq!(app.session.active().unwrap().revision, revision, "{id} edited before confirmation");
+    }
+}
+
+#[test]
+fn new_guide_layout_remembers_successful_values_not_cancelled_edits() {
+    let (mut app, ctx) = app_with(1);
+    let first = menu(&mut app, &ctx, "view.newGuideLayout", json!({})).unwrap()["dialog"].as_u64().unwrap();
+    assert_eq!(app.ui.dialog_mut(first).unwrap().fields["columns"], 8);
+    assert_eq!(app.ui.dialog_mut(first).unwrap().fields["gutter"], 20);
+    for (key, value) in [("columns", json!(2)), ("gutter", json!(0)), ("rows", json!(2)), ("rowGutter", json!(0))] {
+        app.ui.dialog_mut(first).unwrap().fields.insert(key.into(), value);
+    }
+    crate::dialogs::confirm(&mut app, first).unwrap();
+
+    let second = menu(&mut app, &ctx, "view.newGuideLayout", json!({})).unwrap()["dialog"].as_u64().unwrap();
+    let fields = &app.ui.dialog_mut(second).unwrap().fields;
+    assert_eq!(fields["columns"], 2);
+    assert_eq!(fields["gutter"], 0);
+    assert_eq!(fields["rows"], 2);
+    assert_eq!(fields["rowGutter"], 0);
+    assert_eq!(fields["clearExisting"], false);
+    // A cancelled edit must not replace the last successfully used values.
+    app.ui.dialog_mut(second).unwrap().fields.insert("columns".into(), json!(9));
+    app.ui.close_dialog(second);
+    let third = menu(&mut app, &ctx, "view.newGuideLayout", json!({})).unwrap()["dialog"].as_u64().unwrap();
+    assert_eq!(app.ui.dialog_mut(third).unwrap().fields["columns"], 2);
+
+    // The remembered state is part of the serializable UI state.
+    let json_state = serde_json::to_value(&app.ui).unwrap();
+    assert_eq!(json_state["view"]["guide_layout"]["columns"], 2);
+    let restored: crate::state::UiState = serde_json::from_value(json_state).unwrap();
+    assert_eq!(restored.view.guide_layout["rows"], 2);
+}
+
+#[test]
+fn new_guide_layout_does_not_remember_a_failed_command() {
+    let (mut app, _) = app_with(0);
+    let id = front(&mut app, "view.newGuideLayout", &json!({})).unwrap().unwrap()["dialog"].as_u64().unwrap();
+    app.ui.dialog_mut(id).unwrap().fields.insert("columns".into(), json!(3));
+    assert!(crate::dialogs::confirm(&mut app, id).is_err());
+    assert_eq!(app.ui.view.guide_layout["columns"], 8);
+}
+
+#[test]
+fn lookup_export_dialog_uses_the_current_adjustment_selection() {
+    let (mut app, _ctx) = app_with(1);
+    app.run("layer.newAdjustmentLayer.invert", json!({})).unwrap();
+    let current = app.session.active().unwrap().active_layer.unwrap();
+    let opened = front(&mut app, "file.export.colorLookupTables", &json!({})).unwrap().unwrap();
+    let id = opened["dialog"].as_u64().unwrap();
+    let dialog = &app.ui.dialogs.last().unwrap().fields;
+    assert_eq!(dialog["scope"], "selected");
+    assert_eq!(dialog["size"], 33);
+    assert_eq!(dialog["__choices"]["scope"], json!(["all", "selected"]));
+    app.ui.close_dialog(id);
+
+    app.run("layer.new.layer", json!({"name": "Unrelated pixels"})).unwrap();
+    let opened = front(&mut app, "file.export.colorLookupTables", &json!({})).unwrap().unwrap();
+    let id = opened["dialog"].as_u64().unwrap();
+    assert_eq!(app.ui.dialogs.last().unwrap().fields["scope"], "all");
+    app.ui.close_dialog(id);
+
+    app.run("layer.select", json!({"layer": current})).unwrap();
+    let direct = app.run("file.export.colorLookupTables", json!({"size": 3, "scope": "selected"})).unwrap();
+    assert_eq!(direct["layerCount"], 1);
+    assert!(direct["cube"].as_str().unwrap().contains("LUT_3D_SIZE 3"));
 }

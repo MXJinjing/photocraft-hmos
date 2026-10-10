@@ -396,7 +396,7 @@ pub fn mac_layout(bar: &MenuBar, lang: Lang) -> Layout {
             if free {
                 hide.shortcut = Some("Ctrl+Cmd+H".into());
             }
-            let resolution = if free { "Hide moves to ⌃⌘H, as in Photoshop" } else { "Hide has no shortcut" };
+            let resolution = if free { "Hide moves to ⌃⌘H" } else { "Hide has no shortcut" };
             clashes.push(Clash { shortcut: "Cmd+H", system: "Hide", command, resolution });
         }
         None => hide.shortcut = Some("Cmd+H".into()),
@@ -440,7 +440,7 @@ pub fn mac_layout(bar: &MenuBar, lang: Lang) -> Layout {
             if free {
                 it.shortcut = Some("Ctrl+Cmd+M".into());
             }
-            let resolution = if free { "Minimize moves to ⌃⌘M, as in Photoshop" } else { "Minimize has no shortcut" };
+            let resolution = if free { "Minimize moves to ⌃⌘M" } else { "Minimize has no shortcut" };
             clashes.push(Clash { shortcut: "Cmd+M", system: "Minimize", command, resolution });
             Node::Item(it)
         }
@@ -633,12 +633,23 @@ impl NativeMenu {
 
     /// Before egui sees this frame's input: key equivalents become the key presses they were,
     /// and clicks wait for [`NativeMenu::run`].
+    ///
+    /// AppKit takes only the key-down: winit still delivers the key-up (it forwards key-ups while
+    /// ⌘ is held). So a key equivalent adds just its press, ahead of its key-up when that is
+    /// already queued. A second, made-up release made ⌘V paste three times (#1638): a ⌘V release
+    /// without a press is how an image paste reaches us (see [`crate::shortcuts::clipboard_keys`]).
     pub fn raw_input(&mut self, raw: &mut egui::RawInput) {
         for e in self.backend.drain() {
             match e {
                 Event::Key(chord) => {
-                    raw.events.extend(chord.key_event(true));
-                    raw.events.extend(chord.key_event(false));
+                    if let Some(press @ egui::Event::Key { key: pressed_key, .. }) = chord.key_event(true) {
+                        let at = raw
+                            .events
+                            .iter()
+                            .position(|e| matches!(e, egui::Event::Key { key, pressed: false, .. } if *key == pressed_key))
+                            .unwrap_or(raw.events.len());
+                        raw.events.insert(at, press);
+                    }
                 }
                 Event::Click(id) => self.clicks.push(id),
             }
@@ -654,6 +665,10 @@ pub fn run(app: &mut PhotocraftApp, ctx: &egui::Context) {
     for id in clicks {
         if id == MINIMIZE {
             ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+            continue;
+        }
+        // The rows are disabled while a dialog is open; a click that raced the update is dropped.
+        if !crate::menus::modal_allows(app, &id) {
             continue;
         }
         if let Err(e) = crate::menus::invoke(app, ctx, &id, serde_json::json!({})) {
@@ -674,7 +689,11 @@ pub fn sync(app: &mut PhotocraftApp, ctx: &egui::Context) {
         return;
     }
     let lang = crate::i18n::current();
-    let layout = photocraft_layout(&crate::menus::menu_items(app), lang, &app.session.prefs().interface.language);
+    let mut items = crate::menus::menu_items(app);
+    for it in &mut items {
+        it.enabled &= crate::menus::modal_allows(app, &it.id);
+    }
+    let layout = photocraft_layout(&items, lang, &app.session.prefs().interface.language);
     let Some(menu) = app.services.native_menu.as_mut() else { return };
     if !menu.logged {
         for c in &layout.clashes {
@@ -702,6 +721,7 @@ fn state_hash(app: &PhotocraftApp, input: Option<u64>) -> u64 {
     }
     let ui = &app.ui;
     (&ui.recent_files, &ui.workspace, ui.palette_open, ui.transform.is_some(), ui.text_edit.is_some(), ui.dialogs.len()).hash(&mut h);
+    (app.discard.is_some(), app.camera_raw.is_some()).hash(&mut h);
     serde_json::to_string(&(&ui.panels, &ui.extras, &ui.view, ui.theme, ui.tool)).unwrap_or_default().hash(&mut h);
     s.prefs().interface.language.hash(&mut h);
     h.finish()
@@ -794,7 +814,7 @@ mod tests {
         assert!(!file.children.contains(&Node::Standard(Standard::CloseWindow)), "⌘W stays File › Close");
     }
 
-    /// Themes and Next Theme move from Window to the app menu's Appearance, checked by the theme.
+    /// Themes and the appearance-mode cycle move from Window to the app menu's Appearance.
     #[test]
     fn themes_move_to_the_app_menus_appearance() {
         let mut a = app(false);
@@ -809,7 +829,7 @@ mod tests {
         assert!(themes.contains(&"window.theme.pro".to_string()) && themes.contains(&"window.theme.classic".to_string()));
         assert_eq!(l.bar.find("window.theme.classic").unwrap().checked, Some(true));
         assert_eq!(l.bar.find("window.theme.pro").unwrap().checked, Some(false));
-        assert_eq!(l.bar.find("window.theme.toggle").unwrap().label, "Next Theme");
+        assert_eq!(l.bar.find("window.theme.toggle").unwrap().label, "Next Appearance Mode");
         let window = ids(&l.bar.menu(MenuRole::Window).unwrap().children);
         assert!(!window.iter().any(|id| id.starts_with("window.theme.") || id == "[Theme]"), "{window:?}");
     }
@@ -925,7 +945,7 @@ mod tests {
         if let Some(m) = app.services.native_menu.as_mut() {
             m.raw_input(&mut raw);
         }
-        assert_eq!(raw.events.len(), 2, "a press and a release");
+        assert_eq!(raw.events.len(), 1, "the press: winit delivers the release");
         frame(&ctx, raw, |ui| {
             run(&mut app, ui.ctx());
             crate::shortcuts::handle(&mut app, ui.ctx());
@@ -936,6 +956,42 @@ mod tests {
         // Nothing changed: no rebuild of the rows on the next frame.
         frame(&ctx, egui::RawInput::default(), |ui| sync(&mut app, ui.ctx()));
         assert_eq!(synced.borrow().len(), 1);
+    }
+
+    /// #1638: ⌘V through the Mac menu pasted three layers. AppKit takes the key-down for Edit ›
+    /// Paste's key equivalent, but winit still delivers the key-up (it forwards key-ups while ⌘ is
+    /// held). The menu's press plus that real release must paste once, whether the release
+    /// arrives in a later frame or already sits in the same input as the menu event.
+    #[test]
+    fn a_paste_key_equivalent_pastes_once() {
+        let release = || egui::Event::Key { key: Key::V, physical_key: Some(Key::V), pressed: false, repeat: false, modifiers: Modifiers::COMMAND };
+        for same_frame in [false, true] {
+            let mut app = app(true);
+            let ctx = egui::Context::default();
+            app.run("select.rect", json!({"x": 0, "y": 0, "width": 8, "height": 4})).unwrap();
+            app.run("edit.copy", json!({})).unwrap();
+            let layers = |app: &PhotocraftApp| app.session.active().unwrap().doc.layer_count();
+            let before = layers(&app);
+            let paste = Chord::parse("Cmd+V").unwrap();
+            app.services.native_menu = Some(NativeMenu::new(Box::new(Fake { synced: Default::default(), events: vec![Event::Key(paste)] })));
+            let step = |app: &mut PhotocraftApp, events: Vec<egui::Event>| {
+                let mut raw = egui::RawInput { events, ..Default::default() };
+                eframe::App::raw_input_hook(app, &ctx, &mut raw);
+                frame(&ctx, raw, |ui| {
+                    run(app, ui.ctx());
+                    crate::shortcuts::handle(app, ui.ctx());
+                });
+            };
+            if same_frame {
+                // A quick tap: the real key-up is already queued when the menu event is drained.
+                step(&mut app, vec![egui::Event::ModifiersChanged(Modifiers::COMMAND), release()]);
+            } else {
+                step(&mut app, vec![egui::Event::ModifiersChanged(Modifiers::COMMAND)]);
+                step(&mut app, vec![release()]);
+            }
+            step(&mut app, vec![egui::Event::ModifiersChanged(Modifiers::NONE)]);
+            assert_eq!(layers(&app), before + 1, "one ⌘V pastes one layer (key-up in the same frame: {same_frame})");
+        }
     }
 
     #[test]
@@ -956,6 +1012,38 @@ mod tests {
         assert_eq!(app.ui.panels.layers, !before);
         let bar = synced.borrow().last().cloned().unwrap();
         assert_eq!(bar.find("window.panel.layers").unwrap().checked, Some(!before));
+    }
+
+    /// #1354: a dialog is modal for the menu bar too. Its rows are disabled (view navigation
+    /// aside), and a click that arrives anyway doesn't run under the dialog.
+    #[test]
+    fn an_open_dialog_blocks_menu_clicks_except_view_navigation() {
+        let synced = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let mut app = app(true);
+        let ctx = egui::Context::default();
+        crate::menus::invoke(&mut app, &ctx, "image.imageSize", json!({})).unwrap();
+        assert!(!app.ui.dialogs.is_empty(), "Image Size opened its dialog");
+        let size = |app: &PhotocraftApp| app.session.active().map(|d| (d.doc.size.width, d.doc.size.height));
+        let zoom = app.ui.views[0].zoom;
+        let events = vec![Event::Click("image.imageRotation.90cw".into()), Event::Click("view.zoomIn".into())];
+        app.services.native_menu = Some(NativeMenu::new(Box::new(Fake { synced: synced.clone(), events })));
+        let mut raw = egui::RawInput::default();
+        if let Some(m) = app.services.native_menu.as_mut() {
+            m.raw_input(&mut raw);
+        }
+        frame(&ctx, raw, |ui| {
+            run(&mut app, ui.ctx());
+            sync(&mut app, ui.ctx());
+        });
+        assert_eq!(size(&app), Some((64, 48)), "the rotation didn't run under the dialog");
+        assert!(app.ui.views[0].zoom > zoom, "Zoom In still works under a dialog");
+        let bar = synced.borrow().last().cloned().unwrap();
+        assert!(!bar.find("image.imageRotation.90cw").unwrap().enabled);
+        assert!(bar.find("view.zoomIn").unwrap().enabled);
+        // With the dialog closed the rows come back and a click runs.
+        app.ui.dialogs.clear();
+        frame(&ctx, egui::RawInput::default(), |ui| sync(&mut app, ui.ctx()));
+        assert!(synced.borrow().last().unwrap().find("image.imageRotation.90cw").unwrap().enabled);
     }
 
     /// With the Mac menu bar the title bar draws no menu titles: each title shows once fewer.

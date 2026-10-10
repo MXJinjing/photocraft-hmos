@@ -6,7 +6,7 @@ PhotoCraft's own source specific guidance is in `upstream/photocraft/AGENTS.md`;
 
 ## Repository layout
 
-- `upstream/photocraft/` is the PhotoCraft v0.5.0 Rust source, imported as a Git subtree **without squashing history** and updated from v0.3.0 without squashing. Its own `AGENTS.md` applies to PhotoCraft code. This branch's native self-drawing HarmonyOS host is the user requested integration.
+- `upstream/photocraft/` is the PhotoCraft v0.6.0 Rust source, imported as a Git subtree **without squashing history** and updated through v0.5.0 and v0.6.0 without squashing. Its own `AGENTS.md` applies to PhotoCraft code. This branch's native self-drawing HarmonyOS host is the user requested integration.
 - `third_party/wgpu-hal-30.0.1/` is the verified wgpu-hal 30.0.1 crate with the WebGL uniform block fix. The path override is in `upstream/photocraft/Cargo.toml`.
 - `entry/` is the native HarmonyOS ArkTS/C++ host. `rawfile` contains only file-type metadata; do not restore the web snapshot.
 - `native/rust/` is an independent native adapter workspace. FFI and NativeWindow unsafe code stay here; upstream continues to forbid unsafe. Its lockfile and wgpu-hal patch must stay compatible with upstream.
@@ -22,8 +22,8 @@ PhotoCraft's own source specific guidance is in `upstream/photocraft/AGENTS.md`;
 ## Development loop
 
 1. Edit shared Rust code under `upstream/photocraft/`, native adapter code under `native/rust/`, and platform code under `entry/`.
-2. Install `aarch64-unknown-linux-ohos` and `x86_64-unknown-linux-ohos` for the configured Rust toolchain.
-3. Run `scripts/dev.sh build` for a dual-architecture native HAP, `scripts/dev.sh run` to build/install/launch on exactly one connected simulator/device, or `scripts/dev.sh launch` for an already installed HAP. Tool paths remain in ignored `scripts/dev.local.env`.
+2. Install `aarch64-unknown-linux-ohos` for the configured Rust toolchain.
+3. Run `scripts/dev.sh build` for a ARM64 native HAP, `scripts/dev.sh run` to build/install/launch on exactly one connected simulator/device, or `scripts/dev.sh launch` for an already installed HAP. Tool paths remain in ignored `scripts/dev.local.env`.
 4. Rust and ArkTS/C++ edits require HAP rebuild/deployment. All builds and launches use the native host; there is no ArkWeb page, Trunk server, Web build command or hdc reverse-port mapping. Save documents before scripted relaunch/deployment.
 5. `scripts/package_offline.sh` builds the native HAP; `--install` also installs it. Verify with `scripts/verify_native.py <HAP>`. Preserve imported upstream Web sources and history; they are not part of the HarmonyOS build/development workflow.
 
@@ -41,7 +41,7 @@ HarmonyOS accepts digits and dots only in `AppScope/app.json5` `versionName`. Th
 
 ## CI
 
-`.github/workflows/build-hap.yml` runs only when dispatched by hand and builds dual-architecture Rust libraries and an **unsigned** native HAP from the repository. It takes a required `version_name` (see above), an optional `version_code` that defaults to the run number, a `build_mode` of release or debug, a `runner`, `commandline_tools_url`, and a `publish` choice of `none`, `prerelease` or `release`. It writes the version into `AppScope/app.json5`, generates `build-profile.json5` from the committed `build-profile.example.json5`, builds, and uploads `photocraft-hmos-<version>-<mode>-unsigned.hap` as an artifact. Signing material stays local, so the artifact installs on a simulator only.
+`.github/workflows/build-hap.yml` runs only when dispatched by hand and builds the ARM64 Rust library and an **unsigned** native HAP from the repository. It takes a required `version_name` (see above), an optional `version_code` that defaults to the run number, a `build_mode` of release or debug, a `runner`, `commandline_tools_url`, and a `publish` choice of `none`, `prerelease` or `release`. It writes the version into `AppScope/app.json5`, generates `build-profile.json5` from the committed `build-profile.example.json5`, builds, and uploads `photocraft-hmos-<version>-<mode>-unsigned.hap` as an artifact. Signing material stays local, so the artifact installs on a simulator only.
 
 The workflow's `build_mode` controls both HAP and Rust builds: `debug` uses Cargo's `dev` profile and links from the `debug/` target directory; `release` uses and links the `release/` profile. The workflow passes the same mode to `PHOTOCRAFT_RUST_PROFILE` and CMake's `-DPHOTOCRAFT_RUST_PROFILE`, so these must remain synchronized. Local `scripts/dev.sh build` continues to use release Rust libraries by default.
 
@@ -63,5 +63,5 @@ The HarmonyOS SDK is absent from GitHub-hosted images, and Huawei serves the Dev
 - Verify migrations by comparing `cargo test --offline --manifest-path native/rust/Cargo.toml --lib -- --list` before and after, then run `cargo test --offline --manifest-path native/rust/Cargo.toml`. Native builds must continue to exclude test code.
 
 - Run `cargo metadata --offline` from `upstream/photocraft/` for Rust changes; validate the HarmonyOS branch with native builds. For wrapper changes, build the HAP and verify on the simulator before connecting a real Pad.
-- Native host changes require tests, dual-target Rust builds, a HAP build and simulator verification. Use fixed-size before/after screenshots for UI comparisons.
+- Native host changes require tests, an ARM64 Rust build, a HAP build and simulator verification. Use fixed-size before/after screenshots for UI comparisons.
 - Preserve the existing Save/Save As picker and system browser external link behavior during wrapper changes.

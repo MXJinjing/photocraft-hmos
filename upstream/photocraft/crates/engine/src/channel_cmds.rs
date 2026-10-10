@@ -563,9 +563,12 @@ fn routed(id: &str) -> bool {
         || id.starts_with("image.adjustments.")
         || matches!(id, "paint.stroke" | "paint.pencil" | "paint.bucket" | "paint.gradient" | "paint.mixerBrush" | "edit.fill" | "image.applyImage")
         || crate::fill_key_cmds::IDS.contains(&id)
+        // Pasting into a targeted mask or channel (#1035).
+        || matches!(id, "edit.paste" | "edit.pasteSpecial.pasteInPlace" | "edit.pasteSpecial.pasteInto" | "edit.pasteSpecial.pasteOutside")
         || matches!(
             id,
             "paint.cloneStamp"
+                | "paint.patternStamp"
                 | "paint.healingBrush"
                 | "paint.spotHealing"
                 | "paint.dodge"
@@ -575,6 +578,7 @@ fn routed(id: &str) -> bool {
                 | "paint.sharpen"
                 | "paint.smudge"
                 | "paint.historyBrush"
+                | "paint.redEye"
         )
 }
 
@@ -1313,7 +1317,15 @@ fn merge(s: &mut Session, p: &Value) -> Result<Value> {
     if srcs.len() < mode.color_channels() {
         return Err(bad(cmd, format!("{mode:?} needs {} grayscale documents, got {}", mode.color_channels(), srcs.len())));
     }
-    let first = s.documents()[srcs[0]].doc.clone();
+    // Each source closes by its *current* index, so a repeated index would shift the later
+    // removals onto a document that was never named (#934). Refuse it rather than guess.
+    let mut seen = std::collections::HashSet::new();
+    if let Some(dup) = srcs.iter().find(|i| !seen.insert(**i)) {
+        return Err(bad(cmd, format!("document {dup} is listed more than once")));
+    }
+    let Some(first) = srcs.first().and_then(|&i| s.documents().get(i)).map(|d| d.doc.clone()) else {
+        return Err(bad(cmd, "bad document index"));
+    };
     let mut planes = Vec::new();
     for &i in &srcs {
         let d = &s.documents()[i].doc;
@@ -1637,6 +1649,6 @@ fn has_apply_target(s: &Session) -> std::result::Result<(), String> {
     if matches!(l.content, LayerContent::Raster(_)) {
         Ok(())
     } else {
-        Err(format!("Apply Image needs a pixel layer (active layer is a {} layer)", l.content.kind_name()))
+        Err(format!("Apply Image needs a pixel layer (active layer is {} {} layer)", l.content.article(), l.content.kind_name()))
     }
 }

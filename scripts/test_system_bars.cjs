@@ -47,7 +47,8 @@ const { default: EntryAbility } = load('entryability/EntryAbility', {
   'libphotocraft.so': { default: { active() {} } },
   '@kit.AbilityKit': { UIAbility: class {} }, '@kit.ArkUI': {}, '@kit.BasicServicesKit': {},
   '../SystemBars': bars,
-  '../input/NativeCursorAdapter': { restorePointerVisibility() {} },
+  '../WindowChrome': { WindowChrome: class { start() {} stop() {} refresh() {} } },
+      '../input/NativeCursorAdapter': { restorePointerVisibility() {} },
       '../openInbox': { acceptOpenWant() {} }, '../closeGuard': { resetCloseGuard() {}, requestWindowClose() {} }
 });
 async function main() {

@@ -17,6 +17,12 @@
 	Layer	Layer
 	Type	Teks
 	Select	Seleksi
+	Selected	Terpilih
+	Scope	Cakupan
+	Top Left	Kiri atas
+	Top Right	Kanan atas
+	Bottom Left	Kiri bawah
+	Bottom Right	Kanan bawah
 	Filter	Filter
 	View	Tampilan
 	Window	Jendela
@@ -98,6 +104,7 @@
 	Fill…	Isi…
 	Stroke…	Stroke…
 	Content-Aware Fill…	Isi Content-Aware…
+	Delete and Fill Selection	Hapus dan Isi Seleksi
 	Content-Aware Scale	Skala Content-Aware
 	Puppet Warp	Puppet Warp
 	Perspective Warp	Perspective Warp
@@ -648,7 +655,11 @@
 	Pro Medium Gray Theme	Tema Pro Abu-abu Sedang
 	Studio Theme	Tema Studio
 	Studio Light Theme	Tema Studio Terang
+	Adwaita Light Theme	Tema Adwaita Terang
+	Adwaita Dark Theme	Tema Adwaita Gelap
 	Classic Theme	Tema Klasik
+	Solarized dark	Solarized gelap
+	Solarized Dark Theme	Tema Solarized Gelap
 	Next Theme	Tema Berikutnya
 	Actions	Action
 	Brush Settings	Pengaturan Kuas
@@ -732,7 +743,7 @@
 	All Caps	Huruf Kapital Semua
 	All Slices	Semua Slice
 	All User Slices	Semua Slice Pengguna
-	All shortcuts reset to Photoshop defaults.	Semua pintasan direset ke default Photoshop.
+	All shortcuts reset to PhotoCraft defaults.	Semua pintasan direset ke default PhotoCraft.
 	Alt	Alt
 	Alt-click to define a source point to clone from	Alt-klik untuk menentukan titik sumber yang mau di-clone
 	Always use pressure for opacity	Selalu pakai tekanan untuk opasitas
@@ -994,6 +1005,7 @@
 	Fisheye	Fisheye
 	Fit	Pas
 	Fit Screen	Pas Layar
+	Fill Screen	Isi Layar
 	Fit in View	Pas di Tampilan
 	Fixed	Tetap
 	Fixed Ratio	Rasio Tetap
@@ -1047,7 +1059,7 @@
 	Ignore All	Abaikan Semua
 	Image Size	Ukuran Gambar
 	Import Brushes…	Impor Kuas…
-	Import Photoshop brushes (.abr)	Impor kuas Photoshop (.abr)
+	Import brushes (.abr)	Impor kuas (.abr)
 	Import Presets	Impor Preset
 	Imported	Diimpor
 	Indent First	Indentasi Pertama
@@ -1097,7 +1109,6 @@
 	Liquify is not open	Liquify tidak terbuka
 	Load	Muat
 	Load 3D LUT…	Muat 3D LUT…
-	Load Photoshop brushes (.abr)	Muat kuas Photoshop (.abr)
 	Load channel as selection	Muat channel sebagai seleksi
 	Load…	Muat…
 	Localized Color Clusters	Klaster Warna Lokal
@@ -1273,6 +1284,12 @@
 	Rename…	Ganti Nama…
 	Resample	Resample
 	Reset All to Defaults	Reset Semua ke Default
+	Import Shortcuts…	Impor Pintasan…
+	Load a keyboard shortcut set saved as .kys	Muat set pintasan keyboard yang disimpan sebagai .kys
+	Imported {n} shortcuts from {file}. Click OK to keep them.	{n} pintasan diimpor dari {file}. Klik OK untuk menyimpannya.
+	{n} commands are not in PhotoCraft.	{n} perintah tidak ada di PhotoCraft.
+	Keyboard shortcuts imported	Pintasan keyboard diimpor
+	Your keyboard shortcut set {set} is in use here: {n} shortcuts differ from the defaults. Edit › Keyboard Shortcuts shows them; Reset All to Defaults undoes this.	Set pintasan keyboard Anda {set} dipakai di sini: {n} pintasan berbeda dari bawaan. Edit › Pintasan Keyboard menampilkannya; Setel Ulang Semua ke Bawaan membatalkannya.
 	Reset Section	Reset Bagian
 	Reset Transform	Reset Transformasi
 	Reset to defaults	Reset ke default
@@ -1322,6 +1339,7 @@
 	Set background color	Atur warna background
 	Set foreground color	Atur warna foreground
 	Set painting symmetry options	Atur opsi simetri lukisan
+	Symmetry Off	Simetri Mati
 	Set shape fill type	Atur jenis isian bentuk
 	Set shape stroke type	Atur jenis stroke bentuk
 	Set the text color	Atur warna teks
@@ -1363,6 +1381,7 @@
 	Stroke	Stroke
 	Stroke Catch-up	Stroke Catch-up
 	Stroke:	Stroke:
+	Location:	Lokasi:
 	Style	Gaya
 	Style Options	Opsi Gaya
 	Style Options…	Opsi Gaya…
@@ -1441,6 +1460,8 @@
 	↑↓ navigate   {key} run   esc close	↑↓ navigasi   {key} jalankan   esc tutup
 	Version {version}	Versi {version}
 	New Document	Dokumen Baru
+	Preset Name	Nama Preset
+	No saved presets yet.	Belum ada preset tersimpan.
 	Error	Error
 	Command	Perintah
 	Adjustment layers have nothing to transform	Layer penyesuaian tidak ada yang bisa ditransformasi
@@ -1484,7 +1505,7 @@
 	Current Tool	Alat Saat Ini
 	Custom Shape Tool	Alat Bentuk Kustom
 	Cyans	Cyan
-	Default Photoshop Size	Ukuran Default Photoshop
+	Default PhotoCraft Size	Ukuran Default PhotoCraft
 	Delete Workspace	Hapus Ruang Kerja
 	Diamond	Diamond
 	Dimensions:	Dimensi:
@@ -1774,12 +1795,14 @@
 	Maximize psd compatibility	Maksimalkan kompatibilitas PSD
 	Medium gray	Abu-abu sedang
 	Memory usage mb	Pemakaian memori MB
+	Low resolution previews	Pratinjau resolusi rendah
 	Missing glyph protection	Perlindungan glyph hilang
 	Modern	Modern
 	Nearest neighbor	Nearest neighbor
 	Never	Tidak pernah
 	Normal tip	Ujung normal
 	Open as smart object	Buka sebagai smart object
+	Open in camera raw	Buka di Camera Raw
 	Open documents as tabs	Buka dokumen sebagai tab
 	Overscroll	Overscroll
 	Performance	Performa
@@ -1825,6 +1848,8 @@
 	Standard	Standar
 	Studio	Studio
 	Studio light	Studio terang
+	Adwaita	Adwaita
+	Adwaita dark	Adwaita gelap
 	Subdivisions	Subdivisi
 	System	Sistem
 	Text engine	Mesin teks
@@ -1874,6 +1899,7 @@
 	Collapse group  ({key}-click: all groups)	Ciutkan grup  ({key}-klik: semua grup)
 	Create new brush from the current settings	Buat kuas baru dari pengaturan saat ini
 	Create new brush from these settings	Buat kuas baru dari pengaturan ini
+	Update the current brush with these settings	Perbarui kuas saat ini dengan pengaturan ini
 	Delete brush	Hapus kuas
 	Drag the arrow to set the angle, the dots to set the roundness	Seret panah untuk mengatur sudut, titik untuk mengatur kebulatan
 	Expand	Bentangkan
@@ -1895,6 +1921,7 @@
 	System Info…	Info Sistem…
 	System Info	Info Sistem
 	More panels	Panel lainnya
+	More documents	Dokumen lainnya
 	These settings aren't available in PhotoCraft yet.	Pengaturan ini belum tersedia di PhotoCraft.
 	Graphics	Grafis
 	Reset GPU Backend	Reset Backend GPU
@@ -1923,6 +1950,8 @@
 	Brush Settings…  (F5): every option of this brush	Pengaturan Kuas…  (F5): semua opsi kuas ini
 	Rename Brush…	Ganti Nama Kuas…
 	Delete Brush	Hapus Kuas
+	New Brush Preset…	Preset Kuas Baru…
+	Brush Preset Options	Opsi Preset Kuas
 	Group name	Nama grup
 	Brush name	Nama kuas
 	Grid view	Tampilan grid
@@ -1945,7 +1974,13 @@
 	Align with layer	Sejajarkan dengan layer
 	Reset Alignment	Reset Penyelarasan
 	Centre the gradient (offset 0, 0)	Tengahkan gradien (offset 0, 0)
-	The current gradient (pick one in Window › Gradients)	Gradien saat ini (pilih di Jendela › Gradien)
+# Gradient Editor window, opened from the options bar's gradient swatch.
+	Gradient Editor	Editor Gradien
+	Gradient picker	Pemilih gradien
+	Save As Preset	Simpan sebagai Preset
+	The gradient the Gradient tool paints with	Gradien yang digambar oleh alat Gradien
+	Adds the current gradient to the Gradients panel	Menambahkan gradien saat ini ke panel Gradien
+	Gradient stops	Titik gradien
 	Select a type layer to edit its character and paragraph settings.	Pilih layer teks untuk mengedit pengaturan karakter dan paragrafnya.
 	Text color	Warna teks
 	Type Options	Opsi Teks
@@ -1963,6 +1998,8 @@
 	CPU (no GPU acceleration)	CPU (tanpa akselerasi GPU)
 	DirectX 12	DirectX 12
 	GPU backend	Backend GPU
+	Linux display server	Server tampilan Linux
+	X11	X11
 	Metal	Metal
 	OpenGL	OpenGL
 	Use tablet pressure	Pakai tekanan tablet
@@ -1970,9 +2007,13 @@
 	No path to make a selection from: draw one with the Pen tool or select one in the Paths panel.	Tidak ada path untuk dibuat seleksi: gambar dengan alat Pen atau pilih salah satu di panel Path.
 	Cancel opening	Batalkan pembukaan
 	Cancelled opening {name}	Pembukaan {name} dibatalkan
+	Developing {name}	Mengembangkan {name}
 	Cancelled {label}	{label} dibatalkan
 	Esc to cancel	Esc untuk batal
 	Opening {name}	Membuka {name}
+	Saving {name}	Menyimpan {name}
+	A save to {name} is still running; try again when it finishes	Penyimpanan ke {name} masih berjalan; coba lagi setelah selesai
+	{label} is writing the file and can no longer be cancelled	{label} sedang menulis berkas dan tidak dapat dibatalkan lagi
 	Opening {name}…	Membuka {name}…
 	Opening…	Membuka…
 	Reading…	Membaca…
@@ -2018,7 +2059,7 @@
 	Magnetic Lasso	Magnetic Lasso
 	History Brush	History Brush
 	Art History Brush	Art History Brush
-	Pattern Stamp	Pattern Stamp
+	Pattern Stamp	Stempel Pola
 	Spot Healing	Spot Healing
 	Red Eye	Red Eye
 	Patch	Patch
@@ -2327,14 +2368,13 @@
 	Color Profile	Profil Warna
 	Units	Satuan
 	Columns	Kolom
-	Do you want to save you made to “{name}” before quitting?	Mau simpan perubahan yang kamu buat di “{name}” sebelum keluar?
 	Create new count group	Buat grup hitungan baru
 	Adjustment Layer	Layer Penyesuaian
 	Pencil Tool	Alat Pensil
 	Pixel	Piksel
 	Adjustment	Penyesuaian
 	Drag (lasso) or click points (polygonal) · {add} add · {sub} subtract	Seret (lasso) atau klik titik (polygonal) · {add} tambah · {sub} kurangi
-	Drag a crop box · drag inside to move · edges resize ({ratio} ratio, {centre} centre) · Space moves while drawing · {commit} commits · Esc cancels	Seret kotak crop · seret di dalam untuk memindah · tepi mengubah ukuran (rasio {ratio}, tengah {centre}) · Space memindah saat menggambar · {commit} menerapkan · Esc batal
+	Drag a crop box · drag inside to move · edges resize ({ratio} ratio, {centre} centre) · Space moves while drawing · arrows nudge · X swaps orientation · {commit} commits · Esc cancels	Seret kotak crop · seret di dalam untuk memindah · tepi mengubah ukuran (rasio {ratio}, tengah {centre}) · Space memindah saat menggambar · panah menggeser · X menukar orientasi · {commit} menerapkan · Esc batal
 	{mode} Color · {bits} bit	Warna {mode} · {bits} bit
 	Drag to move the layer	Seret untuk memindah layer
 	Scrubby Zoom	Zoom Scrubby
@@ -2446,12 +2486,16 @@
 	Floating point	Titik mengambang
 	Use Global Light	Gunakan Cahaya Global
 	Native file drag-and-drop is unavailable	Seret dan lepas berkas native tidak tersedia
-	Native file drag-and-drop is not supported on Wayland yet. Use File › Open, or run PhotoCraft under XWayland with `WAYLAND_DISPLAY= photocraft`.	Seret dan lepas berkas native belum didukung di Wayland. Gunakan Berkas › Buka, atau jalankan PhotoCraft di XWayland dengan `WAYLAND_DISPLAY= photocraft`.
-	Use File › Open to open an image.	Gunakan Berkas › Buka untuk membuka gambar.
+	Native file drag-and-drop is not supported on Wayland yet. Use File › Open, or copy the image in your file manager and paste it with {paste}.	Seret dan lepas berkas native belum didukung di Wayland. Gunakan Berkas › Buka, atau salin gambar di pengelola berkas lalu tempel dengan {paste}.
+	To drop files, start PhotoCraft under XWayland: `{command}`	Untuk menjatuhkan berkas, jalankan PhotoCraft di XWayland: `{command}`
+	Or set Preferences › Performance › Linux display server to X11: PhotoCraft then always starts under XWayland.	Atau atur Preferensi › Performa › Server tampilan Linux ke X11: PhotoCraft lalu selalu berjalan di XWayland.
+	Edit › Paste	Edit › Tempel
+	Use File › Open, or paste a copied image with {paste}.	Gunakan Berkas › Buka, atau tempel gambar yang disalin dengan {paste}.
 	Mixer Brush Tool	Alat Kuas Pencampur
 	Invalid {mode} profile	Profil {mode} tidak valid
 	Unnamed {mode} profile	Profil {mode} tanpa nama
 	Show bounding box when dragging layer	Tampilkan kotak pembatas saat menyeret layer
+	System title bar	Bilah judul sistem
 	Freeze Lasso: drag to freeze an area, Alt-drag to thaw it (L)	Lasso Bekukan: seret untuk membekukan area, seret dengan Alt untuk mencairkannya (L)
 	Shadow Clipping Warning (U)	Peringatan Clipping Bayangan (U)
 	Highlight Clipping Warning (O)	Peringatan Clipping Highlight (O)
@@ -2463,6 +2507,7 @@
 	Show Selected Region	Tampilkan Wilayah Terpilih
 cameraRaw	Light	Cahaya
 	Camera Raw Filter ({layer})	Filter Camera Raw ({layer})
+	Camera Raw ({name})	Camera Raw ({name})
 cameraRaw	Lights	Nada Terang
 cameraRaw	Darks	Nada Gelap
 cameraRaw	Blacks	Hitam
@@ -2473,6 +2518,7 @@ cameraRaw	Blending	Pembauran
 	Patch Tool	Alat Patch
 	Patch:	Patch:
 	Lasso around an area, then drag the selection	Lingkari area dengan lasso, lalu seret seleksinya
+	Now drag the selection onto another area	Sekarang seret seleksi ke area lain
 	Rendering Mode	Mode Rendering
 	Automatic (recommended)	Otomatis (disarankan)
 	CPU / Compatibility	CPU / Kompatibilitas
@@ -2522,6 +2568,7 @@ cameraRaw	Blending	Pembauran
 	Frequency	Frekuensi
 	Use tablet pressure to change pen width	Gunakan tekanan tablet untuk mengubah lebar pena
 
+
 # About ▸ Contributors / Models (credits, craftrules standards/contributors.md)
 	About	Tentang
 	Contributors	Kontributor
@@ -2553,6 +2600,172 @@ cameraRaw	Blending	Pembauran
 	% of all commits	% dari semua commit
 	Lines +/−	Baris +/−
 	@{login}: {prs} PRs, {commits} commits, +{added} / −{deleted} lines (Δ {delta}), +{binAdded} / −{binDeleted} binary assets, {first} – {last}	@{login}: {prs} PR, {commits} commit, +{added} / −{deleted} baris (Δ {delta}), +{binAdded} / −{binDeleted} berkas biner, {first} – {last}
+
+# Swatches panel
+	Create new swatch	Buat swatch baru
+	New Swatch…	Swatch Baru…
+	New Swatch Group…	Grup Swatch Baru…
+	Import Swatches…	Impor Swatch…
+	Replace Swatches…	Ganti Swatch…
+	Export Swatches…	Ekspor Swatch…
+	Export Swatches for Exchange…	Ekspor Swatch untuk Pertukaran…
+	Reset Swatches	Atur Ulang Swatch
+	Add to Swatches	Tambahkan ke Swatch
+# Layer Style > Blending Options (Advanced Blending)
+	Blend If:	Blend If:
+	Channels:	Channel:
+	Knockout	Knockout
+	Apply At Canvas Bounds	Terapkan efek di batas kanvas
+
+# Shared screen eyedropper and text Color Picker (#1128).
+	Color Picker (Text Color)	Pemilih Warna (Warna Teks)
+	Color Picker (Fill Color)	Pemilih Warna (Warna Isian)
+	Fill color	Warna isian
+	Color Picker (Stroke Color)	Pemilih Warna (Warna Stroke)
+	Stroke color	Warna stroke
+	Pick screen color	Pilih warna layar
+	Sample a pixel anywhere on the screen	Ambil sampel piksel di mana saja pada layar
+	Click to pick · Esc to cancel	Klik untuk memilih · Esc untuk membatalkan
+	Pick a screen pixel or press Esc to cancel	Pilih piksel layar atau tekan Esc untuk membatalkan
+	Scroll to zoom	Gulir untuk memperbesar
+	Show/Hide All Panels	Tampilkan/Sembunyikan Semua Panel
+	Show/Hide Panels	Tampilkan/Sembunyikan Panel
+	Could not open	Tidak dapat membuka
+	{path}: the path is not valid Unicode; rename the file and open it again.	{path}: jalur bukan Unicode yang valid; ganti nama file lalu buka lagi.
+
+# Fill dialog, layer style contours and Image Size
+	Contents:	Isi:
+	Custom Pattern:	Pola Kustom:
+	Foreground Color	Warna Foreground
+	Color…	Warna…
+	50% Gray	Abu-abu 50%
+	{size} (was {old})	{size} (sebelumnya {old})
+	Cone	Kerucut
+	Cone (Inverted)	Kerucut (Terbalik)
+	Domed	Kubah
+	Domed (Inverted)	Kubah (Terbalik)
+	Diagonal (Descending)	Diagonal (Menurun)
+
+	Red Eye Tool	Alat Mata Merah
+	Pupil Size	Ukuran pupil
+	Darken Amount	Jumlah penggelapan
+	Click a red pupil to neutralize it	Klik pupil merah untuk memperbaikinya
+	open source	sumber terbuka
+	…and {n} more	…dan {n} lagi
+
+	Eyedroppers:	Eyedropper:
+	Set Black Point	Atur Titik Hitam
+	Set Neutral Gray Point	Atur Titik Abu-abu Netral
+	Set White Point	Atur Titik Putih
+	Unavailable in this color mode	Tidak tersedia dalam mode warna ini
+	Selection Preview:	Pratinjau Seleksi:
+	Black Matte	Latar Hitam
+	White Matte	Latar Putih
+
+# Layer colour labels.
+	Seafoam	Busa Laut
+	Indigo	Nila
+	Fuchsia	Fuksia
+	Violet	Ungu
+	Large document: redrawing on the CPU	Dokumen besar: menggambar ulang di CPU
+	This redraw took {seconds} s on the CPU.	Penggambaran ulang di CPU ini memakan waktu {seconds} dtk.
+	Edits that change the whole document, such as a layer's blend mode, opacity or visibility, redraw all of it.	Suntingan yang mengubah seluruh dokumen, seperti mode campuran, opasitas, atau visibilitas layer, menggambar ulang semuanya.
+	Its layers don't fit the GPU memory budget. Raising Memory usage in Preferences › Performance raises the budget, up to a quarter of this computer's memory.	Layer tidak muat dalam anggaran memori GPU. Menaikkan Pemakaian memori di Preferensi › Performa menaikkan anggaran, hingga seperempat memori komputer ini.
+	The GPU compositor wasn't used: {reason}	Kompositor GPU tidak digunakan: {reason}
+fontWeight	Thin	Sangat Tipis
+fontWeight	ExtraLight	Ekstra Tipis
+fontWeight	Light	Tipis
+fontWeight	Regular	Reguler
+fontWeight	Medium	Sedang
+fontWeight	SemiBold	SemiTebal
+fontWeight	Bold	Tebal
+fontWeight	ExtraBold	Ekstra Tebal
+fontWeight	Black	Sangat Tebal
+fontWeight	Italic	Miring
+
+# Pattern Stamp tool
+	Pattern Stamp Tool	Alat Stempel Pola
+	Impressionist	Impresionis
+	Rotate View Tool	Alat Putar Tampilan
+	Reset View	Atur Ulang Tampilan
+	Drag around the centre to rotate the view  ·  Shift constrains to 15°	Seret di sekitar pusat untuk memutar tampilan  ·  Shift membatasi ke 15°
+
+# Painting symmetry presets.
+	Dual Axis	Sumbu Ganda
+	Diagonal	Diagonal
+	Transform Symmetry	Transformasi Simetri
+
+# Eyedropper Sample Size and Sample (#1649).
+	Point Sample	Sampel Titik
+	3 by 3 Average	Rata-rata 3 × 3
+	5 by 5 Average	Rata-rata 5 × 5
+	11 by 11 Average	Rata-rata 11 × 11
+	31 by 31 Average	Rata-rata 31 × 31
+	51 by 51 Average	Rata-rata 51 × 51
+	101 by 101 Average	Rata-rata 101 × 101
+	Sample Size:	Ukuran Sampel:
+	All Layers No Adjustments	Semua Layer Tanpa Penyesuaian
+	Current & Below No Adjustments	Saat Ini & Di Bawahnya Tanpa Penyesuaian
+	Show Sampling Ring	Tampilkan Cincin Sampel
+
+# Color Picker warnings
+	Out of gamut for printing: click for the nearest printable colour	Di luar gamut cetak: klik untuk warna cetak terdekat
+	Not a web colour: click for the nearest web colour	Bukan warna web: klik untuk warna web terdekat
+	Color to Alpha…	Warna ke Alpha…
+	Transparency Threshold	Ambang transparansi
+	Opacity Threshold	Ambang opasitas
+	Rule of Thirds	Aturan Sepertiga
+	Triangle	Segitiga
+	Golden Ratio	Rasio Emas
+	Golden Spiral	Spiral Emas
+	Auto Show Overlay	Tampilkan Overlay Otomatis
+	Always Show Overlay	Selalu Tampilkan Overlay
+	Never Show Overlay	Jangan Tampilkan Overlay
+	Cycle Overlay	Ganti Overlay
+	Cycle Orientation	Ganti Orientasi
+	Set the overlay options for the Crop tool	Atur opsi overlay untuk alat Crop
+	Alt-click went to the desktop, which moves windows with Alt-drag. Set its window-move key to Super, or latch Alt in Window › Modifier Keys.	Alt-klik diambil oleh desktop, yang memindahkan jendela dengan Alt-seret. Atur tombol pemindah jendelanya ke Super, atau kunci Alt di Jendela › Tombol Pengubah.
+
+# Shared Layer Style color picker
+	Color Picker (Layer Style Color)	Pemilih Warna (Warna Gaya Lapisan)
+	Auto Hide Notifications	Sembunyikan notifikasi secara otomatis
+	Notification Duration (seconds)	Durasi notifikasi (detik)
+	Appearance Mode	Mode tampilan
+	Dark Theme	Tema gelap
+	Light Theme	Tema terang
+	Pro Medium	Pro Medium
+	Studio Light	Studio Light
+	Next Appearance Mode	Mode tampilan berikutnya
+	Sync with system	Sinkronkan dengan sistem
+	Active	Aktif
+	Color Picker (Solid Color)	Pemilih Warna (Warna Solid)
+	Straighten the image by drawing a line on it	Luruskan gambar dengan menggambar garis di atasnya
+	Set additional Crop options	Atur opsi Crop tambahan
+	Show Cropped Area	Tampilkan Area yang Di-crop
+	Enable Crop Shield	Aktifkan Perisai Crop
+	Match Canvas	Sesuaikan dengan Kanvas
+	Auto Adjust Opacity	Sesuaikan Opasitas Otomatis
+	Crop Shield color	Warna perisai crop
+	Color Picker (Crop Shield Color)	Pemilih Warna (Warna Perisai Crop)
+	From Center	Dari Tengah
+	Link radii	Tautkan radius
+	Star Ratio:	Rasio bintang:
+	Create Rectangle	Buat Persegi Panjang
+	Create Ellipse	Buat Elips
+	Create Triangle	Buat Segitiga
+	Create Polygon	Buat Poligon
+	Some brush presets could not be loaded	Beberapa preset kuas tidak dapat dimuat
+	Retry saving presets	Coba simpan preset lagi
+	Brush preset changes are not saved: {error}	Perubahan preset kuas belum disimpan: {error}
+	Keep this tab open to retain your brushes.	Biarkan tab ini terbuka untuk mempertahankan kuas Anda.
+	Browser storage is unavailable; brushes are session-only. Keep this tab open to retain them.	Penyimpanan browser tidak tersedia; kuas hanya berlaku untuk sesi ini. Biarkan tab ini terbuka untuk mempertahankannya.
+	Saving brush presets… Keep this tab open until saving finishes.	Menyimpan preset kuas… Biarkan tab ini terbuka sampai penyimpanan selesai.
+	Reflect	Pantul
+	Glow	Pendar
+	Negation	Negasi
+	XOR	XOR
+	Color Burn (Paint.NET)	Color Burn (Paint.NET)
+	Color Dodge (Paint.NET)	Color Dodge (Paint.NET)
 	Double-tap pen body	Ketuk dua kali badan stylus
 	Current tool and Eraser	Alat saat ini dan penghapus
 	Previous tool	Alat sebelumnya

@@ -127,6 +127,31 @@ impl Bench {
         Ok(ms(t))
     }
 
+    /// Frame `i` of a Move tool drag of `layer` (#128): the canvas shows the document with the
+    /// layer at the pointer (`layer_multi_cmds::moved`) and recomposites where it was in the
+    /// previous frame and where it is now (`move_ui::damage`).
+    fn drag_frame(&self, s: &Session, layer: u64, i: usize) -> Res<f64> {
+        let doc = s.active().ok_or("no document")?.doc.clone();
+        let id = photocraft_doc::LayerId(layer);
+        let all = photocraft_geom::Rect::new(i32::MIN / 2, i32::MIN / 2, i32::MAX / 2, i32::MAX / 2);
+        let was = doc.layer(id).and_then(|l| photocraft_compose::change_bounds(l, all)).ok_or("no bounds")?;
+        // Frame i shows offset (d, d / 2); the canvas showed the previous frame's.
+        let (d, prev) = (3 * i as i32 + 1, if i == 0 { 0 } else { 3 * i as i32 - 2 });
+        let t = Instant::now();
+        let shown = photocraft_engine::layer_multi_cmds::moved(&doc, &[id], d, d / 2).map_err(|e| e.to_string())?;
+        let damage = was.translate(prev, prev / 2).union(&was.translate(d, d / 2)).inflate(1).intersect(&doc.bounds());
+        match &self.gpu {
+            Some((g, rs)) => {
+                g.refresh(doc.id.0, &shown, Some(damage), None);
+                let _ = rs.device.poll(eframe::wgpu::PollType::Wait { submission_index: None, timeout: None });
+            }
+            None => {
+                std::hint::black_box(photocraft_compose::render(&shown, damage));
+            }
+        }
+        Ok(ms(t))
+    }
+
     fn gpu_bytes(&self, s: &Session) -> Option<u64> {
         let (g, _) = self.gpu.as_ref()?;
         let tex = s.active().and_then(|d| g.texture_info(d.doc.id.0)).map_or(0, |(_, b)| b);
@@ -363,6 +388,7 @@ fn layered_scenarios(b: &mut Bench, sz: &Sizes) {
         exec(s, "layer.translate", json!({"layer": target, "dx": d, "dy": d / 2}))?;
         Ok(ms(t) + b.refresh(s, false)?)
     });
+    b.time("move tool drag frame, styled layer", &mut s, reps, true, |b, s, i| b.drag_frame(s, target, i));
     b.time("set layer opacity + refresh", &mut s, reps, true, |b, s, i| {
         let t = Instant::now();
         exec(s, "layer.setProps", json!({"layer": target, "opacity": if i % 2 == 0 { 0.6 } else { 0.9 }}))?;
@@ -399,6 +425,28 @@ fn layered_scenarios(b: &mut Bench, sz: &Sizes) {
         exec(s, "edit.redo", json!({}))?;
         Ok(ms(t) + b.refresh(s, false)?)
     });
+
+    // A layer filling the canvas, with a drop shadow (#761) and without (#128): dragged, it
+    // overhangs the canvas edge.
+    let full = (|| -> Res<u64> {
+        exec(&mut s, "layer.new.layer", json!({"name": "full"}))?;
+        exec(&mut s, "select.all", json!({}))?;
+        exec(&mut s, "edit.fill", json!({"color": "#4080c0"}))?;
+        exec(&mut s, "select.deselect", json!({}))?;
+        exec(&mut s, "layer.layerStyle.dropShadow", json!({"distance": 12, "size": 16}))?;
+        active_layer(&s)
+    })();
+    match full {
+        Ok(full) => {
+            let _ = b.refresh(&s, true);
+            b.time("move tool drag frame, full-canvas layer with drop shadow", &mut s, reps, true, |b, s, i| b.drag_frame(s, full, i));
+            let _ = exec(&mut s, "layer.layerStyle.clear", json!({"layer": full}));
+            let _ = b.refresh(&s, true);
+            b.time("move tool drag frame, full-canvas layer", &mut s, reps, true, |b, s, i| b.drag_frame(s, full, i));
+            let _ = exec(&mut s, "layer.delete", json!({"layer": full}));
+        }
+        Err(e) => b.errors.push(("full-canvas styled layer".into(), e)),
+    }
 
     // A 12 MP layer, duplicated and pasted: the first time (a fresh layer, cold caches) and
     // again (the same source).
@@ -448,11 +496,12 @@ fn layered_scenarios(b: &mut Bench, sz: &Sizes) {
     });
 }
 
-/// #209: arrow-key nudge in the 150-layer document.
+/// #209: arrow-key nudge in the 150-layer document; #1771: a new layer there.
 fn many_layer_scenarios(b: &mut Bench, sz: &Sizes) {
     // Row names stay stable across modes: the layer count is in the mode, not the key.
     let name = "nudge 1 px in the many-layer document + refresh".to_string();
-    if !b.wanted(&name) {
+    let new_layer = "new layer in the many-layer document + refresh";
+    if !b.wanted(&name) && !b.wanted(new_layer) {
         return;
     }
     // The document's first refresh is part of this row (a crash there is reported against it).
@@ -471,6 +520,15 @@ fn many_layer_scenarios(b: &mut Bench, sz: &Sizes) {
         let t = Instant::now();
         exec(s, "layer.translate", json!({"layer": mid, "dx": if i % 2 == 0 { 1 } else { -1 }, "dy": 0}))?;
         Ok(ms(t) + b.refresh(s, false)?)
+    });
+    // Layer › New › Layer: as fast at any layer count. Undone (untimed) so the count stays put.
+    b.time(new_layer, &mut s, reps, true, |b, s, _| {
+        let t = Instant::now();
+        exec(s, "layer.new.layer", json!({}))?;
+        let took = ms(t) + b.refresh(s, false)?;
+        exec(s, "edit.undo", json!({}))?;
+        b.refresh(s, false)?;
+        Ok(took)
     });
 }
 

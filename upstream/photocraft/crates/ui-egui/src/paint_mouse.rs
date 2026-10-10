@@ -5,38 +5,58 @@
 //! with `"erase": true`, so one undo step, with the pen pressure and tilt of a normal stroke.
 
 use egui::{PointerButton, Response};
+use photocraft_engine::BrushSettings;
 use photocraft_engine::prefs::RightClickPaint;
 
 use crate::PhotocraftApp;
 use crate::state::Tool;
 
-/// Smoothing is a tool option, kept per tool like Photoshop's options bar: switching between the
-/// Brush and the Eraser saves the session brush's smoothing for the old tool and loads the new
-/// tool's (Photoshop's 10 % the first time). Other tools leave it alone.
-pub fn sync_tool_smoothing(app: &mut PhotocraftApp) {
+/// The brush is a tool option, kept per tool like Photoshop's options bar: switching from the
+/// Brush to the Eraser saves the session brush for the old tool and loads the new tool's, so each
+/// keeps its own size, hardness, mode, opacity, dynamics and smoothing. A tool seen for the
+/// first time takes what the brush already has, at Photoshop's 10 % smoothing. Other tools leave
+/// the brush alone.
+///
+/// The foreground and background colours, the erase flag and the stroke seed belong to the
+/// session rather than to the tool, so a swap never carries them between tools: picking a colour
+/// or painting with the Eraser works with any tool's brush.
+pub fn sync_tool_brush(app: &mut PhotocraftApp) {
     let tool = app.ui.tool;
-    if !matches!(tool, Tool::Brush | Tool::Pencil | Tool::Eraser) || app.ui.smoothing_tool == Some(tool) {
+    if !has_brush_picker(tool) || app.ui.brush_tool == tool {
         return;
     }
-    let current = app.session.tools.brush.smoothing.clone();
-    let next = match app.ui.smoothing_tool {
-        // The first smoothing tool takes what the brush has.
-        None => current,
-        Some(prev) => {
-            let saved = &mut app.ui.tool_smoothing;
-            match saved.iter_mut().find(|(t, _)| *t == prev) {
-                Some(e) => e.1 = current,
-                None => saved.push((prev, current)),
-            }
-            saved
-                .iter()
-                .find(|(t, _)| *t == tool)
-                .map(|(_, s)| s.clone())
-                .unwrap_or_else(|| photocraft_engine::paint::brush::Smoothing { amount: 0.1, ..Default::default() })
-        }
+    // The live brush is the outgoing tool's, so save it there before the new one takes over: any
+    // edit it made since it was last active is in it, so its copy never goes stale.
+    let current = app.session.tools.brush.clone();
+    save_brush(app, app.ui.brush_tool, current.clone());
+    app.session.tools.brush = match app.ui.tool_brushes.iter().find(|(t, _)| *t == tool) {
+        Some((_, b)) => session_fields(&current, b),
+        // A tool seen for the first time takes what the brush has, at Photoshop's smoothing.
+        None => BrushSettings { smoothing: first_smoothing(), ..current },
     };
-    app.session.tools.brush.smoothing = next;
-    app.ui.smoothing_tool = Some(tool);
+    // The picked preset was the outgoing tool's brush: forget it, so Update Brush can't overwrite
+    // that preset with this tool's brush.
+    app.session.tools.current_preset = None;
+    app.ui.brush_tool = tool;
+}
+
+/// The brush `tool` had when it was last active.
+fn save_brush(app: &mut PhotocraftApp, tool: Tool, brush: BrushSettings) {
+    match app.ui.tool_brushes.iter_mut().find(|(t, _)| *t == tool) {
+        Some(e) => e.1 = brush,
+        None => app.ui.tool_brushes.push((tool, brush)),
+    }
+}
+
+/// The session's own brush fields, which a tool swap never carries: the colours, the erase flag
+/// and the stroke seed (a stroke's replay seed is the command's, not the tool's).
+fn session_fields(current: &BrushSettings, brush: &BrushSettings) -> BrushSettings {
+    BrushSettings { color: current.color, background: current.background, erase: current.erase, seed: current.seed, ..brush.clone() }
+}
+
+/// Photoshop's 10 % stroke smoothing, what a tool's brush starts at.
+fn first_smoothing() -> photocraft_engine::paint::brush::Smoothing {
+    photocraft_engine::paint::brush::Smoothing { amount: 0.1, ..Default::default() }
 }
 
 /// Which tool events this frame's canvas response produces.
@@ -117,14 +137,18 @@ pub fn pointer_secondary(app: &mut PhotocraftApp, down: bool, mods: egui::Modifi
     false
 }
 
-/// The Brush Preset picker a right-click opened, at the pointer. It edits the session brush like
-/// the options-bar chip's; a click outside, Escape or Enter closes it.
+/// The Brush Preset picker a right-click or the options-bar brush chip opened, at the pointer. It
+/// edits the session brush like the Brushes panel; a press outside, Escape, Enter or a
+/// double-click on a preset closes it.
 pub fn show_picker(app: &mut PhotocraftApp, ctx: &egui::Context) {
     let Some([x, y]) = app.ui.brush_picker else { return };
-    if !has_brush_picker(app.ui.tool) || ctx.input(|i| i.key_pressed(egui::Key::Escape) || i.key_pressed(egui::Key::Enter)) {
+    if !has_brush_picker(app.ui.tool) {
         app.ui.brush_picker = None;
         return;
     }
+    // Escape and Enter close it once this frame's edits are in (a typed size applies), unless they
+    // end a rename in its rename bar.
+    let key_close = app.ui.brush_picker_list.renaming.is_none() && ctx.input(|i| i.key_pressed(egui::Key::Escape) || i.key_pressed(egui::Key::Enter));
     // Keep the whole picker on screen: its last size, or about 320 × 480 points before it shows.
     // A low anchor shifts the top-left up so the picker does not cross the bottom edge.
     let id = egui::Id::new("canvas-brush-picker");
@@ -133,16 +157,21 @@ pub fn show_picker(app: &mut PhotocraftApp, ctx: &egui::Context) {
     let area = egui::Area::new(id).order(egui::Order::Foreground).fixed_pos(pos).show(ctx, |ui| {
         let before = app.session.tools.brush.clone();
         let mut b = before.clone();
-        let pick = egui::Frame::popup(ui.style()).show(ui, |ui| crate::brush_picker::body(ui, &mut b, &app.session.tools.presets)).inner;
+        let list = &mut app.ui.brush_picker_list;
+        let picks = egui::Frame::popup(ui.style())
+            .show(ui, |ui| crate::brush_picker::body(ui, &mut b, &app.session.tools.presets, app.session.tools.current_preset.as_deref(), list))
+            .inner;
         crate::brush_panel::commit_gesture(app, ui.ctx(), &before, &b);
-        if pick == Some(crate::brush_picker::Pick::OpenSettings) {
-            app.ui.brush_picker = None;
-        }
-        crate::brush_picker::apply(app, ui.ctx(), pick);
+        let closes = picks.iter().any(crate::brush_picker::Pick::closes);
+        crate::brush_picker::apply(app, ui.ctx(), picks);
+        closes
     });
-    let outside = ctx.input(|i| i.pointer.any_pressed() && i.pointer.interact_pos().is_some_and(|p| !area.response.rect.contains(p)));
-    if outside {
-        app.ui.brush_picker = None;
+    // Not a press on a menu the picker opened (the gear, a preset's context menu), nor on the
+    // options-bar chip, whose click toggles the picker.
+    let press = ctx.input(|i| i.pointer.any_pressed().then(|| i.pointer.interact_pos()).flatten());
+    let outside = press.is_some_and(|p| !area.response.rect.contains(p) && !crate::brush_picker::on_chip(ctx, p)) && !egui::Popup::is_any_open(ctx);
+    if outside || key_close || area.inner {
+        crate::brush_picker::close(&mut app.ui);
     }
 }
 
@@ -166,7 +195,7 @@ mod tests {
         }
         app.ui.tool = Tool::Brush;
         app.sync_views();
-        let mut h = Harness::builder().with_size(vec2(1200.0, 800.0)).build_ui_state(
+        let mut h = Harness::builder().with_size(vec2(1200.0, 800.0)).with_step_dt(1.0 / 60.0).build_ui_state(
             |ui, app: &mut PhotocraftApp| {
                 let ctx = ui.ctx().clone();
                 if !ctx.fonts(|f| f.families().contains(&egui::FontFamily::Name("medium".into()))) {
@@ -249,9 +278,12 @@ mod tests {
         let strokes = strokes(&h);
         assert_eq!(strokes.len(), 2, "a Shift-click commits one connected stroke");
         let points = strokes[1]["points"].as_array().unwrap();
-        assert_eq!(points.len(), 2, "a click has the previous endpoint and clicked endpoint");
+        // The previous endpoint, then the clicked one. While the button is held, smoothing that is
+        // still catching up repeats the clicked point with later times.
         assert_eq!(points[0][0], previous[0]);
         assert_eq!(points[0][1], previous[1]);
+        let clicked = &points[1];
+        assert!(points[1..].iter().all(|p| p[0] == clicked[0] && p[1] == clicked[1]), "{points:?}");
         assert!(alpha_at(&h, end + vec2(60.0, 40.0)) > 0.9, "the segment between the strokes is painted");
     }
 
@@ -305,6 +337,110 @@ mod tests {
         assert_eq!(h.state().ui.brush_picker, None);
     }
 
+    /// #1031: the right-click picker picks brushes, not just the size. A click picks a preset and
+    /// keeps the picker open, a double-click picks one and closes it, and Enter applies a typed
+    /// size before it closes the picker.
+    #[test]
+    fn picker_click_picks_a_preset_and_double_click_closes_it() {
+        use egui_kittest::kittest::Queryable;
+        let mut h = harness(None);
+        let c = h.state().last_canvas_rect.center();
+        h.event(egui::Event::PointerMoved(c));
+        h.run_steps(1);
+        press(&mut h, c, PointerButton::Secondary, true);
+        press(&mut h, c, PointerButton::Secondary, false);
+        h.run_steps(2);
+        let names: Vec<String> = h.state().session.tools.presets.iter().skip(1).take(2).map(|p| p.name.clone()).collect();
+        let picks = |h: &Harness<'static, PhotocraftApp>, name: &str| {
+            h.state().session.journal.iter().filter(|(id, p)| id == "tools.setBrush" && *p == json!({ "preset": name })).count()
+        };
+        h.get_by_label(&names[0]).click();
+        h.run_steps(3);
+        assert_eq!(picks(&h, &names[0]), 1);
+        assert!(h.state().ui.brush_picker.is_some(), "a click keeps the picker open");
+        let at = h.get_by_label(&names[1]).rect().center();
+        h.event(egui::Event::PointerMoved(at));
+        h.run_steps(1);
+        // Two clicks 2 frames apart; well after the first click, so not a triple click.
+        h.run_steps(40);
+        for pressed in [true, false, true, false] {
+            h.event(egui::Event::PointerButton { pos: at, button: PointerButton::Primary, pressed, modifiers: Modifiers::NONE });
+            h.step();
+        }
+        h.run_steps(2);
+        assert_eq!(picks(&h, &names[1]), 1, "picked once: the second click only closes");
+        assert_eq!(h.state().ui.brush_picker, None, "a double-click closes the picker");
+        assert!(strokes(&h).is_empty(), "nothing painted under the picker");
+        // Enter applies the typed size, then closes the picker.
+        h.state_mut().ui.brush_picker = Some([c.x, c.y]);
+        h.run_steps(2);
+        h.get_all_by_role(egui::accesskit::Role::SpinButton).next().expect("the Size field").click();
+        h.run_steps(1);
+        h.event(egui::Event::Text("30*2".into()));
+        h.run_steps(1);
+        h.key_press(egui::Key::Enter);
+        h.run_steps(2);
+        assert_eq!((h.state().session.tools.brush.size, h.state().ui.brush_picker), (60.0, None));
+    }
+
+    /// A sampled tip has no hardness: the picker shows only its size (Photoshop).
+    #[test]
+    fn picker_shows_hardness_only_for_round_tips() {
+        use egui_kittest::kittest::Queryable;
+        let mut h = harness(None);
+        let c = h.state().last_canvas_rect.center();
+        h.state_mut().ui.brush_picker = Some([c.x, c.y]);
+        h.run_steps(2);
+        assert!(h.query_by_label("Hardness").is_some());
+        let sampled = h.state().session.tools.presets.iter().find(|p| p.brush.tip != photocraft_engine::paint::TipShape::Round).map(|p| p.name.clone());
+        h.state_mut().run("tools.setBrush", json!({ "preset": sampled.expect("a sampled preset") })).unwrap();
+        h.run_steps(2);
+        assert!(h.query_by_label("Hardness").is_none());
+        assert!(h.state().ui.brush_picker.is_some());
+    }
+
+    /// The gear menu's New Brush Preset… saves the brush and asks for its name in the picker's
+    /// rename bar; Enter there renames it and leaves the picker open (Enter closes it otherwise).
+    #[test]
+    fn picker_gear_menu_saves_and_names_a_new_preset() {
+        use egui_kittest::kittest::Queryable;
+        let mut h = harness(None);
+        let c = h.state().last_canvas_rect.center();
+        h.state_mut().ui.brush_picker = Some([c.x, c.y]);
+        h.run_steps(2);
+        h.get_by_label("Brush Preset Options").click();
+        h.run_steps(2);
+        h.get_by_label("New Brush Preset…").click();
+        h.run_steps(3);
+        let saved = h.state().ui.brush_picker_list.renaming.clone().expect("the rename bar asks for a name");
+        assert!(h.state().session.tools.presets.iter().any(|p| p.name == saved.name));
+        assert!(h.state().ui.brush_picker.is_some(), "the menu's click didn't close the picker");
+        h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+        h.event(egui::Event::Text("Inky".into()));
+        h.run_steps(1);
+        h.key_press(egui::Key::Enter);
+        h.run_steps(3);
+        assert!(h.state().session.tools.presets.iter().any(|p| p.name == "Inky"), "renamed");
+        assert!(h.state().ui.brush_picker_list.renaming.is_none());
+        assert!(h.state().ui.brush_picker.is_some(), "Enter ended the rename, not the picker");
+        // The gear's view items switch the list between tips and names.
+        h.get_by_label("Brush Preset Options").click();
+        h.run_steps(2);
+        h.get_by_label("List view").click();
+        h.run_steps(2);
+        assert_eq!(h.state().ui.brush_picker_list.view, crate::brush_panel::BrushesView::List);
+        assert!(h.state().ui.brush_picker.is_some());
+        // A rename left open goes with the picker.
+        h.state_mut().ui.brush_picker_list.renaming =
+            Some(crate::brush_panel::Renaming { group: false, name: "Inky".into(), folder: Vec::new(), text: String::new() });
+        h.run_steps(2);
+        let far = c - vec2(300.0, 200.0);
+        h.event(egui::Event::PointerMoved(far));
+        press(&mut h, far, PointerButton::Primary, true);
+        press(&mut h, far, PointerButton::Primary, false);
+        assert!(h.state().ui.brush_picker.is_none() && h.state().ui.brush_picker_list.renaming.is_none());
+    }
+
     #[test]
     fn right_drag_erases_with_the_erase_preference() {
         let mut h = harness(Some("erase"));
@@ -350,12 +486,12 @@ mod tests {
     }
 
     #[test]
-    fn smoothing_is_a_per_tool_option_that_presets_keep() {
+    fn the_brush_is_a_per_tool_option_that_presets_keep() {
         let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
         app.run("file.new", json!({"width": 64, "height": 64})).unwrap();
         let amount = |app: &PhotocraftApp| app.session.tools.brush.smoothing.amount;
         app.ui.tool = Tool::Brush;
-        sync_tool_smoothing(&mut app);
+        sync_tool_brush(&mut app);
         assert_eq!(amount(&app), 0.1, "Photoshop's default");
         // Picking a preset (whose own smoothing is 0) keeps the tool's smoothing.
         let preset = app.session.tools.presets.iter().find(|p| p.brush.smoothing.amount == 0.0).map(|p| p.name.clone()).unwrap();
@@ -368,21 +504,85 @@ mod tests {
         assert_eq!((amount(&app), app.session.tools.brush.smoothing.pulled_string), (0.42, true));
         // The Eraser has its own (10 % at first); switching back restores the Brush's.
         app.ui.tool = Tool::Eraser;
-        sync_tool_smoothing(&mut app);
+        sync_tool_brush(&mut app);
         assert_eq!(amount(&app), 0.1);
         app.session.tools.brush.smoothing.amount = 0.0;
         app.ui.tool = Tool::Brush;
-        sync_tool_smoothing(&mut app);
+        sync_tool_brush(&mut app);
         assert_eq!((amount(&app), app.session.tools.brush.smoothing.pulled_string), (0.42, true));
         // Other tools leave it alone; the Eraser kept its 0 %.
         app.ui.tool = Tool::Move;
-        sync_tool_smoothing(&mut app);
+        sync_tool_brush(&mut app);
         assert_eq!(amount(&app), 0.42);
         app.ui.tool = Tool::Eraser;
-        // A stroke picks up the tool's smoothing even without a frame in between.
+        // A stroke picks up the tool's brush even without a frame in between.
         tool_event(&mut app, ToolEvent::Down { x: 5.0, y: 5.0, pressure: 1.0 }, Modifiers::NONE);
         assert_eq!(amount(&app), 0.0);
         tool_event(&mut app, ToolEvent::Up { x: 30.0, y: 5.0 }, Modifiers::NONE);
+    }
+
+    /// #218: Photoshop keeps a brush per painting tool, so the size, hardness, mode, opacity and
+    /// dynamics of one tool never leak into another's, and each tool gets its own back.
+    #[test]
+    fn each_tool_keeps_its_own_brush() {
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        app.run("file.new", json!({"width": 64, "height": 64})).unwrap();
+        let brush = |app: &PhotocraftApp| app.session.tools.brush.clone();
+        let size = |b: &BrushSettings| b.size;
+        let hardness = |b: &BrushSettings| b.hardness;
+        let opacity = |b: &BrushSettings| b.opacity;
+        let mode = |b: &BrushSettings| b.mode;
+
+        app.ui.tool = Tool::Brush;
+        sync_tool_brush(&mut app);
+        app.run("tools.setBrush", json!({"brush": {"size": 40, "hardness": 0.2, "opacity": 0.7, "mode": "Multiply"}})).unwrap();
+        assert_eq!(size(&brush(&app)), 40.0);
+
+        // A tool seen for the first time starts from the brush the old tool left (Photoshop's
+        // 10 % smoothing), so nothing is lost by switching.
+        app.ui.tool = Tool::Eraser;
+        sync_tool_brush(&mut app);
+        assert_eq!(size(&brush(&app)), 40.0, "a new tool inherits the current brush");
+
+        // The Eraser edits its own size; the Brush keeps 40 px.
+        app.run("tools.setBrush", json!({"brush": {"size": 8, "hardness": 1.0}})).unwrap();
+        app.ui.tool = Tool::Brush;
+        sync_tool_brush(&mut app);
+        assert_eq!(size(&brush(&app)), 40.0, "the Brush keeps its own size");
+        assert_eq!(hardness(&brush(&app)), 0.2, "and its hardness");
+        app.ui.tool = Tool::Eraser;
+        sync_tool_brush(&mut app);
+        assert_eq!(size(&brush(&app)), 8.0, "the Eraser keeps its own size");
+        assert_eq!(hardness(&brush(&app)), 1.0, "and its hardness");
+
+        // Mode, opacity, flow and the dynamics sections are per tool too.
+        app.ui.tool = Tool::CloneStamp;
+        sync_tool_brush(&mut app);
+        app.run("tools.setBrush", json!({"brush": {"mode": "Screen", "opacity": 0.3}})).unwrap();
+        app.ui.tool = Tool::Brush;
+        sync_tool_brush(&mut app);
+        assert_eq!((mode(&brush(&app)), opacity(&brush(&app))), (photocraft_color::BlendMode::Multiply, 0.7), "the Brush's own mode and opacity");
+        app.ui.tool = Tool::CloneStamp;
+        sync_tool_brush(&mut app);
+        assert_eq!((mode(&brush(&app)), opacity(&brush(&app))), (photocraft_color::BlendMode::Screen, 0.3), "the Clone Stamp keeps its own");
+
+        // The colours, the erase flag and the seed belong to the session, so a swap keeps what is
+        // live now instead of restoring another tool's copy (a picked colour reaches every tool).
+        app.run("tools.setBrush", json!({"brush": {"color": [0.0, 1.0, 0.0, 1.0], "background": [1.0, 0.0, 1.0, 1.0], "erase": true, "seed": 42}})).unwrap();
+        app.ui.tool = Tool::Brush;
+        sync_tool_brush(&mut app);
+        let b = brush(&app);
+        assert_eq!(
+            (b.color, b.background, b.erase, b.seed),
+            ([0.0, 1.0, 0.0, 1.0], [1.0, 0.0, 1.0, 1.0], true, 42),
+            "the session's own brush fields survive the swap"
+        );
+
+        // Tools with no brush of their own (the Move) leave the brush alone.
+        let before = brush(&app);
+        app.ui.tool = Tool::Move;
+        sync_tool_brush(&mut app);
+        assert_eq!(brush(&app), before);
     }
 
     #[test]
