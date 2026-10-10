@@ -419,7 +419,7 @@ jobs:
           {
             echo "Unsigned HarmonyOS HAP built from ${GITHUB_SHA:0:7} by [workflow run #${GITHUB_RUN_NUMBER}](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID})."
             echo
-            echo "| | |"
+            echo "| 项目 | 值 |"
             echo "|---|---|"
             echo "| versionName | \`$VERSION_NAME\` |"
             echo "| versionCode | \`$VERSION_CODE\` |"
@@ -457,7 +457,7 @@ jobs:
           {
             echo "## PhotoCraft HarmonyOS HAP"
             echo
-            echo "| | |"
+            echo "| 项目 | 值 |"
             echo "|---|---|"
             echo "| versionName | \`$VERSION_NAME\` |"
             echo "| versionCode | \`$VERSION_CODE\` |"
