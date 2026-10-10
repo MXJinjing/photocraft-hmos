@@ -7,6 +7,8 @@ license.workspace = true
 [features]
 default = ["eframe-host"]
 eframe-host = ["dep:eframe"]
+# HarmonyOS package: hide project promotion and detailed About credits.
+harmonyos-ui = []
 
 [lints]
 workspace = true

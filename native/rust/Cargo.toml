@@ -5,12 +5,13 @@ resolver = "3"
 name = "photocraft-hmos"
 version = "0.5.0"
 edition = "2024"
+license = "MIT OR Apache-2.0"
 
 [lib]
 crate-type = ["staticlib", "rlib"]
 
 [dependencies]
-photocraft-ui-egui = { path = "../../upstream/photocraft/crates/ui-egui", default-features = false }
+photocraft-ui-egui = { path = "../../upstream/photocraft/crates/ui-egui", default-features = false, features = ["harmonyos-ui"] }
 photocraft-text = { path = "../../upstream/photocraft/crates/text" }
 photocraft-engine = { path = "../../upstream/photocraft/crates/engine" }
 photocraft-io = { path = "../../upstream/photocraft/crates/io" }

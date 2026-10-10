@@ -162,3 +162,19 @@ ARM64/x86_64 release 原生库、HAP 构建与包校验通过；模拟器 127.0.
 验证：touch_nav 5 项通过（新增跨边界、混合起点、取消/重新开始回归）；原生 24 项全部通过，包含真实编辑器侧栏/首选项双指移入画布仍不改变 zoom/center，及有效画布双指正常导航且不编辑文档。UI 全量 888 passed / 3 ignored / 1 GPU adapter 不可访问；该项沙箱外单独复测通过。UI all-target Clippy、offline metadata、28 crates 分层、配置工具链的 wasm 检查通过。ARM64/x86_64 release 库、HAP 构建及 verify_native.py 通过。
 
 API 20 模拟器使用独立 touchorigintest 包完成启动/新建文档/菜单烟测，截图为 2880×1920：[画布](docs/native/touch-origin-canvas.jpeg)。测试包随后移除，没有替换或重启已有含未保存文档的应用，也没有向真实 Pad 部署。模拟器 uitest CLI 只支持单指注入；双指行为由实际原生触摸快照→egui→真实编辑器集成测试验证，硬件多指手感尚未验收。
+
+## 2026-10-10 HarmonyOS 项目入口与关于页面精简
+
+原生适配层启用共享 UI 的 `harmonyos-ui` feature。标题栏、启动页、帮助菜单隐藏 Discord、PhotoCraft/ArtCraft 官网、GitHub 及问题反馈入口；命令搜索使用相同菜单数据。“关于”移除链接与贡献者/模型页签，保留简介、版本和技术栈，窗口宽度随内容收窄。旧 dialog `tab=contributors/models` 状态回退到精简简介。系统信息、保存选择器及系统浏览器服务保持原有行为；默认上游桌面/Web 界面保留原入口。
+
+验证：HarmonyOS feature 下 UI 全量 952 passed / 3 ignored（含 890 项单元测试），原生 24 项通过；默认 feature 下 3 项链接/菜单测试通过。UI all-targets 严格 Clippy、离线 metadata、28 crates 分层检查通过。初次 wasm 检查使用 Homebrew Rust，因缺少目标标准库失败；加载 `scripts/dev.local.env` 配置工具链后完整 wasm 检查通过。ARM64/x86_64 release 库、HAP 构建及 verify_native.py 通过。
+
+仅在 API 20 模拟器 127.0.0.1:5555 安装并启动新版，部署前处于无文档状态，未部署真实 Pad。目视核对启动页、帮助菜单及关于窗口，截图均为 2880×1920：[启动页修改前](docs/native/project-links-home-before.jpeg)、[启动页修改后](docs/native/project-links-home-after.jpeg)、[关于修改前](docs/native/project-links-about-before.jpeg)、[关于修改后](docs/native/project-links-about-after.jpeg)。
+
+## 2026-10-10 恢复 fork GitHub 与问题反馈入口
+
+鸿蒙帮助菜单恢复 `help.github` 与 `help.reportIssue`，分别指向 `https://github.com/MXJinjing/photocraft-hmos` 和该 fork 的 `/issues`。命令搜索沿用菜单数据；默认上游构建仍指向 storytold/photocraft。Discord、官网、主页推广链接及关于窗口的链接/贡献者/模型页签继续隐藏。链接仍通过已有系统浏览器服务打开。
+
+验证：鸿蒙 UI 链接/真实界面 4 项回归、默认上游链接 3 项回归通过；鸿蒙 UI 全量 952 passed / 3 ignored，当前工作区原生 26 项通过。UI all-targets 严格 Clippy、离线 metadata、28 crates 分层与配置工具链 wasm 检查通过。双架构 release 库、HAP 构建和包校验通过；首次构建遇到工作区并行保存接口修改时的暂时签名不一致，接口对齐后重试成功，未改动其他任务的代码。
+
+在无文档状态的 API 20 模拟器 127.0.0.1:5555 安装/启动并目视核对恢复的菜单项，未部署真实 Pad；URL 路由由记录平台 open_url 服务的回归测试验证。2880×1920 帮助菜单对照：[恢复前](docs/native/fork-links-help-before.jpeg)、[恢复后](docs/native/fork-links-help-after.jpeg)。

@@ -8,7 +8,7 @@ fn hardware_shortcuts_use_current_input_once_and_keep_modifiers() {
     let mut app = PhotocraftApp::new(
         photocraft_engine::Session::new(),
         Services {
-            default_save: Some(Box::new(|_| Ok("/local/keyboard.psd".into()))),
+            default_save: Some(Box::new(|_, _| Ok("/local/keyboard.psd".into()))),
             export: Some(Box::new(|_, _, _| Ok((vec![1], Vec::new())))),
             write: Some(Box::new(move |name, _| {
                 seen.lock().unwrap().push(name.to_owned());

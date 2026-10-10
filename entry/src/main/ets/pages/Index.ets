@@ -1,8 +1,7 @@
 import native from 'libphotocraft.so';
-import { documentDirectory } from '../documentDirectory';
-import { LocalSaveDialog } from '../LocalSaveDialog';
+import { applicationDocumentUri } from '../documentDirectory';
 import { LocalDocuments } from '../LocalDocuments';
-import { saveFormatChoices } from '../saveFormats';
+import { savePickerOptions, SaveTargets } from '../savePicker';
 import { NativePrintAdapter } from '../NativePrintAdapter';
 import { common } from '@kit.AbilityKit';
 import { fileIo, fileUri, picker } from '@kit.CoreFileKit';
@@ -60,18 +59,10 @@ struct Index {
   private generation: number = 0;
   // 页面离开或重新初始化后，旧的异步结果不能继续操作当前页面。
   private alive: boolean = false;
-  private localSaveId: number = 0;
   private documents: LocalDocuments | undefined = undefined;
-  private localSaveSuggested: string = '';
-  private localSaveDialog: CustomDialogController = new CustomDialogController({
-    builder: LocalSaveDialog({ initialName: this.localSaveSuggested,
-      onConfirm: (name: string): void => { this.finishLocalSave(name); },
-      onCancel: (): void => { this.finishLocalSave(''); } }),
-    autoCancel: false,
-    cancel: (): void => { this.finishLocalSave(''); }
-  });
-  // Save As 返回给 Rust 的逻辑标识映射到系统授权 URI，写入后消费一次。
-  private saveTargets: Map<string, string> = new Map();
+  private documentUri: string = '';
+  // Ordinary Save retains its authorized URI; Save As consumes its URI once.
+  private saveTargets: SaveTargets = new SaveTargets();
   private stylus: HarmonyStylusAdapter = new HarmonyStylusAdapter((packet: StylusPacket): void => {
     if (this.alive) { native.input(JSON.stringify(new NativeStylusInput(packet))); }
   });
@@ -80,7 +71,14 @@ struct Index {
   private printing: NativePrintAdapter = new NativePrintAdapter(this.context,
     (message: string): void => { if (this.alive) { this.failure = message; } });
   private drainOpens(): void {
-    for (let file of takeOpens()) { native.open(file.name, file.bytes); }
+    for (let file of takeOpens()) {
+      let name = file.name;
+      try {
+        let path = file.uri.length > 0 ? new fileUri.FileUri(file.uri).path : '';
+        if (this.documents?.owns(path)) name = path;
+      } catch (error) { console.info('Open source path unavailable'); }
+      native.open(name, file.bytes);
+    }
   }
   aboutToAppear(): void {
     console.info('PhotoCraft native page appearing');
@@ -94,9 +92,12 @@ struct Index {
   private async initializeHost(generation: number): Promise<void> {
     // 先取得文档目录再创建原生宿主，避免首次保存时目录尚未准备好。
     try {
-      let documents = await documentDirectory(this.context);
+      let uri = await applicationDocumentUri(this.context);
+      let documents = new fileUri.FileUri(uri).path;
+      if (documents.length === 0) throw new Error('Application document directory has no path');
       if (!this.alive || generation !== this.generation) { return; }
       this.documents = new LocalDocuments(documents, this.context.filesDir);
+      this.documentUri = uri;
       let scale: number = this.getUIContext().vp2px(1);
       native.init(JSON.stringify(new NativeConfig(this.context.filesDir, documents, scale, i18n.System.getSystemLanguage())),
         (id: number, message: string, data: ArrayBuffer) => { this.receive(id, message, data); });
@@ -115,8 +116,6 @@ struct Index {
     this.alive = false;
     this.printing.stop();
     this.generation++;
-    this.localSaveDialog.close();
-    this.finishLocalSave('');
     this.initialized = false;
     this.saveTargets.clear();
     this.stylus.stop();
@@ -164,10 +163,7 @@ struct Index {
       }
     }
     else if (request.kind === 'open') { this.openFile(id); }
-    else if (request.kind === 'local_save') {
-      this.ime.stop(); this.cursor.reset();
-      this.localSaveId = id; this.localSaveSuggested = request.text; this.localSaveDialog.open();
-    }
+    else if (request.kind === 'save_default') { this.selectSave(id, request.text, true); }
     else if (request.kind === 'save_select') { this.selectSave(id, request.text); }
     else if (request.kind === 'write') { this.writeFile(id, request.text, data); }
     else if (request.kind === 'print') { this.printFile(id, request.text, data); }
@@ -186,22 +182,6 @@ struct Index {
     } catch (error) {
       native.reply(id, false, (error as Error).message, new ArrayBuffer(0));
     } finally { this.restoreEditorFocus(); }
-  }
-  private async finishLocalSave(name: string): Promise<void> {
-    let id = this.localSaveId;
-    this.localSaveId = 0;
-    if (id > 0) {
-      try {
-        if (name.length === 0 || this.documents === undefined) {
-          native.reply(id, false, 'cancelled', new ArrayBuffer(0));
-        } else {
-          let path = await this.documents.available(name);
-          native.reply(id, true, path, new ArrayBuffer(0));
-        }
-      } catch (error) {
-        native.reply(id, false, (error as Error).message, new ArrayBuffer(0));
-      } finally { this.restoreEditorFocus(); }
-    }
   }
   private restoreEditorFocus(): void {
     // 系统选择器或弹窗关闭后恢复 XComponent 焦点，硬件快捷键才能继续到达编辑器。
@@ -231,7 +211,8 @@ struct Index {
           view.set(new Uint8Array(chunk, 0, read), offset); offset += read;
         }
       } finally { await fileIo.close(file); }
-      native.reply(id, true, new fileUri.FileUri(uris[0]).name, bytes);
+      let opened = new fileUri.FileUri(uris[0]);
+      native.reply(id, true, this.documents?.owns(opened.path) ? opened.path : opened.name, bytes);
     } catch (error) {
       let failure = error as Error;
       native.reply(id, false, failure.message, new ArrayBuffer(0));
@@ -239,20 +220,18 @@ struct Index {
       this.restoreEditorFocus();
     }
   }
-  private async selectSave(id: number, suggested: string): Promise<void> {
+  private async selectSave(id: number, suggested: string, ordinary: boolean = false): Promise<void> {
+    this.ime.stop(); this.cursor.reset();
     let generation = this.generation;
     try {
-      let name = suggested.substring(suggested.lastIndexOf('/') + 1).replace(/[\\:*?"<>|]/g, '_');
-      let options = new picker.DocumentSaveOptions(); options.newFileNames = [name];
-      options.fileSuffixChoices = saveFormatChoices(name);
+      let options = savePickerOptions(suggested, this.documentUri);
       let uris = await new picker.DocumentViewPicker(this.context).save(options);
       if (!this.alive || generation !== this.generation || uris.length === 0) {
         native.reply(id, false, 'cancelled', new ArrayBuffer(0)); return;
       }
       let selectedName = new fileUri.FileUri(uris[0]).name;
       if (selectedName.length === 0) throw new Error('Selected file has no name');
-      let target = 'save-as/' + id.toString() + '/' + selectedName;
-      this.saveTargets.set(target, uris[0]);
+      let target = this.saveTargets.select(id, selectedName, uris[0], ordinary);
       native.reply(id, true, target, new ArrayBuffer(0));
     } catch (error) {
       let failure = error as Error;
@@ -268,8 +247,7 @@ struct Index {
         native.reply(id, true, name, new ArrayBuffer(0));
         return;
       }
-      let uri = this.saveTargets.get(name);
-      this.saveTargets.delete(name);
+      let uri = this.saveTargets.take(name);
       if (uri === undefined) throw new Error('No system save target for ' + name);
       let file = await fileIo.open(uri, fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.CREATE);
       try {

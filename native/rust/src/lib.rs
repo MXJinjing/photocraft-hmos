@@ -99,11 +99,11 @@ fn services(
             Err(e) => Some(("file".into(), Err(e))),
         })),
         always_pick_save: true,
-        default_save: Some(Box::new(move |doc| {
+        default_save: Some(Box::new(move |doc, source| {
             if let Some(path) = documents
                 .lock()
                 .unwrap_or_else(|p| p.into_inner())
-                .target(doc.id.0)
+                .existing(doc.id.0, source)
             {
                 return Ok(path);
             }
@@ -111,7 +111,7 @@ fn services(
                 .name
                 .rsplit_once('.')
                 .map_or(doc.name.as_str(), |(stem, _)| stem);
-            let (name, _) = bridge::request("local_save", &format!("{stem}.psd"), &[])?;
+            let (name, _) = bridge::request("save_default", &format!("{stem}.psd"), &[])?;
             documents
                 .lock()
                 .unwrap_or_else(|p| p.into_inner())

@@ -1,4 +1,4 @@
-//! Local working documents; external destinations are one-shot Save As copies.
+//! Ordinary Save targets: local paths or host-authorized picker tokens.
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
@@ -24,12 +24,28 @@ impl Documents {
                 .any(|c| matches!(c, std::path::Component::ParentDir))
     }
     pub fn select(&mut self, id: u64, path: &str) -> Result<String, String> {
-        // 本地目标按文档 id 缓存；同名文档也不会共享首次保存时选定的路径。
-        if !self.owns(path) {
+        // Tokens carry no ambient filesystem authority: the host retains the matching URI.
+        let parts: Vec<_> = path.split('/').collect();
+        let picker_target = matches!(parts.as_slice(), ["save-default", request, name]
+            if request.parse::<u64>().is_ok_and(|id| id > 0)
+                && !name.is_empty() && *name != "." && *name != ".." && !name.contains('\\'));
+        if !self.owns(path) && !picker_target {
             return Err("Invalid application document path".into());
         }
         self.targets.insert(id, path.into());
         Ok(path.into())
+    }
+    pub fn existing(&mut self, id: u64, source: Option<&str>) -> Option<String> {
+        if let Some(target) = self.target(id) {
+            return Some(target);
+        }
+        let path = source.filter(|path| {
+            self.owns(path)
+                && Path::new(path).extension().is_some_and(|ext| {
+                    ext.eq_ignore_ascii_case("psd") || ext.eq_ignore_ascii_case("psb")
+                })
+        })?;
+        self.select(id, path).ok()
     }
     pub fn target(&self, id: u64) -> Option<String> {
         self.targets.get(&id).cloned()

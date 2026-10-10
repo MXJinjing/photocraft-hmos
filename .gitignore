@@ -19,3 +19,8 @@ upstream/photocraft/dist/
 
 native/rust/target/
 entry/.cxx/
+
+# Local verification projects, logs and Python caches
+/work/
+__pycache__/
+*.pyc

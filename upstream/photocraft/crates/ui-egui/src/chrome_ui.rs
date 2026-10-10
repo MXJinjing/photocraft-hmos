@@ -511,9 +511,13 @@ mod tests {
         h.state().stylus.feed.set_connected(false);
         h.run_steps(2);
         let stylus = h.get_by_label("Stylus").rect();
-        let discord = h.get_by_label("Discord").rect();
         let file = h.get_by_label("File").rect();
-        assert!(discord.left() - stylus.right() >= 16.0, "stylus has breathing room left of Discord");
+        if crate::links::SHOW_PROJECT_LINKS {
+            let discord = h.get_by_label("Discord").rect();
+            assert!(discord.left() - stylus.right() >= 16.0, "stylus has breathing room left of Discord");
+        } else {
+            assert!(h.query_by_label("Discord").is_none());
+        }
         assert!((stylus.center().y - file.center().y).abs() < 1.0, "stylus is in the menu row");
         assert_eq!(h.query_all_by_label("Stylus").count(), 1, "options bar has no duplicate entry");
         if let Some(path) = std::env::var_os("PHOTOCRAFT_STYLUS_SCREENSHOT") {

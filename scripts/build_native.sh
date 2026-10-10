@@ -14,7 +14,8 @@ fi
 TARGETS="${PHOTOCRAFT_NATIVE_TARGETS:-aarch64-unknown-linux-ohos x86_64-unknown-linux-ohos}"
 PROFILE="${PHOTOCRAFT_RUST_PROFILE:-release}"
 ARGS=()
-case "$PROFILE" in release) ARGS+=(--release);; debug) ;; *) echo 'Profile must be release or debug' >&2; exit 2;; esac
+# Explicit dev profile also avoids expanding an empty array under macOS Bash 3's nounset.
+case "$PROFILE" in release) ARGS+=(--release);; debug) ARGS+=(--profile dev);; *) echo 'Profile must be release or debug' >&2; exit 2;; esac
 for target in $TARGETS; do
   case "$target" in aarch64-unknown-linux-ohos|x86_64-unknown-linux-ohos) ;; *) echo "Unsupported target: $target" >&2; exit 2;; esac
   [[ -d "$(rustc --print sysroot)/lib/rustlib/$target" ]] || { echo "Install target with: rustup target add $target" >&2; exit 1; }

@@ -190,8 +190,8 @@ pub type PickOpenFn = Box<dyn FnMut() -> Option<(String, Result<Vec<u8>, String>
 /// File › Open's multi-file picker: the selected paths, `None` when cancelled.
 pub type PickOpenPathsFn = Box<dyn FnMut() -> Option<Vec<String>>>;
 pub type PickSaveFn = Box<dyn FnMut(&str) -> Option<String>>;
-/// Host-owned destination for ordinary Save.
-pub type DefaultSaveFn = Box<dyn FnMut(&Document) -> Result<String, String>>;
+/// Host-owned destination for ordinary Save, with the current document source path.
+pub type DefaultSaveFn = Box<dyn FnMut(&Document, Option<&str>) -> Result<String, String>>;
 pub type WriteFn = Box<dyn FnMut(&str, &[u8]) -> Result<(), String>>;
 /// Read bytes through the desktop control session's authorized read root.
 pub type AutomationReadFn = Box<dyn FnMut(&str) -> Result<(String, Vec<u8>), String>>;
@@ -851,7 +851,7 @@ impl PhotocraftApp {
         Some(bytes.map(|b| (name.clone(), b)).map_err(|e| format!("{}: {e}", file_open::display_name(&name))))
     }
 
-    /// Ordinary Save may use a host-owned working directory without a system picker.
+    /// Ordinary Save delegates destination selection and reuse to the host.
     pub fn save(&mut self, path: Option<String>) -> Result<(String, Vec<String>), String> {
         if self.session.is_enabled("layer.smartObjects.saveContents") {
             return self.save_as(None);
@@ -864,7 +864,7 @@ impl PhotocraftApp {
             if !active.is_dirty() && (extension.eq_ignore_ascii_case("psd") || extension.eq_ignore_ascii_case("psb")) {
                 return Ok((active.path.clone().unwrap_or_else(|| doc.name.clone()), Vec::new()));
             }
-            let target = select(doc)?;
+            let target = select(doc, active.path.as_deref())?;
             return self.write_document(target, &ExportSettings::default());
         }
         self.save_as(path)
@@ -1684,7 +1684,7 @@ mod native_host_tests {
             let mut app = PhotocraftApp::new(
                 Session::new(),
                 Services {
-                    default_save: Some(Box::new(move |_| {
+                    default_save: Some(Box::new(move |_, _| {
                         seen.lock().unwrap().push("select");
                         Ok("/local/view.psd".into())
                     })),
@@ -1704,6 +1704,22 @@ mod native_host_tests {
             app.save(None).unwrap();
             assert_eq!(calls.lock().unwrap().as_slice(), &["select"]);
         }
+    }
+    #[test]
+    fn ordinary_save_passes_source_path_to_host_and_keeps_it_on_cancel() {
+        let mut app = PhotocraftApp::new(Session::new(), Services {
+            default_save: Some(Box::new(|_, source| {
+                assert_eq!(source, Some("/Download/test.bundle/source.psd"));
+                Err("cancelled".into())
+            })),
+            ..Default::default()
+        });
+        app.run("file.new", serde_json::json!({"width": 16, "height": 16})).unwrap();
+        app.run("layer.new.layer", serde_json::json!({})).unwrap();
+        app.session.active_mut().unwrap().path = Some("/Download/test.bundle/source.psd".into());
+        assert_eq!(app.save(None).unwrap_err(), "cancelled");
+        assert_eq!(app.session.active().unwrap().path.as_deref(), Some("/Download/test.bundle/source.psd"));
+        assert!(app.session.active().unwrap().is_dirty());
     }
     #[test]
     fn custom_host_draws_editor_without_eframe_frame() {
@@ -1784,7 +1800,7 @@ mod native_host_tests {
             let mut app = PhotocraftApp::new(
                 Session::new(),
                 Services {
-                    default_save: Some(Box::new(move |_| Ok(target.into()))),
+                    default_save: Some(Box::new(move |_, _| Ok(target.into()))),
                     export: Some(Box::new(|_, _, _| Ok((vec![1], Vec::new())))),
                     write: Some(Box::new(|_, _| Ok(()))),
                     ..Default::default()
@@ -1792,10 +1808,10 @@ mod native_host_tests {
             );
             app.run("file.new", serde_json::json!({"width": 16, "height": 16})).unwrap();
             let original = app.session.active().unwrap().doc.clone();
-            app.services.default_save = Some(Box::new(|_| Err("cancelled".into())));
+            app.services.default_save = Some(Box::new(|_, _| Err("cancelled".into())));
             assert_eq!(app.save(None), Err("cancelled".into()));
             assert_eq!(app.session.active().unwrap().doc.name, original.name);
-            app.services.default_save = Some(Box::new(move |_| Ok(target.into())));
+            app.services.default_save = Some(Box::new(move |_, _| Ok(target.into())));
             app.services.write = Some(Box::new(|_, _| Err("disk full".into())));
             assert_eq!(app.save(None), Err("disk full".into()));
             assert_eq!(app.session.active().unwrap().doc.name, original.name);
@@ -1822,7 +1838,7 @@ mod native_host_tests {
             Session::new(),
             Services {
                 always_pick_save: true,
-                default_save: Some(Box::new(|_| Ok("/local/photo.psd".into()))),
+                default_save: Some(Box::new(|_, _| Ok("/local/photo.psd".into()))),
                 pick_save: Some(Box::new(|_| Some("save-as/42/renamed.psd".into()))),
                 export: Some(Box::new(|_, _, _| Ok((vec![1], Vec::new())))),
                 write: Some(Box::new(move |name, _| {
@@ -1843,7 +1859,7 @@ mod native_host_tests {
         assert_eq!(app.session.active().unwrap().doc.name, "photo.psd");
         assert_eq!(*written.lock().unwrap(), ["/local/photo.psd", "save-as/42/renamed.psd", "/local/photo.psd"]);
         app.run("layer.new.layer", serde_json::json!({})).unwrap();
-        app.services.default_save = Some(Box::new(|_| Err("cancelled".into())));
+        app.services.default_save = Some(Box::new(|_, _| Err("cancelled".into())));
         assert_eq!(app.save(None), Err("cancelled".into()));
         assert!(app.session.active().unwrap().is_dirty());
         assert_eq!(written.lock().unwrap().len(), 3);

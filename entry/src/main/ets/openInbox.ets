@@ -7,10 +7,12 @@ const STREAM_KEY: string = 'ability.params.stream';
 
 export class OpenedFile {
   name: string = '';
+  uri: string = '';
   bytes: ArrayBuffer = new ArrayBuffer(0);
 
-  constructor(name: string, bytes: ArrayBuffer) {
+  constructor(name: string, bytes: ArrayBuffer, uri: string = '') {
     this.name = name;
+    this.uri = uri;
     this.bytes = bytes;
   }
 }
@@ -72,7 +74,7 @@ function enqueueUri(uri: string): void {
       console.error(`Open read incomplete: ${uri}`);
       return;
     }
-    queued.push(new OpenedFile(displayName(uri), bytes));
+    queued.push(new OpenedFile(displayName(uri), bytes, uri));
     if (listener !== null) {
       listener();
     }

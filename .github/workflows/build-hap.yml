@@ -286,6 +286,7 @@ jobs:
         env:
           VERSION_NAME: ${{ steps.cfg.outputs.version_name }}
           VERSION_CODE: ${{ steps.cfg.outputs.version_code }}
+          BUILD_MODE: ${{ steps.cfg.outputs.build_mode }}
         run: |
           set -euo pipefail
 
@@ -301,6 +302,17 @@ jobs:
 
           name = os.environ["VERSION_NAME"]
           code = os.environ["VERSION_CODE"]
+          mode = os.environ["BUILD_MODE"]
+          if mode not in ("debug", "release"):
+              raise SystemExit("build mode must be debug or release")
+
+          # Match the Cargo output directory selected by the Rust build step.
+          profile = Path("entry/build-profile.json5")
+          config = json.loads(profile.read_text(encoding="utf-8"))
+          options = config["buildOption"]["externalNativeOptions"]
+          options["arguments"] = (options.get("arguments", "") +
+                                  f" -DPHOTOCRAFT_RUST_PROFILE={mode}").strip()
+          profile.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
 
           app = Path("AppScope/app.json5")
           text = app.read_text(encoding="utf-8")
@@ -330,6 +342,8 @@ jobs:
           targets: aarch64-unknown-linux-ohos,x86_64-unknown-linux-ohos
 
       - name: Build Rust native libraries
+        env:
+          PHOTOCRAFT_RUST_PROFILE: ${{ steps.cfg.outputs.build_mode }}
         run: scripts/build_native.sh
 
       - name: Build HAP

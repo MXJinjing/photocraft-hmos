@@ -6,11 +6,21 @@ use serde_json::{Value, json};
 
 use crate::PhotocraftApp;
 
+/// Whether this host exposes community and project entry points.
+pub const SHOW_PROJECT_LINKS: bool = !cfg!(feature = "harmonyos-ui");
+
 pub const DISCORD: &str = "https://discord.gg/artcraft";
 pub const ARTCRAFT_WEBSITE: &str = "https://getartcraft.com";
 pub const APP_PAGE: &str = "https://getartcraft.com/apps/photocraft";
+#[cfg(not(feature = "harmonyos-ui"))]
 pub const GITHUB: &str = "https://github.com/storytold/photocraft";
+#[cfg(not(feature = "harmonyos-ui"))]
 pub const ISSUES: &str = "https://github.com/storytold/photocraft/issues";
+// HarmonyOS-specific problems belong to the fork rather than the upstream project.
+#[cfg(feature = "harmonyos-ui")]
+pub const GITHUB: &str = "https://github.com/MXJinjing/photocraft-hmos";
+#[cfg(feature = "harmonyos-ui")]
+pub const ISSUES: &str = "https://github.com/MXJinjing/photocraft-hmos/issues";
 
 /// Help-menu link commands: (id, url). Labels live in `menus::UI_COMMANDS`.
 pub const COMMANDS: &[(&str, &str)] =
@@ -97,6 +107,7 @@ mod tests {
         assert_eq!(opened.lock().unwrap().last().map(String::as_str), Some(DISCORD));
     }
 
+    #[cfg(not(feature = "harmonyos-ui"))]
     #[test]
     fn help_menu_lists_links_then_separator_then_system_info_and_about() {
         let app = PhotocraftApp::new(photocraft_engine::Session::new(), Default::default());
@@ -107,6 +118,47 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "harmonyos-ui")]
+    #[test]
+    fn harmonyos_help_menu_keeps_fork_links_and_local_information() {
+        let app = PhotocraftApp::new(photocraft_engine::Session::new(), Default::default());
+        let help: Vec<String> = crate::menus::menu_items(&app).into_iter().filter(|i| i.path == ["Help"]).map(|i| i.id).collect();
+        assert_eq!(help, ["help.github", "help.reportIssue", "---", "help.systemInfo", "help.about"]);
+        let links: Vec<&str> = crate::menus::UI_COMMANDS.iter().filter(|c| url_for(c.0).is_some()).map(|c| c.0).collect();
+        assert_eq!(links, ["help.github", "help.reportIssue"]);
+        assert_eq!(url_for("help.github"), Some("https://github.com/MXJinjing/photocraft-hmos"));
+        assert_eq!(url_for("help.reportIssue"), Some("https://github.com/MXJinjing/photocraft-hmos/issues"));
+    }
+
+    #[cfg(feature = "harmonyos-ui")]
+    #[test]
+    fn harmonyos_home_and_about_hide_project_links_and_credit_tabs() {
+        use egui_kittest::{Harness, kittest::Queryable};
+        let app = PhotocraftApp::new(photocraft_engine::Session::new(), Default::default());
+        let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_ui_state(
+            |ui, app| {
+                app.host_logic(ui.ctx());
+                app.host_ui(ui);
+            },
+            app,
+        );
+        PhotocraftApp::setup_context(&h.ctx, crate::theme::ThemeKind::ALL[0]);
+        h.run_steps(3);
+        for label in ["Discord", "Join us on Discord", "PhotoCraft website", "GitHub", "ArtCraft"] {
+            assert!(h.query_by_label(label).is_none(), "home: {label}");
+        }
+        for tab in ["about", "contributors", "models"] {
+            h.state_mut().ui.dialogs.clear();
+            h.state_mut().ui.open_dialog(crate::state::DialogKind::About, serde_json::from_value(json!({"tab": tab})).unwrap());
+            h.run_steps(3);
+            assert!(h.query_by_label("About PhotoCraft").is_some());
+            assert!(h.query_by_label_contains("Version ").is_some());
+            for label in ["Contributors", "Models", "Join us on Discord", "PhotoCraft website", "GitHub", "ArtCraft"] {
+                assert!(h.query_by_label(label).is_none(), "about {tab}: {label}");
+            }
+        }
+    }
+
     #[test]
     fn link_commands_open_their_urls() {
         let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), Default::default());
@@ -114,7 +166,8 @@ mod tests {
         for (id, url) in [
             ("help.discord", "https://discord.gg/artcraft"),
             ("help.website", "https://getartcraft.com/apps/photocraft"),
-            ("help.github", "https://github.com/storytold/photocraft"),
+            ("help.github", GITHUB),
+            ("help.reportIssue", ISSUES),
         ] {
             let r = crate::menus::invoke(&mut app, &ctx, id, serde_json::json!({})).unwrap();
             assert_eq!(r["url"], url);

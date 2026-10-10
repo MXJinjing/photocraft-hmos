@@ -101,7 +101,8 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
                 ui.set_min_width(800.0);
             }
             // The About window: room for the contributor table, the same width on every tab.
-            let about_tabs = d.kind == DialogKind::About && d.fields.get("systemInfo").and_then(Value::as_bool) != Some(true);
+            let about_tabs =
+                crate::links::SHOW_PROJECT_LINKS && d.kind == DialogKind::About && d.fields.get("systemInfo").and_then(Value::as_bool) != Some(true);
             if about_tabs {
                 ui.set_min_width(700.0);
             }
@@ -141,29 +142,33 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
                     // tab is a dialog field, so automation can switch it with `ui.dialog.set`.
                     let tab = about_tab(&fields);
                     let mut chosen = tab;
-                    ui.horizontal(|ui| {
-                        for (key, label) in [("about", tl!("About")), ("contributors", tl!("Contributors")), ("models", tl!("Models"))] {
-                            if crate::widgets::pill_tab(ui, label, tab == key).clicked() {
-                                chosen = key;
+                    if crate::links::SHOW_PROJECT_LINKS {
+                        ui.horizontal(|ui| {
+                            for (key, label) in [("about", tl!("About")), ("contributors", tl!("Contributors")), ("models", tl!("Models"))] {
+                                if crate::widgets::pill_tab(ui, label, tab == key).clicked() {
+                                    chosen = key;
+                                }
                             }
+                        });
+                        if chosen != tab {
+                            fields.insert("tab".into(), json!(chosen));
                         }
-                    });
-                    if chosen != tab {
-                        fields.insert("tab".into(), json!(chosen));
+                        ui.add_space(8.0);
                     }
-                    ui.add_space(8.0);
                     match chosen {
                         "contributors" => crate::credits::contributors_ui(ui),
                         "models" => crate::credits::models_ui(ui),
                         _ => {
                             ui.label(tl!("PhotoCraft — an open-source, native image editor written in Rust."));
                             ui.label(crate::i18n::fmt(tl!("Version {version}"), &[("version", &photocraft_engine::build_info::long_version())]));
-                            ui.add_space(12.0);
-                            ui.vertical_centered(|ui| {
-                                crate::links::discord_button(app, ui, 220.0);
-                                ui.add_space(8.0);
-                                crate::links::link_row(app, ui);
-                            });
+                            if crate::links::SHOW_PROJECT_LINKS {
+                                ui.add_space(12.0);
+                                ui.vertical_centered(|ui| {
+                                    crate::links::discord_button(app, ui, 220.0);
+                                    ui.add_space(8.0);
+                                    crate::links::link_row(app, ui);
+                                });
+                            }
                             ui.add_space(10.0);
                             ui.weak("egui · wgpu · photocraft-engine");
                         }
@@ -269,7 +274,11 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
 }
 
 /// The About window's tabs, as stored in its `tab` field.
+#[cfg(not(feature = "harmonyos-ui"))]
 pub const ABOUT_TABS: [&str; 3] = ["about", "contributors", "models"];
+
+#[cfg(feature = "harmonyos-ui")]
+pub const ABOUT_TABS: [&str; 1] = ["about"];
 
 /// The About tab to show: the `tab` field when it names one, otherwise "about".
 fn about_tab(fields: &serde_json::Map<String, Value>) -> &'static str {

@@ -253,7 +253,7 @@ mod tests {
             }
             // Wide windows show the whole group; the narrowest drops Discord (also Help › Discord).
             let has_discord = texts(&out).iter().any(|(t, _)| t == "Discord");
-            assert_eq!(has_discord, width > 1000.0, "Discord at {width}");
+            assert_eq!(has_discord, crate::links::SHOW_PROJECT_LINKS && width > 1000.0, "Discord at {width}");
         }
     }
 
