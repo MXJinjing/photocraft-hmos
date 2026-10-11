@@ -35,7 +35,8 @@ assert.deepEqual(move, {
 }, 'hover must be a move without press and zero pressure');
 
 const leave = JSON.parse(penHoverLeaveMessage(120, 80));
-assert.deepEqual(leave, { kind: 'blur', x: 120, y: 80 });
+assert.deepEqual(leave, { kind: 'hover_leave', x: 120, y: 80 });
 assert.equal(isStaleHoverEcho(120, 80, 120, 80), true, 'leave-point echo is stale');
 assert.equal(isStaleHoverEcho(300, 150, 120, 80), false, 'lift-point hover is fresh');
+assert.equal(isStaleHoverEcho(120, 80, 120, 80), true, 'multi-frame echo stays stale');
 console.log('pen hover preview encoder ok');

@@ -556,7 +556,7 @@ fn pen_hover_move_sets_hover_pos_without_pressing() {
     );
     state.push(
         super::Input {
-            kind: "blur".into(),
+            kind: "hover_leave".into(),
             x: 200.,
             y: 100.,
             ..Default::default()
@@ -584,56 +584,87 @@ fn push_pen(state: &mut super::State, action: i32, x: f32, y: f32, pressure: f32
     state.push(serde_json::from_str(&packet).unwrap(), 2., events);
 }
 
-#[test]
-fn pen_lift_keeps_hover_at_lift_not_old_hover() {
-    let mut state = super::State::default();
-    let mut events = vec![];
-    // Hover at the original point (100, 50) in egui points.
-    push_pen(&mut state, 2, 200., 100., 0., &mut events);
-    events.clear();
-    // Stroke from there to the lift point (300, 150).
-    push_pen(&mut state, 0, 200., 100., 0.5, &mut events);
-    push_pen(&mut state, 2, 400., 200., 0.5, &mut events);
-    // Stale hover echoed while still in contact must not move the stroke.
-    let before = events.len();
-    push_pen(&mut state, 2, 200., 100., 0., &mut events);
-    assert_eq!(events.len(), before, "hover while pen_down must be ignored");
-    push_pen(&mut state, 1, 600., 300., 0., &mut events);
-    let lift = egui::pos2(300., 150.);
-    assert!(
-        events.iter().any(|e| matches!(e, egui::Event::PointerMoved(p) if *p == lift)),
-        "lift must move to tip position: {events:?}"
-    );
-    events.clear();
-    // Spurious onHover(false) right after lift must not clear the tip.
+fn push_mouse(state: &mut super::State, x: f32, y: f32, events: &mut Vec<egui::Event>) {
     state.push(
         super::Input {
-            kind: "blur".into(),
-            x: 200.,
-            y: 100.,
+            kind: "pointer".into(),
+            action: 2,
+            x,
+            y,
             ..Default::default()
         },
         2.,
-        &mut events,
+        events,
     );
+}
+
+/// Real-device sequence: hover A → stroke to B → lift at B → multi-frame echo A (+ mouse).
+/// #8 cleared its one-shot guard after the first echo, so the second frame jumped back to A.
+#[test]
+fn pen_lift_pins_through_multiframe_stale_hover_echo() {
+    let mut state = super::State::default();
+    let mut events = vec![];
+    let scale = 2.0;
+    let a = (200.0_f32, 100.0_f32); // physical px → egui (100, 50)
+    let b = (600.0_f32, 300.0_f32); // physical px → egui (300, 150)
+    let a_pt = egui::pos2(a.0 / scale, a.1 / scale);
+    let b_pt = egui::pos2(b.0 / scale, b.1 / scale);
+
+    push_pen(&mut state, 2, a.0, a.1, 0., &mut events);
+    events.clear();
+    push_pen(&mut state, 0, a.0, a.1, 0.4, &mut events);
+    push_pen(&mut state, 2, 400., 200., 0.5, &mut events);
+    push_pen(&mut state, 1, b.0, b.1, 0., &mut events);
     assert!(
-        events.is_empty(),
-        "post-lift hover leave must not PointerGone: {events:?}"
-    );
-    // Stale onHoverMove at the pre-stroke point must keep the tip at the lift.
-    push_pen(&mut state, 2, 200., 100., 0., &mut events);
-    assert!(
-        matches!(events.as_slice(), [egui::Event::PointerMoved(p)] if *p == lift),
-        "stale post-lift hover must stay at lift: {events:?}"
+        events.iter().any(|e| matches!(e, egui::Event::PointerMoved(p) if *p == b_pt)),
+        "lift must report tip at B: {events:?}"
     );
     events.clear();
-    // A later nearby hover (or continued hover near lift) may update normally.
-    push_pen(&mut state, 2, 610., 310., 0., &mut events);
-    assert!(
-        matches!(events.as_slice(), [egui::Event::PointerMoved(p)] if *p == egui::pos2(305., 155.)),
-        "subsequent hover after consuming the guard must apply: {events:?}"
+
+    // Contact-end hover leave must not clear the tip while pinned.
+    state.push(
+        super::Input {
+            kind: "hover_leave".into(),
+            x: a.0,
+            y: a.1,
+            ..Default::default()
+        },
+        scale,
+        &mut events,
     );
+    assert!(events.is_empty(), "post-lift hover_leave must be ignored: {events:?}");
+
+    // Multi-frame stale echoes at A (the #8 failure mode).
+    for i in 0..5 {
+        push_pen(&mut state, 2, a.0, a.1, 0., &mut events);
+        assert!(
+            matches!(events.as_slice(), [egui::Event::PointerMoved(p)] if *p == b_pt),
+            "frame {i}: echo A must keep tip at lift B, got {events:?}"
+        );
+        events.clear();
+    }
+
+    // XComponent mouse leftovers at A must also stay pinned.
+    push_mouse(&mut state, a.0, a.1, &mut events);
+    assert!(
+        matches!(events.as_slice(), [egui::Event::PointerMoved(p)] if *p == b_pt),
+        "mouse echo at A must stay at B: {events:?}"
+    );
+    events.clear();
+
     let ctx = egui::Context::default();
+    // Reinforce lift into egui, then ensure hover_pos is B not A.
+    frame(
+        &ctx,
+        egui::RawInput {
+            events: vec![egui::Event::PointerMoved(b_pt)],
+            ..Default::default()
+        },
+        |ui| {
+            assert_eq!(ui.input(|i| i.pointer.hover_pos()), Some(b_pt));
+        },
+    );
+    push_pen(&mut state, 2, a.0, a.1, 0., &mut events);
     frame(
         &ctx,
         egui::RawInput {
@@ -641,8 +672,55 @@ fn pen_lift_keeps_hover_at_lift_not_old_hover() {
             ..Default::default()
         },
         |ui| {
-            assert_eq!(ui.input(|i| i.pointer.hover_pos()), Some(egui::pos2(305., 155.)));
-            assert!(!ui.input(|i| i.pointer.any_down()));
+            assert_eq!(
+                ui.input(|i| i.pointer.hover_pos()),
+                Some(b_pt),
+                "egui hover_pos must remain at lift B after echo A"
+            );
+            assert_ne!(ui.input(|i| i.pointer.hover_pos()), Some(a_pt));
         },
+    );
+
+    // A real hover away from A unlocks the pin target.
+    push_pen(&mut state, 2, 700., 400., 0., &mut events);
+    assert!(
+        matches!(events.as_slice(), [egui::Event::PointerMoved(p)] if *p == egui::pos2(350., 200.)),
+        "fresh hover must unlock: {events:?}"
+    );
+    events.clear();
+    // Delayed echo of A after unlock must still be dropped (frozen_hover persists).
+    push_pen(&mut state, 2, a.0, a.1, 0., &mut events);
+    assert!(
+        events.is_empty(),
+        "delayed echo A after unlock must not move tip: {events:?}"
+    );
+}
+
+#[test]
+fn focus_blur_clears_lift_pin() {
+    let mut state = super::State::default();
+    let mut events = vec![];
+    push_pen(&mut state, 2, 200., 100., 0., &mut events);
+    push_pen(&mut state, 0, 200., 100., 0.5, &mut events);
+    push_pen(&mut state, 1, 600., 300., 0., &mut events);
+    events.clear();
+    state.push(
+        super::Input {
+            kind: "blur".into(),
+            ..Default::default()
+        },
+        2.,
+        &mut events,
+    );
+    assert!(
+        events.iter().any(|e| matches!(e, egui::Event::PointerGone)),
+        "focus blur must PointerGone: {events:?}"
+    );
+    events.clear();
+    // After focus blur, a move at the old hover is no longer pinned to the lift.
+    push_pen(&mut state, 2, 200., 100., 0., &mut events);
+    assert!(
+        matches!(events.as_slice(), [egui::Event::PointerMoved(p)] if *p == egui::pos2(100., 50.)),
+        "after focus blur, hover A applies normally: {events:?}"
     );
 }

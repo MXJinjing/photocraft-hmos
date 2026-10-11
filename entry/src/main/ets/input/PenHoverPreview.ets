@@ -17,7 +17,7 @@ export class PenHoverMove {
 }
 
 export class PenHoverLeave {
-  kind: string = 'blur';
+  kind: string = 'hover_leave';
   x: number = 0;
   y: number = 0;
 }
@@ -40,8 +40,9 @@ export function isFiniteHoverPoint(x: number, y: number): boolean {
   return Number.isFinite(x) && Number.isFinite(y);
 }
 
-// After contact ends, ArkUI may re-deliver onHoverMove at the last pre-stroke
-// hover point before the real proximity stream resumes.
+// After contact ends, ArkUI may keep re-delivering onHoverMove at the last
+// pre-stroke hover point for several frames. Drop every such echo until a
+// different point arrives.
 export function isStaleHoverEcho(x: number, y: number, lastX: number, lastY: number): boolean {
   return x === lastX && y === lastY;
 }
