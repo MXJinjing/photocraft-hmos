@@ -871,8 +871,18 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                         }
                         ui.add_enabled_ui(!block, |ui| {
                             percent_field(ui, tl!("Opacity"), &mut b.opacity, 0.0..=100.0, 62.0);
-                            if icons::button(ui, "circle-dot", 24.0, b.pressure_opacity, tl!("Always use pressure for opacity")).clicked() {
-                                b.pressure_opacity = !b.pressure_opacity;
+                            // Eraser keeps its own pressure flags, independent of the brush.
+                            let pressure_opacity = if tool == Tool::Eraser {
+                                app.ui.tool_options.eraser_pressure_opacity
+                            } else {
+                                b.pressure_opacity
+                            };
+                            if icons::button(ui, "circle-dot", 24.0, pressure_opacity, tl!("Always use pressure for opacity")).clicked() {
+                                if tool == Tool::Eraser {
+                                    app.ui.tool_options.eraser_pressure_opacity = !pressure_opacity;
+                                } else {
+                                    b.pressure_opacity = !pressure_opacity;
+                                }
                             }
                         });
                         // A Pencil- or Block-mode Eraser is always full flow, without build-up (Photoshop).
@@ -887,8 +897,17 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                         smoothing_field(ui, b, 58.0);
                         smoothing_options(ui, b);
                         widgets::vline(ui, 22.0);
-                        if icons::button(ui, "circle-dot", 24.0, b.pressure_size, tl!("Always use pressure for size")).clicked() {
-                            b.pressure_size = !b.pressure_size;
+                        let pressure_size = if tool == Tool::Eraser {
+                            app.ui.tool_options.eraser_pressure_size
+                        } else {
+                            b.pressure_size
+                        };
+                        if icons::button(ui, "circle-dot", 24.0, pressure_size, tl!("Always use pressure for size")).clicked() {
+                            if tool == Tool::Eraser {
+                                app.ui.tool_options.eraser_pressure_size = !pressure_size;
+                            } else {
+                                b.pressure_size = !pressure_size;
+                            }
                         }
                     }
                     // Pencil: Photoshop's options (no hardness or flow: the pencil is always hard).
@@ -935,8 +954,13 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                         opt_label(ui, tl!("Smoothing"));
                         smoothing_field(ui, b, 66.0);
                         widgets::vline(ui, 22.0);
-                        widgets::toggle(ui, &mut b.pressure_size, tl!("Pressure for Size"));
-                        widgets::toggle(ui, &mut b.pressure_opacity, tl!("Pressure for Opacity"));
+                        if tool == Tool::Eraser {
+                            widgets::toggle(ui, &mut app.ui.tool_options.eraser_pressure_size, tl!("Pressure for Size"));
+                            widgets::toggle(ui, &mut app.ui.tool_options.eraser_pressure_opacity, tl!("Pressure for Opacity"));
+                        } else {
+                            widgets::toggle(ui, &mut b.pressure_size, tl!("Pressure for Size"));
+                            widgets::toggle(ui, &mut b.pressure_opacity, tl!("Pressure for Opacity"));
+                        }
                     }
                     Tool::MixerBrush => {
                         brush_preset_chip(ui, b, &mut app.ui);
