@@ -1036,13 +1036,25 @@ pub const HIDDEN_UNTIL_IMPLEMENTED: &[&str] = &[
     "integrations.controlPort",
 ];
 
-/// Is the preference at `path` (`"section.key"`) hidden from the Preferences dialog?
-pub fn is_hidden(path: &str) -> bool {
-    HIDDEN_UNTIL_IMPLEMENTED.contains(&path) || (!cfg!(target_os = "linux") && LINUX_ONLY.contains(&path))
+/// Desktop Linux (X11/Wayland). OHOS/HarmonyOS targets also report `target_os = "linux"`,
+/// but they have no Linux display server preference to offer.
+pub const fn is_desktop_linux() -> bool {
+    cfg!(all(target_os = "linux", not(target_env = "ohos")))
 }
 
-/// Preferences that only do something on Linux; the dialog doesn't show them elsewhere. They
-/// still load, save and round-trip on every platform.
+/// Is the preference at `path` (`"section.key"`) hidden from the Preferences dialog?
+pub fn is_hidden(path: &str) -> bool {
+    is_hidden_for(path, is_desktop_linux())
+}
+
+/// Same as [`is_hidden`], with an explicit desktop-Linux flag so OHOS/non-Linux behaviour can
+/// be unit-tested on any host.
+pub fn is_hidden_for(path: &str, desktop_linux: bool) -> bool {
+    HIDDEN_UNTIL_IMPLEMENTED.contains(&path) || (!desktop_linux && LINUX_ONLY.contains(&path))
+}
+
+/// Preferences that only do something on desktop Linux; the dialog doesn't show them on
+/// Windows, macOS, wasm, or OHOS/HarmonyOS. They still load, save and round-trip everywhere.
 pub const LINUX_ONLY: &[&str] = &["performance.linuxDisplayServer"];
 
 /// Choices of an enumerated preference (dotted path, e.g. `"cursors.painting"`).
