@@ -208,6 +208,7 @@ fn stroke_coverage(distance: f32, scale: f32) -> (f32, f32) {
     ((0.5 * scale + 0.5 - distance).clamp(0.0, 1.0), (1.5 * scale + 0.5 - distance).clamp(0.0, 1.0))
 }
 
+#[cfg(test)]
 fn rasterize(shape: Shape, scale: f32) -> Option<CustomCursorImage> {
     rasterize_with_opacity(shape, scale, 1.0)
 }

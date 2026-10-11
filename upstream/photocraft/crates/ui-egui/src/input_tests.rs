@@ -974,3 +974,53 @@ fn escape_with_the_palette_open_does_not_deselect() {
     h.run_steps(2);
     assert!(h.state().session.active().unwrap().doc.selection.is_some(), "Esc belongs to the palette");
 }
+
+/// HarmonyOS paints its tip on the canvas, rather than uploading a Windows cursor bitmap.
+#[test]
+#[cfg(not(target_os = "windows"))]
+fn pen_hover_brush_tip_is_half_as_opaque_and_contact_restores_it() {
+    use crate::stylus::{PenSample, PointerSource};
+    let mut h = harness();
+    h.state_mut().ui.tool = crate::state::Tool::Brush;
+    h.state_mut().run("tools.setBrush", json!({"brush": {"size": 40, "hardness": 1.0}})).unwrap();
+    h.state_mut().session.edit_prefs(|prefs| {
+        prefs.cursors.painting = photocraft_engine::prefs::PaintingCursor::FullSizeTip;
+        prefs.cursors.show_crosshair_in_brush_tip = false;
+        prefs.cursors.show_only_crosshair_while_painting = false;
+    });
+    let p = h.state().last_canvas_rect.center();
+    let strokes = |h: &Harness<'static, PhotocraftApp>, at: Pos2| {
+        h.output()
+            .shapes
+            .iter()
+            .filter_map(|s| match &s.shape {
+                egui::Shape::Circle(c) if c.center == at && c.radius > 6.0 => Some((c.stroke.width, c.stroke.color.a())),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    h.state_mut().stylus.feed.report(PointerSource::Mouse, None);
+    h.hover_at(p);
+    h.run_steps(3);
+    let mouse = strokes(&h, p);
+    assert_eq!(mouse, [(3.0, 160), (1.0, 235)]);
+    capture_menu_frame(&mut h, "brush-tip-mouse");
+
+    h.state_mut().stylus.feed.report(PointerSource::Pen, Some(PenSample { pressure: 0.0, ..Default::default() }));
+    h.run_steps(3);
+    assert!(h.state().drag.is_none());
+    assert_eq!(strokes(&h, p), [(3.0, 80), (1.0, 118)]);
+    capture_menu_frame(&mut h, "brush-tip-pen-hover");
+
+    h.state_mut().stylus.feed.report(PointerSource::Pen, Some(PenSample { pressure: 0.8, ..Default::default() }));
+    h.event(pointer_button(p, true));
+    h.run_steps(1);
+    let contact = p + vec2(20.0, 0.0);
+    h.event(egui::Event::PointerMoved(contact));
+    h.run_steps(1);
+    assert!(h.state().drag.is_some());
+    assert_eq!(strokes(&h, contact), mouse);
+    h.event(pointer_button(contact, false));
+    h.run_steps(2);
+    assert_eq!(strokes(&h, contact), [(3.0, 80), (1.0, 118)]);
+}
