@@ -11,7 +11,7 @@
 PhotoCraft 是一款开源图像编辑器，支持图层、蒙版、文字、画笔，以及 Photoshop 分层文件（PSD）。本仓库为其在 **HarmonyOS** 上的原生适配版本，界面与操作尽量贴近上游桌面版。
 
 > [!NOTE]
-> 本仓库为个人对 PhotoCraft 的鸿蒙适配，**与上游 PhotoCraft / ArtCraft 团队无关**，未获其官方支持或背书。当前仍是早期开发版本（基于上游 PhotoCraft v0.6.0），功能与稳定性仍在完善中，**请谨慎用于实际生产场景**，编辑过程中请及时保存文件内容。如遇问题，欢迎通过 Issue 反馈。
+> 本仓库为个人对 PhotoCraft 的鸿蒙适配，**与上游 PhotoCraft / ArtCraft 团队无关**，未获其官方支持或背书。当前仍是早期开发版本，功能与稳定性仍在完善中，**请谨慎用于实际生产场景**，编辑过程中请及时保存文件内容。如遇问题，欢迎通过 Issue 反馈。
 
 完整功能与桌面版能力说明，请参阅上游项目：[storytold/photocraft](https://github.com/storytold/photocraft) · 官网介绍：[getartcraft.com/apps/photocraft](https://getartcraft.com/apps/photocraft)
 
@@ -116,7 +116,7 @@ hdc shell aa start -a EntryAbility -b io.github.storytold.photocraft.hmos
 
 ## 原生架构与验证
 
-当前源码基于 PhotoCraft v0.6.0，鸿蒙版本为 `0.6.0.1`（versionCode `60001`）。PhotoCraft Rust 库通过 XComponent / NativeWindow 与 wgpu GLES/EGL 绘制 egui UI；文档画布使用 CPU 合成。HAP 包含 ARM64 原生库，上游桌面/Web 源码和完整 Git 历史随 subtree 保留。
+PhotoCraft Rust 库通过 XComponent / NativeWindow 与 wgpu GLES/EGL 绘制 egui UI；文档画布使用 CPU 合成。HAP 包含 ARM64 原生库，上游桌面/Web 源码和完整 Git 历史随 subtree 保留。具体版本号以 `AppScope/app.json5` 与 GitHub Releases 为准。
 
 自动显示配置文件表示应用输出空间，文档按 ICC 转换后由鸿蒙完成屏幕映射；它不代表实测面板 ICC。窗口重建、尺寸变化和 EGL surface 恢复后重新声明色彩空间。
 
