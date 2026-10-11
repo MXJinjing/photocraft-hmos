@@ -17,7 +17,7 @@ Verified on 2026-10-11 with the `harmonyos-ui` feature and configured Rust 1.99.
 | Fit in all 10 themes | Original text size / padding retained; immediately right of zoom; click requests document fit |
 | Mixed hidden panel combinations, existing shell commands | Passed |
 | Touch events in the full shell with finger painting blocked | Passed; document history unchanged |
-| Full UI test suite | 1842 passed, 4 existing failures, 10 ignored |
+| Full UI test suite on final main | 1845 passed, 4 existing failures, 10 ignored |
 | UI Clippy, all targets, warnings denied | Passed |
 | Dependency layers | Passed, 29 crates |
 | WASM compatibility | Passed |
@@ -31,7 +31,7 @@ The same four full-suite failures reproduce on unchanged main (`227ea9d7`):
 - `native_host_tests::host_local_save_and_external_save_as_use_separate_destinations`
 - `panels::color_tests::short_toolbar_scrolls_to_bottom_tools_without_moving_or_painting_canvas`
 
-The baseline suite had 1837 passing tests, those same four failures and 10 ignored tests. This change adds five passing tests.
+The original baseline suite had 1837 passing tests, those same four failures and 10 ignored tests. The final main also includes three unrelated upstream tests added after that baseline; this change adds five passing tests.
 
 Simulator checks use the isolated `io.github.storytold.photocraft.panelcontroltest` bundle on `127.0.0.1:5555`. The regular app and real Pad are unaffected. The temporary test bundle name is restored in source after packaging. Test documents are blank generated canvases.
 
