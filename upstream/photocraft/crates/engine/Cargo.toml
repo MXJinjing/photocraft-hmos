@@ -10,8 +10,6 @@ workspace = true
 [features]
 # Real-file corpus tests (opt-in; `cargo xtask test-corpus`). Fail when the corpus is missing.
 corpus = []
-# HarmonyOS / photocraft-hmos package: hide desktop-Linux-only preferences (X11/Wayland).
-harmonyos = []
 
 [dependencies]
 photocraft-geom = { workspace = true }

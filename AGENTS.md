@@ -40,6 +40,20 @@ Do not share checkouts. After cloning, add the `upstream` remote if missing. Pre
 4. Rust and ArkTS/C++ edits require HAP rebuild/deployment. All builds and launches use the native host; there is no ArkWeb page, Trunk server, Web build command or hdc reverse-port mapping. Save documents before scripted relaunch/deployment.
 5. `scripts/package_offline.sh` builds the native HAP; `--install` also installs it. Verify with `scripts/verify_native.py <HAP>`. Preserve imported upstream Web sources and history; they are not part of the HarmonyOS build/development workflow.
 
+## Platform cfg (HarmonyOS / OHOS)
+
+Judge the HarmonyOS native target with Rust cfg, the same way wasm uses the target rather than a business Cargo feature:
+
+| Platform | Preferred cfg | Notes |
+|----------|---------------|-------|
+| HarmonyOS / OHOS | `cfg!(target_env = "ohos")` / `#[cfg(target_env = "ohos")]` | Official triples are `*-linux-ohos` (`aarch64-unknown-linux-ohos`, …). `target_os` is still `"linux"`. |
+| Desktop Linux | `cfg!(all(target_os = "linux", not(target_env = "ohos")))` | X11/Wayland and other desktop-only paths. |
+| Web / wasm | `cfg!(target_arch = "wasm32")` | Existing PhotoCraft pattern; do not reinvent with features. |
+
+Preferences marked `LINUX_ONLY` (e.g. `performance.linuxDisplayServer`) and similar platform gates must follow this rule via `prefs::is_desktop_linux()` / `is_hidden` / `is_hidden_for`. Do **not** hide them behind the `harmonyos-ui` Cargo feature (that feature is for Hmos-only UI chrome such as links/menus). Cross-compile the engine into the HAP with an **ohos triple** so `target_env = "ohos"` is set; a plain `*-linux-gnu` target will incorrectly look like desktop Linux.
+
+Reference implementations: `fonts.rs` (system font scan), `prefs::is_desktop_linux`.
+
 ## Version numbers
 
 Upstream PhotoCraft is early alpha, but SemVer already marks that with the leading `0`, so no channel word belongs in the version.

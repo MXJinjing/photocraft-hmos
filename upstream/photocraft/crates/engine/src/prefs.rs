@@ -1036,12 +1036,12 @@ pub const HIDDEN_UNTIL_IMPLEMENTED: &[&str] = &[
     "integrations.controlPort",
 ];
 
-/// Desktop Linux (X11/Wayland). HarmonyOS builds must not show this preference:
-/// - Official OHOS triples set `target_env = "ohos"` while still reporting `target_os = "linux"`.
-/// - The photocraft-hmos package also enables Cargo feature `harmonyos` (via `harmonyos-ui`),
-///   which is the reliable gate when a build's target env is not `ohos`.
+/// Desktop Linux (X11/Wayland). HarmonyOS / OHOS builds must not show this preference.
+/// Official OHOS triples (`*-linux-ohos`) still report `target_os = "linux"`; gate on
+/// `target_env = "ohos"` instead (same style as wasm's `target_arch = "wasm32"`). Cross-compile
+/// HarmonyOS HAP Rust with an ohos triple so this cfg is true.
 pub const fn is_desktop_linux() -> bool {
-    cfg!(all(target_os = "linux", not(target_env = "ohos"), not(feature = "harmonyos")))
+    cfg!(all(target_os = "linux", not(target_env = "ohos")))
 }
 
 /// Is the preference at `path` (`"section.key"`) hidden from the Preferences dialog?
