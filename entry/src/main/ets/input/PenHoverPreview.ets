@@ -16,6 +16,8 @@ export class PenHoverMove {
   sample: PenHoverSample = new PenHoverSample();
 }
 
+// Distinct from focus blur so post-lift proximity leave can keep the tip at the
+// last stroke point (C++ XComponent Hover uses the same kind).
 export class PenHoverLeave {
   kind: string = 'hover_leave';
   x: number = 0;
@@ -38,11 +40,4 @@ export function penHoverLeaveMessage(xPx: number = 0, yPx: number = 0): string {
 
 export function isFiniteHoverPoint(x: number, y: number): boolean {
   return Number.isFinite(x) && Number.isFinite(y);
-}
-
-// After contact ends, ArkUI may keep re-delivering onHoverMove at the last
-// pre-stroke hover point for several frames. Drop every such echo until a
-// different point arrives.
-export function isStaleHoverEcho(x: number, y: number, lastX: number, lastY: number): boolean {
-  return x === lastX && y === lastY;
 }

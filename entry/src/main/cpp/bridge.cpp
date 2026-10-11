@@ -224,7 +224,7 @@ void Axis(OH_NativeXComponent*,ArkUI_UIInputEvent* event,ArkUI_UIInputEvent_Type
          ",\"dy\":"+std::to_string(y)+",\"zoom\":"+std::to_string(zoom)+"}");
 }
 void Blur(OH_NativeXComponent*,void*) {touchId=-1;penContact=false;fingerContact=false;Json("{\"kind\":\"blur\"}");}
-void Hover(OH_NativeXComponent*,bool isHover) {if(!isHover && !penContact && !fingerContact)Json("{\"kind\":\"blur\"}");}
+void Hover(OH_NativeXComponent*,bool isHover) {if(!isHover && !penContact && !fingerContact)Json("{\"kind\":\"hover_leave\"}");}
 OH_NativeXComponent_Callback callbacks{SurfaceCreated,SurfaceChanged,SurfaceDestroyed,Touch};
 OH_NativeXComponent_MouseEvent_Callback mouseCallbacks{Mouse,Hover};
 
