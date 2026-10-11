@@ -56,7 +56,7 @@ function setup(failedGesture, granted = false) {
     off(name, callback) { assert.equal(gestures.get(name), callback); gestures.delete(name); }
   };
   const info = new Map([[1, { name: 'HUAWEI M-Pencil', uniq: '11:22:33:44:55:66', phys: '' }]]);
-  const bluetooth = { ids: ['11:22:33:44:55:66'], name: 'HUAWEI M-Pencil', battery: 82, queries: 0, pending: null };
+  const bluetooth = { ids: ['11:22:33:44:55:66'], name: 'HUAWEI M-Pencil', battery: 82, queries: 0, pending: null, bleIds: [], hidError: false, nameError: false };
   let permissionRequests = 0;
   const device = {
     KeyboardType: { HANDWRITING_PEN: 13 },
@@ -70,9 +70,10 @@ function setup(failedGesture, granted = false) {
     './StylusProtocol': protocol, '@kit.Penkit': { stylusInteraction: sdk },
     '@kit.InputKit': { inputDevice: device },
     '@kit.ConnectivityKit': {
-      hid: { createHidHostProfile: () => ({ getConnectedDevices: () => bluetooth.ids }) },
+      hid: { createHidHostProfile: () => ({ getConnectedDevices: () => { if (bluetooth.hidError) throw { code: 801 }; return bluetooth.ids; } }) },
+      ble: { getConnectedBLEDevices: () => bluetooth.bleIds },
       connection: {
-        getRemoteDeviceName: () => bluetooth.name,
+        getRemoteDeviceName: () => { if (bluetooth.nameError) throw { code: 1 }; return bluetooth.name; },
         getRemoteDeviceBatteryInfo: () => {
           bluetooth.queries++;
           return bluetooth.pending ? new Promise(resolve => bluetooth.pending.push(resolve)) : Promise.resolve({ batteryLevel: bluetooth.battery });
@@ -154,6 +155,61 @@ async function main() {
   assert.deepEqual(b.packets.at(-1), { version: 1, type: 'connection', connected: false }, 'late battery must not reconnect a pen');
   b.adapter.stop();
 
+  // BLE-only pens, including generic InputKit driver names, still report battery.
+  const bleOnly = setup(undefined, true);
+  bleOnly.bluetooth.ids = [];
+  bleOnly.bluetooth.bleIds = ['11:22:33:44:55:66'];
+  bleOnly.bluetooth.hidError = true;
+  bleOnly.info.set(1, { name: 'Virtual Stylus', uniq: '', phys: '' });
+  bleOnly.adapter.start(); bleOnly.pending.shift()([1]); await flush();
+  bleOnly.pending.shift()([1]); await flush();
+  assert.equal(bleOnly.packets.at(-1).batteryPercent, 82, 'BLE does not depend on HID availability or identical driver names');
+  assert.equal(bleOnly.packets.at(-1).deviceName, 'HUAWEI M-Pencil');
+  bleOnly.bluetooth.bleIds.push('22:33:44:55:66:77');
+  bleOnly.timers.values().next().value(); bleOnly.pending.shift()([1]); await flush();
+  assert.equal(bleOnly.packets.at(-1).batteryPercent, undefined, 'two remote pens are ambiguous');
+  bleOnly.bluetooth.bleIds = ['11:22:33:44:55:66'];
+  bleOnly.info.set(2, { name: 'Second Stylus', uniq: '', phys: '' });
+  bleOnly.timers.values().next().value(); bleOnly.pending.shift()([1, 2]); await flush();
+  assert.equal(bleOnly.packets.at(-1).batteryPercent, undefined, 'two input pens must not share a guessed battery');
+  bleOnly.adapter.stop();
+
+  const slow = setup(undefined, true);
+  slow.adapter.start(); slow.pending.shift()([1]); await flush();
+  slow.bluetooth.pending = [];
+  slow.pending.shift()([1]); await flush();
+  const slowBattery = slow.bluetooth.pending.shift();
+  slow.timers.values().next().value(); slow.pending.shift()([1]); await flush();
+  slow.timers.values().next().value(); slow.pending.shift()([1]); await flush();
+  assert.equal(slow.bluetooth.queries, 1, 'polls do not overlap battery requests');
+  slowBattery({ batteryLevel: 73 }); await flush();
+  assert.equal(slow.packets.at(-1).batteryPercent, 73, 'reads lasting over one poll are not discarded');
+  slow.adapter.stop();
+
+  // Identity matching takes priority and survives an unavailable remote device name.
+  const identity = setup(undefined, true);
+  identity.bluetooth.bleIds = identity.bluetooth.ids.slice();
+  identity.bluetooth.nameError = true;
+  identity.adapter.start(); identity.pending.shift()([1]); await flush();
+  identity.pending.shift()([1]); await flush();
+  assert.equal(identity.bluetooth.queries, 1, 'deduplicate HID and BLE addresses');
+  assert.equal(identity.packets.at(-1).batteryPercent, 82, 'address match does not require a readable remote name');
+  identity.adapter.stop();
+
+  const reconnect = setup(undefined, true);
+  reconnect.adapter.start(); reconnect.pending.shift()([1]); await flush();
+  reconnect.bluetooth.pending = [];
+  reconnect.pending.shift()([1]); await flush();
+  const previousBattery = reconnect.bluetooth.pending.shift();
+  reconnect.devices.get('change')({}); reconnect.pending.shift()([]); await flush();
+  reconnect.devices.get('change')({}); reconnect.pending.shift()([1]); await flush();
+  previousBattery({ batteryLevel: 99 }); await flush();
+  assert.equal(reconnect.packets.at(-1).batteryPercent, undefined, 'disconnect and reconnect invalidate old reads even when InputKit reuses the ID');
+  reconnect.bluetooth.pending = null;
+  reconnect.timers.values().next().value(); reconnect.pending.shift()([1]); await flush();
+  assert.equal(reconnect.packets.at(-1).batteryPercent, 82, 'new connection can read its own battery');
+  reconnect.adapter.stop();
+
   const denied = setup();
   denied.adapter.start(); denied.pending.shift()([]); await flush();
   assert.equal(denied.permissionRequests(), 0, 'no permission prompt without a pen');
@@ -163,6 +219,6 @@ async function main() {
   assert.equal(denied.bluetooth.queries, 0);
   assert.equal(denied.packets.at(-1).deviceName, 'HUAWEI M-Pencil', 'InputKit name survives denial');
   denied.adapter.stop();
-  console.log('Passed: packets, lifecycle, connection/name/battery updates, unavailable/zero battery, permission denial, stale queries and unrelated devices.');
+  console.log('Passed: packets, lifecycle, connection/name/battery updates, unavailable/zero battery, permission denial, stale queries, BLE-only pens, differing names, ambiguous pens, slow reads and unrelated devices.');
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });
