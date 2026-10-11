@@ -2529,3 +2529,7 @@ fontWeight	Italic	Cursiva
 	Front Image	Imagen frontal
 	Search settings…	Buscar ajustes…
 	No matching settings	No hay ajustes que coincidan
+
+# Status bar panel controls
+	Only show canvas	Mostrar solo el lienzo
+	Right sidebar	Barra lateral derecha

@@ -3028,3 +3028,7 @@ fontWeight	Italic	기울임
 	Front Image	전면 이미지
 	Search settings…	설정 검색…
 	No matching settings	일치하는 설정 없음
+
+# Status bar panel controls
+	Only show canvas	캔버스만 표시
+	Right sidebar	오른쪽 사이드바

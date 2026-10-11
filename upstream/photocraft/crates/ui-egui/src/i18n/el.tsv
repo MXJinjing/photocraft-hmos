@@ -3557,3 +3557,7 @@ fontWeight	Thin	Πολύ λεπτά
 	Front Image	Μπροστινή εικόνα
 	Search settings…	Αναζήτηση ρυθμίσεων…
 	No matching settings	Δεν βρέθηκαν ρυθμίσεις
+
+# Status bar panel controls
+	Only show canvas	Εμφάνιση μόνο του καμβά
+	Right sidebar	Δεξιά πλαϊνή στήλη
