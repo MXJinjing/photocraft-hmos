@@ -13,11 +13,23 @@ PhotoCraft's own source specific guidance is in `upstream/photocraft/AGENTS.md`;
 
 ## Git ancestry and upstream updates
 
-- The `upstream` remote points to `https://github.com/storytold/photocraft.git`; tag `v0.3.0` is an ancestor of this repository's `main` branch through the subtree merge.
+- The `upstream` remote points to `https://github.com/storytold/photocraft.git`; tag `v0.3.0` is an ancestor of this repository through the subtree merge.
 - Git remotes are local configuration and do not travel with clones. In a fresh clone, run `git remote add upstream https://github.com/storytold/photocraft.git` before fetching updates; the imported commit ancestry remains in the repository.
 - Do not replace the subtree with a tarball, initialize another `.git` inside it, shallow fetch it, squash its history, or force push the upstream remote.
-- For future upstream changes, fetch from `upstream`, review the range, then use `git subtree pull --prefix=upstream/photocraft upstream <reviewed-ref>` **without `--squash`**. Recheck the HarmonyOS compatibility changes and the vendored dependency after each update.
+- **Upstream PhotoCraft syncs land on the remote `0.6.0` branch**, not on `main`. Unreleased upstream work should not be folded into `main` by default.
+- For upstream changes: check out / branch from `origin/0.6.0`, fetch from `upstream`, review the range, then `git subtree pull --prefix=upstream/photocraft upstream <reviewed-ref>` **without `--squash`**. Open a PR **into `0.6.0`**. Recheck HarmonyOS compatibility and the vendored dependency after each update.
+- **HarmonyOS host features and fixes** (ArkTS/native adapter, Hmos-only UI wiring, etc.) keep using topic branches and PRs **into `main`**.
 - The root `build-profile.json5` contains local signing material and is ignored. `build-profile.example.json5` is the safe template. Never commit signing certificates, private keys or passwords.
+
+## Team workflow (photocraft-hmos agents)
+
+| Role | Work dir | Branch / PR target | Notes |
+|------|----------|--------------------|-------|
+| Coding Man | `/workspace/photocraft-hmos-coding-man` | `sync/upstream-YYYYMMDD` → PR into **`0.6.0`** | Daily upstream subtree sync; x86-64 native build OK; do not merge; no device tests |
+| Prominent Coder | `/workspace/photocraft-hmos-prominent-coder` | `fix/…` or `feat/…` → PR into **`main`** | Issues/PRs/host fixes; tests when possible; do not merge |
+| Project Manager | `/workspace/photocraft-hmos` | Reviews and merges PRs; pushes `main` and `0.6.0` | Only agent that merges; never delete the repo; never push unreviewed code |
+
+Do not share checkouts. After cloning, add the `upstream` remote if missing. Prefer `gh` / existing GitHub login; do not force-push shared branches.
 
 ## Development loop
 
