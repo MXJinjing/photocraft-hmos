@@ -159,6 +159,7 @@ pub fn status_bar_pro(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         app.ui.views[i].zoom = crate::zoom_levels::clamp(pct / 100.0, app.ui.views[i].doc_size);
         app.ui.views[i].fit_pending = false;
     }
+    crate::status_panel_controls::fit_button(app, ui);
     ui.add_space(12.0);
     ui.label(RichText::new(tl!(&text)).color(t.text_dim).size(12.0));
     let (r, resp) = ui.allocate_exact_size(vec2(18.0, 18.0), Sense::click());

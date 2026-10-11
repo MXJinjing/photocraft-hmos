@@ -2450,3 +2450,7 @@ fontWeight	Italic	Kurzíva
 	Front Image	Přední obraz
 	Search settings…	Hledat nastavení…
 	No matching settings	Žádná odpovídající nastavení
+
+# Status bar panel controls
+	Only show canvas	Zobrazit pouze plátno
+	Right sidebar	Pravý postranní panel

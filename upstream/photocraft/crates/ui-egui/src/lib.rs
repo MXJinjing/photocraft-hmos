@@ -148,6 +148,7 @@ pub mod smart_ui;
 pub mod snap_ui;
 pub(crate) mod solid_fill_ui;
 pub mod state;
+mod status_panel_controls;
 pub mod stroke_constraint;
 pub mod stroke_trail;
 pub mod stroke_ui;

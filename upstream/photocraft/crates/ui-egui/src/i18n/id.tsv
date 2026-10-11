@@ -2854,3 +2854,7 @@ fontWeight	Italic	Miring
 	Front Image	Gambar Depan
 	Search settings…	Cari pengaturan…
 	No matching settings	Tidak ada pengaturan yang cocok
+
+# Status bar panel controls
+	Only show canvas	Tampilkan kanvas saja
+	Right sidebar	Bilah sisi kanan

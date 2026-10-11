@@ -2734,3 +2734,7 @@ fontWeight	Italic	Курсив
 	Rasterize Layer Style	Растрировать стиль слоя
 	Search settings…	Поиск настроек…
 	No matching settings	Нет подходящих настроек
+
+# Status bar panel controls
+	Only show canvas	Показать только холст
+	Right sidebar	Правая боковая панель

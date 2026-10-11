@@ -2488,3 +2488,7 @@ fontWeight	Italic	Kursiv
 	Front Image	Vorderes Bild
 	Search settings…	Einstellungen durchsuchen…
 	No matching settings	Keine passenden Einstellungen
+
+# Status bar panel controls
+	Only show canvas	Nur Leinwand anzeigen
+	Right sidebar	Rechte Seitenleiste
