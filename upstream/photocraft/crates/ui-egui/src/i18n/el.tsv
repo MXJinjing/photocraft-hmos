@@ -3561,3 +3561,7 @@ fontWeight	Thin	Πολύ λεπτά
 # Status bar panel controls
 	Only show canvas	Εμφάνιση μόνο του καμβά
 	Right sidebar	Δεξιά πλαϊνή στήλη
+	Connected pen	Συνδεδεμένη γραφίδα
+	No pen connected	Δεν έχει συνδεθεί γραφίδα
+	Battery unavailable	Η στάθμη μπαταρίας δεν είναι διαθέσιμη
+	Battery: {percent}%	Μπαταρία: {percent}%

@@ -3,7 +3,7 @@ import { applicationDocumentUri } from '../documentDirectory';
 import { LocalDocuments } from '../LocalDocuments';
 import { savePickerOptions, SaveTargets } from '../savePicker';
 import { NativePrintAdapter } from '../NativePrintAdapter';
-import { common } from '@kit.AbilityKit';
+import { abilityAccessCtrl, common } from '@kit.AbilityKit';
 import { fileIo, fileUri, picker } from '@kit.CoreFileKit';
 import { i18n } from '@kit.LocalizationKit';
 import { BusinessError } from '@kit.BasicServicesKit';
@@ -72,6 +72,9 @@ struct Index {
   private saveTargets: SaveTargets = new SaveTargets();
   private stylus: HarmonyStylusAdapter = new HarmonyStylusAdapter((packet: StylusPacket): void => {
     if (this.alive) { native.input(JSON.stringify(new NativeStylusInput(packet))); }
+  }, async (): Promise<boolean> => {
+    let result = await abilityAccessCtrl.createAtManager().requestPermissionsFromUser(this.context, ['ohos.permission.ACCESS_BLUETOOTH']);
+    return result.authResults.length > 0 && result.authResults[0] === 0;
   });
   private cursor: NativeCursorAdapter = new NativeCursorAdapter(this.getUIContext());
   private ime: NativeImeAdapter = new NativeImeAdapter((message: string): void => native.input(message));

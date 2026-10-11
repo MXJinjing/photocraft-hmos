@@ -103,13 +103,36 @@ pub enum PenGesture {
 
 /// The common input contract for browser, native tablet and host adapters.
 /// All timestamps use milliseconds on the same clock (web adapters use Unix epoch time).
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum StylusInput {
-    Pointer { source: PointerSource, sample: Option<PenSample> },
-    BarrelButton { pressed: bool, timestamp_ms: f64 },
-    Gesture { gesture: PenGesture, timestamp_ms: f64 },
-    Connection { connected: bool },
+    Pointer {
+        source: PointerSource,
+        sample: Option<PenSample>,
+    },
+    BarrelButton {
+        pressed: bool,
+        timestamp_ms: f64,
+    },
+    Gesture {
+        gesture: PenGesture,
+        timestamp_ms: f64,
+    },
+    Connection {
+        connected: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        device_name: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        battery_percent: Option<u8>,
+    },
+}
+
+/// A single snapshot of the attached pen. Missing metadata means the platform cannot report it.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct StylusDevice {
+    pub connected: bool,
+    pub name: Option<String>,
+    pub battery_percent: Option<u8>,
 }
 
 /// Barrel-button timing. A short second press within [`DOUBLE_MS`] is a double-tap; holding for
@@ -165,8 +188,7 @@ struct Slot {
     barrel: BarrelWatch,
     last_gesture: Option<(PenGesture, f64)>,
     /// Attachment reported by an adapter, distinct from contact with the screen.
-    connected: bool,
-    ever_connected: bool,
+    device: StylusDevice,
     queue: VecDeque<PenSample>,
 }
 
@@ -178,8 +200,7 @@ impl Default for Slot {
             gestures: Vec::new(),
             barrel: BarrelWatch::default(),
             last_gesture: None,
-            connected: false,
-            ever_connected: false,
+            device: StylusDevice::default(),
             queue: VecDeque::new(),
         }
     }
@@ -224,7 +245,7 @@ impl StylusFeed {
                 self.push_gesture(gesture, timestamp_ms);
                 true
             }
-            StylusInput::Connection { connected } => self.set_connected(connected),
+            StylusInput::Connection { connected, device_name, battery_percent } => self.set_device(connected, device_name, battery_percent),
         }
     }
 
@@ -269,18 +290,37 @@ impl StylusFeed {
     /// Whether a stylus is attached, as reported by the platform adapter.
     pub fn set_connected(&self, on: bool) -> bool {
         let Ok(mut g) = self.0.lock() else { return false };
-        let changed = g.connected != on;
-        g.connected = on;
-        g.ever_connected |= on;
+        let changed = g.device.connected != on;
+        if on {
+            g.device.connected = true;
+        } else {
+            g.device = StylusDevice::default();
+        }
+        changed
+    }
+    /// Update connection and metadata together; a disconnect clears the previous pen's details.
+    pub fn set_device(&self, connected: bool, name: Option<String>, battery_percent: Option<u8>) -> bool {
+        let name = name.map(|s| s.chars().filter(|c| !c.is_control()).take(128).collect::<String>());
+        let device = if connected {
+            StylusDevice {
+                connected,
+                name: name.map(|s| s.trim().to_owned()).filter(|s| !s.is_empty()),
+                battery_percent: battery_percent.filter(|v| *v <= 100),
+            }
+        } else {
+            StylusDevice::default()
+        };
+        let Ok(mut g) = self.0.lock() else { return false };
+        let changed = g.device != device;
+        g.device = device;
         changed
     }
     /// A stylus is attached right now. False until the platform says otherwise.
     pub fn connected(&self) -> bool {
-        self.0.lock().is_ok_and(|g| g.connected)
+        self.0.lock().is_ok_and(|g| g.device.connected)
     }
-    /// Keep stylus settings available after the first reported connection in this app lifetime.
-    pub fn ever_connected(&self) -> bool {
-        self.0.lock().is_ok_and(|g| g.ever_connected)
+    pub fn device(&self) -> StylusDevice {
+        self.0.lock().map(|g| g.device.clone()).unwrap_or_default()
     }
     /// Gestures queued since the last take, oldest first.
     pub fn take_gestures(&self) -> Vec<PenGesture> {
@@ -892,16 +932,14 @@ mod tests {
     fn connection_starts_off_and_only_the_platform_sets_it() {
         let feed = StylusFeed::default();
         assert!(!feed.connected());
-        assert!(!feed.ever_connected());
         feed.report(PointerSource::Pen, Some(PenSample::default()));
-        assert!(!feed.ever_connected(), "contact alone is not a connection report");
+        assert!(!feed.connected(), "contact alone is not a connection report");
         assert!(feed.set_connected(true));
         assert!(feed.connected());
-        assert!(feed.ever_connected());
         assert!(!feed.set_connected(true), "unchanged");
         assert!(feed.set_connected(false));
         assert!(!feed.connected());
-        assert!(feed.ever_connected(), "disconnect keeps settings available");
+        assert_eq!(feed.device(), StylusDevice::default());
     }
 
     #[test]

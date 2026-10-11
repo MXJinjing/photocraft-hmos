@@ -193,29 +193,22 @@ fn status_message(app: &PhotocraftApp, ui: &mut egui::Ui, t: &Tokens) {
     ui.label(RichText::new(&app.ui.status).color(if is_err { t.warning } else { t.text_faint }));
 }
 
-/// Chevron width of the options-bar stylus control. The menu opens from this end.
-/// Width reserved for the title-bar stylus control, using the menu button font.
-pub fn stylus_menu_width(ui: &egui::Ui) -> f32 {
-    let font = egui::TextStyle::Button.resolve(ui.style());
-    let text_w = ui.painter().layout_no_wrap(tl!("Stylus").to_string(), font, Tokens::get(ui.ctx()).text_dim).size().x;
-    12.0 + 14.0 + ui.spacing().icon_spacing + 2.0 + text_w
+/// Width reserved for the icon-only title-bar stylus control.
+pub fn stylus_menu_width() -> f32 {
+    28.0
 }
 
 /// Title-bar stylus menu, immediately left of Discord. The menu holds
 /// Block finger input: fingers then only pan or pinch-zoom; the pen still paints.
 pub fn stylus_menu(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
-    if !app.stylus.feed.ever_connected() {
-        return;
-    }
     let t = Tokens::get(ui.ctx());
-    let resp = ui
-        .scope(|ui| {
-            ui.spacing_mut().button_padding = vec2(6.0, 3.0);
-            ui.spacing_mut().icon_spacing += 2.0;
-            ui.add(egui::Button::image_and_text(icons::image("pencil", 14.0, t.text_dim), RichText::new(tl!("Stylus")).color(t.text_dim)).frame(false))
-        })
-        .inner;
-    if app.stylus.feed.connected() {
+    let device = app.stylus.feed.device();
+    let (rect, resp) = ui.allocate_exact_size(vec2(stylus_menu_width(), 28.0), Sense::click());
+    if resp.hovered() {
+        ui.painter().rect_filled(rect, t.radius_sm, t.hover);
+    }
+    icons::paint(ui, rect, "pencil", 14.0, t.text_dim);
+    if device.connected {
         let c = pos2(resp.rect.left() + 13.0, resp.rect.center().y + 6.0);
         ui.painter().circle_filled(c, 3.2, t.chrome);
         ui.painter().circle_filled(c, 2.2, t.online);
@@ -225,7 +218,15 @@ pub fn stylus_menu(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     egui::Popup::menu(&resp).show(|ui| {
         let t = Tokens::get(ui.ctx());
         ui.set_min_width(240.0);
-        ui.label(RichText::new(tl!("Stylus")).color(t.text));
+        if device.connected {
+            ui.label(RichText::new(device.name.as_deref().unwrap_or(tl!("Connected pen"))).color(t.text));
+            let battery = device
+                .battery_percent
+                .map_or_else(|| tl!("Battery unavailable").to_owned(), |p| crate::i18n::fmt(tl!("Battery: {percent}%"), &[("percent", &p.to_string())]));
+            ui.label(RichText::new(battery).color(t.text_dim));
+        } else {
+            ui.label(RichText::new(tl!("No pen connected")).color(t.text_dim));
+        }
         ui.separator();
         let on = app.session.prefs().tools.block_finger_input;
         if ui.add(egui::Button::selectable(on, tl!("Block finger input"))).clicked() {
@@ -604,10 +605,10 @@ mod tests {
         );
         crate::PhotocraftApp::setup_context(&h.ctx, crate::theme::ThemeKind::Studio);
         h.run_steps(4);
-        assert!(h.query_by_label("Stylus").is_none(), "hidden before connection");
+        assert!(h.query_by_label("Stylus").is_some(), "settings are available before connection");
         h.state().stylus.feed.report(crate::stylus::PointerSource::Pen, None);
         h.run_steps(2);
-        assert!(h.query_by_label("Stylus").is_none(), "contact does not reveal settings");
+        assert!(h.query_by_label("Stylus").is_some(), "contact does not hide settings");
         h.state().stylus.feed.set_connected(true);
         h.run_steps(2);
         h.state().stylus.feed.set_connected(false);
@@ -643,6 +644,9 @@ mod tests {
         let zh = crate::i18n::Lang::from_code("zh-hans").expect("zh-hans registered");
         assert_eq!(crate::i18n::tr(zh, "Stylus"), "手写笔");
         assert_eq!(crate::i18n::tr(crate::i18n::Lang::EN, "Stylus"), "Stylus");
+        assert_eq!(crate::i18n::tr(zh, "No pen connected"), "未连接笔");
+        assert_eq!(crate::i18n::tr(zh, "Battery unavailable"), "电量不可用");
+        assert_eq!(crate::i18n::tr(zh, "Battery: {percent}%"), "电量：{percent}%");
         assert_eq!(crate::i18n::tr(zh, "Double-tap pen body"), "双击笔身");
         assert_eq!(crate::i18n::tr(zh, "Long-press pen body"), "轻捏笔身");
 
@@ -656,6 +660,51 @@ mod tests {
         crate::PhotocraftApp::setup_context(&status.ctx, crate::theme::ThemeKind::Studio);
         status.run_steps(3);
         assert!(status.query_by_label_contains("Block finger input").is_none(), "status bar no longer hosts the stylus menu");
+    }
+
+    #[test]
+    fn stylus_menu_reports_current_name_and_battery_and_clears_on_disconnect() {
+        use egui_kittest::{Harness, kittest::Queryable};
+        let app = crate::PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        let mut h = Harness::builder().with_size(egui::vec2(1400.0, 500.0)).build_ui_state(
+            |ui, app| {
+                if ui.ctx().fonts(|f| f.families().contains(&egui::FontFamily::Name("medium".into()))) {
+                    crate::panels::title_bar(app, ui);
+                }
+            },
+            app,
+        );
+        crate::PhotocraftApp::setup_context(&h.ctx, crate::theme::ThemeKind::Studio);
+        h.run_steps(4);
+        assert!(h.get_by_label("Stylus").rect().width() <= 28.0, "icon-only entry");
+        h.get_by_label("Stylus").click();
+        h.run_steps(2);
+        assert!(h.query_by_label("No pen connected").is_some());
+        assert!(h.query_by_label("Block finger input").is_some());
+        h.state().stylus.feed.set_device(true, Some("HUAWEI M-Pencil".into()), Some(82));
+        h.run_steps(2);
+        assert!(h.query_by_label("HUAWEI M-Pencil").is_some());
+        assert!(h.query_by_label("Battery: 82%").is_some());
+        assert!(h.query_by_label("No pen connected").is_none());
+        if let Some(path) = std::env::var_os("PHOTOCRAFT_STYLUS_POPUP_SCREENSHOT") {
+            h.render().expect("render stylus menu").save(path).expect("save stylus menu");
+        }
+        h.state().stylus.feed.set_device(true, Some("HUAWEI M-Pencil".into()), Some(0));
+        h.run_steps(2);
+        assert!(h.query_by_label("Battery: 0%").is_some(), "zero is a valid battery level");
+        h.state().stylus.feed.set_device(true, Some("Another pen".into()), None);
+        h.run_steps(2);
+        assert!(h.query_by_label("Another pen").is_some());
+        assert!(h.query_by_label("Battery unavailable").is_some());
+        assert!(h.query_by_label("HUAWEI M-Pencil").is_none());
+        h.state().stylus.feed.set_connected(false);
+        h.run_steps(2);
+        assert!(h.query_by_label("No pen connected").is_some());
+        assert!(h.query_by_label("Another pen").is_none());
+        assert!(h.query_by_label("Battery unavailable").is_none());
+        h.get_by_label("Block finger input").click();
+        h.run_steps(2);
+        assert!(h.state().session.prefs().tools.block_finger_input, "settings work while disconnected");
     }
 
     #[test]

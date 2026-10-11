@@ -33,6 +33,8 @@ export class StylusPacket {
   gesture?: StylusAction;
   timestampMs?: number;
   connected?: boolean;
+  deviceName?: string;
+  batteryPercent?: number;
   source?: StylusPointerSource;
   sample?: StylusSample | null;
   pressed?: boolean;
@@ -48,9 +50,13 @@ export class StylusPacket {
     return packet;
   }
 
-  static connection(connected: boolean): StylusPacket {
+  static connection(connected: boolean, deviceName?: string, batteryPercent?: number): StylusPacket {
     let packet = new StylusPacket(StylusEventType.Connection);
     packet.connected = connected;
+    if (connected) {
+      packet.deviceName = deviceName;
+      packet.batteryPercent = batteryPercent;
+    }
     return packet;
   }
 

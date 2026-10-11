@@ -572,7 +572,7 @@ pub fn title_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                     // A narrow bar drops what is also in a menu, Discord first (below), then
                     // the theme toggle (Preferences), then search (Edit › Search), and narrows
                     // the switcher (Window › Workspace) before anything runs over.
-                    let stylus_room = if app.stylus.feed.ever_connected() { crate::chrome_ui::stylus_menu_width(ui) + 16.0 } else { 0.0 };
+                    let stylus_room = crate::chrome_ui::stylus_menu_width() + 16.0;
                     let room = (ui.available_width() - stylus_room).max(0.0);
                     let icons_shown: u8 = if room >= WORKSPACE_MIN + 2.0 * ICON_SLOT {
                         2

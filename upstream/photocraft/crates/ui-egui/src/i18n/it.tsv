@@ -2523,3 +2523,7 @@ fontWeight	Italic	Corsivo
 # Status bar panel controls
 	Only show canvas	Mostra solo la tela
 	Right sidebar	Barra laterale destra
+	Connected pen	Penna connessa
+	No pen connected	Nessuna penna connessa
+	Battery unavailable	Batteria non disponibile
+	Battery: {percent}%	Batteria: {percent}%

@@ -2492,3 +2492,7 @@ fontWeight	Italic	Kursiv
 # Status bar panel controls
 	Only show canvas	Nur Leinwand anzeigen
 	Right sidebar	Rechte Seitenleiste
+	Connected pen	Verbundener Stift
+	No pen connected	Kein Stift verbunden
+	Battery unavailable	Akkustand nicht verfügbar
+	Battery: {percent}%	Akku: {percent}%

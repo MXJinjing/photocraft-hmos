@@ -3631,3 +3631,7 @@ cameraRaw	Whites	Witten
 # Status bar panel controls
 	Only show canvas	Alleen canvas tonen
 	Right sidebar	Rechterzijbalk
+	Connected pen	Verbonden pen
+	No pen connected	Geen pen verbonden
+	Battery unavailable	Batterijniveau niet beschikbaar
+	Battery: {percent}%	Batterij: {percent}%

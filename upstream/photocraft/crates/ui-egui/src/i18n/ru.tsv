@@ -2738,3 +2738,7 @@ fontWeight	Italic	Курсив
 # Status bar panel controls
 	Only show canvas	Показать только холст
 	Right sidebar	Правая боковая панель
+	Connected pen	Подключённое перо
+	No pen connected	Перо не подключено
+	Battery unavailable	Заряд батареи недоступен
+	Battery: {percent}%	Заряд батареи: {percent}%

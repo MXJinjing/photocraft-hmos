@@ -1215,3 +1215,25 @@ fn rendered_brush_outline_hides_on_lift_or_leave_and_returns_on_next_hover_or_mo
         "hover must not paint"
     );
 }
+
+#[test]
+fn stylus_connection_metadata_reaches_native_menu_and_clears_on_disconnect() {
+    let mut input = super::State::default();
+    let mut events = vec![];
+    input.push(serde_json::from_str(r#"{"kind":"stylus","packet":{"version":1,"type":"connection","connected":true,"deviceName":"HUAWEI M-Pencil","batteryPercent":82}}"#).unwrap(), 1., &mut events);
+    assert_eq!(input.feed.device().name.as_deref(), Some("HUAWEI M-Pencil"));
+    assert_eq!(input.feed.device().battery_percent, Some(82));
+    input.push(
+        serde_json::from_str(
+            r#"{"kind":"stylus","packet":{"version":1,"type":"connection","connected":false}}"#,
+        )
+        .unwrap(),
+        1.,
+        &mut events,
+    );
+    assert_eq!(input.feed.device(), Default::default());
+    assert!(
+        events.is_empty(),
+        "status updates do not generate drawing input"
+    );
+}

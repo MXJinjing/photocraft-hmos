@@ -3472,3 +3472,7 @@ fontWeight	Italic	斜体
 # Status bar panel controls
 	Only show canvas	キャンバスのみ表示
 	Right sidebar	右サイドバー
+	Connected pen	接続中のペン
+	No pen connected	ペンが接続されていません
+	Battery unavailable	バッテリー情報なし
+	Battery: {percent}%	バッテリー: {percent}%

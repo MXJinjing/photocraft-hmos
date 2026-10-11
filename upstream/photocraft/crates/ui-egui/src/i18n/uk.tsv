@@ -3559,3 +3559,7 @@ cameraRaw	Masking	Маскування
 # Status bar panel controls
 	Only show canvas	Показати лише полотно
 	Right sidebar	Права бічна панель
+	Connected pen	Підключене перо
+	No pen connected	Перо не підключено
+	Battery unavailable	Заряд батареї недоступний
+	Battery: {percent}%	Заряд батареї: {percent}%

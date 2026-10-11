@@ -1,5 +1,6 @@
 {
   "string": [
-    { "name": "module_description", "value": "PhotoCraft 离线绘图应用" }
+    { "name": "module_description", "value": "PhotoCraft 离线绘图应用" },
+    { "name": "stylus_bluetooth_reason", "value": "用于显示已连接笔的名称和电量" }
   ]
 }

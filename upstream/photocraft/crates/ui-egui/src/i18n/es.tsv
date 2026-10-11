@@ -2533,3 +2533,7 @@ fontWeight	Italic	Cursiva
 # Status bar panel controls
 	Only show canvas	Mostrar solo el lienzo
 	Right sidebar	Barra lateral derecha
+	Connected pen	Lápiz conectado
+	No pen connected	Ningún lápiz conectado
+	Battery unavailable	Batería no disponible
+	Battery: {percent}%	Batería: {percent}%

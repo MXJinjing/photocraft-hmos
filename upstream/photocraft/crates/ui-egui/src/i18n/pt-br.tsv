@@ -2879,3 +2879,7 @@ fontWeight	Italic	Itálico
 # Status bar panel controls
 	Only show canvas	Mostrar apenas a tela
 	Right sidebar	Barra lateral direita
+	Connected pen	Caneta conectada
+	No pen connected	Nenhuma caneta conectada
+	Battery unavailable	Bateria indisponível
+	Battery: {percent}%	Bateria: {percent}%

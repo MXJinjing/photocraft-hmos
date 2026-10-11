@@ -2871,3 +2871,7 @@ fontWeight	Italic	Italique
 # Status bar panel controls
 	Only show canvas	Afficher uniquement la zone de travail
 	Right sidebar	Barre latérale droite
+	Connected pen	Stylet connecté
+	No pen connected	Aucun stylet connecté
+	Battery unavailable	Batterie indisponible
+	Battery: {percent}%	Batterie : {percent}%
