@@ -533,11 +533,24 @@ pub fn title_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                     ui.add_space(6.0);
                 }
                 // With the macOS menu bar the menus are at the top of the screen instead.
-                menus_right = if app.services.native_menu.is_some() { ui.cursor().left() } else { crate::menus::menu_bar(app, ui) };
-                // The menu bar takes the whole row, so the right-hand group gets its own rect:
-                // from the menus to the bar's end, or to the caption buttons.
+                // Budget the titles so a narrow bar folds them into a hamburger before they
+                // crowd out the right-hand controls (workspace / search / theme / stylus).
                 let native_button_room = if app.host_titlebar.x > 0.0 { app.host_titlebar.x + 4.0 } else { 0.0 };
                 let right_edge = if custom { full.right() - crate::titlebar::WIDTH - 4.0 } else { (full.right() - native_button_room).max(full.left()) };
+                let stylus_reserve = if app.stylus.feed.ever_connected() {
+                    // Approximate: measured later in the right group; keep room for the control.
+                    110.0
+                } else {
+                    0.0
+                };
+                let menu_budget = (right_edge - ui.cursor().left() - TITLE_GAP - WORKSPACE_MIN - stylus_reserve).max(crate::menus::MENU_BAR_HAMBURGER_WIDTH);
+                menus_right = if app.services.native_menu.is_some() {
+                    ui.cursor().left()
+                } else {
+                    crate::menus::menu_bar(app, ui, menu_budget)
+                };
+                // The menu bar takes the whole row, so the right-hand group gets its own rect:
+                // from the menus to the bar's end, or to the caption buttons.
                 let group = egui::Rect::from_min_max(egui::pos2((menus_right + TITLE_GAP).min(right_edge), full.top()), egui::pos2(right_edge, full.bottom()));
                 let mut group_ui = ui.new_child(egui::UiBuilder::new().max_rect(group).layout(egui::Layout::right_to_left(egui::Align::Center)));
                 controls_left = {
