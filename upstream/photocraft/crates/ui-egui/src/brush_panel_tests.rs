@@ -445,6 +445,125 @@ fn drop_targets_and_actions_reorder_presets() {
     }
 }
 
+#[test]
+fn touch_group_drag_is_gated_and_move_group_reaches_its_target() {
+    use crate::stylus::PointerSource;
+    use egui_kittest::kittest::Queryable;
+
+    fn press(h: &mut Harness<'static, PhotocraftApp>, p: egui::Pos2) {
+        h.input_mut().events.extend([
+            egui::Event::Touch { device_id: egui::TouchDeviceId(0), id: egui::TouchId(1), phase: egui::TouchPhase::Start, pos: p, force: None },
+            egui::Event::PointerMoved(p),
+            egui::Event::PointerButton { pos: p, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE },
+        ]);
+        h.run_steps(1);
+    }
+    fn move_to(h: &mut Harness<'static, PhotocraftApp>, p: egui::Pos2) {
+        h.input_mut().events.extend([
+            egui::Event::Touch { device_id: egui::TouchDeviceId(0), id: egui::TouchId(1), phase: egui::TouchPhase::Move, pos: p, force: None },
+            egui::Event::PointerMoved(p),
+        ]);
+        h.run_steps(3);
+    }
+    fn release(h: &mut Harness<'static, PhotocraftApp>, p: egui::Pos2) {
+        h.input_mut().events.extend([
+            egui::Event::Touch { device_id: egui::TouchDeviceId(0), id: egui::TouchId(1), phase: egui::TouchPhase::End, pos: p, force: None },
+            egui::Event::PointerButton { pos: p, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::NONE },
+            egui::Event::PointerGone,
+        ]);
+        h.run_steps(2);
+    }
+    fn ui(app: PhotocraftApp) -> Harness<'static, PhotocraftApp> {
+        let mut h = Harness::builder().with_step_dt(0.01).with_size(vec2(500.0, 500.0)).build_ui_state(
+            |ui, app: &mut PhotocraftApp| {
+                if !ui.ctx().fonts(|f| f.families().contains(&egui::FontFamily::Name("medium".into()))) {
+                    return;
+                }
+                crate::brushes_tab::show(app, ui);
+            },
+            app,
+        );
+        PhotocraftApp::setup_context(&h.ctx, crate::theme::ThemeKind::ALL[0]);
+        h.run_steps(4);
+        h
+    }
+    fn add_preset(app: &mut PhotocraftApp, name: &str, group: &str, folder: &[&str]) {
+        app.session.tools.presets.push(paint::BrushPreset {
+            name: name.into(),
+            brush: Default::default(),
+            builtin: false,
+            group: group.into(),
+            folder: folder.iter().map(|s| (*s).to_string()).collect(),
+        });
+    }
+
+    // A single-finger swipe on a group or file-folder header must not become a DnD gesture.
+    let mut state = app();
+    state.ui.brush_tab = 0;
+    state.session.tools.presets.clear();
+    state.stylus.feed.report(PointerSource::Touch, None);
+    add_preset(&mut state, "A0", "Alpha", &["Source File"]);
+    for i in 1..16 {
+        add_preset(&mut state, &format!("A{i}"), "Alpha", &[]);
+    }
+    add_preset(&mut state, "B1", "Beta", &[]);
+    let mut h = ui(state);
+    for label in ["Alpha", "Source File"] {
+        let start = h.get_by_label(label).rect().center();
+        press(&mut h, start);
+        move_to(&mut h, start - vec2(0.0, 34.0));
+        assert!(egui::DragAndDrop::payload::<crate::brushes_tab::BrushDrag>(&h.ctx).is_none(), "one swipe must not start dragging {label}");
+        release(&mut h, start - vec2(0.0, 34.0));
+    }
+
+    // A tap followed by a held press arms the group drag, which executes moveGroup.
+    let mut state = app();
+    state.ui.brush_tab = 0;
+    state.session.tools.presets.clear();
+    state.stylus.feed.report(PointerSource::Touch, None);
+    add_preset(&mut state, "A1", "Alpha", &["Dry"]);
+    add_preset(&mut state, "A2", "Alpha", &["Inks"]);
+    add_preset(&mut state, "B1", "Beta", &[]);
+    let mut h = ui(state);
+    let start = h.get_by_label("Beta").rect().center();
+    press(&mut h, start);
+    release(&mut h, start);
+    let start = h.get_by_label("Beta").rect().center();
+    press(&mut h, start);
+    assert_eq!(h.state().stylus.feed.source(), PointerSource::Touch);
+    assert!(crate::list_drag::drag_is_armed(&h.ctx), "second press must arm group reordering");
+    h.run_steps(79);
+    assert!(h.ctx.dragged_id().is_some(), "second held press did not take drag ownership");
+    let target = h.get_by_label("Alpha").rect().center();
+    move_to(&mut h, target);
+    assert!(matches!(
+        egui::DragAndDrop::payload::<crate::brushes_tab::BrushDrag>(&h.ctx).as_deref(),
+        Some(crate::brushes_tab::BrushDrag::Group(g)) if g == "Beta"
+    ));
+    release(&mut h, target);
+    let order = photocraft_engine::brush_preset_cmds::group_order(&h.state().session.tools.presets);
+    assert!(order.iter().position(|g| g == "Beta") < order.iter().position(|g| g == "Alpha"), "group drop must reorder Beta before Alpha: {order:?}");
+    assert_eq!(last_journal(h.state()).unwrap().0, "brush.presets.moveGroup");
+
+    // Nested file folders use the same touch gate and moveGroup path.
+    let start = h.get_by_label("Inks").rect().center();
+    press(&mut h, start);
+    release(&mut h, start);
+    let start = h.get_by_label("Inks").rect().center();
+    press(&mut h, start);
+    assert!(crate::list_drag::drag_is_armed(&h.ctx), "second press must arm folder reordering");
+    h.run_steps(79);
+    let target = h.get_by_label("Dry").rect().center();
+    move_to(&mut h, target);
+    assert!(matches!(
+        egui::DragAndDrop::payload::<crate::brushes_tab::BrushDrag>(&h.ctx).as_deref(),
+        Some(crate::brushes_tab::BrushDrag::Folder { group, folder }) if group == "Alpha" && folder == &["Inks"]
+    ));
+    release(&mut h, target);
+    assert_eq!(photocraft_engine::brush_preset_cmds::subfolder_order(&h.state().session.tools.presets, "Alpha", &[]), ["Inks", "Dry"]);
+    assert_eq!(last_journal(h.state()).unwrap().0, "brush.presets.moveGroup");
+}
+
 fn harness(tab: usize, section: usize) -> Harness<'static, PhotocraftApp> {
     let mut app = app();
     app.ui.panels.brush_settings = true;
