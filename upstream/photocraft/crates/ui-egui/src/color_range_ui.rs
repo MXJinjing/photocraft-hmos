@@ -751,7 +751,7 @@ mod tests {
     fn harness(app: PhotocraftApp) -> Harness<'static, PhotocraftApp> {
         let mut h = Harness::builder().with_size(egui::vec2(1200.0, 900.0)).build_ui_state(
             |ui, app| {
-                crate::menus::menu_bar(app, ui);
+                crate::menus::menu_bar(app, ui, ui.available_width());
                 crate::dialogs::show(app, ui.ctx());
             },
             app,
