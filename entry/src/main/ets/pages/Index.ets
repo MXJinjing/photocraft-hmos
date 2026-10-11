@@ -18,6 +18,7 @@ import { NativeCursorAdapter } from '../input/NativeCursorAdapter';
 import { moveWindow, toggleWindowMaximize } from '../WindowChrome';
 import { window } from '@kit.ArkUI';
 import { configureDisplayColor } from '../DisplayColor';
+import { SYSTEM_THEME_DARK, SYSTEM_THEME_LIGHT } from '../SystemTheme';
 
 class NativeConfig {
   files: string;
@@ -25,9 +26,11 @@ class NativeConfig {
   scale: number;
   language: string;
   displayP3: boolean;
-  constructor(files: string, documents: string, scale: number, language: string, displayP3: boolean) {
+  systemTheme: string;
+  constructor(files: string, documents: string, scale: number, language: string, displayP3: boolean, systemTheme: string) {
     this.files = files; this.documents = documents; this.scale = scale; this.language = language;
     this.displayP3 = displayP3;
+    this.systemTheme = systemTheme;
   }
 }
 class NativeMessage { kind: string = ''; text: string = ''; }
@@ -104,7 +107,11 @@ struct Index {
       let scale: number = this.getUIContext().vp2px(1);
       const displayP3 = await configureDisplayColor(this.context);
       if (!this.alive || generation !== this.generation) { return; }
-      native.init(JSON.stringify(new NativeConfig(this.context.filesDir, documents, scale, i18n.System.getSystemLanguage(), displayP3)),
+      let systemTheme = AppStorage.get<string>('photocraftSystemTheme') ?? '';
+      if (systemTheme !== SYSTEM_THEME_DARK && systemTheme !== SYSTEM_THEME_LIGHT) {
+        systemTheme = '';
+      }
+      native.init(JSON.stringify(new NativeConfig(this.context.filesDir, documents, scale, i18n.System.getSystemLanguage(), displayP3, systemTheme)),
         (id: number, message: string, data: ArrayBuffer) => { this.receive(id, message, data); });
       this.initialized = true;
       this.onTitlebarChanged();

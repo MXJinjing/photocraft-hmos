@@ -9,6 +9,8 @@
 )]
 mod bridge;
 #[cfg(any(target_env = "ohos", test))]
+mod appearance;
+#[cfg(any(target_env = "ohos", test))]
 mod chrome;
 #[cfg(any(target_env = "ohos", test))]
 mod cursor;
@@ -48,6 +50,8 @@ struct Config {
     language: String,
     #[serde(default, rename = "displayP3")]
     display_p3: bool,
+    #[serde(default, rename = "systemTheme")]
+    system_theme: String,
 }
 fn default_scale() -> f32 {
     1.
@@ -75,6 +79,7 @@ fn send(message: Message) {
 fn services(
     files: &str,
     documents: std::sync::Arc<std::sync::Mutex<documents::Documents>>,
+    appearance: &appearance::Appearance,
 ) -> Services {
     let load = std::path::Path::new(files).join("native-preferences.json");
     let save = load.clone();
@@ -139,10 +144,16 @@ fn services(
             bridge::notify(0, "url", url, &[]);
             Ok(())
         })),
-        load_prefs: Some(Box::new(move || std::fs::read_to_string(&load).ok())),
+        load_prefs: Some(Box::new(move || {
+            std::fs::read_to_string(&load).ok().or_else(|| {
+                // First launch on HarmonyOS: follow the system colour scheme.
+                Some(r#"{"interface":{"appearanceMode":"auto"}}"#.into())
+            })
+        })),
         save_prefs: Some(Box::new(move |text| {
             photocraft_format::atomic_write(&save, text.as_bytes()).map_err(|e| e.to_string())
         })),
+        system_theme: Some(appearance.service()),
         ..Default::default()
     }
 }
@@ -313,9 +324,10 @@ fn worker(config: Config, rx: mpsc::Receiver<Message>) {
     let ctx = egui::Context::default();
     PhotocraftApp::setup_context(&ctx, Default::default());
     bridge::notify(0, "stage", "egui context ready", &[]);
+    let appearance = appearance::Appearance::from_token(&config.system_theme);
     let mut app = PhotocraftApp::new(
         photocraft_engine::Session::new(),
-        services(&config.files, documents.clone()),
+        services(&config.files, documents.clone(), &appearance),
     );
     app.session.print_service = Some(|pdf, metadata| {
         bridge::request("print", &metadata.to_string(), pdf).map(|(message, _)| message)
@@ -434,6 +446,11 @@ fn worker(config: Config, rx: mpsc::Receiver<Message>) {
                         }
                     }
                     Message::Input(value) => {
+                        if value.kind == "system_theme" {
+                            appearance.publish_token(&value.text);
+                            deadline = Some(Instant::now());
+                            return Ok(());
+                        }
                         if value.kind == "titlebar" {
                             titlebar_pixels = egui::vec2(value.dx, value.dy);
                         }
@@ -484,6 +501,7 @@ fn worker(config: Config, rx: mpsc::Receiver<Message>) {
                             screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
                             time: Some(started.elapsed().as_secs_f64()),
                             events: std::mem::take(&mut events),
+                            system_theme: appearance.current(),
                             ..Default::default()
                         };
                         let viewport = raw.viewports.entry(egui::ViewportId::ROOT).or_default();

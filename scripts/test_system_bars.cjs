@@ -43,16 +43,25 @@ for (const [color, content] of [['#141415', '#FFFFFFFF'], ['#F6F6F8', '#FF1A1A1A
 const count = painted.length;
 bars.paintWindow(win, '#invalid');
 assert.equal(painted.length, count);
+const ConfigurationConstant = {
+  ColorMode: { COLOR_MODE_NOT_SET: -1, COLOR_MODE_DARK: 0, COLOR_MODE_LIGHT: 1 }
+};
+const systemTheme = load('SystemTheme', {
+  '@kit.AbilityKit': { ConfigurationConstant }
+});
 const { default: EntryAbility } = load('entryability/EntryAbility', {
-  'libphotocraft.so': { default: { active() {} } },
-  '@kit.AbilityKit': { UIAbility: class {} }, '@kit.ArkUI': {}, '@kit.BasicServicesKit': {},
+  'libphotocraft.so': { default: { active() {}, input() {} } },
+  '@kit.AbilityKit': { UIAbility: class {}, AbilityConstant: {}, ConfigurationConstant },
+  '@kit.ArkUI': {}, '@kit.BasicServicesKit': {},
   '../SystemBars': bars,
+  '../SystemTheme': systemTheme,
   '../WindowChrome': { WindowChrome: class { start() {} stop() {} refresh() {} } },
       '../input/NativeCursorAdapter': { restorePointerVisibility() {} },
       '../openInbox': { acceptOpenWant() {} }, '../closeGuard': { resetCloseGuard() {}, requestWindowClose() {} }
 });
 async function main() {
   const app = new EntryAbility();
+  app.context = { config: { colorMode: ConfigurationConstant.ColorMode.COLOR_MODE_DARK } };
   let loaded;
   const stage = { on() {}, getMainWindowSync: () => win, loadContent: (_page, cb) => { loaded = cb; } };
   app.onWindowStageCreate(stage);
