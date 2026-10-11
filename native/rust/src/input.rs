@@ -67,8 +67,11 @@ pub struct State {
     touches: BTreeMap<u64, Pos2>,
     touch_pointer: Option<u64>,
     pen_down: bool,
-    /// After pen up, ArkUI may re-deliver a stale onHoverMove at the pre-stroke
-    /// hover point. Keep the tip at the lift position until a nearby hover arrives.
+    /// Last pressure-0 pen hover position (before / between strokes).
+    last_hover_pos: Option<Pos2>,
+    /// Pre-stroke hover captured at pen-down; post-lift echoes of this point are pinned.
+    frozen_hover: Option<Pos2>,
+    /// Lift position after pen-up; tip stays here while frozen-hover echoes arrive.
     after_pen_lift: Option<Pos2>,
     ignore_fingers: bool,
     axis_zoom: Option<f32>,
@@ -88,10 +91,15 @@ impl State {
         }
         self.touch_pointer = None;
     }
+    fn clear_lift_guards(&mut self) {
+        self.frozen_hover = None;
+        self.after_pen_lift = None;
+    }
+
     pub fn cancel(&mut self, pos: Pos2, events: &mut Vec<Event>) {
         self.clear_touches(events);
         self.pen_down = false;
-        self.after_pen_lift = None;
+        self.clear_lift_guards();
         self.ignore_fingers = false;
         self.axis_zoom = None;
         if let Some(button) = self.pressed.take() {
@@ -243,6 +251,12 @@ impl State {
                     self.cancel(pos, events);
                     return;
                 }
+                let pressure = input
+                    .sample
+                    .as_ref()
+                    .map(|s| s.pressure)
+                    .unwrap_or(if input.source == PointerSource::Pen { 0.0 } else { 1.0 });
+                let is_hover_move = input.action == 2 && pressure <= 0.0;
                 if input.source == PointerSource::Pen && input.action == 0 {
                     self.ignore_fingers = !self.touches.is_empty();
                     self.clear_touches(events);
@@ -255,28 +269,37 @@ impl State {
                         });
                     }
                     self.pen_down = true;
+                    // Freeze the pre-stroke hover so post-lift echoes of that point stay pinned.
+                    self.frozen_hover = self.last_hover_pos;
                     self.after_pen_lift = None;
                 } else if self.pen_down && input.source != PointerSource::Pen {
                     return;
                 }
-                // ArkUI may keep delivering onHoverMove (pressure 0) during contact at the
-                // pre-stroke point; real pen drags still use action 2 with pressure.
-                if self.pen_down && input.action == 2 {
-                    let pressure = input.sample.as_ref().map(|s| s.pressure).unwrap_or(1.0);
-                    if pressure <= 0.0 {
-                        return;
-                    }
+                // Contact-time ArkUI hover echoes (pressure 0) must not move the stroke.
+                if self.pen_down && is_hover_move {
+                    return;
                 }
+                // After lift: every echo of the frozen pre-stroke hover is pinned to the
+                // lift point across frames (pen hover *and* mouse leftovers). A genuine
+                // non-echo move unlocks the pin target, but frozen_hover stays until the
+                // next pen-down / focus blur so a delayed A echo cannot jump the tip back.
                 if input.action == 2 {
-                    if let Some(lift) = self.after_pen_lift {
-                        // First post-lift hover is frequently the old hover echo, not the tip.
-                        if (pos - lift).length_sq() > 4.0 {
-                            self.after_pen_lift = None;
+                    let echo = self
+                        .frozen_hover
+                        .is_some_and(|frozen| (pos - frozen).length_sq() <= 16.0);
+                    if echo {
+                        if let Some(lift) = self.after_pen_lift {
                             self.feed.report(input.source, input.sample);
                             events.push(Event::PointerMoved(lift));
-                            return;
                         }
+                        // Drop the echo entirely when already unlocked.
+                        return;
+                    }
+                    if self.after_pen_lift.is_some() {
                         self.after_pen_lift = None;
+                    }
+                    if is_hover_move && input.source == PointerSource::Pen {
+                        self.last_hover_pos = Some(pos);
                     }
                 }
                 if input.source == PointerSource::Pen && input.action == 1 {
@@ -313,6 +336,18 @@ impl State {
                     _ => {}
                 }
             }
+            "hover_leave" => {
+                // Contact start/end both flip onHover(false). Ignore during contact and
+                // after lift so the tip stays at the lift point; focus loss uses "blur".
+                if self.pen_down || self.after_pen_lift.is_some() {
+                    return;
+                }
+                self.cancel(pos, events);
+            }
+            "blur" => {
+                // Focus loss / background: always tear down, including lift guards.
+                self.cancel(pos, events);
+            }
             "wheel" => events.push(Event::MouseWheel {
                 unit: egui::MouseWheelUnit::Point,
                 phase: egui::TouchPhase::Move,
@@ -338,14 +373,6 @@ impl State {
                 {
                     events.push(Event::Text(input.text));
                 }
-            }
-            "blur" => {
-                // onHover(false) often fires when contact ends even though the pen is still
-                // near; dropping that leave keeps the tip at the lift point.
-                if self.after_pen_lift.is_some() {
-                    return;
-                }
-                self.cancel(pos, events);
             }
             _ => {}
         }

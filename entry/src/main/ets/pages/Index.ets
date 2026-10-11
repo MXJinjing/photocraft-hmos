@@ -79,7 +79,7 @@ struct Index {
     (message: string): void => { if (this.alive) { this.failure = message; } });
   private lastHoverX: number = 0;
   private lastHoverY: number = 0;
-  private hoverLeft: boolean = false;
+  private ignoreHoverEcho: boolean = false;
   private drainOpens(): void {
     for (let file of takeOpens()) {
       let name = file.name;
@@ -291,11 +291,11 @@ struct Index {
     // onHoverMove reports component-local vp; the native bridge expects physical pixels.
     let xPx = this.getUIContext().vp2px(x);
     let yPx = this.getUIContext().vp2px(y);
-    if (this.hoverLeft) {
-      this.hoverLeft = false;
-      // Drop the leave-point echo so the tip stays at the lift position.
-      if (isStaleHoverEcho(xPx, yPx, this.lastHoverX, this.lastHoverY)) { return; }
+    // Keep dropping the pre-stroke leave-point for every frame until a new point arrives.
+    if (this.ignoreHoverEcho && isStaleHoverEcho(xPx, yPx, this.lastHoverX, this.lastHoverY)) {
+      return;
     }
+    this.ignoreHoverEcho = false;
     this.lastHoverX = xPx;
     this.lastHoverY = yPx;
     native.input(penHoverMoveMessage(xPx, yPx));
@@ -303,11 +303,11 @@ struct Index {
   private sendPenHoverLeave(isHover: boolean): void {
     if (isHover) {
       // Contact end / leave often flips hover back on before a fresh move stream.
-      this.hoverLeft = true;
+      this.ignoreHoverEcho = true;
       return;
     }
     if (!this.alive || !this.initialized) { return; }
-    this.hoverLeft = false;
+    this.ignoreHoverEcho = true;
     native.input(penHoverLeaveMessage(this.lastHoverX, this.lastHoverY));
   }
   build() {
