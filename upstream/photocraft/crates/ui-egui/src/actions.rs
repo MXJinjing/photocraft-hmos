@@ -359,7 +359,7 @@ pub fn panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
             let item = egui::Id::new(("action-row", i));
             let sense = crate::list_drag::row_sense(ui.ctx(), source, item);
             let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 26.0), sense);
-            crate::list_drag::after_row(ui.ctx(), source, item, &resp);
+            let resp = crate::list_drag::after_row(ui.ctx(), source, item, &resp);
             if reveal == Some((i, 0)) {
                 ui.scroll_to_rect(rect, Some(egui::Align::BOTTOM));
             }
@@ -443,7 +443,7 @@ pub fn panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                     let item = egui::Id::new(("action-step", i, step));
                     let sense = crate::list_drag::row_sense(ui.ctx(), source, item);
                     let (r, response) = ui.allocate_exact_size(vec2(ui.available_width(), 20.0), sense);
-                    crate::list_drag::after_row(ui.ctx(), source, item, &response);
+                    let response = crate::list_drag::after_row(ui.ctx(), source, item, &response);
                     if reveal == Some((i, step + 1)) {
                         ui.scroll_to_rect(r, Some(egui::Align::BOTTOM));
                     }

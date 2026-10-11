@@ -2419,7 +2419,7 @@ fn layer_row(
     let item = egui::Id::new(("layer-row", l.id.0));
     let sense = crate::list_drag::row_sense(ctx, source, item);
     let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), row_h), sense);
-    crate::list_drag::after_row(ctx, source, item, &resp);
+    let resp = crate::list_drag::after_row(ctx, source, item, &resp);
     layer_drag_and_drop(app, ctx, ui, l, rect, &resp, actions);
     fx_drop(ctx, ui, l, rect, actions);
     if crate::list_drag::may_begin_drag(ctx, source, item, &resp) {
