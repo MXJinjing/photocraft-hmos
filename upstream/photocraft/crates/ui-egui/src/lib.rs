@@ -163,6 +163,7 @@ mod titlebar;
 pub mod tone;
 mod tool_cursor;
 pub mod tool_feedback;
+pub mod list_drag;
 pub mod touch_nav;
 pub mod transform_tex;
 pub mod transform_tool;

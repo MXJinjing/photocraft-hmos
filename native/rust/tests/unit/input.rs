@@ -303,6 +303,150 @@ fn pen_takeover_cancels_fingers_and_ignores_palms_until_lift() {
 }
 
 #[test]
+fn pen_takeover_releases_finger_in_place_not_at_pen_tip() {
+    let mut state = super::State::default();
+    let mut events = vec![];
+    // Finger primary at A (physical 10,20 → egui 5,10 with scale 2).
+    snapshot(&mut state, &[(1, 10., 20.)], &mut events);
+    assert_eq!(state.touch_pointer, Some(1));
+    events.clear();
+    // Pen down at B must not release the finger press at B (that rubber-bands A→B ink).
+    push_pen(&mut state, 0, 400., 300., 0.5, &mut events);
+    let finger = egui::pos2(5., 10.);
+    let pen = egui::pos2(200., 150.);
+    let release = events.iter().find_map(|e| match e {
+        egui::Event::PointerButton {
+            pressed: false,
+            pos,
+            ..
+        } => Some(*pos),
+        _ => None,
+    });
+    assert_eq!(
+        release,
+        Some(finger),
+        "finger primary must release at finger A, not pen B: {events:?}"
+    );
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, egui::Event::PointerGone)),
+        "finger pointer must PointerGone before pen owns the canvas: {events:?}"
+    );
+    assert!(
+        events.iter().any(|e| matches!(
+            e,
+            egui::Event::PointerButton {
+                pressed: true,
+                pos,
+                ..
+            } if *pos == pen
+        )),
+        "pen must still press at B: {events:?}"
+    );
+    assert!(state.touches.is_empty());
+    assert!(state.ignore_fingers);
+}
+
+#[test]
+fn pen_hover_while_finger_down_does_not_rubber_band_to_tip() {
+    let mut state = super::State::default();
+    let mut events = vec![];
+    snapshot(&mut state, &[(1, 10., 20.)], &mut events);
+    events.clear();
+    // Pen hover must suppress the finger in place; a PointerMoved to the tip while the
+    // finger button is still down is exactly the finger→tip straight line bug.
+    push_pen(&mut state, 2, 400., 300., 0., &mut events);
+    let finger = egui::pos2(5., 10.);
+    assert!(
+        events.iter().any(|e| matches!(
+            e,
+            egui::Event::PointerButton {
+                pressed: false,
+                pos,
+                ..
+            } if *pos == finger
+        )),
+        "hover takeover must release finger at A: {events:?}"
+    );
+    assert!(state.touches.is_empty());
+    assert!(state.ignore_fingers);
+    assert!(state.pressed.is_none(), "finger must not remain pressed across hover move");
+    // Subsequent palm snapshots stay suppressed.
+    let before = events.len();
+    snapshot(&mut state, &[(1, 20., 30.)], &mut events);
+    assert_eq!(before, events.len());
+}
+
+#[test]
+fn two_finger_snapshot_does_not_synthesize_primary_tool_press() {
+    let mut state = super::State::default();
+    let mut events = vec![];
+    snapshot(
+        &mut state,
+        &[(1, 100., 100.), (2, 300., 100.)],
+        &mut events,
+    );
+    assert!(
+        state.pressed.is_none() && state.touch_pointer.is_none(),
+        "multi-touch must not own a tool primary press"
+    );
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, egui::Event::PointerMoved(_))),
+        "multi-touch begin still needs a pointer hover anchor for egui pinch: {events:?}"
+    );
+    assert!(
+        !events
+            .iter()
+            .any(|e| matches!(e, egui::Event::PointerButton { pressed: true, .. })),
+        "no primary press on a two-finger begin: {events:?}"
+    );
+    assert_eq!(
+        events
+            .iter()
+            .filter(|e| matches!(
+                e,
+                egui::Event::Touch {
+                    phase: egui::TouchPhase::Start,
+                    ..
+                }
+            ))
+            .count(),
+        2
+    );
+}
+
+#[test]
+fn second_finger_cancels_one_finger_primary_in_place() {
+    let mut state = super::State::default();
+    let mut events = vec![];
+    snapshot(&mut state, &[(1, 100., 100.)], &mut events);
+    assert_eq!(state.touch_pointer, Some(1));
+    events.clear();
+    snapshot(
+        &mut state,
+        &[(1, 100., 100.), (2, 300., 100.)],
+        &mut events,
+    );
+    let finger = egui::pos2(50., 50.);
+    assert!(
+        events.iter().any(|e| matches!(
+            e,
+            egui::Event::PointerButton {
+                pressed: false,
+                pos,
+                ..
+            } if *pos == finger
+        )),
+        "second finger must release the first primary at its anchor: {events:?}"
+    );
+    assert!(state.pressed.is_none() && state.touch_pointer.is_none());
+    assert_eq!(state.touches.len(), 2);
+}
+
+#[test]
 fn trackpad_axis_scales_are_incremental_and_pan_has_an_anchor() {
     let mut state = super::State::default();
     let mut events = vec![];

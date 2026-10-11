@@ -117,7 +117,10 @@ pub fn toolbar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
             if ui.input(|i| i.pointer.any_pressed()) {
                 ui.data_mut(|d| d.remove::<egui::Id>(held_id));
             }
-            egui::ScrollArea::vertical().id_salt("toolbar-columns").show(ui, |ui| {
+            egui::ScrollArea::vertical()
+                .id_salt("toolbar-columns")
+                .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
+                .show(ui, |ui| {
                 // Pro has no group dividers, so its two columns fill every row across groups.
                 let sections: Vec<Vec<(usize, Vec<Tool>)>> = if t.pro { vec![sections.into_iter().flatten().collect()] } else { sections };
                 for (si, section) in sections.iter().enumerate() {
@@ -533,11 +536,24 @@ pub fn title_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                     ui.add_space(6.0);
                 }
                 // With the macOS menu bar the menus are at the top of the screen instead.
-                menus_right = if app.services.native_menu.is_some() { ui.cursor().left() } else { crate::menus::menu_bar(app, ui) };
-                // The menu bar takes the whole row, so the right-hand group gets its own rect:
-                // from the menus to the bar's end, or to the caption buttons.
+                // Budget the titles so a narrow bar folds them into a hamburger before they
+                // crowd out the right-hand controls (workspace / search / theme / stylus).
                 let native_button_room = if app.host_titlebar.x > 0.0 { app.host_titlebar.x + 4.0 } else { 0.0 };
                 let right_edge = if custom { full.right() - crate::titlebar::WIDTH - 4.0 } else { (full.right() - native_button_room).max(full.left()) };
+                let stylus_reserve = if app.stylus.feed.ever_connected() {
+                    // Approximate: measured later in the right group; keep room for the control.
+                    110.0
+                } else {
+                    0.0
+                };
+                let menu_budget = (right_edge - ui.cursor().left() - TITLE_GAP - WORKSPACE_MIN - stylus_reserve).max(crate::menus::MENU_BAR_HAMBURGER_WIDTH);
+                menus_right = if app.services.native_menu.is_some() {
+                    ui.cursor().left()
+                } else {
+                    crate::menus::menu_bar(app, ui, menu_budget)
+                };
+                // The menu bar takes the whole row, so the right-hand group gets its own rect:
+                // from the menus to the bar's end, or to the caption buttons.
                 let group = egui::Rect::from_min_max(egui::pos2((menus_right + TITLE_GAP).min(right_edge), full.top()), egui::pos2(right_edge, full.bottom()));
                 let mut group_ui = ui.new_child(egui::UiBuilder::new().max_rect(group).layout(egui::Layout::right_to_left(egui::Align::Center)));
                 controls_left = {
@@ -798,7 +814,8 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
             let mut content_ui = ui.new_child(egui::UiBuilder::new().max_rect(content));
             content_ui.set_clip_rect(content.intersect(ui.clip_rect()));
             egui::ScrollArea::horizontal().id_salt("pc-options-bar").auto_shrink([false, false])
-                .scroll_source(egui::scroll_area::ScrollSource { scroll_bar: true, drag: egui::scroll_area::DragScroll::Always, mouse_wheel: true })
+                .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
+                .scroll_source(egui::scroll_area::ScrollSource { scroll_bar: false, drag: egui::scroll_area::DragScroll::Always, mouse_wheel: true })
                 .show(&mut content_ui, |ui| {
                     ui.set_min_height(content.height());
                     ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
@@ -2408,10 +2425,14 @@ fn layer_row(
     let t = Tokens::get(ctx);
     // Photoshop's default (medium) thumbnails: 32 pt rows.
     let row_h = if t.pro { 32.0 } else { 46.0 };
-    let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), row_h), Sense::click_and_drag());
+    let source = app.stylus.feed.source();
+    let item = egui::Id::new(("layer-row", l.id.0));
+    let sense = crate::list_drag::row_sense(ctx, source, item);
+    let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), row_h), sense);
+    crate::list_drag::after_row(ctx, source, item, &resp);
     layer_drag_and_drop(app, ctx, ui, l, rect, &resp, actions);
     fx_drop(ctx, ui, l, rect, actions);
-    if resp.drag_started() {
+    if crate::list_drag::may_begin_drag(ctx, source, item, &resp) {
         crate::layer_transfer::begin_from_panel(app, ctx, l.id);
     }
     // Rows are painted: name them for screen readers and UI tests.
@@ -2448,7 +2469,12 @@ fn layer_row(
     let eye = Rect::from_min_size(pos2(x, rect.center().y - 11.0), vec2(22.0, 22.0));
     // The eye takes drags too (so a drag starting on it never reorders the row): dragging down
     // the eyes gives every row swept over the visibility the first eye toggled to.
-    let eye_resp = ui.interact(eye, ui.id().with(("eye", l.id.0)), Sense::click_and_drag());
+    let eye_sense = if crate::list_drag::prefers_scroll(app.stylus.feed.source()) {
+        Sense::click()
+    } else {
+        Sense::click_and_drag()
+    };
+    let eye_resp = ui.interact(eye, ui.id().with(("eye", l.id.0)), eye_sense);
     // A hidden layer's eye box is left empty (still clickable).
     if l.visible {
         // Centre the drawing in the column while preserving the visibility hit area.
@@ -3325,7 +3351,9 @@ fn layer_drag_and_drop(
 ) {
     let t = Tokens::get(ctx);
     let key = egui::Id::new("layer-drag");
-    if resp.drag_started() {
+    let source = app.stylus.feed.source();
+    let item = egui::Id::new(("layer-row", l.id.0));
+    if crate::list_drag::may_begin_drag(ctx, source, item, resp) {
         ctx.data_mut(|d| d.insert_temp(key, l.id.0));
     }
     let Some(dragged) = ctx.data(|d| d.get_temp::<u64>(key)) else { return };

@@ -27,6 +27,7 @@ PhotoCraft's own source specific guidance is in `upstream/photocraft/AGENTS.md`;
 |------|----------|--------------------|-------|
 | Coding Man | `/workspace/photocraft-hmos-coding-man` | `sync/upstream-YYYYMMDD` → PR into **`0.7.0`** | Daily upstream subtree sync; x86-64 native build OK; do not merge; no device tests |
 | Prominent Coder | `/workspace/photocraft-hmos-prominent-coder` | `fix/…` or `feat/…` → PR into **`main`** | Issues/PRs/host fixes; tests when possible; do not merge |
+| Programmer | `/workspace/photocraft-hmos-programmer` | `fix/…` or `feat/…` → PR into **`main`** | Host features/fixes as assigned; tests when possible; do not merge |
 | Project Manager | `/workspace/photocraft-hmos` | Reviews and merges PRs; pushes `main` and `0.7.0` | Only agent that merges; never delete the repo; never push unreviewed code |
 
 Do not share checkouts. After cloning, add the `upstream` remote if missing. Prefer `gh` / existing GitHub login; do not force-push shared branches.
