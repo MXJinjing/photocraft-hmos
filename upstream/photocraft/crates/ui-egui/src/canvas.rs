@@ -14,6 +14,7 @@ use crate::state::{Tool, View};
 
 /// Largest texture side we upload; bigger documents display downsampled until the GPU path lands.
 pub const MAX_TEXTURE: u32 = 4096;
+const PEN_HOVER_TIP_OPACITY: f32 = 0.5;
 
 pub(crate) struct ClonePreviewCache {
     key: String,
@@ -3197,6 +3198,7 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
                         crate::tool_cursor::crosshair(&painter, p, 6.0, 0.0)
                     } else {
                         let painting = app.drag.is_some();
+                        let tip_opacity = if app.stylus.is_pen() && !painting { PEN_HOVER_TIP_OPACITY } else { 1.0 };
                         let brush = &app.session.tools.brush;
                         let full = (brush.size / 2.0 * xf.zoom).max(1.0);
                         let r = if cur.painting == PaintingCursor::NormalTip {
@@ -3235,7 +3237,11 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
                             }
                             _ => {
                                 let centre = brush_tip_centre(tool, alt || app.ui.shell.sticky_alt, cur.show_crosshair_in_brush_tip, r);
-                                crate::tool_cursor::circle(&painter, p, r, centre)
+                                if tip_opacity == 1.0 {
+                                    crate::tool_cursor::circle(&painter, p, r, centre)
+                                } else {
+                                    crate::tool_cursor::circle_with_opacity(&painter, p, r, centre, tip_opacity)
+                                }
                             }
                         }
                     }
