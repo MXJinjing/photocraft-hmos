@@ -355,7 +355,11 @@ pub fn panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
             }
         }
         for (i, (name, steps)) in rows.iter().enumerate() {
-            let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 26.0), Sense::click_and_drag());
+            let source = app.stylus.feed.source();
+            let item = egui::Id::new(("action-row", i));
+            let sense = crate::list_drag::row_sense(ui.ctx(), source, item);
+            let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 26.0), sense);
+            crate::list_drag::after_row(ui.ctx(), source, item, &resp);
             if reveal == Some((i, 0)) {
                 ui.scroll_to_rect(rect, Some(egui::Align::BOTTOM));
             }
@@ -366,7 +370,9 @@ pub fn panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
             } else if resp.hovered() {
                 ui.painter().rect_filled(rect, 0.0, t.hover.gamma_multiply(0.5));
             }
-            if let Some(change) = drag_row(ui, &resp, DragRow { action: i, step: None }, &t) {
+            if (!crate::list_drag::prefers_scroll(source) || crate::list_drag::is_armed(ui.ctx(), item))
+                && let Some(change) = drag_row(ui, &resp, DragRow { action: i, step: None }, &t)
+            {
                 moved = Some(change);
             }
             let expanded = app.ui.actions.expanded.get(i).copied().unwrap_or(false);
@@ -433,7 +439,11 @@ pub fn panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
             }
             if expanded {
                 for (step, (id, params)) in steps.iter().enumerate() {
-                    let (r, response) = ui.allocate_exact_size(vec2(ui.available_width(), 20.0), Sense::click_and_drag());
+                    let source = app.stylus.feed.source();
+                    let item = egui::Id::new(("action-step", i, step));
+                    let sense = crate::list_drag::row_sense(ui.ctx(), source, item);
+                    let (r, response) = ui.allocate_exact_size(vec2(ui.available_width(), 20.0), sense);
+                    crate::list_drag::after_row(ui.ctx(), source, item, &response);
                     if reveal == Some((i, step + 1)) {
                         ui.scroll_to_rect(r, Some(egui::Align::BOTTOM));
                     }
@@ -445,7 +455,9 @@ pub fn panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                     } else if response.hovered() {
                         ui.painter().rect_filled(r, 0.0, t.hover.gamma_multiply(0.5));
                     }
-                    if let Some(change) = drag_row(ui, &response, DragRow { action: i, step: Some(step) }, &t) {
+                    if (!crate::list_drag::prefers_scroll(source) || crate::list_drag::is_armed(ui.ctx(), item))
+                        && let Some(change) = drag_row(ui, &response, DragRow { action: i, step: Some(step) }, &t)
+                    {
                         moved = Some(change);
                     }
                     ui.painter().text(pos2(r.left() + 44.0, r.center().y), Align2::LEFT_CENTER, label, egui::FontId::proportional(11.5), t.text_dim);
