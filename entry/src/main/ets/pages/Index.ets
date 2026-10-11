@@ -15,7 +15,7 @@ import { HarmonyStylusAdapter } from '../stylus/HarmonyStylusAdapter';
 import { StylusPacket } from '../stylus/StylusProtocol';
 import { NativeImeAdapter, NativeImeState } from '../input/NativeImeAdapter';
 import { NativeCursorAdapter } from '../input/NativeCursorAdapter';
-import { isFiniteHoverPoint, penHoverLeaveMessage, penHoverMoveMessage } from '../input/PenHoverPreview';
+import { isFiniteHoverPoint, isStaleHoverEcho, penHoverLeaveMessage, penHoverMoveMessage } from '../input/PenHoverPreview';
 import { moveWindow, toggleWindowMaximize } from '../WindowChrome';
 import { window } from '@kit.ArkUI';
 import { configureDisplayColor } from '../DisplayColor';
@@ -79,6 +79,7 @@ struct Index {
     (message: string): void => { if (this.alive) { this.failure = message; } });
   private lastHoverX: number = 0;
   private lastHoverY: number = 0;
+  private hoverLeft: boolean = false;
   private drainOpens(): void {
     for (let file of takeOpens()) {
       let name = file.name;
@@ -290,12 +291,23 @@ struct Index {
     // onHoverMove reports component-local vp; the native bridge expects physical pixels.
     let xPx = this.getUIContext().vp2px(x);
     let yPx = this.getUIContext().vp2px(y);
+    if (this.hoverLeft) {
+      this.hoverLeft = false;
+      // Drop the leave-point echo so the tip stays at the lift position.
+      if (isStaleHoverEcho(xPx, yPx, this.lastHoverX, this.lastHoverY)) { return; }
+    }
     this.lastHoverX = xPx;
     this.lastHoverY = yPx;
     native.input(penHoverMoveMessage(xPx, yPx));
   }
   private sendPenHoverLeave(isHover: boolean): void {
-    if (isHover || !this.alive || !this.initialized) { return; }
+    if (isHover) {
+      // Contact end / leave often flips hover back on before a fresh move stream.
+      this.hoverLeft = true;
+      return;
+    }
+    if (!this.alive || !this.initialized) { return; }
+    this.hoverLeft = false;
     native.input(penHoverLeaveMessage(this.lastHoverX, this.lastHoverY));
   }
   build() {

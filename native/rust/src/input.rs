@@ -67,6 +67,9 @@ pub struct State {
     touches: BTreeMap<u64, Pos2>,
     touch_pointer: Option<u64>,
     pen_down: bool,
+    /// After pen up, ArkUI may re-deliver a stale onHoverMove at the pre-stroke
+    /// hover point. Keep the tip at the lift position until a nearby hover arrives.
+    after_pen_lift: Option<Pos2>,
     ignore_fingers: bool,
     axis_zoom: Option<f32>,
     pub modifiers: Modifiers,
@@ -88,6 +91,7 @@ impl State {
     pub fn cancel(&mut self, pos: Pos2, events: &mut Vec<Event>) {
         self.clear_touches(events);
         self.pen_down = false;
+        self.after_pen_lift = None;
         self.ignore_fingers = false;
         self.axis_zoom = None;
         if let Some(button) = self.pressed.take() {
@@ -251,11 +255,33 @@ impl State {
                         });
                     }
                     self.pen_down = true;
+                    self.after_pen_lift = None;
                 } else if self.pen_down && input.source != PointerSource::Pen {
                     return;
                 }
+                // ArkUI may keep delivering onHoverMove (pressure 0) during contact at the
+                // pre-stroke point; real pen drags still use action 2 with pressure.
+                if self.pen_down && input.action == 2 {
+                    let pressure = input.sample.as_ref().map(|s| s.pressure).unwrap_or(1.0);
+                    if pressure <= 0.0 {
+                        return;
+                    }
+                }
+                if input.action == 2 {
+                    if let Some(lift) = self.after_pen_lift {
+                        // First post-lift hover is frequently the old hover echo, not the tip.
+                        if (pos - lift).length_sq() > 4.0 {
+                            self.after_pen_lift = None;
+                            self.feed.report(input.source, input.sample);
+                            events.push(Event::PointerMoved(lift));
+                            return;
+                        }
+                        self.after_pen_lift = None;
+                    }
+                }
                 if input.source == PointerSource::Pen && input.action == 1 {
                     self.pen_down = false;
+                    self.after_pen_lift = Some(pos);
                 }
                 self.feed.report(input.source, input.sample);
                 events.push(Event::PointerMoved(pos));
@@ -313,7 +339,14 @@ impl State {
                     events.push(Event::Text(input.text));
                 }
             }
-            "blur" => self.cancel(pos, events),
+            "blur" => {
+                // onHover(false) often fires when contact ends even though the pen is still
+                // near; dropping that leave keeps the tip at the lift point.
+                if self.after_pen_lift.is_some() {
+                    return;
+                }
+                self.cancel(pos, events);
+            }
             _ => {}
         }
     }
