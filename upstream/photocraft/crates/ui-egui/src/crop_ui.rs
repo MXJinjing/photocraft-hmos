@@ -642,8 +642,10 @@ pub fn abort_drag(app: &mut PhotocraftApp) {
     let Some(drag) = app.crop.drag.take() else { return };
     match drag {
         CropDrag::Draw { prev, .. } => app.ui.crop_rect = prev,
-        CropDrag::Move { rect, .. } | CropDrag::Resize { rect, .. } => app.ui.crop_rect = Some(rect),
-        CropDrag::Rotate { from, .. } => app.ui.crop_angle = from,
+        CropDrag::Move { rect, .. } | CropDrag::Resize { rect, .. } | CropDrag::MoveImage { rect, .. } => {
+            app.ui.crop_rect = Some(rect)
+        }
+        CropDrag::Rotate { from, .. } | CropDrag::TurnImage { from, .. } => app.ui.crop_angle = from,
     }
 }
 

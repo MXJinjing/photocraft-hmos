@@ -79,8 +79,8 @@ fn services(
     let load = std::path::Path::new(files).join("native-preferences.json");
     let save = load.clone();
     Services {
-        import: Some(Box::new(move |name, bytes| {
-            photocraft_io::import(name, bytes)
+        import: Some(Box::new(move |name, bytes, max_svg_group_depth| {
+            photocraft_io::import_with_svg_group_depth(name, bytes, max_svg_group_depth)
                 .map(|r| (r.document, r.warnings))
                 .map_err(|e| e.to_string())
         })),
