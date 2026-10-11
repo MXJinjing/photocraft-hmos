@@ -117,7 +117,7 @@ struct Index {
       this.onTitlebarChanged();
       this.failure = '';
       setOpenListener(() => this.drainOpens());
-      setCloseRequest(() => native.close());
+      setCloseRequest((): void => { native.close(); });
       this.drainOpens();
       this.stylus.start();
     } catch (error) {
