@@ -175,6 +175,11 @@ void Mouse(OH_NativeXComponent* c,void* window) {
     if(penContact || fingerContact)return;
     OH_NativeXComponent_MouseEvent e{};
     if(OH_NativeXComponent_GetMouseEvent(c,window,&e)!=OH_NATIVEXCOMPONENT_RESULT_SUCCESS)return;
+    if(e.action==OH_NATIVEXCOMPONENT_MOUSE_CANCEL){Json("{\"kind\":\"pointer\",\"action\":3}");return;}
+    // Proximity callbacks can expose a cached mouse event with action NONE.
+    // Only actual movement or button events may make the brush tip visible again.
+    if(e.action!=OH_NATIVEXCOMPONENT_MOUSE_PRESS && e.action!=OH_NATIVEXCOMPONENT_MOUSE_RELEASE &&
+       e.action!=OH_NATIVEXCOMPONENT_MOUSE_MOVE)return;
     int action=e.action==OH_NATIVEXCOMPONENT_MOUSE_PRESS?0:e.action==OH_NATIVEXCOMPONENT_MOUSE_RELEASE?1:2;
     int button=e.button==OH_NATIVEXCOMPONENT_RIGHT_BUTTON?1:e.button==OH_NATIVEXCOMPONENT_MIDDLE_BUTTON?2:0;
     Json("{\"kind\":\"pointer\",\"action\":"+std::to_string(action)+",\"button\":"+std::to_string(button)+",\"x\":"+std::to_string(e.x)+",\"y\":"+std::to_string(e.y)+"}");
@@ -224,7 +229,10 @@ void Axis(OH_NativeXComponent*,ArkUI_UIInputEvent* event,ArkUI_UIInputEvent_Type
          ",\"dy\":"+std::to_string(y)+",\"zoom\":"+std::to_string(zoom)+"}");
 }
 void Blur(OH_NativeXComponent*,void*) {touchId=-1;penContact=false;fingerContact=false;Json("{\"kind\":\"blur\"}");}
-void Hover(OH_NativeXComponent*,bool isHover) {if(!isHover && !penContact && !fingerContact)Json("{\"kind\":\"hover_leave\"}");}
+void Hover(OH_NativeXComponent*,bool isHover) {
+    // Entry has no position to replay; the next real movement resumes the preview.
+    if(!isHover && !penContact && !fingerContact)Json("{\"kind\":\"hover_leave\"}");
+}
 OH_NativeXComponent_Callback callbacks{SurfaceCreated,SurfaceChanged,SurfaceDestroyed,Touch};
 OH_NativeXComponent_MouseEvent_Callback mouseCallbacks{Mouse,Hover};
 

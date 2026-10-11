@@ -86,16 +86,15 @@ pub fn toolbar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     egui::Panel::left("toolbar").resizable(false).exact_size(w).frame(egui::Frame::NONE.fill(t.chrome).inner_margin(egui::Margin::symmetric(m, 8))).show(
         ui,
         |ui| {
-            if t.pro {
-                // Photoshop's toolbar header chevrons switch between one and two columns.
-                let (cr, resp) = ui.allocate_exact_size(vec2(bx, 14.0), Sense::click());
-                icons::paint(ui, cr, if double { "chevrons-left" } else { "chevrons-right" }, 11.0, if resp.hovered() { t.text } else { t.text_faint });
-                resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tl!("Toolbar")));
-                if resp.clicked() {
-                    app.ui.panels.toolbar_double = !app.ui.panels.toolbar_double;
-                }
-                ui.add_space(4.0);
+            // Photoshop's toolbar header chevrons switch between one and two columns.
+            // Every theme gets the toggle (not only Pro): Studio/Classic/etc. previously hid it.
+            let (cr, resp) = ui.allocate_exact_size(vec2(bx, 14.0), Sense::click());
+            icons::paint(ui, cr, if double { "chevrons-left" } else { "chevrons-right" }, 11.0, if resp.hovered() { t.text } else { t.text_faint });
+            resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tl!("Toolbar")));
+            if resp.clicked() {
+                app.ui.panels.toolbar_double = !app.ui.panels.toolbar_double;
             }
+            ui.add_space(4.0);
             // Subtle violet wash at the bottom of the toolbar.
             let full = ui.max_rect();
             if !t.bevel && !t.pro && t.dark() {
@@ -117,7 +116,10 @@ pub fn toolbar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
             if ui.input(|i| i.pointer.any_pressed()) {
                 ui.data_mut(|d| d.remove::<egui::Id>(held_id));
             }
-            egui::ScrollArea::vertical().id_salt("toolbar-columns").show(ui, |ui| {
+            egui::ScrollArea::vertical()
+                .id_salt("toolbar-columns")
+                .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
+                .show(ui, |ui| {
                 // Pro has no group dividers, so its two columns fill every row across groups.
                 let sections: Vec<Vec<(usize, Vec<Tool>)>> = if t.pro { vec![sections.into_iter().flatten().collect()] } else { sections };
                 for (si, section) in sections.iter().enumerate() {
@@ -811,7 +813,8 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
             let mut content_ui = ui.new_child(egui::UiBuilder::new().max_rect(content));
             content_ui.set_clip_rect(content.intersect(ui.clip_rect()));
             egui::ScrollArea::horizontal().id_salt("pc-options-bar").auto_shrink([false, false])
-                .scroll_source(egui::scroll_area::ScrollSource { scroll_bar: true, drag: egui::scroll_area::DragScroll::Always, mouse_wheel: true })
+                .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
+                .scroll_source(egui::scroll_area::ScrollSource { scroll_bar: false, drag: egui::scroll_area::DragScroll::Always, mouse_wheel: true })
                 .show(&mut content_ui, |ui| {
                     ui.set_min_height(content.height());
                     ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
@@ -2416,10 +2419,14 @@ fn layer_row(
     let t = Tokens::get(ctx);
     // Photoshop's default (medium) thumbnails: 32 pt rows.
     let row_h = if t.pro { 32.0 } else { 46.0 };
-    let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), row_h), Sense::click_and_drag());
+    let source = app.stylus.feed.source();
+    let item = egui::Id::new(("layer-row", l.id.0));
+    let sense = crate::list_drag::row_sense(ctx, source, item);
+    let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), row_h), sense);
+    crate::list_drag::after_row(ctx, source, item, &resp);
     layer_drag_and_drop(app, ctx, ui, l, rect, &resp, actions);
     fx_drop(ctx, ui, l, rect, actions);
-    if resp.drag_started() {
+    if crate::list_drag::may_begin_drag(ctx, source, item, &resp) {
         crate::layer_transfer::begin_from_panel(app, ctx, l.id);
     }
     // Rows are painted: name them for screen readers and UI tests.
@@ -2456,7 +2463,12 @@ fn layer_row(
     let eye = Rect::from_min_size(pos2(x, rect.center().y - 11.0), vec2(22.0, 22.0));
     // The eye takes drags too (so a drag starting on it never reorders the row): dragging down
     // the eyes gives every row swept over the visibility the first eye toggled to.
-    let eye_resp = ui.interact(eye, ui.id().with(("eye", l.id.0)), Sense::click_and_drag());
+    let eye_sense = if crate::list_drag::prefers_scroll(app.stylus.feed.source()) {
+        Sense::click()
+    } else {
+        Sense::click_and_drag()
+    };
+    let eye_resp = ui.interact(eye, ui.id().with(("eye", l.id.0)), eye_sense);
     // A hidden layer's eye box is left empty (still clickable).
     if l.visible {
         // Centre the drawing in the column while preserving the visibility hit area.
@@ -3333,7 +3345,9 @@ fn layer_drag_and_drop(
 ) {
     let t = Tokens::get(ctx);
     let key = egui::Id::new("layer-drag");
-    if resp.drag_started() {
+    let source = app.stylus.feed.source();
+    let item = egui::Id::new(("layer-row", l.id.0));
+    if crate::list_drag::may_begin_drag(ctx, source, item, resp) {
         ctx.data_mut(|d| d.insert_temp(key, l.id.0));
     }
     let Some(dragged) = ctx.data(|d| d.get_temp::<u64>(key)) else { return };
@@ -4353,8 +4367,7 @@ mod toolbar_tests {
     use egui_kittest::kittest::Queryable;
 
     /// #1197: the header chevron switches the toolbar between one and two columns.
-    #[test]
-    fn header_chevron_toggles_two_columns() {
+    fn assert_header_chevron_toggles(kind: crate::theme::ThemeKind) {
         let app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
         let mut h = egui_kittest::Harness::builder().with_size(vec2(800.0, 1400.0)).build_ui_state(
             |ui, app: &mut PhotocraftApp| {
@@ -4366,7 +4379,7 @@ mod toolbar_tests {
             },
             app,
         );
-        PhotocraftApp::setup_context(&h.ctx, crate::theme::ThemeKind::Pro);
+        PhotocraftApp::setup_context(&h.ctx, kind);
         h.run_steps(2);
         let left = |h: &egui_kittest::Harness<'_, PhotocraftApp>| h.ctx.data(|d| d.get_temp::<f32>(egui::Id::new("toolbar-test-left"))).unwrap_or(0.0);
         let single = left(&h);
@@ -4374,13 +4387,24 @@ mod toolbar_tests {
 
         h.get_by_label("Toolbar").click();
         h.run_steps(2);
-        assert!(h.state().ui.panels.toolbar_double);
-        assert!(left(&h) > single + 20.0, "the toolbar did not widen: {single} -> {}", left(&h));
+        assert!(h.state().ui.panels.toolbar_double, "chevron missing or inert under {kind:?}");
+        assert!(left(&h) > single + 20.0, "the toolbar did not widen under {kind:?}: {single} -> {}", left(&h));
 
         h.get_by_label("Toolbar").click();
         h.run_steps(2);
         assert!(!h.state().ui.panels.toolbar_double);
         assert_eq!(left(&h), single);
+    }
+
+    #[test]
+    fn header_chevron_toggles_two_columns() {
+        assert_header_chevron_toggles(crate::theme::ThemeKind::Pro);
+    }
+
+    /// Non-Pro themes also expose the column toggle (Studio previously hid it).
+    #[test]
+    fn header_chevron_toggles_two_columns_studio() {
+        assert_header_chevron_toggles(crate::theme::ThemeKind::Studio);
     }
 
     fn click(h: &mut egui_kittest::Harness<'_, PhotocraftApp>, p: egui::Pos2) {
