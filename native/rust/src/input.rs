@@ -91,6 +91,33 @@ impl State {
         self.touch_pointer = None;
     }
 
+    /// Last finger-owned pointer position, if any.
+    fn finger_anchor(&self) -> Option<Pos2> {
+        self.touch_pointer
+            .and_then(|id| self.touches.get(&id).copied())
+            .or_else(|| self.touches.values().next().copied())
+    }
+
+    /// Drop finger contacts and any tool pointer they owned, releasing in place.
+    /// Releasing at a pen/mouse point instead would rubber-band ink between contacts.
+    fn suppress_fingers(&mut self, events: &mut Vec<Event>) {
+        let anchor = self.finger_anchor();
+        let had_touch_pointer = self.touch_pointer.is_some();
+        self.clear_touches(events);
+        if had_touch_pointer || self.pressed.is_some() {
+            let pos = anchor.unwrap_or(Pos2::ZERO);
+            if let Some(button) = self.pressed.take() {
+                events.push(Event::PointerButton {
+                    pos,
+                    button,
+                    pressed: false,
+                    modifiers: self.modifiers,
+                });
+            }
+            events.push(Event::PointerGone);
+        }
+    }
+
     pub fn cancel(&mut self, pos: Pos2, events: &mut Vec<Event>) {
         self.clear_touches(events);
         self.pen_down = false;
@@ -144,6 +171,10 @@ impl State {
                 // Keep palms suppressed until all fingers lift after a pen stroke.
                 if self.pen_down || self.ignore_fingers {
                     self.ignore_fingers = !input.points.is_empty();
+                    // Defensive: drop any leaked finger pointer so it cannot ink mid-stroke.
+                    if !self.touches.is_empty() || self.touch_pointer.is_some() {
+                        self.suppress_fingers(events);
+                    }
                     return;
                 }
                 if input.points.len() > 10
@@ -183,7 +214,32 @@ impl State {
                         }
                     }
                 }
+                // Two-or-more fingers are navigation only: never keep a tool primary press.
+                let multi = next.len() >= 2;
+                if multi && (self.touch_pointer.is_some() || self.pressed.is_some()) {
+                    let anchor = self
+                        .finger_anchor()
+                        .or_else(|| next.values().next().copied())
+                        .unwrap_or(Pos2::ZERO);
+                    if let Some(button) = self.pressed.take() {
+                        events.push(Event::PointerButton {
+                            pos: anchor,
+                            button,
+                            pressed: false,
+                            modifiers: self.modifiers,
+                        });
+                    }
+                    if self.touch_pointer.take().is_some() {
+                        events.push(Event::PointerGone);
+                    }
+                }
                 let first = self.touches.is_empty();
+                // egui's pinch anchor needs a pointer frame; do not press Primary (that inks).
+                if multi && first {
+                    if let Some(&pos) = next.values().next() {
+                        events.push(Event::PointerMoved(pos));
+                    }
+                }
                 for (&id, &pos) in &next {
                     let phase = if self.touches.contains_key(&id) {
                         egui::TouchPhase::Move
@@ -197,7 +253,8 @@ impl State {
                         pos,
                         force: None,
                     });
-                    if first && self.touch_pointer.is_none() && self.pressed.is_none() {
+                    // Single-finger only synthesizes a primary pointer for tools / one-finger pan.
+                    if !multi && first && self.touch_pointer.is_none() && self.pressed.is_none() {
                         self.touch_pointer = Some(id);
                         self.pressed = Some(PointerButton::Primary);
                         events.push(Event::PointerMoved(pos));
@@ -252,9 +309,19 @@ impl State {
                     .map(|s| s.pressure)
                     .unwrap_or(if input.source == PointerSource::Pen { 0.0 } else { 1.0 });
                 let is_hover_move = input.action == 2 && pressure <= 0.0;
+                // Any pen activity while fingers are down must drop the finger pointer in place
+                // first. Moving/releasing at the pen point rubber-bands ink finger→tip.
+                if input.source == PointerSource::Pen
+                    && (!self.touches.is_empty() || self.touch_pointer.is_some())
+                {
+                    self.suppress_fingers(events);
+                    self.ignore_fingers = true;
+                }
                 if input.source == PointerSource::Pen && input.action == 0 {
-                    self.ignore_fingers = !self.touches.is_empty();
-                    self.clear_touches(events);
+                    if !self.touches.is_empty() || self.touch_pointer.is_some() {
+                        self.suppress_fingers(events);
+                        self.ignore_fingers = true;
+                    }
                     if let Some(button) = self.pressed.take() {
                         events.push(Event::PointerButton {
                             pos,
