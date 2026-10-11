@@ -61,12 +61,13 @@ pub fn after_row(ctx: &Context, source: PointerSource, item: Id, resp: &Response
     }
 
     // Second press of a double-tap on this row, still held → arm reorder for this press.
-    if pressed && resp.is_pointer_button_down_on() {
-        if let Some((id, t0, p0)) = gate.last_click {
-            let pos = ctx.input(|i| i.pointer.press_origin()).unwrap_or(p0);
-            if id == item && (time - t0) <= delay && pos.distance(p0) <= dist {
-                gate.armed = Some(item);
-            }
+    if pressed
+        && resp.is_pointer_button_down_on()
+        && let Some((id, t0, p0)) = gate.last_click
+    {
+        let pos = ctx.input(|i| i.pointer.press_origin()).unwrap_or(p0);
+        if id == item && (time - t0) <= delay && pos.distance(p0) <= dist {
+            gate.armed = Some(item);
         }
     }
 
