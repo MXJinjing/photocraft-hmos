@@ -15,6 +15,7 @@ import { HarmonyStylusAdapter } from '../stylus/HarmonyStylusAdapter';
 import { StylusPacket } from '../stylus/StylusProtocol';
 import { NativeImeAdapter, NativeImeState } from '../input/NativeImeAdapter';
 import { NativeCursorAdapter } from '../input/NativeCursorAdapter';
+import { isFiniteHoverPoint, penHoverLeaveMessage, penHoverMoveMessage } from '../input/PenHoverPreview';
 import { moveWindow, toggleWindowMaximize } from '../WindowChrome';
 import { window } from '@kit.ArkUI';
 import { configureDisplayColor } from '../DisplayColor';
@@ -76,6 +77,8 @@ struct Index {
   private ime: NativeImeAdapter = new NativeImeAdapter((message: string): void => native.input(message));
   private printing: NativePrintAdapter = new NativePrintAdapter(this.context,
     (message: string): void => { if (this.alive) { this.failure = message; } });
+  private lastHoverX: number = 0;
+  private lastHoverY: number = 0;
   private drainOpens(): void {
     for (let file of takeOpens()) {
       let name = file.name;
@@ -279,6 +282,22 @@ struct Index {
       native.reply(id, false, failure.message, new ArrayBuffer(0));
     }
   }
+  private sendPenHoverMove(event: HoverEvent): void {
+    if (!this.alive || !this.initialized) { return; }
+    let x = Number(event.x);
+    let y = Number(event.y);
+    if (!isFiniteHoverPoint(x, y)) { return; }
+    // onHoverMove reports component-local vp; the native bridge expects physical pixels.
+    let xPx = this.getUIContext().vp2px(x);
+    let yPx = this.getUIContext().vp2px(y);
+    this.lastHoverX = xPx;
+    this.lastHoverY = yPx;
+    native.input(penHoverMoveMessage(xPx, yPx));
+  }
+  private sendPenHoverLeave(isHover: boolean): void {
+    if (isHover || !this.alive || !this.initialized) { return; }
+    native.input(penHoverLeaveMessage(this.lastHoverX, this.lastHoverY));
+  }
   build() {
     Stack() {
       if (this.initialized) {
@@ -289,6 +308,8 @@ struct Index {
           this.ime.setOrigin(this.getUIContext().vp2px(Number(area.globalPosition.x)),
             this.getUIContext().vp2px(Number(area.globalPosition.y)));
         })
+        .onHoverMove((event: HoverEvent): void => { this.sendPenHoverMove(event); })
+        .onHover((isHover: boolean): void => { this.sendPenHoverLeave(isHover); })
         .id('photocraft-editor').focusable(true).defaultFocus(true).focusOnTouch(true)
         .onBlur(() => { this.cursor.reset(); let input = new NativeInput(); input.kind = 'blur'; native.input(JSON.stringify(input)); })
       } else {

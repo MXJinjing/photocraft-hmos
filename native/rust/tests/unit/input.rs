@@ -523,3 +523,56 @@ fn shortcut_does_not_insert_text_and_bad_numbers_are_ignored() {
     );
     assert_eq!(events.len(), 2);
 }
+
+#[test]
+fn pen_hover_move_sets_hover_pos_without_pressing() {
+    let mut state = super::State::default();
+    let mut events = vec![];
+    let packet = r#"{"kind":"pointer","source":"pen","action":2,"x":200,"y":100,"sample":{"pressure":0,"tiltX":0,"tiltY":0,"eraser":false}}"#;
+    state.push(serde_json::from_str(packet).unwrap(), 2., &mut events);
+    assert!(
+        matches!(events.as_slice(), [egui::Event::PointerMoved(p)] if *p == egui::pos2(100., 50.)),
+        "hover must be PointerMoved only: {events:?}"
+    );
+    assert!(state.pressed.is_none());
+    assert!(!state.pen_down);
+    assert_eq!(state.feed.source(), super::PointerSource::Pen);
+    assert_eq!(
+        state.feed.get().map(|s| s.pressure),
+        Some(0.),
+        "hover reports zero pressure so ink does not start"
+    );
+    let ctx = egui::Context::default();
+    frame(
+        &ctx,
+        egui::RawInput {
+            events: std::mem::take(&mut events),
+            ..Default::default()
+        },
+        |ui| {
+            assert_eq!(ui.input(|i| i.pointer.hover_pos()), Some(egui::pos2(100., 50.)));
+            assert!(!ui.input(|i| i.pointer.any_down()));
+        },
+    );
+    state.push(
+        super::Input {
+            kind: "blur".into(),
+            x: 200.,
+            y: 100.,
+            ..Default::default()
+        },
+        2.,
+        &mut events,
+    );
+    frame(
+        &ctx,
+        egui::RawInput {
+            events,
+            ..Default::default()
+        },
+        |ui| {
+            assert!(ui.input(|i| i.pointer.hover_pos().is_none()));
+            assert!(!ui.input(|i| i.pointer.any_down()));
+        },
+    );
+}
