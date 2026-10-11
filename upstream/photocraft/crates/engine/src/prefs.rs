@@ -1036,10 +1036,12 @@ pub const HIDDEN_UNTIL_IMPLEMENTED: &[&str] = &[
     "integrations.controlPort",
 ];
 
-/// Desktop Linux (X11/Wayland). OHOS/HarmonyOS targets also report `target_os = "linux"`,
-/// but they have no Linux display server preference to offer.
+/// Desktop Linux (X11/Wayland). HarmonyOS builds must not show this preference:
+/// - Official OHOS triples set `target_env = "ohos"` while still reporting `target_os = "linux"`.
+/// - The photocraft-hmos package also enables Cargo feature `harmonyos` (via `harmonyos-ui`),
+///   which is the reliable gate when a build's target env is not `ohos`.
 pub const fn is_desktop_linux() -> bool {
-    cfg!(all(target_os = "linux", not(target_env = "ohos")))
+    cfg!(all(target_os = "linux", not(target_env = "ohos"), not(feature = "harmonyos")))
 }
 
 /// Is the preference at `path` (`"section.key"`) hidden from the Preferences dialog?

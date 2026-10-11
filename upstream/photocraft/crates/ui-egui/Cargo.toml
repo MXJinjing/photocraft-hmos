@@ -8,7 +8,9 @@ license.workspace = true
 default = ["eframe-host"]
 eframe-host = ["dep:eframe"]
 # HarmonyOS package: hide project promotion and detailed About credits.
-harmonyos-ui = []
+# Also enables photocraft-engine/harmonyos so LINUX_ONLY prefs (X11/Wayland) stay hidden
+# even if the Rust target's target_env is not "ohos".
+harmonyos-ui = ["photocraft-engine/harmonyos"]
 
 [lints]
 workspace = true
