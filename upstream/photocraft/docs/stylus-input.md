@@ -78,10 +78,13 @@ script and a `StylusAdapter` lifecycle interface (`start`, `stop`, `publishState
 - SDK `squeeze` becomes the shared `longPress` action used by the current preferences.
 - Device changes and a one-second poll publish connection state and the InputKit device name.
 - After a pen is detected, the native page requests Bluetooth access once per adapter lifetime.
-  Denial keeps pen settings and InputKit names available. Connected Bluetooth HID devices are
-  matched by exact device address or name; only an unambiguous match supplies the remote name
-  and battery. NearLink/non-Bluetooth pens and devices not reporting battery show unavailable.
-- Stale scans and battery results cannot reconnect or overwrite a disconnected/replaced pen.
+  Denial keeps pen settings and InputKit names available. Connected Bluetooth HID and BLE devices are queried independently and deduplicated.
+  Matches prefer exact device address, then name. When InputKit supplies a driver name, a
+  fallback requires exactly one input pen and one recognisable connected remote pen.
+  Only an unambiguous match supplies the remote name and battery. NearLink/non-Bluetooth pens and devices not reporting battery show unavailable.
+- Battery reads are serialized; a slower read remains valid across one-second polls of the
+  same device. Device revisions and lifecycle generations reject results from disconnected,
+  replaced or restarted devices.
 - Registration failures are handled separately, allowing supported capabilities to keep working.
 - Start/stop are idempotent; asynchronous connection queries from a previous lifecycle are ignored.
 
