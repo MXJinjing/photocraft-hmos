@@ -209,7 +209,7 @@ pub fn stylus_menu(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     }
     icons::paint(ui, rect, "pencil", 14.0, t.text_dim);
     if device.connected {
-        let c = pos2(resp.rect.left() + 13.0, resp.rect.center().y + 6.0);
+        let c = pos2(resp.rect.left() + 19.0, resp.rect.center().y + 6.0);
         ui.painter().circle_filled(c, 3.2, t.chrome);
         ui.painter().circle_filled(c, 2.2, t.online);
     }

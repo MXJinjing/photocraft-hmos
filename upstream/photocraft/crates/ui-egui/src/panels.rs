@@ -539,12 +539,8 @@ pub fn title_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                 // crowd out the right-hand controls (workspace / search / theme / stylus).
                 let native_button_room = if app.host_titlebar.x > 0.0 { app.host_titlebar.x + 4.0 } else { 0.0 };
                 let right_edge = if custom { full.right() - crate::titlebar::WIDTH - 4.0 } else { (full.right() - native_button_room).max(full.left()) };
-                let stylus_reserve = if app.stylus.feed.ever_connected() {
-                    // Approximate: measured later in the right group; keep room for the control.
-                    110.0
-                } else {
-                    0.0
-                };
+                // Approximate: measured later in the right group; always reserve room for the control.
+                let stylus_reserve = 110.0;
                 let menu_budget = (right_edge - ui.cursor().left() - TITLE_GAP - WORKSPACE_MIN - stylus_reserve).max(crate::menus::MENU_BAR_HAMBURGER_WIDTH);
                 menus_right = if app.services.native_menu.is_some() {
                     ui.cursor().left()
