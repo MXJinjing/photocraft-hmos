@@ -13,7 +13,7 @@ crate-type = ["staticlib", "rlib"]
 [dependencies]
 photocraft-ui-egui = { path = "../../upstream/photocraft/crates/ui-egui", default-features = false, features = ["harmonyos-ui"] }
 photocraft-text = { path = "../../upstream/photocraft/crates/text" }
-photocraft-engine = { path = "../../upstream/photocraft/crates/engine", features = ["harmonyos"] }
+photocraft-engine = { path = "../../upstream/photocraft/crates/engine" }
 photocraft-cms = { path = "../../upstream/photocraft/crates/cms" }
 photocraft-io = { path = "../../upstream/photocraft/crates/io" }
 photocraft-format = { path = "../../upstream/photocraft/crates/format" }
