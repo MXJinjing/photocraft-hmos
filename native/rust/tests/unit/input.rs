@@ -447,6 +447,78 @@ fn second_finger_cancels_one_finger_primary_in_place() {
 }
 
 #[test]
+fn leftover_finger_after_pinch_does_not_synthesize_primary() {
+    let mut state = super::State::default();
+    let mut events = vec![];
+    // Two-finger pinch / pan: navigation only.
+    snapshot(
+        &mut state,
+        &[(1, 100., 100.), (2, 300., 100.)],
+        &mut events,
+    );
+    assert!(state.touch_nav_active);
+    assert!(state.pressed.is_none() && state.touch_pointer.is_none());
+    events.clear();
+    // One finger remains on screen after the other lifts — must not become Primary.
+    snapshot(&mut state, &[(1, 120., 110.)], &mut events);
+    assert!(
+        state.pressed.is_none() && state.touch_pointer.is_none(),
+        "leftover finger after multi-touch must not own a tool primary: pressed={:?} touch_pointer={:?}",
+        state.pressed,
+        state.touch_pointer
+    );
+    assert!(
+        !events
+            .iter()
+            .any(|e| matches!(e, egui::Event::PointerButton { pressed: true, .. })),
+        "no primary press from leftover finger: {events:?}"
+    );
+    assert!(state.touch_nav_active, "nav rejection stays until all fingers lift");
+    // Full lift clears nav latch so a later intentional single-finger can paint.
+    snapshot(&mut state, &[], &mut events);
+    assert!(!state.touch_nav_active);
+    state.leftover_guard_until = None; // expire platform re-report window for a fresh tap
+    events.clear();
+    snapshot(&mut state, &[(3, 200., 200.)], &mut events);
+    assert_eq!(state.touch_pointer, Some(3));
+    assert_eq!(state.pressed, Some(egui::PointerButton::Primary));
+}
+
+#[test]
+fn leftover_finger_after_empty_snapshot_does_not_synthesize_primary() {
+    let mut state = super::State::default();
+    let mut events = vec![];
+    snapshot(
+        &mut state,
+        &[(1, 100., 100.), (2, 300., 100.)],
+        &mut events,
+    );
+    events.clear();
+    // Platform quirk: empty snapshot between multi-touch and the remnant contact.
+    snapshot(&mut state, &[], &mut events);
+    assert!(!state.touch_nav_active);
+    assert!(state.leftover_guard_until.is_some());
+    events.clear();
+    // Remnant finger re-reported as a fresh single contact must not ink a dot.
+    snapshot(&mut state, &[(1, 120., 110.)], &mut events);
+    assert!(
+        state.pressed.is_none() && state.touch_pointer.is_none(),
+        "re-reported leftover after empty must not Primary: pressed={:?} touch_pointer={:?}",
+        state.pressed,
+        state.touch_pointer
+    );
+    assert!(
+        !events
+            .iter()
+            .any(|e| matches!(e, egui::Event::PointerButton { pressed: true, .. })),
+        "no primary press after empty-gap leftover: {events:?}"
+    );
+    assert!(state.touch_nav_active);
+    snapshot(&mut state, &[], &mut events);
+    assert!(!state.touch_nav_active);
+}
+
+#[test]
 fn trackpad_axis_scales_are_incremental_and_pan_has_an_anchor() {
     let mut state = super::State::default();
     let mut events = vec![];

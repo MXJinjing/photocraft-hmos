@@ -2,6 +2,7 @@ use egui::{Event, Key, Modifiers, PointerButton, Pos2};
 use photocraft_ui_egui::stylus::{PenSample, PointerSource, StylusFeed, StylusInput};
 use serde::Deserialize;
 use std::collections::BTreeMap;
+use std::time::{Duration, Instant};
 
 #[derive(Deserialize, Default)]
 pub struct Contact {
@@ -104,6 +105,11 @@ pub struct State {
     preview_resume: Option<PreviewResume>,
     preview_hidden: bool,
     ignore_fingers: bool,
+    /// Multi-touch / pinch navigation is active; leftover fingers must not Primary.
+    touch_nav_active: bool,
+    /// After nav ends with an empty snapshot, briefly block Primary so a re-reported
+    /// leftover finger (platform quirk) cannot deposit a stroke/dot.
+    leftover_guard_until: Option<Instant>,
     axis_zoom: Option<f32>,
     pub modifiers: Modifiers,
     pub feed: StylusFeed,
@@ -190,6 +196,8 @@ impl State {
         self.preview_resume = None;
         self.preview_hidden = false;
         self.ignore_fingers = false;
+        self.touch_nav_active = false;
+        self.leftover_guard_until = None;
         self.axis_zoom = None;
         if let Some(button) = self.pressed.take() {
             events.push(Event::PointerButton {
@@ -283,6 +291,10 @@ impl State {
                 }
                 // Two-or-more fingers are navigation only: never keep a tool primary press.
                 let multi = next.len() >= 2;
+                if multi {
+                    self.touch_nav_active = true;
+                    self.leftover_guard_until = None;
+                }
                 if multi && (self.touch_pointer.is_some() || self.pressed.is_some()) {
                     let anchor = self
                         .finger_anchor()
@@ -301,6 +313,10 @@ impl State {
                     }
                 }
                 let first = self.touches.is_empty();
+                let leftover_guard = self
+                    .leftover_guard_until
+                    .is_some_and(|until| Instant::now() < until);
+                let block_primary = multi || self.touch_nav_active || leftover_guard;
                 // egui's pinch anchor needs a pointer frame; do not press Primary (that inks).
                 if multi && first {
                     if let Some(&pos) = next.values().next() {
@@ -321,19 +337,35 @@ impl State {
                         force: None,
                     });
                     // Single-finger only synthesizes a primary pointer for tools / one-finger pan.
+                    // After pinch/multi-touch, leftover contacts (including re-reports after an
+                    // empty platform snapshot) must not become a Primary stroke/dot.
                     if !multi && first && self.touch_pointer.is_none() && self.pressed.is_none() {
-                        self.touch_pointer = Some(id);
-                        self.pressed = Some(PointerButton::Primary);
-                        events.push(Event::PointerMoved(pos));
-                        events.push(Event::PointerButton {
-                            pos,
-                            button: PointerButton::Primary,
-                            pressed: true,
-                            modifiers: self.modifiers,
-                        });
+                        if block_primary {
+                            self.touch_nav_active = true;
+                            self.leftover_guard_until = None;
+                        } else {
+                            self.touch_pointer = Some(id);
+                            self.pressed = Some(PointerButton::Primary);
+                            events.push(Event::PointerMoved(pos));
+                            events.push(Event::PointerButton {
+                                pos,
+                                button: PointerButton::Primary,
+                                pressed: true,
+                                modifiers: self.modifiers,
+                            });
+                        }
                     } else if self.touch_pointer == Some(id) {
                         events.push(Event::PointerMoved(pos));
                     }
+                }
+                if next.is_empty() {
+                    if self.touch_nav_active {
+                        // Catch a leftover finger re-reported right after the platform
+                        // inserts an empty snapshot between multi-touch and the remnant.
+                        self.leftover_guard_until =
+                            Some(Instant::now() + Duration::from_millis(300));
+                    }
+                    self.touch_nav_active = false;
                 }
                 self.touches = next;
             }
