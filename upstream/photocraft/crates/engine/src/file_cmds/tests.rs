@@ -92,6 +92,28 @@ fn revert_reloads_as_one_undoable_step() {
 }
 
 #[test]
+fn injected_import_failure_does_not_open_a_document() {
+    let mut s = session(8, 8, 8);
+    let before = s.documents().len();
+    crate::allocation::fail_next_for_test();
+    let result = open_bytes_as(&mut s, "image.png", b"not decoded", None, None);
+    assert!(result.as_ref().is_err_and(|e| e.to_string().contains("not enough memory for importing document")));
+    assert_eq!(s.documents().len(), before);
+}
+
+#[test]
+fn injected_save_failure_does_not_modify_the_destination() {
+    let dir = tmp("allocation-save");
+    let path = join(&dir, "existing.psd");
+    std::fs::write(&path, b"previous file").unwrap();
+    let s = session(8, 8, 8);
+    crate::allocation::fail_next_for_test();
+    let result = save_doc(doc(&s), &path, None);
+    assert!(result.as_ref().is_err_and(|e| e.to_string().contains("not enough memory for saving document")));
+    assert_eq!(std::fs::read(path).unwrap(), b"previous file");
+}
+
+#[test]
 fn save_a_copy_keeps_path_and_dirty_state() {
     let dir = tmp("copy");
     let mut s = session(20, 10, 16);
@@ -158,6 +180,23 @@ fn place_embedded_centres_fits_and_embeds() {
     }
 }
 
+/// Preferences ▸ General ▸ Resize Image During Place: off, a larger image keeps its natural size
+/// instead of being fitted to the canvas; an explicit `"fit"` still wins.
+#[test]
+fn resize_image_during_place_preference_controls_the_fit() {
+    let dir = tmp("place-fit-pref");
+    let big = png(&dir, "big.png", 200, 100, "#ff0000");
+    let mut s = session(100, 100, 8);
+    s.execute("prefs.set", json!({"path": "general.resizeImageDuringPlace", "value": false})).unwrap();
+    let r = s.execute("file.placeEmbedded", json!({"path": big})).unwrap();
+    assert!((r["scale"].as_f64().unwrap() - 100.0).abs() < 1e-9, "natural size: {r}");
+    let b = r["bounds"].as_array().unwrap();
+    assert!(b[2].as_f64().unwrap() > 100.0, "wider than the canvas: {b:?}");
+    // An explicit "fit": true overrides the preference.
+    let r = s.execute("file.placeEmbedded", json!({"path": big, "fit": true})).unwrap();
+    assert!((r["scale"].as_f64().unwrap() - 50.0).abs() < 1e-9, "fitted on request: {r}");
+}
+
 /// A 40×20 JPEG (left half red, right half blue) tagged EXIF Orientation = 6: shown upright it
 /// is 20×40, red on top.
 fn rotated_jpeg(dir: &str) -> String {
@@ -219,6 +258,73 @@ fn file_info_round_trips_through_xmp_and_psd() {
     let out = write_file_info(Some(foreign), &json!({"authorTitle": "Artist"}));
     assert!(out.contains("xmp:CreatorTool=\"Other App\""));
     assert_eq!(read_file_info(Some(&out))["authorTitle"], "Artist");
+}
+
+const MULTILINGUAL_XMP: &str = r#"<x:xmpmeta xmlns:x="adobe:ns:meta/">
+<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+<rdf:Description rdf:about="" xmlns:dc="http://purl.org/dc/elements/1.1/"
+ xmlns:xmp="http://ns.adobe.com/xap/1.0/" xmlns:xmpRights="http://ns.adobe.com/xap/1.0/rights/"
+ xmp:CreatorTool="Other App" xmpRights:Marked="True" xmpRights:WebStatement="https://example.com/license">
+<dc:title><rdf:Alt><rdf:li xml:lang="x-default">Sun</rdf:li><rdf:li xml:lang="fr">Soleil</rdf:li><rdf:li xml:lang="ar">الشمس</rdf:li></rdf:Alt></dc:title>
+<dc:description><rdf:Alt><rdf:li xml:lang="x-default">Sunrise</rdf:li><rdf:li xml:lang="fr">Lever du soleil</rdf:li></rdf:Alt></dc:description>
+<dc:rights><rdf:Alt><rdf:li xml:lang="x-default">All rights reserved</rdf:li><rdf:li xml:lang="fr">Tous droits réservés</rdf:li></rdf:Alt></dc:rights>
+<dc:subject><rdf:Bag><rdf:li>sky</rdf:li></rdf:Bag></dc:subject>
+</rdf:Description></rdf:RDF></x:xmpmeta>"#;
+
+fn assert_translations_kept(xmp: &str) {
+    for prop in ["dc:title", "dc:description", "dc:rights"] {
+        assert_eq!(find_element(xmp, prop).unwrap().2, find_element(MULTILINGUAL_XMP, prop).unwrap().2, "{prop}");
+        assert_eq!(xmp.matches(&format!("<{prop}>")).count(), 1);
+    }
+    assert!(xmp.contains("xmp:CreatorTool=\"Other App\""));
+    assert!(xmp.contains("xmpRights:Marked=\"True\""));
+    assert!(xmp.contains("xmpRights:WebStatement=\"https://example.com/license\""));
+}
+
+#[test]
+fn file_info_keeps_translations_when_editing_keywords() {
+    let partial = json!({"keywords": ["sky", "sunrise"]});
+    let mut dialog = read_file_info(Some(MULTILINGUAL_XMP));
+    dialog["keywords"] = json!("sky; sunrise");
+    for params in [partial, dialog] {
+        let out = write_file_info(Some(MULTILINGUAL_XMP), &params);
+        assert_translations_kept(&out);
+        assert_eq!(read_file_info(Some(&out))["keywords"], json!(["sky", "sunrise"]));
+    }
+    let unchanged = read_file_info(Some(MULTILINGUAL_XMP));
+    assert_eq!(write_file_info(Some(MULTILINGUAL_XMP), &unchanged), MULTILINGUAL_XMP);
+    assert_eq!(write_file_info(Some(MULTILINGUAL_XMP), &json!({})), MULTILINGUAL_XMP);
+}
+
+#[test]
+fn file_info_clears_only_the_requested_field() {
+    let out = write_file_info(Some(MULTILINGUAL_XMP), &json!({"keywords": []}));
+    assert_translations_kept(&out);
+    assert!(find_element(&out, "dc:subject").is_none());
+    assert_eq!(read_file_info(Some(&out))["keywords"], json!([]));
+}
+
+#[test]
+fn file_info_translations_survive_undo_and_psd_round_trip() {
+    for depth in [8, 16, 32] {
+        let mut s = session(8, 8, depth);
+        s.edit("Set metadata", |doc, _| {
+            doc.metadata.xmp = Some(MULTILINGUAL_XMP.to_string());
+            Ok(())
+        })
+        .unwrap();
+        s.execute("file.fileInfo", json!({"keywords": ["sunrise"]})).unwrap();
+        let edited = doc(&s).metadata.xmp.clone().unwrap();
+        assert_translations_kept(&edited);
+        assert!(s.undo());
+        assert_eq!(doc(&s).metadata.xmp.as_deref(), Some(MULTILINGUAL_XMP));
+        assert!(s.redo());
+        assert_eq!(doc(&s).metadata.xmp.as_deref(), Some(edited.as_str()));
+        let (bytes, _) = encode(doc(&s), "x.psd", None).unwrap();
+        let back = photocraft_io::import("x.psd", &bytes).unwrap().document;
+        assert_translations_kept(back.metadata.xmp.as_deref().unwrap());
+        assert_eq!(read_file_info(back.metadata.xmp.as_deref())["keywords"], json!(["sunrise"]));
+    }
 }
 
 #[test]
@@ -476,7 +582,7 @@ fn guide_layouts() {
 
 #[test]
 fn only_layered_files_save_in_place() {
-    for path in ["a.psd", "dir/a.PSB", r"C:\w\a.pcraft", "my.dir/a.psd"] {
+    for path in ["a.psd", "dir/a.PSB", r"C:\w\a.pcraft", "my.dir/a.psd", "a.ora", "dir/A.ORA"] {
         assert!(saves_in_place(path), "{path}");
     }
     // Flat formats, no extension, a dotted folder with an extensionless file, a dot file.
