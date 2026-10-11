@@ -12,6 +12,8 @@ The native ready notification resends current geometry. Rust retains physical ge
 
 Decor setup is now best-effort and separate from listening. Status and size changes re-apply decor before refreshing geometry, so a runtime freeform entry recovers the inset even when startup decor failed.
 
+2026-10-11 (compile fix): PR #4 briefly typed the shared layout callback as `WindowStatusType` and reused it for `windowSizeChange`. ArkTS overload resolution then rejected `on/off('windowSizeChange', …)` (error mentioning `freeWindowModeChange`). Status and size now use separate callbacks (`Callback<WindowStatusType>` vs `Callback<Size>`) that both re-apply decor and refresh geometry.
+
 Validation:
 
 - `scripts/test_window_chrome.cjs`: passed mocked transition-zero, query-error, delayed-recovery, visible-caption/lagging-status, non-floating empty geometry, lifecycle cleanup, and freeform-entry-after-fullscreen (decor-throw and size-driven) regressions.

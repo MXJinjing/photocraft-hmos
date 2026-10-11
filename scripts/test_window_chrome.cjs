@@ -116,10 +116,15 @@ function runScenario(options = {}) {
     rect: { width: 0, height: 0 }
   });
   s.chrome.start();
+  assert.notEqual(
+    s.listeners.get('windowStatusChange'),
+    s.listeners.get('windowSizeChange'),
+    'status and size must use distinct typed callbacks for ArkTS overloads'
+  );
   const decorAfterStart = s.decorCalls;
   s.status = WindowStatusType.FLOATING;
   s.rect = { width: 120, height: 38 };
-  s.listeners.get('windowSizeChange')();
+  s.listeners.get('windowSizeChange')({ width: 1280, height: 800 });
   assert.ok(s.decorCalls > decorAfterStart, 'size change into freeform re-applies decor');
   assert.equal(s.storage.get('photocraftTitleRight'), 128, 'size-driven freeform entry publishes caption inset');
   s.chrome.stop();
@@ -133,4 +138,4 @@ function runScenario(options = {}) {
   assert.equal(s.storage.get('photocraftTitleRight'), undefined);
 }
 
-console.log('Passed: title geometry transitions, freeform-entry recovery after fullscreen start, decor re-apply and cleanup.');
+console.log('Passed: title geometry transitions, freeform-entry recovery after fullscreen start, distinct status/size callbacks and cleanup.');
