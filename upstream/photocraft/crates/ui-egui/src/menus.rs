@@ -274,9 +274,14 @@ pub(crate) fn invoke_unguarded(app: &mut PhotocraftApp, ctx: &egui::Context, id:
         }
         "file.save" => {
             // Writes back only to a layered file; a flat one goes through Save As.
+            // HarmonyOS (and other hosts with `default_save`) must use `save` so ordinary Save
+            // reuses the host's authorized destination instead of a one-shot Save As token.
             match params.get("path").and_then(Value::as_str) {
                 Some(path) => app.save_as(Some(path.to_string())),
-                None => match app.session.active().and_then(|d| d.path.clone()).filter(|p| photocraft_engine::file_cmds::saves_in_place(p)) {
+                None if app.services.default_save.is_some() => app.save(None),
+                None => match app.session.active().and_then(|d| d.path.clone()).filter(|p| {
+                    photocraft_engine::file_cmds::saves_in_place(p) && !p.starts_with("save-as/")
+                }) {
                     Some(path) => app.save_in_place(path),
                     None => app.save_as(None),
                 },

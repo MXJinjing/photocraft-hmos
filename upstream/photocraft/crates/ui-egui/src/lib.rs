@@ -1117,7 +1117,8 @@ impl PhotocraftApp {
                 return Ok(serde_json::json!({"path": active.path.clone().unwrap_or_else(|| doc.name.clone()), "warnings": []}));
             }
             let target = select(doc, active.path.as_deref())?;
-            return self.save_to(target);
+            // Ordinary Save must journal `file.save`, not Save As, once the host picked a target.
+            return self.save_in_place(target);
         }
         self.save_as(path)
     }
@@ -2588,5 +2589,84 @@ mod native_host_tests {
         assert_eq!(app.save(None), Err("cancelled".into()));
         assert!(app.session.active().unwrap().is_dirty());
         assert_eq!(written.lock().unwrap().len(), 3);
+    }
+    /// Regression: after Save As the document path is a one-shot `save-as/…` token. Ordinary
+    /// File › Save must ask `default_save` again, not try to rewrite the consumed token
+    /// (`No system save target for save-as/…` on HarmonyOS).
+    #[test]
+    fn ordinary_save_after_save_as_does_not_reuse_one_shot_token() {
+        use std::sync::{Arc, Mutex};
+        let written = Arc::new(Mutex::new(Vec::new()));
+        let seen = written.clone();
+        let picks = Arc::new(Mutex::new(0u32));
+        let pick_count = picks.clone();
+        let mut app = PhotocraftApp::new(
+            Session::new(),
+            Services {
+                always_pick_save: true,
+                default_save: Some(Box::new(move |_, _| {
+                    let mut n = pick_count.lock().unwrap();
+                    *n += 1;
+                    Ok(format!("save-default/{}/untitled.psd", *n))
+                })),
+                pick_save: Some(Box::new(|_| Some("save-as/15/untitled.psd".into()))),
+                export: Some(Box::new(|_, _, _| Ok((vec![1], Vec::new())))),
+                write: Some(Box::new(move |name, _| {
+                    seen.lock().unwrap().push(name.to_owned());
+                    Ok(())
+                })),
+                ..Default::default()
+            },
+        );
+        app.run("file.new", serde_json::json!({"width": 16, "height": 16})).unwrap();
+        let ctx = egui::Context::default();
+        menus::invoke_unguarded(&mut app, &ctx, "file.saveAs", serde_json::json!({})).unwrap();
+        assert_eq!(app.session.active().unwrap().path.as_deref(), Some("save-as/15/untitled.psd"));
+        app.run("layer.new.layer", serde_json::json!({})).unwrap();
+        menus::invoke_unguarded(&mut app, &ctx, "file.save", serde_json::json!({})).unwrap();
+        assert_eq!(
+            *written.lock().unwrap(),
+            ["save-as/15/untitled.psd", "save-default/1/untitled.psd"]
+        );
+        assert_eq!(app.session.active().unwrap().path.as_deref(), Some("save-default/1/untitled.psd"));
+        // A later Save reuses the host's ordinary target, still not the Save As token.
+        app.run("layer.new.layer", serde_json::json!({})).unwrap();
+        app.services.default_save = Some(Box::new(|_, _| Ok("save-default/1/untitled.psd".into())));
+        menus::invoke_unguarded(&mut app, &ctx, "file.save", serde_json::json!({})).unwrap();
+        assert_eq!(
+            *written.lock().unwrap(),
+            [
+                "save-as/15/untitled.psd",
+                "save-default/1/untitled.psd",
+                "save-default/1/untitled.psd"
+            ]
+        );
+    }
+    /// Without `default_save`, a document whose path is a consumed `save-as/…` token must not
+    /// be treated as an in-place Save destination.
+    #[test]
+    fn save_as_token_paths_are_not_saved_in_place() {
+        let written = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let seen = written.clone();
+        let mut app = PhotocraftApp::new(
+            Session::new(),
+            Services {
+                always_pick_save: true,
+                pick_save: Some(Box::new(|_| Some("save-as/99/retry.psd".into()))),
+                export: Some(Box::new(|_, _, _| Ok((vec![1], Vec::new())))),
+                write: Some(Box::new(move |name, _| {
+                    seen.lock().unwrap().push(name.to_owned());
+                    Ok(())
+                })),
+                ..Default::default()
+            },
+        );
+        app.run("file.new", serde_json::json!({"width": 16, "height": 16})).unwrap();
+        let active = app.session.active_mut().unwrap();
+        active.path = Some("save-as/15/untitled.psd".into());
+        active.saved_revision = active.revision;
+        let ctx = egui::Context::default();
+        menus::invoke_unguarded(&mut app, &ctx, "file.save", serde_json::json!({})).unwrap();
+        assert_eq!(*written.lock().unwrap(), ["save-as/99/retry.psd"]);
     }
 }
