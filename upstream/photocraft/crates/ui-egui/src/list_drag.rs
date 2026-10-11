@@ -18,6 +18,8 @@ struct Gate {
     last_click: Option<(Id, f64, Pos2)>,
     /// Item whose current held press is the second half of a double-tap (drag allowed).
     armed: Option<Id>,
+    /// Logical item and egui widget owning the drag, retained through its release frame.
+    drag_widget: Option<(Id, Id)>,
 }
 
 /// Touch and pen should scroll list rows by default; mouse keeps click-and-drag reorder.
@@ -30,22 +32,20 @@ pub fn row_sense(ctx: &Context, source: PointerSource, item: Id) -> Sense {
     if !prefers_scroll(source) {
         return Sense::click_and_drag();
     }
-    if is_armed(ctx, item) {
-        Sense::click_and_drag()
-    } else {
-        Sense::click()
-    }
+    if is_armed(ctx, item) { Sense::click_and_drag() } else { Sense::click() }
 }
 
 /// Whether `item` is armed for reorder on the current held press.
 pub fn is_armed(ctx: &Context, item: Id) -> bool {
-    ctx.data(|d| d.get_temp::<Gate>(Id::new(GATE)).and_then(|g| g.armed) == Some(item))
+    ctx.data(|d| d.get_temp::<Gate>(Id::new(GATE)))
+        .is_some_and(|g| g.armed == Some(item) || g.drag_widget.is_some_and(|(logical, widget)| logical == item && ctx.drag_stopped_id() == Some(widget)))
 }
 
-/// Update the gate after the row's response is known. Call once per row per frame.
-pub fn after_row(ctx: &Context, source: PointerSource, item: Id, resp: &Response) {
+/// Update the gate after the row's response is known. Use the returned response so
+/// drag-start notifications from an ownership transfer are visible in this frame.
+pub fn after_row(ctx: &Context, source: PointerSource, item: Id, resp: &Response) -> Response {
     if !prefers_scroll(source) {
-        return;
+        return resp.clone();
     }
     let mut gate = ctx.data(|d| d.get_temp::<Gate>(Id::new(GATE))).unwrap_or_default();
     let (time, down, pressed) = ctx.input(|i| (i.time, i.pointer.primary_down(), i.pointer.primary_pressed()));
@@ -53,6 +53,15 @@ pub fn after_row(ctx: &Context, source: PointerSource, item: Id, resp: &Response
 
     if !down {
         gate.armed = None;
+    }
+    if ctx.input(|i| i.key_pressed(egui::Key::Escape) || i.multi_touch().is_some_and(|t| t.num_touches > 1)) {
+        gate.armed = None;
+        gate.drag_widget = None;
+        gate.last_click = None;
+    }
+
+    if !down && !ctx.input(|i| i.pointer.primary_released()) {
+        gate.drag_widget = None;
     }
 
     if resp.clicked() {
@@ -68,10 +77,34 @@ pub fn after_row(ctx: &Context, source: PointerSource, item: Id, resp: &Response
         let pos = ctx.input(|i| i.pointer.press_origin()).unwrap_or(p0);
         if id == item && (time - t0) <= delay && pos.distance(p0) <= dist {
             gate.armed = Some(item);
+            gate.last_click = None;
         }
     }
 
+    // egui chooses potential_drag_id on the press using LAST frame's widget senses.
+    // Merely switching a click-only row to click-and-drag next frame leaves the
+    // ScrollArea owning the gesture. Transfer ownership using the actual widget id
+    // (allocated rows may have a different id from the logical item).
+    let armed = gate.armed == Some(item) && down;
+    if armed {
+        gate.drag_widget = Some((item, resp.id));
+    }
     ctx.data_mut(|d| d.insert_temp(Id::new(GATE), gate));
+    if armed {
+        // A stationary touch hold can trigger egui's long-touch context-menu path,
+        // which clears drag ownership. Keep the armed gesture attached to this row.
+        if ctx.dragged_id() != Some(resp.id) {
+            ctx.set_dragged_id(resp.id);
+            ctx.request_repaint();
+        }
+        let mut response = ctx.read_response(resp.id).unwrap_or_else(|| resp.clone());
+        // Keep a normal double-tap clickable, but a held second press belongs to
+        // dragging rather than the touch context menu.
+        response.flags.remove(egui::response::Flags::LONG_TOUCHED);
+        response
+    } else {
+        resp.clone()
+    }
 }
 
 /// Whether a reorder / transfer drag may begin from this response.
@@ -107,13 +140,7 @@ mod tests {
         let item = Id::new("layer-1");
         let other = Id::new("layer-2");
         ctx.data_mut(|d| {
-            d.insert_temp(
-                Id::new(GATE),
-                Gate {
-                    last_click: Some((item, 1.0, pos2(10.0, 10.0))),
-                    armed: Some(item),
-                },
-            );
+            d.insert_temp(Id::new(GATE), Gate { last_click: Some((item, 1.0, pos2(10.0, 10.0))), armed: Some(item), drag_widget: None });
         });
         assert!(is_armed(&ctx, item));
         assert!(!is_armed(&ctx, other));
@@ -142,13 +169,7 @@ mod tests {
         assert_eq!(row_sense(&ctx, PointerSource::Pen, cell), Sense::click());
         assert_eq!(row_sense(&ctx, PointerSource::Mouse, cell), Sense::click_and_drag());
         ctx.data_mut(|d| {
-            d.insert_temp(
-                Id::new(GATE),
-                Gate {
-                    last_click: Some((cell, 1.0, pos2(8.0, 8.0))),
-                    armed: Some(cell),
-                },
-            );
+            d.insert_temp(Id::new(GATE), Gate { last_click: Some((cell, 1.0, pos2(8.0, 8.0))), armed: Some(cell), drag_widget: None });
         });
         assert!(is_armed(&ctx, cell));
         assert_eq!(row_sense(&ctx, PointerSource::Touch, cell), Sense::click_and_drag());
