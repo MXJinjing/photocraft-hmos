@@ -87,16 +87,15 @@ pub fn toolbar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     egui::Panel::left("toolbar").resizable(false).exact_size(w).frame(egui::Frame::NONE.fill(t.chrome).inner_margin(egui::Margin::symmetric(m, 8))).show(
         ui,
         |ui| {
-            if t.pro {
-                // Photoshop's toolbar header chevrons switch between one and two columns.
-                let (cr, resp) = ui.allocate_exact_size(vec2(bx, 14.0), Sense::click());
-                icons::paint(ui, cr, if double { "chevrons-left" } else { "chevrons-right" }, 11.0, if resp.hovered() { t.text } else { t.text_faint });
-                resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tl!("Toolbar")));
-                if resp.clicked() {
-                    app.ui.panels.toolbar_double = !app.ui.panels.toolbar_double;
-                }
-                ui.add_space(4.0);
+            // Photoshop's toolbar header chevrons switch between one and two columns.
+            // Every theme gets the toggle (not only Pro): Studio/Classic/etc. previously hid it.
+            let (cr, resp) = ui.allocate_exact_size(vec2(bx, 14.0), Sense::click());
+            icons::paint(ui, cr, if double { "chevrons-left" } else { "chevrons-right" }, 11.0, if resp.hovered() { t.text } else { t.text_faint });
+            resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tl!("Toolbar")));
+            if resp.clicked() {
+                app.ui.panels.toolbar_double = !app.ui.panels.toolbar_double;
             }
+            ui.add_space(4.0);
             // Subtle violet wash at the bottom of the toolbar.
             let full = ui.max_rect();
             if !t.bevel && !t.pro && t.dark() {
@@ -4391,8 +4390,7 @@ mod toolbar_tests {
     use egui_kittest::kittest::Queryable;
 
     /// #1197: the header chevron switches the toolbar between one and two columns.
-    #[test]
-    fn header_chevron_toggles_two_columns() {
+    fn assert_header_chevron_toggles(kind: crate::theme::ThemeKind) {
         let app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
         let mut h = egui_kittest::Harness::builder().with_size(vec2(800.0, 1400.0)).build_ui_state(
             |ui, app: &mut PhotocraftApp| {
@@ -4404,7 +4402,7 @@ mod toolbar_tests {
             },
             app,
         );
-        PhotocraftApp::setup_context(&h.ctx, crate::theme::ThemeKind::Pro);
+        PhotocraftApp::setup_context(&h.ctx, kind);
         h.run_steps(2);
         let left = |h: &egui_kittest::Harness<'_, PhotocraftApp>| h.ctx.data(|d| d.get_temp::<f32>(egui::Id::new("toolbar-test-left"))).unwrap_or(0.0);
         let single = left(&h);
@@ -4412,13 +4410,24 @@ mod toolbar_tests {
 
         h.get_by_label("Toolbar").click();
         h.run_steps(2);
-        assert!(h.state().ui.panels.toolbar_double);
-        assert!(left(&h) > single + 20.0, "the toolbar did not widen: {single} -> {}", left(&h));
+        assert!(h.state().ui.panels.toolbar_double, "chevron missing or inert under {kind:?}");
+        assert!(left(&h) > single + 20.0, "the toolbar did not widen under {kind:?}: {single} -> {}", left(&h));
 
         h.get_by_label("Toolbar").click();
         h.run_steps(2);
         assert!(!h.state().ui.panels.toolbar_double);
         assert_eq!(left(&h), single);
+    }
+
+    #[test]
+    fn header_chevron_toggles_two_columns() {
+        assert_header_chevron_toggles(crate::theme::ThemeKind::Pro);
+    }
+
+    /// Non-Pro themes also expose the column toggle (Studio previously hid it).
+    #[test]
+    fn header_chevron_toggles_two_columns_studio() {
+        assert_header_chevron_toggles(crate::theme::ThemeKind::Studio);
     }
 
     fn click(h: &mut egui_kittest::Harness<'_, PhotocraftApp>, p: egui::Pos2) {
