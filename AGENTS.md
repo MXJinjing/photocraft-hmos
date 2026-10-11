@@ -40,6 +40,13 @@ Do not share checkouts. After cloning, add the `upstream` remote if missing. Pre
 4. Rust and ArkTS/C++ edits require HAP rebuild/deployment. All builds and launches use the native host; there is no ArkWeb page, Trunk server, Web build command or hdc reverse-port mapping. Save documents before scripted relaunch/deployment.
 5. `scripts/package_offline.sh` builds the native HAP; `--install` also installs it. Verify with `scripts/verify_native.py <HAP>`. Preserve imported upstream Web sources and history; they are not part of the HarmonyOS build/development workflow.
 
+After every successful `scripts/build_native.sh` invocation, `scripts/clean_rust_debug.py`
+clears native host/ARM64 intermediate caches and the separate upstream UI Rust caches.
+The ARM64 `libphotocraft_hmos.a` files needed by CMake/HAP stay in place. Busy Cargo
+profile locks are skipped; lock files keep their inodes. Failed Rust builds retain
+caches. This favors disk space over incremental compilation speed. Use `--dry-run`
+with the cleanup script to preview the deletion scope.
+
 ## Version numbers
 
 Upstream PhotoCraft is early alpha, but SemVer already marks that with the leading `0`, so no channel word belongs in the version.
