@@ -67,12 +67,11 @@ pub struct State {
     touches: BTreeMap<u64, Pos2>,
     touch_pointer: Option<u64>,
     pen_down: bool,
-    /// Last pressure-0 pen hover position (before / between strokes).
-    last_hover_pos: Option<Pos2>,
-    /// Pre-stroke hover captured at pen-down; post-lift echoes of this point are pinned.
-    frozen_hover: Option<Pos2>,
-    /// Lift position after pen-up; tip stays here while frozen-hover echoes arrive.
-    after_pen_lift: Option<Pos2>,
+    /// Last pen contact point while the tip is down (updated on every non-hover move).
+    last_stroke_pos: Option<Pos2>,
+    /// After lift, keep the brush tip here (last stroke point) until the next pen-down
+    /// or focus blur. Post-lift hover/mouse echoes are rewritten to this point.
+    hold_at_stroke: Option<Pos2>,
     ignore_fingers: bool,
     axis_zoom: Option<f32>,
     pub modifiers: Modifiers,
@@ -91,15 +90,11 @@ impl State {
         }
         self.touch_pointer = None;
     }
-    fn clear_lift_guards(&mut self) {
-        self.frozen_hover = None;
-        self.after_pen_lift = None;
-    }
 
     pub fn cancel(&mut self, pos: Pos2, events: &mut Vec<Event>) {
         self.clear_touches(events);
         self.pen_down = false;
-        self.clear_lift_guards();
+        self.hold_at_stroke = None;
         self.ignore_fingers = false;
         self.axis_zoom = None;
         if let Some(button) = self.pressed.take() {
@@ -269,9 +264,8 @@ impl State {
                         });
                     }
                     self.pen_down = true;
-                    // Freeze the pre-stroke hover so post-lift echoes of that point stay pinned.
-                    self.frozen_hover = self.last_hover_pos;
-                    self.after_pen_lift = None;
+                    self.hold_at_stroke = None;
+                    self.last_stroke_pos = Some(pos);
                 } else if self.pen_down && input.source != PointerSource::Pen {
                     return;
                 }
@@ -279,35 +273,27 @@ impl State {
                 if self.pen_down && is_hover_move {
                     return;
                 }
-                // After lift: every echo of the frozen pre-stroke hover is pinned to the
-                // lift point across frames (pen hover *and* mouse leftovers). A genuine
-                // non-echo move unlocks the pin target, but frozen_hover stays until the
-                // next pen-down / focus blur so a delayed A echo cannot jump the tip back.
-                if input.action == 2 {
-                    let echo = self
-                        .frozen_hover
-                        .is_some_and(|frozen| (pos - frozen).length_sq() <= 16.0);
-                    if echo {
-                        if let Some(lift) = self.after_pen_lift {
-                            self.feed.report(input.source, input.sample);
-                            events.push(Event::PointerMoved(lift));
-                        }
-                        // Drop the echo entirely when already unlocked.
+                // After lift: every hover/mouse move is pinned to the last stroke point
+                // so stale pre-stroke echoes cannot jump the tip back to hover-start A.
+                if let Some(hold) = self.hold_at_stroke {
+                    if input.action == 2 {
+                        self.feed.report(input.source, input.sample);
+                        events.push(Event::PointerMoved(hold));
                         return;
                     }
-                    if self.after_pen_lift.is_some() {
-                        self.after_pen_lift = None;
-                    }
-                    if is_hover_move && input.source == PointerSource::Pen {
-                        self.last_hover_pos = Some(pos);
-                    }
                 }
+                if self.pen_down && !is_hover_move {
+                    self.last_stroke_pos = Some(pos);
+                }
+                let mut move_pos = pos;
                 if input.source == PointerSource::Pen && input.action == 1 {
                     self.pen_down = false;
-                    self.after_pen_lift = Some(pos);
+                    let hold = self.last_stroke_pos.unwrap_or(pos);
+                    self.hold_at_stroke = Some(hold);
+                    move_pos = hold;
                 }
                 self.feed.report(input.source, input.sample);
-                events.push(Event::PointerMoved(pos));
+                events.push(Event::PointerMoved(move_pos));
                 let button = match input.button {
                     1 => PointerButton::Secondary,
                     2 => PointerButton::Middle,
@@ -317,7 +303,7 @@ impl State {
                     0 if self.pressed.is_none() => {
                         self.pressed = Some(button);
                         events.push(Event::PointerButton {
-                            pos,
+                            pos: move_pos,
                             button,
                             pressed: true,
                             modifiers: self.modifiers,
@@ -326,7 +312,7 @@ impl State {
                     1 => {
                         if let Some(button) = self.pressed.take() {
                             events.push(Event::PointerButton {
-                                pos,
+                                pos: move_pos,
                                 button,
                                 pressed: false,
                                 modifiers: self.modifiers,
@@ -337,15 +323,15 @@ impl State {
                 }
             }
             "hover_leave" => {
-                // Contact start/end both flip onHover(false). Ignore during contact and
-                // after lift so the tip stays at the lift point; focus loss uses "blur".
-                if self.pen_down || self.after_pen_lift.is_some() {
+                // Contact end / proximity leave: keep the tip at the last stroke point.
+                // Focus loss still uses "blur".
+                if self.pen_down || self.hold_at_stroke.is_some() {
                     return;
                 }
                 self.cancel(pos, events);
             }
             "blur" => {
-                // Focus loss / background: always tear down, including lift guards.
+                // Focus loss / background: always tear down the stroke hold.
                 self.cancel(pos, events);
             }
             "wheel" => events.push(Event::MouseWheel {

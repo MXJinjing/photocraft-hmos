@@ -15,7 +15,7 @@ import { HarmonyStylusAdapter } from '../stylus/HarmonyStylusAdapter';
 import { StylusPacket } from '../stylus/StylusProtocol';
 import { NativeImeAdapter, NativeImeState } from '../input/NativeImeAdapter';
 import { NativeCursorAdapter } from '../input/NativeCursorAdapter';
-import { isFiniteHoverPoint, isStaleHoverEcho, penHoverLeaveMessage, penHoverMoveMessage } from '../input/PenHoverPreview';
+import { isFiniteHoverPoint, penHoverLeaveMessage, penHoverMoveMessage } from '../input/PenHoverPreview';
 import { moveWindow, toggleWindowMaximize } from '../WindowChrome';
 import { window } from '@kit.ArkUI';
 import { configureDisplayColor } from '../DisplayColor';
@@ -79,7 +79,6 @@ struct Index {
     (message: string): void => { if (this.alive) { this.failure = message; } });
   private lastHoverX: number = 0;
   private lastHoverY: number = 0;
-  private ignoreHoverEcho: boolean = false;
   private drainOpens(): void {
     for (let file of takeOpens()) {
       let name = file.name;
@@ -291,23 +290,13 @@ struct Index {
     // onHoverMove reports component-local vp; the native bridge expects physical pixels.
     let xPx = this.getUIContext().vp2px(x);
     let yPx = this.getUIContext().vp2px(y);
-    // Keep dropping the pre-stroke leave-point for every frame until a new point arrives.
-    if (this.ignoreHoverEcho && isStaleHoverEcho(xPx, yPx, this.lastHoverX, this.lastHoverY)) {
-      return;
-    }
-    this.ignoreHoverEcho = false;
     this.lastHoverX = xPx;
     this.lastHoverY = yPx;
     native.input(penHoverMoveMessage(xPx, yPx));
   }
   private sendPenHoverLeave(isHover: boolean): void {
-    if (isHover) {
-      // Contact end / leave often flips hover back on before a fresh move stream.
-      this.ignoreHoverEcho = true;
-      return;
-    }
-    if (!this.alive || !this.initialized) { return; }
-    this.ignoreHoverEcho = true;
+    // Proximity leave (not focus blur). Native holds the tip at the last stroke point.
+    if (isHover || !this.alive || !this.initialized) { return; }
     native.input(penHoverLeaveMessage(this.lastHoverX, this.lastHoverY));
   }
   build() {

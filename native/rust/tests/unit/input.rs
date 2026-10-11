@@ -598,10 +598,9 @@ fn push_mouse(state: &mut super::State, x: f32, y: f32, events: &mut Vec<egui::E
     );
 }
 
-/// Real-device sequence: hover A → stroke to B → lift at B → multi-frame echo A (+ mouse).
-/// #8 cleared its one-shot guard after the first echo, so the second frame jumped back to A.
+/// Hover A → stroke to B → lift at B → post-lift echo A must keep tip at last stroke B.
 #[test]
-fn pen_lift_pins_through_multiframe_stale_hover_echo() {
+fn pen_lift_holds_tip_at_last_stroke_not_hover_start() {
     let mut state = super::State::default();
     let mut events = vec![];
     let scale = 2.0;
@@ -617,11 +616,11 @@ fn pen_lift_pins_through_multiframe_stale_hover_echo() {
     push_pen(&mut state, 1, b.0, b.1, 0., &mut events);
     assert!(
         events.iter().any(|e| matches!(e, egui::Event::PointerMoved(p) if *p == b_pt)),
-        "lift must report tip at B: {events:?}"
+        "lift must report tip at last stroke B: {events:?}"
     );
     events.clear();
 
-    // Contact-end hover leave must not clear the tip while pinned.
+    // C++/ArkTS proximity leave must not clear the tip while held at last stroke.
     state.push(
         super::Input {
             kind: "hover_leave".into(),
@@ -634,17 +633,15 @@ fn pen_lift_pins_through_multiframe_stale_hover_echo() {
     );
     assert!(events.is_empty(), "post-lift hover_leave must be ignored: {events:?}");
 
-    // Multi-frame stale echoes at A (the #8 failure mode).
+    // Multi-frame stale echoes at A (and mouse leftovers) stay at B.
     for i in 0..5 {
         push_pen(&mut state, 2, a.0, a.1, 0., &mut events);
         assert!(
             matches!(events.as_slice(), [egui::Event::PointerMoved(p)] if *p == b_pt),
-            "frame {i}: echo A must keep tip at lift B, got {events:?}"
+            "frame {i}: echo A must keep tip at last stroke B, got {events:?}"
         );
         events.clear();
     }
-
-    // XComponent mouse leftovers at A must also stay pinned.
     push_mouse(&mut state, a.0, a.1, &mut events);
     assert!(
         matches!(events.as_slice(), [egui::Event::PointerMoved(p)] if *p == b_pt),
@@ -653,7 +650,6 @@ fn pen_lift_pins_through_multiframe_stale_hover_echo() {
     events.clear();
 
     let ctx = egui::Context::default();
-    // Reinforce lift into egui, then ensure hover_pos is B not A.
     frame(
         &ctx,
         egui::RawInput {
@@ -675,29 +671,22 @@ fn pen_lift_pins_through_multiframe_stale_hover_echo() {
             assert_eq!(
                 ui.input(|i| i.pointer.hover_pos()),
                 Some(b_pt),
-                "egui hover_pos must remain at lift B after echo A"
+                "egui hover_pos must remain at last stroke B after echo A"
             );
             assert_ne!(ui.input(|i| i.pointer.hover_pos()), Some(a_pt));
         },
     );
 
-    // A real hover away from A unlocks the pin target.
+    // Even a far hover stays pinned until the next pen-down / focus blur.
     push_pen(&mut state, 2, 700., 400., 0., &mut events);
     assert!(
-        matches!(events.as_slice(), [egui::Event::PointerMoved(p)] if *p == egui::pos2(350., 200.)),
-        "fresh hover must unlock: {events:?}"
-    );
-    events.clear();
-    // Delayed echo of A after unlock must still be dropped (frozen_hover persists).
-    push_pen(&mut state, 2, a.0, a.1, 0., &mut events);
-    assert!(
-        events.is_empty(),
-        "delayed echo A after unlock must not move tip: {events:?}"
+        matches!(events.as_slice(), [egui::Event::PointerMoved(p)] if *p == b_pt),
+        "post-lift hover stays at last stroke B: {events:?}"
     );
 }
 
 #[test]
-fn focus_blur_clears_lift_pin() {
+fn focus_blur_clears_stroke_hold() {
     let mut state = super::State::default();
     let mut events = vec![];
     push_pen(&mut state, 2, 200., 100., 0., &mut events);
@@ -717,10 +706,34 @@ fn focus_blur_clears_lift_pin() {
         "focus blur must PointerGone: {events:?}"
     );
     events.clear();
-    // After focus blur, a move at the old hover is no longer pinned to the lift.
+    // After focus blur, hover A applies normally again.
     push_pen(&mut state, 2, 200., 100., 0., &mut events);
     assert!(
         matches!(events.as_slice(), [egui::Event::PointerMoved(p)] if *p == egui::pos2(100., 50.)),
         "after focus blur, hover A applies normally: {events:?}"
+    );
+}
+
+#[test]
+fn next_pen_down_clears_stroke_hold() {
+    let mut state = super::State::default();
+    let mut events = vec![];
+    push_pen(&mut state, 2, 200., 100., 0., &mut events);
+    push_pen(&mut state, 0, 200., 100., 0.5, &mut events);
+    push_pen(&mut state, 1, 600., 300., 0., &mut events);
+    events.clear();
+    // Held at B; next down at C unlocks.
+    push_pen(&mut state, 0, 800., 400., 0.5, &mut events);
+    assert!(
+        events.iter().any(|e| matches!(e, egui::Event::PointerMoved(p) if *p == egui::pos2(400., 200.))),
+        "next pen-down must move to C: {events:?}"
+    );
+    events.clear();
+    push_pen(&mut state, 1, 800., 400., 0., &mut events);
+    events.clear();
+    push_pen(&mut state, 2, 200., 100., 0., &mut events);
+    assert!(
+        matches!(events.as_slice(), [egui::Event::PointerMoved(p)] if *p == egui::pos2(400., 200.)),
+        "after second stroke, hold is the new last stroke C: {events:?}"
     );
 }
