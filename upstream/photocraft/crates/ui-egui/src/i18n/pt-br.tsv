@@ -35,8 +35,15 @@
 	New…	Novo…
 	Open…	Abrir…
 	Open As…	Abrir como…
+	Open EXR Parts…	Abrir partes EXR…
+	Add beauty precomp from the AOVs	Adicionar a pré-composição da beleza a partir dos AOVs
+	Both	Ambas
+	Left	Esquerda
+	Right	Direita
 	Open Recent	Abrir recentes
 	Clear Recent Files	Limpar arquivos recentes
+	Remove from Recent	Remover dos recentes
+	Remove {name} from Recent	Remover {name} dos recentes
 	Close	Fechar
 	Minimize	Minimizar
 	Maximize	Maximizar
@@ -84,6 +91,8 @@
 	Import	Importar
 	Browse…	Procurar…
 	Reveal in Finder	Mostrar no Finder
+	Show in Explorer	Mostrar no Explorador
+	Show in Folder	Mostrar na pasta
 	File Info…	Informações do arquivo…
 	Print…	Imprimir…
 	Print One Copy	Imprimir uma cópia
@@ -252,6 +261,7 @@
 	Layer via Cut	Camada via recorte
 	Layer From Background…	Camada a partir do plano de fundo…
 	Layer from Background…	Camada a partir do plano de fundo…
+	Background From Layer	Plano de fundo a partir da camada
 	New Shape Layer	Nova camada de forma
 	New Type Layer	Nova camada de texto
 	New Fill Layer	Nova camada de preenchimento
@@ -572,6 +582,10 @@
 	100%	100%
 	200%	200%
 	75%	75%
+	80%	80%
+	85%	85%
+	90%	90%
+	95%	95%
 	125%	125%
 	150%	150%
 	175%	175%
@@ -664,6 +678,10 @@
 	Classic Theme	Tema clássico
 	Solarized dark	Solarized escuro
 	Solarized Dark Theme	Tema Solarized Escuro
+	Breeze dark	Breeze escuro
+	Breeze Dark Theme	Tema Breeze Escuro
+	Breeze light	Breeze claro
+	Breeze Light Theme	Tema Breeze Claro
 	Next Theme	Próximo tema
 	Actions	Ações
 	Brush Settings	Configurações do pincel
@@ -795,7 +813,6 @@
 	Blending Options	Opções de mesclagem
 	Blue	Azul
 	Blue, Red, Yellow	Azul, vermelho, amarelo
-	Both	Ambos
 	Both Axes	Ambos os eixos
 	Bottom	Inferior
 	Brightness	Brilho
@@ -937,6 +954,17 @@
 	Delete current channel	Excluir o canal atual
 	Delete current state	Excluir o estado atual
 	Delete effect layer	Excluir camada de efeito
+
+# Layers-panel trash confirmation
+	Delete layer ‘{name}’?	Excluir a camada “{name}”?
+	Delete {count} layers? {names}	Excluir {count} camadas? {names}
+	Delete layer?	Excluir camada?
+	The document is closed	O documento está fechado
+	The document or selected layers changed. Please request deletion again.	O documento ou as camadas selecionadas mudaram. Solicite a exclusão novamente.
+	Missing delete command	Comando de exclusão ausente
+	Invalid delete command	Comando de exclusão inválido
+	Layer deleted, but confirmation preference could not be saved: {error}	A camada foi excluída, mas não foi possível salvar a preferência de confirmação: {error}
+
 	Delete layer	Excluir camada
 	Delete layer comp	Excluir composição de camadas
 	Delete note	Excluir anotação
@@ -1099,7 +1127,6 @@
 	Leading	Entrelinha
 	Leading (set to the font size × auto-leading when Auto)	Entrelinha (no modo Automático, é o tamanho da fonte × entrelinha automática)
 	Leave as is (don't color manage)	Deixar como está (não gerenciar cores)
-	Left	Esquerda
 	Left align text	Alinhar texto à esquerda
 	Length:	Comprimento:
 	Level	Nível
@@ -1271,6 +1298,7 @@
 	Record ● a sequence of edits, then play ▶ it on any document.	Grave ● uma sequência de edições e depois reproduza-a ▶ em qualquer documento.
 	Red	Vermelho
 	Redefine style by current selection	Redefinir o estilo pela seleção atual
+	Refine	Refinar
 	Reflected Gradient	Degradê refletido
 	Registration Marks	Marcas de registro
 	Regular	Regular
@@ -1280,6 +1308,7 @@
 	Remove All Pins	Remover todos os alfinetes
 	Remove Background	Remover plano de fundo
 	Remove Planes	Remover planos
+	Remove Tool	Ferramenta Remover
 	Remove stop	Remover parada
 	Remove variable	Remover variável
 	Rename	Renomear
@@ -1295,6 +1324,11 @@
 	{n} commands are not in PhotoCraft.	{n} comandos não existem no PhotoCraft.
 	Keyboard shortcuts imported	Atalhos de teclado importados
 	Your keyboard shortcut set {set} is in use here: {n} shortcuts differ from the defaults. Edit › Keyboard Shortcuts shows them; Reset All to Defaults undoes this.	Seu conjunto de atalhos de teclado {set} está em uso aqui: {n} atalhos diferem dos padrões. Editar › Atalhos de teclado os mostra; Redefinir tudo para o padrão desfaz isso.
+	Import keyboard shortcuts?	Importar atalhos de teclado?
+	PhotoCraft found your keyboard shortcut set {set} from another image editor on this computer: {n} of its shortcuts differ from PhotoCraft's. Import it?	O PhotoCraft encontrou neste computador seu conjunto de atalhos de teclado {set} de outro editor de imagens: {n} de seus atalhos diferem dos do PhotoCraft. Importá-lo?
+	Edit › Keyboard Shortcuts › Reset All to Defaults undoes an import.	Editar › Atalhos de teclado › Redefinir tudo para o padrão desfaz uma importação.
+	Don't Import	Não importar
+	The keyboard shortcut set was not imported: {error}	O conjunto de atalhos de teclado não foi importado: {error}
 	Reset Section	Redefinir seção
 	Reset Transform	Redefinir transformação
 	Reset to defaults	Redefinir para os padrões
@@ -1303,7 +1337,6 @@
 	Restore All	Restaurar tudo
 	Restore Defaults	Restaurar padrões
 	Restrictive (Web)	Restritiva (Web)
-	Right	Direita
 	Right align text	Alinhar texto à direita
 	Rigid	Rígido
 	Rotate:	Girar:
@@ -1483,6 +1516,7 @@
 	Blur Tool	Ferramenta Desfoque
 	Bold	Negrito
 	Brush	Pincel
+	Block	Bloco
 	Brush Pose	Pose do pincel
 	Brush Tip Shape	Forma da ponta do pincel
 	Brush Tool	Ferramenta Pincel
@@ -1531,6 +1565,8 @@
 	Efficiency: 100%	Eficiência: 100%
 	Ellipse Tool	Ferramenta Elipse
 	Elliptical Marquee Tool	Ferramenta Letreiro elíptico
+	Single Row Marquee Tool	Ferramenta Letreiro de linha única
+	Single Column Marquee Tool	Ferramenta Letreiro de coluna única
 	Emboss	Entalhe
 	Eraser	Borracha
 	Eraser Tool	Ferramenta Borracha
@@ -1587,6 +1623,8 @@
 	Millimeters	Milímetros
 	Mobile	Dispositivos móveis
 	Move Tool	Ferramenta Mover
+	Could not use the move tool because the layer is locked.	Não foi possível usar a ferramenta Mover porque a camada está bloqueada.
+	Could not complete the Free Transform command because the layer is locked.	Não foi possível concluir o comando Transformação livre porque a camada está bloqueada.
 	Multiply	Multiplicação
 	My Brushes	Meus pincéis
 	Neutrals	Neutros
@@ -1631,6 +1669,7 @@
 	Quick Selection Tool	Ferramenta Seleção rápida
 	Radial	Radial
 	Rasterize Layer	Rasterizar camada
+	Rasterize Layers	Rasterizar camadas
 	Ratio	Proporção
 	Recent	Recentes
 	Rectangle Tool	Ferramenta Retângulo
@@ -1694,6 +1733,7 @@
 	Scratch: {size}	Trabalho: {size}
 	Untagged {mode}	{mode} sem marcação
 	{w} px x {h} px ({ppi} ppi)	{w} px x {h} px ({ppi} ppi)
+	{w} {unit} x {h} {unit} ({ppi} ppi)	{w} {unit} x {h} {unit} ({ppi} ppi)
 	Resolution: {dpi} pixels/inch	Resolução: {dpi} pixels/polegada
 	Doc: {w} × {h} px	Doc: {w} × {h} px
 	Frame {current} / {total}	Quadro {current} / {total}
@@ -1844,6 +1884,7 @@
 	Show only crosshair while painting	Mostrar apenas a mira ao pintar
 	Show slice numbers	Mostrar números das fatias
 	Show tooltips	Mostrar dicas de ferramentas
+	Show highlight on rollover	Mostrar realce ao passar o mouse
 	Show transformation values	Mostrar valores de transformação
 	Slice color	Cor das fatias
 	Smart guide color	Cor das guias inteligentes
@@ -1945,6 +1986,7 @@
 	Create Warped Text	Criar texto deformado
 	Rasterize Smart Object	Rasterizar objeto inteligente
 	Rasterize Fill Content	Rasterizar conteúdo do preenchimento
+	Rasterize Layer Style	Rasterizar estilo de camada
 	Unlock: picking a preset replaces these settings	Desbloquear: escolher uma predefinição substitui estas configurações
 	Lock: keep these settings when picking another preset	Bloquear: manter estas configurações ao escolher outra predefinição
 	Diameter:	Diâmetro:
@@ -1959,8 +2001,8 @@
 	Brush Preset Options	Opções de predefinições de pincel
 	Group name	Nome do grupo
 	Brush name	Nome do pincel
-	Grid view	Visualização em grade
-	List view	Visualização em lista
+	Brush Name	Nome do pincel
+	Brush Stroke	Traçado do pincel
 	Off: the speed of the pointer sets the spacing	Desativado: a velocidade do ponteiro define o espaçamento
 	Tilt Scale	Escala de inclinação
 	Brush Projection	Projeção do pincel
@@ -2640,6 +2682,7 @@ cameraRaw	Whites	Brancos
 
 # Shared screen eyedropper and text Color Picker (#1128).
 	Color Picker (Text Color)	Seletor de cores (Cor do texto)
+	Color Picker ({name})	Seletor de cores ({name})
 	Color Picker (Fill Color)	Seletor de cores (Cor de preenchimento)
 	Fill color	Cor de preenchimento
 	Color Picker (Stroke Color)	Seletor de cores (Cor do traçado)
@@ -2735,6 +2778,10 @@ fontWeight	Italic	Itálico
 	Color to Alpha…	Cor para alfa…
 	Transparency Threshold	Limiar de transparência
 	Opacity Threshold	Limiar de opacidade
+	PhotoCraft — Screen Color Picker	PhotoCraft — Seletor de cor da tela
+
+	Rasterize svg groups deeper than	Rasterizar grupos SVG além desta profundidade
+	0 turns this threshold off; SVG groups nested deeper than 100 levels are always rasterized.	0 desativa este limite; grupos SVG aninhados em mais de 100 níveis são sempre rasterizados.
 	Rule of Thirds	Regra dos terços
 	Triangle	Triângulo
 	Golden Ratio	Proporção áurea
@@ -2775,6 +2822,8 @@ fontWeight	Italic	Itálico
 	Create Ellipse	Criar elipse
 	Create Triangle	Criar triângulo
 	Create Polygon	Criar polígono
+	Pressure curve	Curva de pressão
+	Click to add a point, right-click to remove	Clique para adicionar um ponto; clique com o botão direito para removê-lo
 	Some brush presets could not be loaded	Não foi possível carregar algumas predefinições de pincel
 	Retry saving presets	Tentar salvar as predefinições novamente
 	Brush preset changes are not saved: {error}	As alterações nas predefinições de pincel não foram salvas: {error}
@@ -2794,3 +2843,35 @@ fontWeight	Italic	Itálico
 	Show or hide context menu	Mostrar ou ocultar o menu de contexto
 	Choose printer, copies and duplex in the system print dialog.	Escolha impressora, cópias e frente e verso na janela de impressão do sistema.
 	System print preview opened	Pré-visualização de impressão do sistema aberta
+	Stroke Options	Opções de traçado
+	Solid	Contínuo
+	Dashed	Tracejado
+	Dotted	Pontilhado
+	Caps	Pontas
+	Butt / Flat	Plano
+	Corners	Cantos
+	Miter	Junção em ângulo
+	Round	Redondo
+	Bevel	Chanfrado
+	Miter limit	Limite da junção
+	Dashed line	Linha tracejada
+	Dash	Traço
+	Gap	Espaço
+	Dash / gap lengths × stroke width	Comprimentos de traço / espaço × largura do traçado
+	Add pair	Adicionar par
+	Remove pair	Remover par
+	Dash offset	Deslocamento do tracejado
+	Open paths use centered strokes	Caminhos abertos usam traçados centralizados
+	Use finite lengths and a positive pattern total	Use comprimentos finitos e um total de padrão positivo
+	No subject found — try Object Selection or the Lasso	Nenhum assunto encontrado — tente Seleção de objeto ou o Laço
+	Quick Selection found nothing there	A Seleção rápida não encontrou nada ali
+	Object Selection found nothing there — try a tighter rectangle	A Seleção de objeto não encontrou nada ali — tente um retângulo mais justo
+	No subject found — try a rectangle around the object	Nenhum assunto encontrado — tente um retângulo ao redor do objeto
+	Use Classic Mode	Usar modo clássico
+	Auto Center Preview	Centralizar visualização automaticamente
+	Next Document	Próximo documento
+	Previous Document	Documento anterior
+	W x H x Resolution	L x A x Resolução
+	Front Image	Imagem frontal
+	Search settings…	Pesquisar configurações…
+	No matching settings	Nenhuma configuração encontrada

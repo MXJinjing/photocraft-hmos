@@ -42,8 +42,15 @@
 	Open…	Открыть…
 	Open	Открыть
 	Open As…	Открыть как…
+	Open EXR Parts…	Открыть части EXR…
+	Add beauty precomp from the AOVs	Добавить предкомпозит красоты из AOV
+	Both	Оба
+	Left	Левый
+	Right	Правый
 	Open Recent	Открыть недавние
 	Clear Recent Files	Очистить список недавних файлов
+	Remove from Recent	Удалить из недавних
+	Remove {name} from Recent	Удалить {name} из недавних
 	Close	Закрыть
 	Minimize	Свернуть
 	Maximize	Развернуть
@@ -145,6 +152,8 @@
 	Rename Layer	Переименовать слой
 	Layer From Background…	Слой из фона…
 	Layer from Background…	Слой из фона…
+	Background from Layer	Фон из слоя
+	Background From Layer	Фон из слоя
 	Group Layers	Сгруппировать слои
 	Group…	Группировать…
 	Ungroup Layers	Разгруппировать слои
@@ -164,6 +173,8 @@
 	Rasterize	Растрировать
 	Rasterize Type	Растрировать текст
 	Rasterize Shape	Растрировать фигуру
+	Rasterize Layer	Растрировать слой
+	Rasterize Layers	Растрировать слои
 	New Adjustment Layer	Новый корректирующий слой
 	New Fill Layer	Новый слой-заливка
 	Layer Mask	Маска слоя
@@ -200,12 +211,21 @@
 	Inner Shadow…	Внутренняя тень…
 	Outer Glow…	Внешнее свечение…
 	Inner Glow…	Внутреннее свечение…
-	Bevel & Emboss…	Фаска и рельеф…
+	Bevel & Emboss…	Тиснение…
 	Use Global Light	Использовать глобальный свет
 	Satin…	Глянец…
 	Color Overlay…	Наложение цвета…
 	Gradient Overlay…	Наложение градиента…
-	Pattern Overlay…	Наложение паттерна…
+	Pattern Overlay…	Наложение узора…
+	Bevel & Emboss	Тиснение
+	Inner Shadow	Внутренняя тень
+	Inner Glow	Внутреннее свечение
+	Satin	Глянец
+	Color Overlay	Наложение цвета
+	Gradient Overlay	Наложение градиента
+	Pattern Overlay	Наложение узора
+	Outer Glow	Внешнее свечение
+	Drop Shadow	Тень
 	Copy Layer Style	Скопировать стиль слоя
 	Paste Layer Style	Вставить стиль слоя
 	Clear Layer Style	Очистить стиль слоя
@@ -375,6 +395,10 @@
 	100%	100%
 	200%	200%
 	75%	75%
+	80%	80%
+	85%	85%
+	90%	90%
+	95%	95%
 	125%	125%
 	150%	150%
 	175%	175%
@@ -470,6 +494,7 @@
 	Wand	Волшебная палочка
 	Eyedropper	Пипетка
 	Brush	Кисть
+	Block	Квадрат
 	Pencil	Карандаш
 	Eraser	Ластик
 	Clone Stamp	Штамп
@@ -538,6 +563,11 @@
 	{n} commands are not in PhotoCraft.	Команд, которых нет в PhotoCraft: {n}.
 	Keyboard shortcuts imported	Сочетания клавиш импортированы
 	Your keyboard shortcut set {set} is in use here: {n} shortcuts differ from the defaults. Edit › Keyboard Shortcuts shows them; Reset All to Defaults undoes this.	Здесь используется ваш набор сочетаний клавиш {set}: сочетаний, отличных от стандартных: {n}. Их показывает Редактирование › Сочетания клавиш; «Сбросить всё к значениям по умолчанию» отменяет импорт.
+	Import keyboard shortcuts?	Импортировать сочетания клавиш?
+	PhotoCraft found your keyboard shortcut set {set} from another image editor on this computer: {n} of its shortcuts differ from PhotoCraft's. Import it?	PhotoCraft нашёл на этом компьютере ваш набор сочетаний клавиш {set} из другого графического редактора: сочетаний, отличных от PhotoCraft: {n}. Импортировать его?
+	Edit › Keyboard Shortcuts › Reset All to Defaults undoes an import.	Редактирование › Сочетания клавиш › «Сбросить всё к значениям по умолчанию» отменяет импорт.
+	Don't Import	Не импортировать
+	The keyboard shortcut set was not imported: {error}	Набор сочетаний клавиш не импортирован: {error}
 	Defaults restored.	Значения по умолчанию восстановлены.
 	Restore Defaults	Восстановить по умолчанию
 	Restore original size	Восстановить исходный размер
@@ -619,6 +649,7 @@
 	Resolution:	Разрешение:
 	Resolution: {dpi} pixels/inch	Разрешение: {dpi} пикс./дюйм
 	{w} px x {h} px ({ppi} ppi)	{w} px × {h} px ({ppi} ppi)
+	{w} {unit} x {h} {unit} ({ppi} ppi)	{w} {unit} × {h} {unit} ({ppi} ppi)
 	Pixels:	Пикселы:
 	Pixel Length:	Длина в пикселах:
 	Logical Length:	Логическая длина:
@@ -960,8 +991,8 @@
 	Rename Brush…	Переименовать кисть…
 	Delete Brush	Удалить кисть
 	Import Brushes…	Импортировать кисти…
-	List view	Вид списком
-	Grid view	Вид сеткой
+	Brush Name	Имя кисти
+	Brush Stroke	Мазок кисти
 	New Brush Preset…	Новый набор параметров кисти…
 	Brush Preset Options	Параметры наборов кистей
 	New Brush	Новая кисть
@@ -1064,8 +1095,6 @@
 	Single Word Justification	Выключка одного слова
 	Alignment	Выравнивание
 	Indent First	Отступ первой строки
-	Left	По левому краю
-	Right	По правому краю
 	Center	По центру
 	Justify	По ширине
 
@@ -1368,6 +1397,10 @@
 	Classic Theme	Классическая тема
 	Solarized dark	Solarized тёмная
 	Solarized Dark Theme	Тёмная тема Solarized
+	Breeze dark	Breeze тёмная
+	Breeze Dark Theme	Тёмная тема Breeze
+	Breeze light	Breeze светлая
+	Breeze Light Theme	Светлая тема Breeze
 	Studio Theme	Тема Studio
 	Studio Light Theme	Светлая тема Studio
 	Adwaita Light Theme	Светлая тема Adwaita
@@ -1493,8 +1526,12 @@
 	Adjustment Layer	Корректирующий слой
 	{name} Properties	Свойства: {name}
 	Move Tool	Перемещение
+	Could not use the move tool because the layer is locked.	Не удалось использовать инструмент «Перемещение», потому что слой заблокирован.
+	Could not complete the Free Transform command because the layer is locked.	Не удалось выполнить команду «Свободное трансформирование», потому что слой заблокирован.
 	Rectangular Marquee Tool	Прямоугольная область
 	Elliptical Marquee Tool	Овальная область
+	Single Row Marquee Tool	Область (горизонтальная строка)
+	Single Column Marquee Tool	Область (вертикальная строка)
 	Brush Tool	Кисть
 	Pencil Tool	Карандаш
 	Eraser Tool	Ластик
@@ -1598,6 +1635,8 @@
 	Open a document to select a colour range.	Откройте документ, чтобы выбрать цветовой диапазон.
 	Saved	Сохранено
 	Reveal in Finder	Показать в Finder
+	Show in Explorer	Показать в Проводнике
+	Show in Folder	Показать в папке
 	Before (Y)	До (Y)
 	After (X)	После (X)
 	Original	Оригинал
@@ -1650,6 +1689,7 @@
 	Add Pins	Добавить булавки
 	Delete Pins	Удалить булавки
 	Remove All Pins	Удалить все булавки
+	Remove Tool	Инструмент «Удаление»
 	Pin Depth:	Глубина булавки:
 	Bring the selected pin forward	Переместить выбранную булавку вперёд
 	Send the selected pin backward	Переместить выбранную булавку назад
@@ -1912,7 +1952,6 @@
 	Bilinear	Билинейная
 	Black, White	Чёрный, белый
 	Blue, Red, Yellow	Синий, красный, жёлтый
-	Both	Оба
 	Bottom	Снизу
 	Brightness Jitter	Колебание яркости
 	Brush Reconstruct Options	Параметры восстановления кисти
@@ -2060,6 +2099,7 @@
 	Quality	Качество
 	Recent	Недавние
 	Reconstruct	Восстановление
+	Refine	Уточнение
 	Registration Marks	Кресты приводки
 	Regular	Обычный
 	Remove stop	Удалить ограничитель
@@ -2105,7 +2145,7 @@
 	Straighten	Выпрямить
 	Straighten Layer	Выпрямить слой
 	Strength:	Интенсивность:
-	Stroke	Мазок
+	Stroke	Обводка
 	Stroke Catch-up	Догонять мазком
 	Stroke:	Обводка:
 	Location:	Расположение:
@@ -2290,6 +2330,7 @@
 	Show only crosshair while painting	Только перекрестье при рисовании
 	Show slice numbers	Показывать номера фрагментов
 	Show tooltips	Показывать подсказки
+	Show highlight on rollover	Показывать подсветку при наведении
 	Show bounding box when dragging layer	Показывать рамку при перетаскивании слоя
 	System title bar	Системная строка заголовка
 	Show transformation values	Показывать значения трансформации
@@ -2482,6 +2523,7 @@ cameraRaw	Roughness	Неровность
 
 # Shared screen eyedropper and text Color Picker (#1128).
 	Color Picker (Text Color)	Палитра цветов (Цвет текста)
+	Color Picker ({name})	Палитра цветов ({name})
 	Color Picker (Fill Color)	Палитра цветов (Цвет заливки)
 	Fill color	Цвет заливки
 	Color Picker (Stroke Color)	Палитра цветов (Цвет обводки)
@@ -2581,6 +2623,10 @@ fontWeight	Italic	Курсив
 	Color to Alpha…	Цвет в альфа-канал…
 	Transparency Threshold	Порог прозрачности
 	Opacity Threshold	Порог непрозрачности
+	PhotoCraft — Screen Color Picker	PhotoCraft — Пипетка цвета экрана
+
+	Rasterize svg groups deeper than	Растеризовать группы SVG глубже этого уровня
+	0 turns this threshold off; SVG groups nested deeper than 100 levels are always rasterized.	0 отключает этот порог; группы SVG с вложенностью более 100 уровней всегда растрируются.
 	Rule of Thirds	Правило третей
 	Triangle	Треугольник
 	Golden Ratio	Золотое сечение
@@ -2621,6 +2667,10 @@ fontWeight	Italic	Курсив
 	Create Ellipse	Создать эллипс
 	Create Triangle	Создать треугольник
 	Create Polygon	Создать многоугольник
+	Pressure curve	Кривая нажима
+	Click to add a point, right-click to remove	Щёлкните, чтобы добавить точку; щелчок правой кнопкой удаляет её
+	Soft	Мягкая
+	Hard	Жёсткая
 	Some brush presets could not be loaded	Не удалось загрузить некоторые наборы кистей
 	Retry saving presets	Повторить сохранение наборов
 	Brush preset changes are not saved: {error}	Изменения наборов кистей не сохранены: {error}
@@ -2640,3 +2690,47 @@ fontWeight	Italic	Курсив
 	Show or hide context menu	Показать или скрыть контекстное меню
 	Choose printer, copies and duplex in the system print dialog.	Выберите принтер, копии и двустороннюю печать в системном диалоге.
 	System print preview opened	Открыт системный предпросмотр печати
+	Stroke Options	Параметры обводки
+	Solid	Сплошная
+	Dashed	Штриховая
+	Dotted	Пунктирная
+	Caps	Концы
+	Butt / Flat	Плоские
+	Corners	Углы
+	Miter	Острые
+	Round	Круглые
+	Bevel	Скошенные
+	Miter limit	Предел острого угла
+	Dashed line	Штриховая линия
+	Dash	Штрих
+	Gap	Пробел
+	Dash / gap lengths × stroke width	Длины штриха / пробела × ширина обводки
+	Add pair	Добавить пару
+	Remove pair	Удалить пару
+	Dash offset	Смещение штрихов
+	Open paths use centered strokes	Открытые контуры используют обводку по центру
+	Use finite lengths and a positive pattern total	Используйте конечные длины и положительную сумму шаблона
+	No subject found — try Object Selection or the Lasso	Объект не найден — попробуйте «Выделение объектов» или «Лассо»
+	Quick Selection found nothing there	Быстрое выделение ничего здесь не нашло
+	Object Selection found nothing there — try a tighter rectangle	Выделение объектов ничего здесь не нашло — попробуйте более узкий прямоугольник
+	No subject found — try a rectangle around the object	Объект не найден — попробуйте прямоугольник вокруг объекта
+
+# Layers-panel trash confirmation
+	Delete layer ‘{name}’?	Удалить слой «{name}»?
+	Delete {count} layers? {names}	Удалить слои ({count})? {names}
+	Delete layer?	Удалить слой?
+	The document is closed	Документ закрыт
+	The document or selected layers changed. Please request deletion again.	Документ или выбранные слои изменились. Повторите запрос на удаление.
+	Missing delete command	Отсутствует команда удаления
+	Invalid delete command	Недопустимая команда удаления
+	Layer deleted, but confirmation preference could not be saved: {error}	Слой удалён, но не удалось сохранить настройку подтверждения: {error}
+	Use Classic Mode	Использовать классический режим
+	Auto Center Preview	Автоматически центрировать просмотр
+	Next Document	Следующий документ
+	Previous Document	Предыдущий документ
+	W x H x Resolution	Ш x В x Разрешение
+	Front Image	Изображение переднего плана
+	Swaps height and width	Меняет местами высоту и ширину
+	Rasterize Layer Style	Растрировать стиль слоя
+	Search settings…	Поиск настроек…
+	No matching settings	Нет подходящих настроек

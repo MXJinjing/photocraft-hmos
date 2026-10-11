@@ -31,8 +31,15 @@
 	New…	Baru…
 	Open…	Buka…
 	Open As…	Buka Sebagai…
+	Open EXR Parts…	Buka bagian EXR…
+	Add beauty precomp from the AOVs	Tambahkan prakomposisi beauty dari AOV
+	Both	Keduanya
+	Left	Kiri
+	Right	Kanan
 	Open Recent	Terakhir Dibuka
 	Clear Recent Files	Hapus Daftar Berkas Terakhir
+	Remove from Recent	Hapus dari Daftar Terakhir
+	Remove {name} from Recent	Hapus {name} dari Daftar Terakhir
 	Close	Tutup
 	Minimize	Minimalkan
 	Maximize	Maksimalkan
@@ -80,6 +87,8 @@
 	Import	Impor
 	Browse…	Telusuri…
 	Reveal in Finder	Tampilkan di Finder
+	Show in Explorer	Tampilkan di Explorer
+	Show in Folder	Tampilkan di Folder
 	File Info…	Info Berkas…
 	Print…	Cetak…
 	Print One Copy	Cetak Satu Salinan
@@ -248,6 +257,7 @@
 	Layer via Cut	Layer via Potong
 	Layer From Background…	Layer dari Background…
 	Layer from Background…	Layer dari Background…
+	Background From Layer	Background dari Layer
 	New Shape Layer	Layer Bentuk Baru
 	New Type Layer	Layer Teks Baru
 	New Fill Layer	Layer Isian Baru
@@ -568,6 +578,10 @@
 	100%	100%
 	200%	200%
 	75%	75%
+	80%	80%
+	85%	85%
+	90%	90%
+	95%	95%
 	125%	125%
 	150%	150%
 	175%	175%
@@ -660,6 +674,10 @@
 	Classic Theme	Tema Klasik
 	Solarized dark	Solarized gelap
 	Solarized Dark Theme	Tema Solarized Gelap
+	Breeze dark	Breeze gelap
+	Breeze Dark Theme	Tema Breeze Gelap
+	Breeze light	Breeze terang
+	Breeze Light Theme	Tema Breeze Terang
 	Next Theme	Tema Berikutnya
 	Actions	Action
 	Brush Settings	Pengaturan Kuas
@@ -792,7 +810,6 @@
 	Blending Options	Opsi Blending
 	Blue	Biru
 	Blue, Red, Yellow	Biru, Merah, Kuning
-	Both	Keduanya
 	Both Axes	Kedua Sumbu
 	Bottom	Bawah
 	Brightness	Kecerahan
@@ -932,6 +949,17 @@
 	Delete current channel	Hapus channel saat ini
 	Delete current state	Hapus kondisi saat ini
 	Delete effect layer	Hapus layer efek
+
+# Layers-panel trash confirmation
+	Delete layer ‘{name}’?	Hapus layer ‘{name}’?
+	Delete {count} layers? {names}	Hapus {count} layer? {names}
+	Delete layer?	Hapus layer?
+	The document is closed	Dokumen sudah ditutup
+	The document or selected layers changed. Please request deletion again.	Dokumen atau layer yang dipilih telah berubah. Minta penghapusan lagi.
+	Missing delete command	Perintah hapus tidak tersedia
+	Invalid delete command	Perintah hapus tidak valid
+	Layer deleted, but confirmation preference could not be saved: {error}	Layer dihapus, tetapi preferensi konfirmasi tidak dapat disimpan: {error}
+
 	Delete layer	Hapus layer
 	Delete layer comp	Hapus layer comp
 	Delete note	Hapus catatan
@@ -1094,7 +1122,6 @@
 	Leading	Leading
 	Leading (set to the font size × auto-leading when Auto)	Leading (diatur ke ukuran font × auto-leading saat Auto)
 	Leave as is (don't color manage)	Biarkan apa adanya (tanpa manajemen warna)
-	Left	Kiri
 	Left align text	Teks rata kiri
 	Length:	Panjang:
 	Level	Level
@@ -1266,6 +1293,7 @@
 	Record ● a sequence of edits, then play ▶ it on any document.	Rekam ● urutan pengeditan, lalu putar ▶ di dokumen apa saja.
 	Red	Merah
 	Redefine style by current selection	Definisikan ulang gaya dengan seleksi saat ini
+	Refine	Perhalus
 	Reflected Gradient	Gradien Pantulan
 	Registration Marks	Tanda Registrasi
 	Regular	Reguler
@@ -1275,6 +1303,7 @@
 	Remove All Pins	Hapus Semua Pin
 	Remove Background	Hapus Background
 	Remove Planes	Hapus Bidang
+	Remove Tool	Alat Hapus
 	Remove stop	Hapus stop
 	Remove variable	Hapus variabel
 	Rename	Ganti Nama
@@ -1290,6 +1319,11 @@
 	{n} commands are not in PhotoCraft.	{n} perintah tidak ada di PhotoCraft.
 	Keyboard shortcuts imported	Pintasan keyboard diimpor
 	Your keyboard shortcut set {set} is in use here: {n} shortcuts differ from the defaults. Edit › Keyboard Shortcuts shows them; Reset All to Defaults undoes this.	Set pintasan keyboard Anda {set} dipakai di sini: {n} pintasan berbeda dari bawaan. Edit › Pintasan Keyboard menampilkannya; Setel Ulang Semua ke Bawaan membatalkannya.
+	Import keyboard shortcuts?	Impor pintasan keyboard?
+	PhotoCraft found your keyboard shortcut set {set} from another image editor on this computer: {n} of its shortcuts differ from PhotoCraft's. Import it?	PhotoCraft menemukan set pintasan keyboard Anda {set} dari editor gambar lain di komputer ini: {n} pintasannya berbeda dari PhotoCraft. Impor?
+	Edit › Keyboard Shortcuts › Reset All to Defaults undoes an import.	Edit › Pintasan Keyboard › Setel Ulang Semua ke Bawaan membatalkan impor.
+	Don't Import	Jangan Impor
+	The keyboard shortcut set was not imported: {error}	Set pintasan keyboard tidak diimpor: {error}
 	Reset Section	Reset Bagian
 	Reset Transform	Reset Transformasi
 	Reset to defaults	Reset ke default
@@ -1298,7 +1332,6 @@
 	Restore All	Pulihkan Semua
 	Restore Defaults	Pulihkan Default
 	Restrictive (Web)	Restriktif (Web)
-	Right	Kanan
 	Right align text	Teks rata kanan
 	Rigid	Kaku
 	Rotate:	Putar:
@@ -1478,6 +1511,7 @@
 	Blur Tool	Alat Blur
 	Bold	Tebal
 	Brush	Kuas
+	Block	Blok
 	Brush Pose	Pose Kuas
 	Brush Tip Shape	Bentuk Ujung Kuas
 	Brush Tool	Alat Kuas
@@ -1526,6 +1560,8 @@
 	Efficiency: 100%	Efisiensi: 100%
 	Ellipse Tool	Alat Ellipse
 	Elliptical Marquee Tool	Alat Elliptical Marquee
+	Single Row Marquee Tool	Alat Single Row Marquee
+	Single Column Marquee Tool	Alat Single Column Marquee
 	Emboss	Emboss
 	Eraser	Penghapus
 	Eraser Tool	Alat Penghapus
@@ -1582,6 +1618,8 @@
 	Millimeters	Milimeter
 	Mobile	Seluler
 	Move Tool	Alat Pindah
+	Could not use the move tool because the layer is locked.	Tidak dapat menggunakan alat Pindahkan karena layer terkunci.
+	Could not complete the Free Transform command because the layer is locked.	Tidak dapat menyelesaikan perintah Transformasi Bebas karena layer terkunci.
 	Multiply	Multiply
 	My Brushes	Kuas Saya
 	Neutrals	Netral
@@ -1626,6 +1664,7 @@
 	Quick Selection Tool	Alat Quick Selection
 	Radial	Radial
 	Rasterize Layer	Rasterisasi Layer
+	Rasterize Layers	Rasterisasi Layer
 	Ratio	Rasio
 	Recent	Terbaru
 	Rectangle Tool	Alat Rectangle
@@ -1689,6 +1728,7 @@
 	Scratch: {size}	Scratch: {size}
 	Untagged {mode}	{mode} Tanpa Tag
 	{w} px x {h} px ({ppi} ppi)	{w} px x {h} px ({ppi} ppi)
+	{w} {unit} x {h} {unit} ({ppi} ppi)	{w} {unit} x {h} {unit} ({ppi} ppi)
 	Resolution: {dpi} pixels/inch	Resolusi: {dpi} piksel/inci
 	Doc: {w} × {h} px	Dok: {w} × {h} px
 	Frame {current} / {total}	Frame {current} / {total}
@@ -1839,6 +1879,7 @@
 	Show only crosshair while painting	Tampilkan crosshair saja saat melukis
 	Show slice numbers	Tampilkan nomor slice
 	Show tooltips	Tampilkan tooltip
+	Show highlight on rollover	Tampilkan sorotan saat kursor melintas
 	Show transformation values	Tampilkan nilai transformasi
 	Slice color	Warna slice
 	Smart guide color	Warna smart guide
@@ -1940,6 +1981,7 @@
 	Create Warped Text	Buat Teks Warp
 	Rasterize Smart Object	Rasterisasi Smart Object
 	Rasterize Fill Content	Rasterisasi Isi Konten
+	Rasterize Layer Style	Rasterisasi Gaya Layer
 	Unlock: picking a preset replaces these settings	Buka kunci: memilih preset akan mengganti pengaturan ini
 	Lock: keep these settings when picking another preset	Kunci: pertahankan pengaturan ini saat memilih preset lain
 	Diameter:	Diameter:
@@ -1954,8 +1996,8 @@
 	Brush Preset Options	Opsi Preset Kuas
 	Group name	Nama grup
 	Brush name	Nama kuas
-	Grid view	Tampilan grid
-	List view	Tampilan daftar
+	Brush Name	Nama kuas
+	Brush Stroke	Sapuan kuas
 	Off: the speed of the pointer sets the spacing	Mati: kecepatan penunjuk menentukan jarak
 	Tilt Scale	Skala Kemiringan
 	Brush Projection	Proyeksi Kuas
@@ -2619,6 +2661,7 @@ cameraRaw	Blending	Pembauran
 
 # Shared screen eyedropper and text Color Picker (#1128).
 	Color Picker (Text Color)	Pemilih Warna (Warna Teks)
+	Color Picker ({name})	Pemilih Warna ({name})
 	Color Picker (Fill Color)	Pemilih Warna (Warna Isian)
 	Fill color	Warna isian
 	Color Picker (Stroke Color)	Pemilih Warna (Warna Stroke)
@@ -2714,6 +2757,10 @@ fontWeight	Italic	Miring
 	Color to Alpha…	Warna ke Alpha…
 	Transparency Threshold	Ambang transparansi
 	Opacity Threshold	Ambang opasitas
+	PhotoCraft — Screen Color Picker	PhotoCraft — Pemilih Warna Layar
+
+	Rasterize svg groups deeper than	Rasterisasi grup SVG yang lebih dalam dari ini
+	0 turns this threshold off; SVG groups nested deeper than 100 levels are always rasterized.	0 menonaktifkan ambang ini; grup SVG yang bersarang lebih dari 100 tingkat selalu dirasterisasi.
 	Rule of Thirds	Aturan Sepertiga
 	Triangle	Segitiga
 	Golden Ratio	Rasio Emas
@@ -2754,6 +2801,8 @@ fontWeight	Italic	Miring
 	Create Ellipse	Buat Elips
 	Create Triangle	Buat Segitiga
 	Create Polygon	Buat Poligon
+	Pressure curve	Kurva tekanan
+	Click to add a point, right-click to remove	Klik untuk menambah titik, klik kanan untuk menghapusnya
 	Some brush presets could not be loaded	Beberapa preset kuas tidak dapat dimuat
 	Retry saving presets	Coba simpan preset lagi
 	Brush preset changes are not saved: {error}	Perubahan preset kuas belum disimpan: {error}
@@ -2773,3 +2822,35 @@ fontWeight	Italic	Miring
 	Show or hide context menu	Tampilkan atau sembunyikan menu konteks
 	Choose printer, copies and duplex in the system print dialog.	Pilih printer, jumlah salinan dan dupleks di dialog cetak sistem.
 	System print preview opened	Pratinjau cetak sistem dibuka
+	Stroke Options	Opsi goresan
+	Solid	Utuh
+	Dashed	Putus-putus
+	Dotted	Titik-titik
+	Caps	Ujung
+	Butt / Flat	Datar
+	Corners	Sudut
+	Miter	Tajam
+	Round	Bulat
+	Bevel	Miring
+	Miter limit	Batas sudut tajam
+	Dashed line	Garis putus-putus
+	Dash	Garis
+	Gap	Celah
+	Dash / gap lengths × stroke width	Panjang garis / celah × lebar goresan
+	Add pair	Tambah pasangan
+	Remove pair	Hapus pasangan
+	Dash offset	Offset garis
+	Open paths use centered strokes	Jalur terbuka menggunakan goresan tengah
+	Use finite lengths and a positive pattern total	Gunakan panjang terbatas dan total pola positif
+	No subject found — try Object Selection or the Lasso	Subjek tidak ditemukan — coba Seleksi Objek atau Laso
+	Quick Selection found nothing there	Seleksi Cepat tidak menemukan apa pun di sana
+	Object Selection found nothing there — try a tighter rectangle	Seleksi Objek tidak menemukan apa pun di sana — coba persegi panjang yang lebih rapat
+	No subject found — try a rectangle around the object	Subjek tidak ditemukan — coba persegi panjang di sekitar objek
+	Use Classic Mode	Gunakan Mode Klasik
+	Auto Center Preview	Pusatkan Pratinjau Otomatis
+	Next Document	Dokumen Berikutnya
+	Previous Document	Dokumen Sebelumnya
+	W x H x Resolution	L x T x Resolusi
+	Front Image	Gambar Depan
+	Search settings…	Cari pengaturan…
+	No matching settings	Tidak ada pengaturan yang cocok

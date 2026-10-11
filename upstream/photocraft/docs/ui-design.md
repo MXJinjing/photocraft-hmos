@@ -12,10 +12,16 @@
 | Adwaita | GNOME's libadwaita light palette on the Studio layout: white header bar and cards on a grey sidebar, GNOME blue accent (#3584e4), 6 / 9 / 12 px radii, grey (not red) close button |
 | Adwaita Dark | The libadwaita dark palette on the same layout |
 | Solarized Dark | Ethan Schoonover's Solarized palette: base03 canvas, base02 panels, base0 text, Solarized blue accent |
+| Breeze Light | An adaptation of KDE Plasma's Breeze Light on the Studio layout: cool light blue-grey surfaces a few levels from Breeze's so the app blends into a Plasma desktop, Breeze-style blue accent, 5 px radii, red close button on hover; text and status colours are darker than Breeze's for contrast |
+| Breeze Dark | The same for Breeze Dark: cool dark blue-grey surfaces (darkest canvas, then dock, cards, chrome and controls) near Breeze's, blue accent, 5 px radii; secondary text and status colours are lighter than Breeze's for contrast |
+
+Both Breeze themes are our own values close to Plasma's (not a copy of its colour schemes) and put text readability first: every text colour holds 4.5:1 on every surface and on hovered, pressed and selected states (`theme.rs` tests), so their secondary text, accent and status colours are darker (Light) or lighter (Dark) than Breeze's own, and the primary button is a deeper blue with white text.
 
 Edit → Preferences → Interface shows an Appearance Mode selector (Sync with system, Dark, Light) above separate light and dark theme cards with PhotoCraft editor previews and radio choices. Auto is opt-in and follows the operating system while the app is running. On Linux it reads the desktop portal once and then listens for its `SettingChanged` signal (no polling, and the UI repaints only when the value changes); `gsettings` runs at most once at start-up, by absolute path, when the portal gives no answer. A missing system appearance falls back to Dark. New installs keep Photoshop's default: Dark mode with Pro Medium (Studio Light is the saved light theme). Existing saved single-theme preferences migrate to a fixed Dark or Light mode with their chosen theme. The header appearance button cycles Auto → Light → Dark; its icon shows a monitor, moon or sun for the selected mode. Window → Theme and `ui.set {"theme":"classic"}` select a theme and fix the mode to its light or dark family.
 
-The toolbar's foreground and background colour chips follow the `Tokens::round_chips` flag. Pro and Classic leave it off and draw Photoshop's overlapping squares with Default Colors and Switch Colors above them. Studio, Studio Light, Solarized Dark, Adwaita and Adwaita Dark (the Studio-layout themes) turn it on and draw large round chips with a curved Switch Colors arrow centred right under them, its heads touching the chips: stacked vertically in one tool column, with Default Colors at their top-right, and side by side in two tool columns, with Default Colors at the toolbar's left edge. Another non-Pro theme can opt in by setting the flag.
+Window → Theme and macOS PhotoCraft → Appearance also offer Sync with system. Its checkmark follows the saved Auto mode rather than the displayed palette; choosing a manual theme selects its fixed appearance mode.
+
+The toolbar's foreground and background colour chips follow the `Tokens::round_chips` flag. Pro and Classic leave it off and draw Photoshop's overlapping squares with Default Colors and Switch Colors above them. Studio, Studio Light, Solarized Dark, Adwaita, Adwaita Dark, Breeze Light and Breeze Dark (the Studio-layout themes) turn it on and draw large round chips with a curved Switch Colors arrow centred right under them, its heads touching the chips: stacked vertically in one tool column, with Default Colors at their top-right, and side by side in two tool columns, with Default Colors at the toolbar's left edge. Another non-Pro theme can opt in by setting the flag.
 
 ## Rules
 
@@ -48,7 +54,7 @@ curl -sfL -o assets/icons/<name>.svg https://raw.githubusercontent.com/lucide-ic
 | Free Transform | `transform_tool.rs` | ⌘T. Corners and edges scale proportionally (⇧ frees them: an edge then stretches one axis); ⌥ scales about the reference point; ⌘-corner distorts; dragging outside rotates (⇧ snaps to 15°); dragging inside moves. Preview = document without the moving pixels + a textured 24×24 mesh. ↩ or a double-click commits via `edit.transform {rect, quad}`. |
 | Quick layer pick | `quick_pick.rs` | macOS: ⌘⌥⌃-click with any tool selects the topmost visible layer with pixels under the pointer (`layer.pickAt`) without switching tools; the drag and release are swallowed. Windows/Linux have no third modifier distinct from the ⌃⌥ brush resize, so the gesture is a no-op there (use the Move tool's Auto-Select). A failed pick is a status-bar error. |
 | Layers rows | `panels.rs` | Double-click: on the name renames in place; on the Background makes it a normal layer; on an adjustment or fill thumbnail opens its Properties; on a Smart Object thumbnail opens its contents (Edit Contents); anywhere else on the row opens Layer Style. |
-| Layer masks | `panels.rs` | Clicking the mask thumbnail targets the mask (corner-bracket frame; the tab reads "Layer, Layer Mask/8"). Brush, eraser (paints background colour), gradient and bucket then send `"target": "mask"`. Adjustment and fill layers target their mask automatically. |
+| Layer masks | `panels.rs` | Clicking the mask thumbnail targets the mask (corner-bracket frame; the tab reads "Layer, Layer Mask/8"). Brush, eraser (paints background colour), gradient, bucket and moving the selected pixels (⌘-drag, `select.float`; the hole takes the background colour) then send `"target": "mask"`. Adjustment and fill layers target their mask automatically. |
 | Levels / Curves | `tone.rs` | Histogram of the image *below* the adjustment. Curves: click to add a point, drag out to delete. Every change is a coalesced `layer.setAdjustment`, so one drag = one undo step and the canvas updates at full resolution on the GPU. |
 
 While editing type, hold Ctrl (Windows/Linux) or Command (macOS) for an oriented transform
@@ -80,6 +86,16 @@ The app's top bar (`panels::title_bar`) starts with the brand mark (the app icon
 
 ## Menus
 
+An embedding application's `panels.menu_bar` and `panels.rail` flags belong to its current
+session. Restoring a saved workspace or remembered panel layout preserves both flags, including
+when the serialized layout contains their values. Panel visibility, dock layout, tabs and Timeline
+visibility follow the saved layout.
+
+The Pro status bar's Document Dimensions readout follows Preferences › Units & Rulers › Rulers,
+including changes made from a ruler's context menu. It uses the document resolution for physical
+units, each side's own extent for percentages and the selected point-size convention for points
+and picas. The readout retains the document's pixels-per-inch value.
+
 `menu_catalog.rs` holds Photoshop's menu tree (standard command names, order, separators, default shortcuts). Items whose id matches an engine or UI command are live; others render disabled until implemented. Give new commands the catalogue's id (for example `image.imageSize`) and they light up in the right place automatically.
 
 Menus never run off the window: the menu bar's menus and submenus scroll with arrows (`menu_nav::level`), and long right-click menus (Layers, canvas tools, Channels, Paths, document tabs) wrap their rows in `widgets::menu_scroll`, so they move up to fit and scroll only when taller than the visible window.
@@ -92,7 +108,7 @@ Use `ui.click {x,y}`, `ui.move`, `ui.key` and `ui.type` (synthetic input in scre
 
 The Type options bar, Character panel, Character/Paragraph Style editors and Glyphs panel
 share a searchable family picker. Each visible row shows an `AaBbCc` sample rendered by
-PhotoCraft's text engine in that family (script/symbol fonts use characters they support).
+PhotoCraft's text engine in that family (script/symbol fonts use characters they support). A family whose face also covers Arabic (alef, lam, meem, ain and the sample letters) shows a short `أبجد هوز` sample left of it, shaped right-to-left by the same engine; its row reserves the extra width once that row has been painted, and Latin-only families are unchanged.
 Samples are cached with a bounded cache and follow display scale and theme text colour.
 Builds without system fonts preview the bundled fonts.
 While the menu is open, Up/Down applies the previous/next matching family and scrolls it into
@@ -185,3 +201,13 @@ panel width. Catalog coverage and actual shell language-switch tests enforce the
 
 Native CJK font fallback follows the selected UI script and resets its cache when switching
 languages; font delivery on the web remains separate work.
+
+## Arithmetic in numeric fields
+
+Click a numeric value and type an expression, then press Enter or move focus to finish.
+Numeric fields accept `+`, `-`, `*`, `/`, remainder `%`, powers `^` or `**`, parentheses,
+scientific notation, and `pi` / `tau`. For example, `1920/2` gives `960`, and `(30+15)*2`
+gives `90`. Shared value fields apply plain numbers live and arithmetic when editing
+finishes, preserving rounded/integer workflows. Field limits and integer rounding
+still apply; invalid expressions, division by zero, and non-finite results are rejected.
+Expressions are evaluated locally as arithmetic, never as scripts.
