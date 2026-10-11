@@ -576,3 +576,73 @@ fn pen_hover_move_sets_hover_pos_without_pressing() {
         },
     );
 }
+
+fn push_pen(state: &mut super::State, action: i32, x: f32, y: f32, pressure: f32, events: &mut Vec<egui::Event>) {
+    let packet = format!(
+        r#"{{"kind":"pointer","source":"pen","action":{action},"x":{x},"y":{y},"sample":{{"pressure":{pressure},"tiltX":0,"tiltY":0,"eraser":false}}}}"#
+    );
+    state.push(serde_json::from_str(&packet).unwrap(), 2., events);
+}
+
+#[test]
+fn pen_lift_keeps_hover_at_lift_not_old_hover() {
+    let mut state = super::State::default();
+    let mut events = vec![];
+    // Hover at the original point (100, 50) in egui points.
+    push_pen(&mut state, 2, 200., 100., 0., &mut events);
+    events.clear();
+    // Stroke from there to the lift point (300, 150).
+    push_pen(&mut state, 0, 200., 100., 0.5, &mut events);
+    push_pen(&mut state, 2, 400., 200., 0.5, &mut events);
+    // Stale hover echoed while still in contact must not move the stroke.
+    let before = events.len();
+    push_pen(&mut state, 2, 200., 100., 0., &mut events);
+    assert_eq!(events.len(), before, "hover while pen_down must be ignored");
+    push_pen(&mut state, 1, 600., 300., 0., &mut events);
+    let lift = egui::pos2(300., 150.);
+    assert!(
+        events.iter().any(|e| matches!(e, egui::Event::PointerMoved(p) if *p == lift)),
+        "lift must move to tip position: {events:?}"
+    );
+    events.clear();
+    // Spurious onHover(false) right after lift must not clear the tip.
+    state.push(
+        super::Input {
+            kind: "blur".into(),
+            x: 200.,
+            y: 100.,
+            ..Default::default()
+        },
+        2.,
+        &mut events,
+    );
+    assert!(
+        events.is_empty(),
+        "post-lift hover leave must not PointerGone: {events:?}"
+    );
+    // Stale onHoverMove at the pre-stroke point must keep the tip at the lift.
+    push_pen(&mut state, 2, 200., 100., 0., &mut events);
+    assert!(
+        matches!(events.as_slice(), [egui::Event::PointerMoved(p)] if *p == lift),
+        "stale post-lift hover must stay at lift: {events:?}"
+    );
+    events.clear();
+    // A later nearby hover (or continued hover near lift) may update normally.
+    push_pen(&mut state, 2, 610., 310., 0., &mut events);
+    assert!(
+        matches!(events.as_slice(), [egui::Event::PointerMoved(p)] if *p == egui::pos2(305., 155.)),
+        "subsequent hover after consuming the guard must apply: {events:?}"
+    );
+    let ctx = egui::Context::default();
+    frame(
+        &ctx,
+        egui::RawInput {
+            events: std::mem::take(&mut events),
+            ..Default::default()
+        },
+        |ui| {
+            assert_eq!(ui.input(|i| i.pointer.hover_pos()), Some(egui::pos2(305., 155.)));
+            assert!(!ui.input(|i| i.pointer.any_down()));
+        },
+    );
+}
