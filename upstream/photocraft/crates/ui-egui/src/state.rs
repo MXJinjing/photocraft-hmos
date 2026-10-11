@@ -65,6 +65,11 @@ pub enum Tool {
     Move,
     RectMarquee,
     EllipseMarquee,
+    /// Selects one pixel row across the whole canvas at the clicked y (Photoshop's flyout only:
+    /// no key, not in the ⇧M cycle).
+    SingleRowMarquee,
+    /// Selects one pixel column down the whole canvas at the clicked x.
+    SingleColumnMarquee,
     Lasso,
     PolygonLasso,
     MagneticLasso,
@@ -87,6 +92,7 @@ pub enum Tool {
     Hand,
     RotateView,
     Zoom,
+    Remove,
     SpotHealing,
     Healing,
     Patch,
@@ -117,10 +123,12 @@ pub enum Tool {
 }
 
 impl Tool {
-    pub const ALL: [Tool; 52] = [
+    pub const ALL: [Tool; 55] = [
         Tool::Move,
         Tool::RectMarquee,
         Tool::EllipseMarquee,
+        Tool::SingleRowMarquee,
+        Tool::SingleColumnMarquee,
         Tool::Lasso,
         Tool::PolygonLasso,
         Tool::MagneticLasso,
@@ -143,6 +151,7 @@ impl Tool {
         Tool::Hand,
         Tool::RotateView,
         Tool::Zoom,
+        Tool::Remove,
         Tool::SpotHealing,
         Tool::Healing,
         Tool::Patch,
@@ -177,6 +186,8 @@ impl Tool {
             Tool::Move => "Move Tool",
             Tool::RectMarquee => "Rectangular Marquee Tool",
             Tool::EllipseMarquee => "Elliptical Marquee Tool",
+            Tool::SingleRowMarquee => "Single Row Marquee Tool",
+            Tool::SingleColumnMarquee => "Single Column Marquee Tool",
             Tool::Brush => "Brush Tool",
             Tool::Pencil => "Pencil Tool",
             Tool::MixerBrush => "Mixer Brush Tool",
@@ -201,6 +212,7 @@ impl Tool {
             Tool::Hand => "Hand Tool",
             Tool::RotateView => "Rotate View Tool",
             Tool::Zoom => "Zoom Tool",
+            Tool::Remove => "Remove Tool",
             Tool::SpotHealing => "Spot Healing Brush Tool",
             Tool::Healing => "Healing Brush Tool",
             Tool::Patch => "Patch Tool",
@@ -241,6 +253,7 @@ impl Tool {
                 | Tool::MixerBrush
                 | Tool::Eraser
                 | Tool::BackgroundEraser
+                | Tool::Remove
                 | Tool::SpotHealing
                 | Tool::Healing
                 | Tool::CloneStamp
@@ -270,10 +283,12 @@ impl Tool {
             Tool::Hand => 'H',
             Tool::RotateView => 'R',
             Tool::Zoom => 'Z',
-            Tool::SpotHealing | Tool::Healing | Tool::Patch | Tool::ContentAwareMove | Tool::RedEye => 'J',
+            Tool::Remove | Tool::SpotHealing | Tool::Healing | Tool::Patch | Tool::ContentAwareMove | Tool::RedEye => 'J',
             Tool::CloneStamp | Tool::PatternStamp => 'S',
             Tool::HistoryBrush => 'Y',
             Tool::Blur | Tool::Sharpen | Tool::Smudge => '\0',
+            // In the Marquee flyout, but M cycles only the Rectangular and Elliptical Marquee.
+            Tool::SingleRowMarquee | Tool::SingleColumnMarquee => '\0',
             Tool::Dodge | Tool::Burn | Tool::Sponge => 'O',
             Tool::QuickSelection | Tool::ObjectSelection => 'W',
             Tool::Pen => 'P',
@@ -398,7 +413,8 @@ pub enum DialogKind {
 pub struct View {
     /// Screen (device) pixels per document pixel: the user-facing zoom (`100%` is `1.0`).
     /// Canvas geometry works in egui points and divides by `ctx.pixels_per_point`
-    /// (`PhotocraftApp::point_zoom`), so a scaled display doesn't magnify the image.
+    /// (`PhotocraftApp::point_zoom`), so neither the display scale nor Interface › UI Scale
+    /// magnifies the image (#1943, #2121).
     pub zoom: f32,
     /// Document-space point shown at the canvas centre.
     pub center: [f32; 2],
@@ -474,6 +490,10 @@ pub struct ToolOptions {
     pub spot_type: String,
     /// Patch: source (repair the selection) | destination (repair where it is dragged).
     pub patch_mode: String,
+    /// Patch: Content-Aware instead of Normal, with its Structure 1..7 and Color 0..10.
+    pub patch_content_aware: bool,
+    pub patch_structure: f32,
+    pub patch_color: f32,
     /// Content-Aware Move: move | extend, Structure 1..7, Color 0..10.
     pub cam_mode: String,
     pub cam_structure: f32,
@@ -497,6 +517,8 @@ pub struct ToolOptions {
     /// radius, polygon sides, line weight.
     pub shape_fill: bool,
     pub stroke_width: f32,
+    #[serde(default)]
+    pub shape_stroke: crate::shape_stroke_ui::StrokeOptions,
     pub corner_radius: f32,
     pub polygon_sides: u32,
     pub line_weight: f32,
@@ -521,6 +543,17 @@ pub struct ToolOptions {
     pub crop_ratio: String,
     #[serde(default = "yes")]
     pub crop_delete: bool,
+    /// Crop W x H x Resolution (`crop_ratio` = "whr", #2443): width and height as typed lengths
+    /// with their unit ("4 in", "1024 px"; empty = unset), the resolution ("" = the document's)
+    /// and its unit ("px/in" or "px/cm"). See `crop_size`.
+    #[serde(default)]
+    pub crop_width: String,
+    #[serde(default)]
+    pub crop_height: String,
+    #[serde(default)]
+    pub crop_resolution: String,
+    #[serde(default = "default_crop_resolution_unit")]
+    pub crop_resolution_unit: String,
     /// Crop overlay (#1919): the guide in the crop box, when it shows and its orientation
     /// (Photoshop's defaults: Rule of Thirds, Auto Show Overlay). See `crop_overlay`.
     #[serde(default)]
@@ -553,6 +586,10 @@ pub struct ToolOptions {
     /// Eraser tool › Pressure for Opacity. Independent of the brush/pen.
     #[serde(default)]
     pub eraser_pressure_opacity: bool,
+    /// Eraser › Mode: `brush` (soft, anti-aliased) or `pencil` (hard, aliased pixels, through
+    /// `paint.pencil`), as in Photoshop's options bar (#2662).
+    #[serde(default = "default_eraser_mode")]
+    pub eraser_mode: String,
     /// Magnetic Lasso: detection width (px, 1..256), edge contrast (%, 1..100), how often it
     /// fastens points by itself (0..100), and whether pen pressure narrows the width.
     pub magnetic_width: f32,
@@ -582,8 +619,16 @@ fn yes() -> bool {
     true
 }
 
+fn default_crop_resolution_unit() -> String {
+    crate::crop_size::PX_PER_IN.into()
+}
+
 fn default_move_target() -> String {
     "layer".into()
+}
+
+fn default_eraser_mode() -> String {
+    "brush".into()
 }
 
 fn default_marquee_style() -> String {
@@ -639,6 +684,9 @@ impl Default for ToolOptions {
             clone_sample: "current".into(),
             spot_type: "contentAware".into(),
             patch_mode: "source".into(),
+            patch_content_aware: false,
+            patch_structure: 4.0,
+            patch_color: 0.0,
             cam_mode: "move".into(),
             cam_structure: 4.0,
             cam_color: 0.0,
@@ -654,6 +702,7 @@ impl Default for ToolOptions {
             vector_mode: "path".into(),
             shape_fill: true,
             stroke_width: 0.0,
+            shape_stroke: Default::default(),
             corner_radius: 0.0,
             polygon_sides: 5,
             line_weight: 3.0,
@@ -665,6 +714,10 @@ impl Default for ToolOptions {
             move_show_transform: false,
             crop_ratio: String::new(),
             crop_delete: true,
+            crop_width: String::new(),
+            crop_height: String::new(),
+            crop_resolution: String::new(),
+            crop_resolution_unit: default_crop_resolution_unit(),
             crop_overlay: Default::default(),
             crop_overlay_show: Default::default(),
             crop_overlay_orientation: 0,
@@ -678,6 +731,7 @@ impl Default for ToolOptions {
             pencil_auto_erase: false,
             eraser_pressure_size: true,
             eraser_pressure_opacity: false,
+            eraser_mode: default_eraser_mode(),
             magnetic_width: 10.0,
             magnetic_contrast: 10.0,
             magnetic_frequency: 57.0,
@@ -837,6 +891,10 @@ pub struct ColorPanelState {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct UiState {
     pub tool: Tool,
+    /// The last tool used in each shortcut group (the tools sharing a key, [`Tool::key`]), at most
+    /// one per group: the group's key brings it back, as in Photoshop (#2608).
+    #[serde(default)]
+    pub group_tools: Vec<Tool>,
     /// Recently opened file paths, most-recent first (File › Open Recent). Capped; de-duplicated.
     #[serde(default)]
     pub recent_files: Vec<String>,
@@ -877,6 +935,10 @@ pub struct UiState {
     /// The Brush Preset picker's preset list: search, collapsed groups, view, a rename in progress.
     #[serde(default = "crate::brush_picker::list_state")]
     pub brush_picker_list: crate::brush_panel::BrushesPanelState,
+    /// The Brush Preset picker's content size, once its corner grip was dragged
+    /// ([`crate::brush_picker::DEFAULT_SIZE`] before that).
+    #[serde(default)]
+    pub brush_picker_size: Option<[f32; 2]>,
     /// Layers under the pointer, listed by a right-click on the canvas with the Move tool or
     /// ⌘/Ctrl+right-click with any tool (`layer_pick_ui`, #307).
     #[serde(default)]
@@ -894,6 +956,8 @@ pub struct UiState {
     /// Pen path under construction.
     #[serde(default)]
     pub pen: Option<crate::vector_ui::PenPath>,
+    #[serde(default)]
+    pub stroke_editor: Option<crate::shape_stroke_ui::StrokeEditor>,
     /// Direct Selection tool: selected anchors and the drag in progress (#790).
     #[serde(default)]
     pub direct_selection: crate::direct_select::DirectSelection,
@@ -988,6 +1052,9 @@ pub struct UiState {
     /// Pending GPU fallback warning, visible to automation.
     #[serde(default)]
     pub gpu_fallback_notice: Option<String>,
+    /// A keyboard shortcut set found at first launch, waiting for Import / Don't Import.
+    #[serde(default)]
+    pub kys_offer: Option<crate::kys_import::Offer>,
     /// Documents (ids) whose slow full refresh on the CPU compositor has had its notice.
     #[serde(default)]
     pub slow_refresh_noticed: Vec<u64>,
@@ -1004,6 +1071,7 @@ impl Default for UiState {
     fn default() -> Self {
         Self {
             tool: Tool::Brush,
+            group_tools: Vec::new(),
             recent_files: Vec::new(),
             text_edit: None,
             type_transform: None,
@@ -1014,6 +1082,7 @@ impl Default for UiState {
             vector_mask_target: false,
             brush_picker: None,
             brush_picker_list: crate::brush_picker::list_state(),
+            brush_picker_size: None,
             layer_menu: None,
             canvas_tool_menu: None,
             brush_tool: Tool::Brush,
@@ -1033,6 +1102,7 @@ impl Default for UiState {
             shell: Default::default(),
             layer_filter: Vec::new(),
             pen: None,
+            stroke_editor: None,
             direct_selection: Default::default(),
             selected_path: None,
             panels: Panels::default(),
@@ -1060,6 +1130,7 @@ impl Default for UiState {
             status_error: false,
             notices: Vec::new(),
             gpu_fallback_notice: None,
+            kys_offer: None,
             slow_refresh_noticed: Vec::new(),
             chrome: Default::default(),
             camera_raw_scope: Default::default(),
@@ -1069,6 +1140,20 @@ impl Default for UiState {
 }
 
 impl UiState {
+    /// Records the current tool as the last one used in its shortcut group.
+    pub fn remember_group_tool(&mut self) {
+        let tool = self.tool;
+        if !self.group_tools.contains(&tool) {
+            self.group_tools.retain(|t| t.key() != tool.key());
+            self.group_tools.push(tool);
+        }
+    }
+
+    /// The last tool used in the shortcut group of `key`, if any.
+    pub fn group_tool(&self, key: char) -> Option<Tool> {
+        self.group_tools.iter().copied().find(|t| t.key() == key)
+    }
+
     pub fn alloc_id(&mut self) -> u64 {
         let id = self.next_id;
         self.next_id += 1;
@@ -1114,7 +1199,10 @@ mod tests {
         assert!(!Tool::RedEye.is_brushlike());
         assert_eq!(Tool::from_name("patternStamp"), Some(Tool::PatternStamp));
         assert_eq!(Tool::from_name("Pattern Stamp Tool"), Some(Tool::PatternStamp));
-        assert_eq!(Tool::ALL.len(), 52);
+        assert_eq!(Tool::ALL.len(), 55);
+        assert_eq!(Tool::from_name("Remove Tool"), Some(Tool::Remove));
+        assert_eq!(Tool::Remove.key(), 'J');
+        assert!(Tool::Remove.is_brushlike());
         assert_eq!(Tool::from_name("RotateView"), Some(Tool::RotateView));
         assert_eq!(Tool::from_name("Rotate View Tool"), Some(Tool::RotateView));
         assert_eq!(Tool::RotateView.key(), 'R');
