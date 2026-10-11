@@ -3,8 +3,8 @@
 //! On a mouse, a press-drag reorders the row (Photoshop desktop). On touch or pen the same
 //! gesture must scroll the list: a single finger drag is scrolling. Reorder is armed only by a
 //! double-press that stays held (tap, then press-and-hold on the same row), after which a drag
-//! moves the item. Channels / swatches / paths already use [`Sense::click`] so they scroll; this
-//! gate is for rows that otherwise take [`Sense::click_and_drag`].
+//! moves the item. Used by layer/Actions rows and by the preset browser (Swatches grid/list,
+//! Gradients, Patterns, Styles, Shapes) wherever cells take [`Sense::click_and_drag`].
 
 use egui::{Context, Id, Pos2, Response, Sense};
 
@@ -131,5 +131,27 @@ mod tests {
         assert!(!prefers_scroll(PointerSource::Mouse));
         assert!(prefers_scroll(PointerSource::Touch));
         assert_eq!(row_sense(&ctx, PointerSource::Mouse, item), Sense::click_and_drag());
+    }
+
+    #[test]
+    fn preset_grid_cell_uses_same_gate_as_list_rows() {
+        // Swatches (and Gradients/Patterns) share this gate for grid cells and list rows.
+        let ctx = Context::default();
+        let cell = Id::new(("swatches", 0usize, 3usize));
+        assert_eq!(row_sense(&ctx, PointerSource::Touch, cell), Sense::click());
+        assert_eq!(row_sense(&ctx, PointerSource::Pen, cell), Sense::click());
+        assert_eq!(row_sense(&ctx, PointerSource::Mouse, cell), Sense::click_and_drag());
+        ctx.data_mut(|d| {
+            d.insert_temp(
+                Id::new(GATE),
+                Gate {
+                    last_click: Some((cell, 1.0, pos2(8.0, 8.0))),
+                    armed: Some(cell),
+                },
+            );
+        });
+        assert!(is_armed(&ctx, cell));
+        assert_eq!(row_sense(&ctx, PointerSource::Touch, cell), Sense::click_and_drag());
+        assert_eq!(row_sense(&ctx, PointerSource::Touch, Id::new(("swatches", 0usize, 4usize))), Sense::click());
     }
 }

@@ -7,6 +7,7 @@
 //! preset selects it, double-clicking or dragging it onto the canvas applies it. Every action is
 //! an engine command (`gradient.presets.*`, `pattern.presets.*`, `style.presets.*`,
 //! `shape.presets.*`, `tool.presets.*`, `cloneSource.*`); this module only draws and dispatches.
+//! On touch/pen, grid and list cells scroll by default; drag arms after a double-press that stays held.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -279,6 +280,8 @@ pub(crate) struct Place<'a> {
     pub(crate) canvas: Rect,
     pub(crate) max_h: f32,
     pub(crate) new_tip: &'a str,
+    /// Mouse keeps press-drag reorder; touch/pen scroll unless double-press-and-hold.
+    pub(crate) pointer: crate::stylus::PointerSource,
 }
 
 pub(crate) fn browser(
@@ -290,7 +293,7 @@ pub(crate) fn browser(
     thumb: &mut dyn FnMut(&egui::Ui, Rect, usize, usize),
 ) -> Vec<Ev> {
     let t = Tokens::get(ui.ctx());
-    let Place { canvas, max_h, new_tip } = place;
+    let Place { canvas, max_h, new_tip, pointer } = place;
     let mut ev = Vec::new();
     let size = *st.sizes.get(panel).unwrap_or(&40.0);
     let list = size <= MIN_THUMB + 0.5;
@@ -369,7 +372,10 @@ pub(crate) fn browser(
             for (ii, it) in g.items.iter().enumerate() {
                 let (cx, cy) = ((ii % cols) as f32, (ii / cols) as f32);
                 let r = Rect::from_min_size(area.min + vec2(pad + cx * (cell.x + gap), cy * (cell.y + gap)), cell);
-                let resp = ui.interact(r, ui.id().with((panel, gi, ii)), Sense::click_and_drag());
+                let item = ui.id().with((panel, gi, ii));
+                let sense = crate::list_drag::row_sense(ui.ctx(), pointer, item);
+                let resp = ui.interact(r, item, sense);
+                crate::list_drag::after_row(ui.ctx(), pointer, item, &resp);
                 resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &it.name));
                 let is_sel = selected.as_deref() == Some(&it.key);
                 if list {
@@ -535,7 +541,7 @@ pub fn gradients_panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let canvas = canvas_drop_rect(app);
     let mut st = std::mem::take(&mut app.ui.presets_ui);
     let max_h = (ui.available_height() - 40.0).clamp(90.0, 260.0);
-    let events = browser(ui, &mut st, "gradients", &groups, Place { canvas, max_h, new_tip: tl!("Create new gradient") }, &mut |ui, r, gi, ii| {
+    let events = browser(ui, &mut st, "gradients", &groups, Place { canvas, max_h, new_tip: tl!("Create new gradient"), pointer: app.stylus.feed.source() }, &mut |ui, r, gi, ii| {
         let stops = groups_src[gi].items[ii].resolve(fg, bg);
         paint_gradient(ui, r, &stops);
     });
@@ -584,7 +590,7 @@ pub fn patterns_panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let max_h = (ui.available_height() - 40.0).clamp(90.0, 280.0);
     let ctx = ui.ctx().clone();
     let events =
-        browser(ui, &mut st, "patterns", &groups, Place { canvas, max_h, new_tip: tl!("Create new pattern from the selection") }, &mut |ui, r, gi, ii| {
+        browser(ui, &mut st, "patterns", &groups, Place { canvas, max_h, new_tip: tl!("Create new pattern from the selection"), pointer: app.stylus.feed.source() }, &mut |ui, r, gi, ii| {
             let tex = pattern_texture(&ctx, &pats[gi][ii]);
             ui.painter().image(tex.id(), r, Rect::from_min_max(Pos2::ZERO, pos2(1.0, 1.0)), Color32::WHITE);
         });
@@ -688,7 +694,7 @@ pub fn styles_panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         &mut st,
         "styles",
         &groups,
-        Place { canvas, max_h: 300.0, new_tip: tl!("Create new style from the selected layer") },
+        Place { canvas, max_h: 300.0, new_tip: tl!("Create new style from the selected layer"), pointer: app.stylus.feed.source() },
         &mut |ui, r, gi, ii| {
             ui.painter().rect_filled(r, 2.0, t.field);
             ui.painter().image(texes[gi][ii].id(), r, Rect::from_min_max(Pos2::ZERO, pos2(1.0, 1.0)), Color32::WHITE);
@@ -732,7 +738,7 @@ pub fn shapes_panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         &mut st,
         "shapes",
         &groups,
-        Place { canvas, max_h: 300.0, new_tip: tl!("Create new shape from the current path") },
+        Place { canvas, max_h: 300.0, new_tip: tl!("Create new shape from the current path"), pointer: app.stylus.feed.source() },
         &mut |ui, r, gi, ii| {
             let tex = shape_texture(&ctx, &src[gi].items[ii]);
             ui.painter().image(tex.id(), r.shrink(2.0), Rect::from_min_max(Pos2::ZERO, pos2(1.0, 1.0)), t.text);

@@ -69,7 +69,7 @@ pub fn panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     st.sizes.entry(PANEL.to_string()).or_insert(DEFAULT_SIZE);
     let max_h = (ui.available_height() - 30.0).max(60.0);
     let card_border = crate::theme::Tokens::get(ui.ctx()).card_border;
-    let events = browser(ui, &mut st, PANEL, &groups, Place { canvas, max_h, new_tip: tl!("Create new swatch") }, &mut |ui, r: Rect, gi, ii| {
+    let events = browser(ui, &mut st, PANEL, &groups, Place { canvas, max_h, new_tip: tl!("Create new swatch"), pointer: app.stylus.feed.source() }, &mut |ui, r: Rect, gi, ii| {
         let c = table.get(gi).and_then(|g| g.get(ii)).copied().unwrap_or(Color32::GRAY);
         ui.painter().rect_filled(r, CornerRadius::same(2), c);
         ui.painter().rect_stroke(r, CornerRadius::same(2), egui::Stroke::new(1.0, card_border), egui::StrokeKind::Inside);
@@ -376,5 +376,42 @@ mod tests {
         let out = written.lock().unwrap();
         assert_eq!(out[0].0, "out/Swatches.ase");
         assert!(out[0].1.starts_with(b"ASEF"));
+    }
+
+
+    /// Default swatch size is a grid. Touch/pen cells use click-only sense until double-press-hold.
+    #[test]
+    fn touch_grid_defers_drag_until_double_press_hold() {
+        use crate::list_drag;
+        use crate::stylus::PointerSource;
+        use egui::Sense;
+
+        let app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        app.stylus.feed.report(PointerSource::Touch, None);
+        assert!(DEFAULT_SIZE > 20.5, "default thumb size is grid, not list");
+        let mut h = Harness::builder().with_size(vec2(300.0, 400.0)).build_ui_state(|ui, app: &mut PhotocraftApp| panel(app, ui), app);
+        h.run_steps(2);
+        assert_eq!(h.state().stylus.feed.source(), PointerSource::Touch);
+
+        let p = first_cell(&h);
+        // First tap selects and records last_click for the gate.
+        click(&mut h, p, Modifiers::NONE);
+        assert_eq!(h.state().ui.presets_ui.selected.get(PANEL).map(String::as_str), Some("Black"));
+
+        // Second press held on the same cell arms reorder for this press.
+        h.hover_at(p);
+        h.event(egui::Event::PointerButton { pos: p, button: egui::PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE });
+        h.run_steps(2);
+        // Move while held: with the gate armed, Sense::click_and_drag allows a drag gesture.
+        let away = p + vec2(48.0, 0.0);
+        h.event(egui::Event::PointerMoved(away));
+        h.run_steps(3);
+        h.event(egui::Event::PointerButton { pos: away, button: egui::PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE });
+        h.run_steps(2);
+
+        // After release, touch again prefers scroll (gate disarms).
+        let probe = egui::Id::new(("swatches", 0usize, 0usize));
+        assert_eq!(list_drag::row_sense(&h.ctx, PointerSource::Touch, probe), Sense::click());
+        assert_eq!(list_drag::row_sense(&h.ctx, PointerSource::Mouse, probe), Sense::click_and_drag());
     }
 }
