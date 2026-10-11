@@ -550,7 +550,10 @@ fn pen_hover_move_sets_hover_pos_without_pressing() {
             ..Default::default()
         },
         |ui| {
-            assert_eq!(ui.input(|i| i.pointer.hover_pos()), Some(egui::pos2(100., 50.)));
+            assert_eq!(
+                ui.input(|i| i.pointer.hover_pos()),
+                Some(egui::pos2(100., 50.))
+            );
             assert!(!ui.input(|i| i.pointer.any_down()));
         },
     );
@@ -577,7 +580,14 @@ fn pen_hover_move_sets_hover_pos_without_pressing() {
     );
 }
 
-fn push_pen(state: &mut super::State, action: i32, x: f32, y: f32, pressure: f32, events: &mut Vec<egui::Event>) {
+fn push_pen(
+    state: &mut super::State,
+    action: i32,
+    x: f32,
+    y: f32,
+    pressure: f32,
+    events: &mut Vec<egui::Event>,
+) {
     let packet = format!(
         r#"{{"kind":"pointer","source":"pen","action":{action},"x":{x},"y":{y},"sample":{{"pressure":{pressure},"tiltX":0,"tiltY":0,"eraser":false}}}}"#
     );
@@ -598,69 +608,40 @@ fn push_mouse(state: &mut super::State, x: f32, y: f32, events: &mut Vec<egui::E
     );
 }
 
-/// Hover A → stroke to B → lift at B → post-lift echo A must keep tip at last stroke B.
-#[test]
-fn pen_lift_holds_tip_at_last_stroke_not_hover_start() {
-    let mut state = super::State::default();
-    let mut events = vec![];
-    let scale = 2.0;
-    let a = (200.0_f32, 100.0_f32); // physical px → egui (100, 50)
-    let b = (600.0_f32, 300.0_f32); // physical px → egui (300, 150)
-    let a_pt = egui::pos2(a.0 / scale, a.1 / scale);
-    let b_pt = egui::pos2(b.0 / scale, b.1 / scale);
-
-    push_pen(&mut state, 2, a.0, a.1, 0., &mut events);
-    events.clear();
-    push_pen(&mut state, 0, a.0, a.1, 0.4, &mut events);
-    push_pen(&mut state, 2, 400., 200., 0.5, &mut events);
-    push_pen(&mut state, 1, b.0, b.1, 0., &mut events);
-    assert!(
-        events.iter().any(|e| matches!(e, egui::Event::PointerMoved(p) if *p == b_pt)),
-        "lift must report tip at last stroke B: {events:?}"
-    );
-    events.clear();
-
-    // C++/ArkTS proximity leave must not clear the tip while held at last stroke.
+fn proximity(state: &mut super::State, kind: &str, events: &mut Vec<egui::Event>) {
     state.push(
         super::Input {
-            kind: "hover_leave".into(),
-            x: a.0,
-            y: a.1,
+            kind: kind.into(),
             ..Default::default()
         },
-        scale,
-        &mut events,
+        2.,
+        events,
     );
-    assert!(events.is_empty(), "post-lift hover_leave must be ignored: {events:?}");
+}
 
-    // Multi-frame stale echoes at A (and mouse leftovers) stay at B.
-    for i in 0..5 {
-        push_pen(&mut state, 2, a.0, a.1, 0., &mut events);
-        assert!(
-            matches!(events.as_slice(), [egui::Event::PointerMoved(p)] if *p == b_pt),
-            "frame {i}: echo A must keep tip at last stroke B, got {events:?}"
-        );
-        events.clear();
-    }
-    push_mouse(&mut state, a.0, a.1, &mut events);
-    assert!(
-        matches!(events.as_slice(), [egui::Event::PointerMoved(p)] if *p == b_pt),
-        "mouse echo at A must stay at B: {events:?}"
-    );
-    events.clear();
-
+#[test]
+fn hover_leave_hides_preview_until_next_pen_hover_without_entry_notification() {
+    let mut state = super::State::default();
+    let mut events = vec![];
     let ctx = egui::Context::default();
+    push_pen(&mut state, 2, 200., 100., 0., &mut events);
+    push_pen(&mut state, 2, 600., 300., 0., &mut events);
     frame(
         &ctx,
         egui::RawInput {
-            events: vec![egui::Event::PointerMoved(b_pt)],
+            events: std::mem::take(&mut events),
             ..Default::default()
         },
-        |ui| {
-            assert_eq!(ui.input(|i| i.pointer.hover_pos()), Some(b_pt));
-        },
+        |_| {},
     );
-    push_pen(&mut state, 2, a.0, a.1, 0., &mut events);
+    // Neither native nor ArkTS leave coordinates may restore the old cursor.
+    proximity(&mut state, "hover_leave", &mut events);
+    proximity(&mut state, "hover_leave", &mut events);
+    assert!(
+        events
+            .iter()
+            .all(|event| matches!(event, egui::Event::PointerGone))
+    );
     frame(
         &ctx,
         egui::RawInput {
@@ -668,72 +649,425 @@ fn pen_lift_holds_tip_at_last_stroke_not_hover_start() {
             ..Default::default()
         },
         |ui| {
-            assert_eq!(
-                ui.input(|i| i.pointer.hover_pos()),
-                Some(b_pt),
-                "egui hover_pos must remain at last stroke B after echo A"
-            );
-            assert_ne!(ui.input(|i| i.pointer.hover_pos()), Some(a_pt));
+            assert!(ui.input(|i| i.pointer.hover_pos().is_none()));
+            assert!(!ui.input(|i| i.pointer.any_down()));
         },
     );
-
-    // Even a far hover stays pinned until the next pen-down / focus blur.
-    push_pen(&mut state, 2, 700., 400., 0., &mut events);
+    // Repeat/echo the old coordinates after leave without restoring the tip.
+    push_pen(&mut state, 2, 600., 300., 0., &mut events);
+    push_pen(&mut state, 2, 200., 100., 0., &mut events);
+    assert!(events.is_empty());
+    assert_eq!(
+        state.cursor_icon(egui::CursorIcon::Default),
+        egui::CursorIcon::None
+    );
+    // Motion resumes even if there is no new onHover(true).
+    push_pen(&mut state, 2, 640., 340., 0., &mut events);
     assert!(
-        matches!(events.as_slice(), [egui::Event::PointerMoved(p)] if *p == b_pt),
-        "post-lift hover stays at last stroke B: {events:?}"
+        matches!(events.as_slice(), [egui::Event::PointerMoved(p)] if *p == egui::pos2(320., 170.))
     );
 }
 
 #[test]
-fn focus_blur_clears_stroke_hold() {
+fn mouse_motion_restores_preview_after_pen_hover_leave() {
     let mut state = super::State::default();
     let mut events = vec![];
+    push_pen(&mut state, 2, 600., 300., 0., &mut events);
+    proximity(&mut state, "hover_leave", &mut events);
+    events.clear();
+    push_mouse(&mut state, 800., 400., &mut events);
+    assert!(
+        matches!(events.as_slice(), [egui::Event::PointerMoved(p)] if *p == egui::pos2(400., 200.))
+    );
+    assert_eq!(state.feed.source(), super::PointerSource::Mouse);
+    assert_eq!(
+        state.cursor_icon(egui::CursorIcon::Crosshair),
+        egui::CursorIcon::Crosshair
+    );
+    events.clear();
+    // Pen hover can take over again without a proximity entry notification.
+    push_pen(&mut state, 2, 900., 450., 0., &mut events);
+    assert!(events.is_empty());
+    push_pen(&mut state, 2, 920., 470., 0., &mut events);
+    assert!(
+        matches!(events.as_slice(), [egui::Event::PointerMoved(p)] if *p == egui::pos2(460., 235.))
+    );
+    assert_eq!(state.feed.source(), super::PointerSource::Pen);
+}
+
+#[test]
+fn pen_lift_releases_contact_then_hides_preview_until_new_input() {
+    let mut state = super::State::default();
+    let mut events = vec![];
+    let ctx = egui::Context::default();
+    push_pen(&mut state, 0, 200., 100., 0.4, &mut events);
+    push_pen(&mut state, 2, 600., 300., 0.5, &mut events);
+    frame(
+        &ctx,
+        egui::RawInput {
+            events: std::mem::take(&mut events),
+            ..Default::default()
+        },
+        |_| {},
+    );
+    push_pen(&mut state, 1, 600., 300., 0., &mut events);
+    assert!(matches!(
+        events.as_slice(),
+        [
+            egui::Event::PointerMoved(_),
+            egui::Event::PointerButton { pressed: false, .. },
+            egui::Event::PointerGone
+        ]
+    ));
+    assert!(!state.pen_down);
+    assert!(state.pressed.is_none());
+    frame(
+        &ctx,
+        egui::RawInput {
+            events: std::mem::take(&mut events),
+            ..Default::default()
+        },
+        |ui| {
+            assert!(ui.input(|i| i.pointer.hover_pos().is_none()));
+            assert!(!ui.input(|i| i.pointer.any_down()));
+        },
+    );
+    // Lifting into hover need not produce another proximity entry notification.
+    push_pen(&mut state, 2, 600., 300., 0., &mut events);
+    assert!(events.is_empty());
+    push_pen(&mut state, 2, 800., 400., 0., &mut events);
+    assert!(
+        matches!(events.as_slice(), [egui::Event::PointerMoved(p)] if *p == egui::pos2(400., 200.))
+    );
+}
+
+#[test]
+fn pen_lift_stationary_and_cached_moves_do_not_restore_preview() {
+    let mut state = super::State::default();
+    let mut events = vec![];
+    push_mouse(&mut state, 40., 80., &mut events);
     push_pen(&mut state, 2, 200., 100., 0., &mut events);
+    push_pen(&mut state, 0, 200., 100., 0.5, &mut events);
+    push_pen(&mut state, 2, 600., 300., 0.5, &mut events);
+    push_pen(&mut state, 1, 600., 300., 0., &mut events);
+    events.clear();
+    assert_eq!(
+        state.cursor_icon(egui::CursorIcon::Default),
+        egui::CursorIcon::None
+    );
+    for _ in 0..20 {
+        for (x, y) in [(600., 300.), (601., 301.), (200., 100.)] {
+            push_pen(&mut state, 2, x, y, 0., &mut events);
+            assert!(
+                events.is_empty(),
+                "stationary/replayed pen coordinates must stay hidden: {events:?}"
+            );
+        }
+        push_mouse(&mut state, 40., 80., &mut events);
+        assert!(
+            events.is_empty(),
+            "cached mouse coordinates must stay hidden: {events:?}"
+        );
+        state.push(
+            super::Input {
+                kind: "pointer".into(),
+                action: 1,
+                x: 40.,
+                y: 80.,
+                ..Default::default()
+            },
+            2.,
+            &mut events,
+        );
+        assert!(
+            events.is_empty(),
+            "an unmatched mouse release must not restore preview"
+        );
+    }
+    // No proximity entry notification is required to resume actual motion.
+    push_pen(&mut state, 2, 620., 320., 0., &mut events);
+    assert!(
+        matches!(events.as_slice(), [egui::Event::PointerMoved(p)] if *p == egui::pos2(310., 160.))
+    );
+    assert_eq!(
+        state.cursor_icon(egui::CursorIcon::Default),
+        egui::CursorIcon::Default
+    );
+}
+
+#[test]
+fn first_post_lift_hover_is_an_anchor_and_mouse_can_resume_independently() {
+    let mut state = super::State::default();
+    let mut events = vec![];
     push_pen(&mut state, 0, 200., 100., 0.5, &mut events);
     push_pen(&mut state, 1, 600., 300., 0., &mut events);
     events.clear();
+    // Hover coordinates can shift on transition even without horizontal motion.
+    for _ in 0..20 {
+        push_pen(&mut state, 2, 700., 400., 0., &mut events);
+        push_pen(&mut state, 2, 701., 401., 0., &mut events);
+        assert!(events.is_empty());
+        assert_eq!(
+            state.cursor_icon(egui::CursorIcon::Default),
+            egui::CursorIcon::None
+        );
+    }
+    push_mouse(&mut state, 900., 500., &mut events);
+    assert!(
+        matches!(events.as_slice(), [egui::Event::PointerMoved(p)] if *p == egui::pos2(450., 250.))
+    );
+    assert_eq!(
+        state.cursor_icon(egui::CursorIcon::Default),
+        egui::CursorIcon::Default
+    );
+    events.clear();
+    push_pen(&mut state, 2, 700., 400., 0., &mut events);
+    assert!(
+        events.is_empty(),
+        "a replayed pen position must not replace the real mouse"
+    );
+    push_pen(&mut state, 2, 720., 420., 0., &mut events);
+    assert!(
+        matches!(events.as_slice(), [egui::Event::PointerMoved(p)] if *p == egui::pos2(360., 210.))
+    );
+}
+
+#[test]
+fn pointer_cancel_keeps_pen_preview_hidden_but_focus_blur_restores_normal_cursor() {
+    for source in [super::PointerSource::Pen, super::PointerSource::Mouse] {
+        let mut state = super::State::default();
+        let mut events = vec![];
+        push_pen(&mut state, 0, 200., 100., 0.5, &mut events);
+        push_pen(&mut state, 1, 600., 300., 0., &mut events);
+        events.clear();
+        state.push(
+            super::Input {
+                kind: "pointer".into(),
+                action: 3,
+                source,
+                x: 600.,
+                y: 300.,
+                ..Default::default()
+            },
+            2.,
+            &mut events,
+        );
+        assert!(
+            events
+                .iter()
+                .any(|event| matches!(event, egui::Event::PointerGone))
+        );
+        events.clear();
+        for _ in 0..20 {
+            push_pen(&mut state, 2, 600., 300., 0., &mut events);
+            assert!(events.is_empty());
+            assert_eq!(
+                state.cursor_icon(egui::CursorIcon::Default),
+                egui::CursorIcon::None
+            );
+        }
+        proximity(&mut state, "blur", &mut events);
+        assert_eq!(
+            state.cursor_icon(egui::CursorIcon::Default),
+            egui::CursorIcon::Default
+        );
+    }
+}
+
+#[test]
+fn next_pen_down_restores_preview_and_contact_hover_leave_does_not_end_stroke() {
+    let mut state = super::State::default();
+    let mut events = vec![];
+    push_pen(&mut state, 2, 200., 100., 0., &mut events);
+    proximity(&mut state, "hover_leave", &mut events);
+    events.clear();
+    push_pen(&mut state, 0, 800., 400., 0.5, &mut events);
+    assert!(
+        matches!(events.as_slice(), [egui::Event::PointerMoved(p), egui::Event::PointerButton { pressed: true, .. }] if *p == egui::pos2(400., 200.))
+    );
+    assert_eq!(
+        state.cursor_icon(egui::CursorIcon::Crosshair),
+        egui::CursorIcon::Crosshair
+    );
+    events.clear();
+    proximity(&mut state, "hover_leave", &mut events);
+    push_pen(&mut state, 2, 200., 100., 0., &mut events);
+    assert!(
+        events.is_empty(),
+        "hover notifications during contact must not end/move a stroke"
+    );
+    assert!(state.pen_down);
+    assert!(state.pressed.is_some());
+    push_pen(&mut state, 2, 900., 450., 0.5, &mut events);
+    assert!(
+        matches!(events.as_slice(), [egui::Event::PointerMoved(p)] if *p == egui::pos2(450., 225.))
+    );
+}
+
+#[test]
+fn hover_leave_preserves_keyboard_modifiers_and_blur_hides_preview() {
+    let mut state = super::State::default();
+    let mut events = vec![];
     state.push(
         super::Input {
-            kind: "blur".into(),
+            kind: "key".into(),
+            ctrl: true,
             ..Default::default()
         },
         2.,
         &mut events,
     );
+    push_pen(&mut state, 2, 200., 100., 0., &mut events);
+    events.clear();
+    proximity(&mut state, "hover_leave", &mut events);
+    assert!(matches!(events.as_slice(), [egui::Event::PointerGone]));
+    assert!(state.modifiers.ctrl);
+    events.clear();
+    proximity(&mut state, "blur", &mut events);
     assert!(
-        events.iter().any(|e| matches!(e, egui::Event::PointerGone)),
-        "focus blur must PointerGone: {events:?}"
+        events
+            .iter()
+            .any(|event| matches!(event, egui::Event::PointerGone))
+    );
+    assert!(!state.modifiers.ctrl);
+    assert_eq!(
+        state.cursor_icon(egui::CursorIcon::Default),
+        egui::CursorIcon::Default
     );
     events.clear();
-    // After focus blur, hover A applies normally again.
-    push_pen(&mut state, 2, 200., 100., 0., &mut events);
+    push_pen(&mut state, 2, 800., 400., 0., &mut events);
     assert!(
-        matches!(events.as_slice(), [egui::Event::PointerMoved(p)] if *p == egui::pos2(100., 50.)),
-        "after focus blur, hover A applies normally: {events:?}"
+        matches!(events.as_slice(), [egui::Event::PointerMoved(p)] if *p == egui::pos2(400., 200.))
     );
 }
 
 #[test]
-fn next_pen_down_clears_stroke_hold() {
-    let mut state = super::State::default();
+fn rendered_brush_outline_hides_on_lift_or_leave_and_returns_on_next_hover_or_mouse() {
+    use photocraft_ui_egui::{PhotocraftApp, Services, state::Tool};
+    let ctx = egui::Context::default();
+    let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), Services::default());
+    app.run("file.new", serde_json::json!({"width": 256, "height": 256}))
+        .unwrap();
+    app.ui.tool = Tool::Brush;
+    let render = |app: &mut PhotocraftApp, events: Vec<egui::Event>| {
+        let mut raw = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1200., 800.),
+            )),
+            events,
+            ..Default::default()
+        };
+        app.host_input(&ctx, &mut raw);
+        let _ = ctx.run_logic(&raw, |ctx| app.host_logic(ctx));
+        let mut output = ctx.run_ui(raw, |ui| app.host_ui(ui));
+        output.textures_delta.clear();
+        output
+    };
+    let outline = |output: &egui::FullOutput, pos: egui::Pos2| {
+        output.shapes.iter().any(|s| matches!(&s.shape, egui::epaint::Shape::Circle(c) if c.center == pos && c.stroke.width > 0.))
+    };
+    for _ in 0..4 {
+        render(&mut app, vec![]);
+    }
+    let start = app.last_canvas_rect.center();
+    let end = start + egui::vec2(40., 30.);
+    let revision = app.session.active().unwrap().revision;
+    let mut state = super::State {
+        feed: app.stylus.feed.clone(),
+        ..Default::default()
+    };
     let mut events = vec![];
-    push_pen(&mut state, 2, 200., 100., 0., &mut events);
-    push_pen(&mut state, 0, 200., 100., 0.5, &mut events);
-    push_pen(&mut state, 1, 600., 300., 0., &mut events);
-    events.clear();
-    // Held at B; next down at C unlocks.
-    push_pen(&mut state, 0, 800., 400., 0.5, &mut events);
+    push_pen(&mut state, 2, start.x * 2., start.y * 2., 0., &mut events);
+    render(&mut app, std::mem::take(&mut events));
+    push_pen(&mut state, 2, end.x * 2., end.y * 2., 0., &mut events);
+    assert!(outline(&render(&mut app, std::mem::take(&mut events)), end));
+    proximity(&mut state, "hover_leave", &mut events);
+    let output = render(&mut app, std::mem::take(&mut events));
     assert!(
-        events.iter().any(|e| matches!(e, egui::Event::PointerMoved(p) if *p == egui::pos2(400., 200.))),
-        "next pen-down must move to C: {events:?}"
+        !outline(&output, start) && !outline(&output, end),
+        "leave must hide the brush tip"
     );
-    events.clear();
-    push_pen(&mut state, 1, 800., 400., 0., &mut events);
-    events.clear();
-    push_pen(&mut state, 2, 200., 100., 0., &mut events);
+    assert!(ctx.input(|i| i.pointer.hover_pos().is_none()));
+    // Stationary and cached reports, including a small jitter, stay hidden.
+    for _ in 0..20 {
+        for p in [end, start, end + egui::vec2(0.5, 0.5)] {
+            push_pen(&mut state, 2, p.x * 2., p.y * 2., 0., &mut events);
+            let output = render(&mut app, std::mem::take(&mut events));
+            assert!(ctx.input(|i| i.pointer.hover_pos().is_none()));
+            assert_eq!(
+                state.cursor_icon(output.platform_output.cursor_icon),
+                egui::CursorIcon::None
+            );
+        }
+    }
+    // Actual movement resumes without a separate hover-enter callback.
+    let moved = end + egui::vec2(12., 8.);
+    push_pen(&mut state, 2, moved.x * 2., moved.y * 2., 0., &mut events);
+    assert!(outline(
+        &render(&mut app, std::mem::take(&mut events)),
+        moved
+    ));
+    // Once visible, regular hover tracks even a move back to the old position.
+    push_pen(&mut state, 2, end.x * 2., end.y * 2., 0., &mut events);
+    assert!(outline(&render(&mut app, std::mem::take(&mut events)), end));
+    proximity(&mut state, "hover_leave", &mut events);
+    render(&mut app, std::mem::take(&mut events));
+    let mouse = start + egui::vec2(8., -10.);
+    push_mouse(&mut state, mouse.x * 2., mouse.y * 2., &mut events);
+    assert!(outline(
+        &render(&mut app, std::mem::take(&mut events)),
+        mouse
+    ));
+    assert!(!ctx.input(|i| i.pointer.any_down()));
+    assert_eq!(
+        state.cursor_icon(egui::CursorIcon::Default),
+        egui::CursorIcon::Default
+    );
+    assert_eq!(app.session.active().unwrap().revision, revision);
+
+    // Contact, lift and continued hover while the pen stays in proximity.
+    push_pen(&mut state, 0, start.x * 2., start.y * 2., 0.5, &mut events);
+    render(&mut app, std::mem::take(&mut events));
+    push_pen(&mut state, 2, end.x * 2., end.y * 2., 0.5, &mut events);
+    render(&mut app, std::mem::take(&mut events));
+    push_pen(&mut state, 1, end.x * 2., end.y * 2., 0., &mut events);
+    // Real callbacks may be batched into the very same frame as pen-up.
+    push_pen(&mut state, 2, end.x * 2., end.y * 2., 0., &mut events);
+    let output = render(&mut app, std::mem::take(&mut events));
     assert!(
-        matches!(events.as_slice(), [egui::Event::PointerMoved(p)] if *p == egui::pos2(400., 200.)),
-        "after second stroke, hold is the new last stroke C: {events:?}"
+        !outline(&output, start) && !outline(&output, end),
+        "lift must hide the brush tip"
+    );
+    assert!(ctx.input(|i| i.pointer.hover_pos().is_none()));
+    assert!(!ctx.input(|i| i.pointer.any_down()));
+    assert_eq!(
+        state.cursor_icon(output.platform_output.cursor_icon),
+        egui::CursorIcon::None
+    );
+    let stroke_revision = app.session.active().unwrap().revision;
+    assert!(
+        stroke_revision > revision,
+        "lift must still finish the stroke"
+    );
+    for _ in 0..20 {
+        for p in [end, start, end + egui::vec2(0.5, 0.5)] {
+            push_pen(&mut state, 2, p.x * 2., p.y * 2., 0., &mut events);
+            let output = render(&mut app, std::mem::take(&mut events));
+            assert!(!outline(&output, start) && !outline(&output, end));
+            assert!(ctx.input(|i| i.pointer.hover_pos().is_none()));
+            assert_eq!(
+                state.cursor_icon(output.platform_output.cursor_icon),
+                egui::CursorIcon::None
+            );
+        }
+    }
+    push_pen(&mut state, 2, moved.x * 2., moved.y * 2., 0., &mut events);
+    assert!(outline(&render(&mut app, events), moved));
+    assert!(!ctx.input(|i| i.pointer.any_down()));
+    assert_eq!(
+        app.session.active().unwrap().revision,
+        stroke_revision,
+        "hover must not paint"
     );
 }

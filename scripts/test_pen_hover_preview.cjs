@@ -33,7 +33,7 @@ assert.deepEqual(move, {
   sample: { pressure: 0, tiltX: 0, tiltY: 0, eraser: false }
 }, 'hover must be a move without press and zero pressure');
 
-const leave = JSON.parse(penHoverLeaveMessage(120, 80));
-assert.deepEqual(leave, { kind: 'hover_leave', x: 120, y: 80 });
+const leave = JSON.parse(penHoverLeaveMessage());
+assert.deepEqual(leave, { kind: 'hover_leave' }, 'leave must not replay any cached coordinates');
 assert.equal(typeof moduleShim.exports.isStaleHoverEcho, 'undefined', '#8/#9 echo helper must be gone');
 console.log('pen hover preview encoder ok');

@@ -530,7 +530,9 @@ fn worker(config: Config, rx: mpsc::Receiver<Message>) {
                             initial_textures.append(std::mem::take(&mut output.textures_delta));
                             output.textures_delta = std::mem::take(&mut initial_textures);
                         }
-                        if let Some(icon) = cursor.update(output.platform_output.cursor_icon) {
+                        if let Some(icon) =
+                            cursor.update(input.cursor_icon(output.platform_output.cursor_icon))
+                        {
                             bridge::notify(0, "cursor", &icon, &[]);
                         }
                         if ime::reveal_canvas_caret(&mut app, &output.platform_output) {

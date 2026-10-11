@@ -77,8 +77,6 @@ struct Index {
   private ime: NativeImeAdapter = new NativeImeAdapter((message: string): void => native.input(message));
   private printing: NativePrintAdapter = new NativePrintAdapter(this.context,
     (message: string): void => { if (this.alive) { this.failure = message; } });
-  private lastHoverX: number = 0;
-  private lastHoverY: number = 0;
   private drainOpens(): void {
     for (let file of takeOpens()) {
       let name = file.name;
@@ -290,14 +288,12 @@ struct Index {
     // onHoverMove reports component-local vp; the native bridge expects physical pixels.
     let xPx = this.getUIContext().vp2px(x);
     let yPx = this.getUIContext().vp2px(y);
-    this.lastHoverX = xPx;
-    this.lastHoverY = yPx;
     native.input(penHoverMoveMessage(xPx, yPx));
   }
   private sendPenHoverLeave(isHover: boolean): void {
-    // Proximity leave (not focus blur). Native holds the tip at the last stroke point.
+    // Hide on leave; actual hover motion resumes preview without an entry gate.
     if (isHover || !this.alive || !this.initialized) { return; }
-    native.input(penHoverLeaveMessage(this.lastHoverX, this.lastHoverY));
+    native.input(penHoverLeaveMessage());
   }
   build() {
     Stack() {

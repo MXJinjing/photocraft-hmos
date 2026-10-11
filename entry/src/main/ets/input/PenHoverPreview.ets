@@ -16,12 +16,9 @@ export class PenHoverMove {
   sample: PenHoverSample = new PenHoverSample();
 }
 
-// Distinct from focus blur so post-lift proximity leave can keep the tip at the
-// last stroke point (C++ XComponent Hover uses the same kind).
+// Leave hides the brush preview without changing keyboard focus/modifiers.
 export class PenHoverLeave {
   kind: string = 'hover_leave';
-  x: number = 0;
-  y: number = 0;
 }
 
 export function penHoverMoveMessage(xPx: number, yPx: number): string {
@@ -31,11 +28,8 @@ export function penHoverMoveMessage(xPx: number, yPx: number): string {
   return JSON.stringify(message);
 }
 
-export function penHoverLeaveMessage(xPx: number = 0, yPx: number = 0): string {
-  let message = new PenHoverLeave();
-  message.x = xPx;
-  message.y = yPx;
-  return JSON.stringify(message);
+export function penHoverLeaveMessage(): string {
+  return JSON.stringify(new PenHoverLeave());
 }
 
 export function isFiniteHoverPoint(x: number, y: number): boolean {
