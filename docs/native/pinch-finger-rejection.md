@@ -74,5 +74,6 @@ python3 scripts/test_pinch_simulator.py --target 127.0.0.1:5555 --bundle io.gith
 Expected result: `TestFinished-ResultCode: 0` from the runner, followed by
 `PASS` from the Python verifier with revisions `[1,1,1,2]`.
 The runner creates `/data/local/tmp/photocraft-pinch-before.png` and
-`/data/local/tmp/photocraft-pinch-after.png` on the simulator. Export these with
+`/data/local/tmp/photocraft-pinch-after.png` on the simulator, plus
+`/data/local/tmp/photocraft-pinch-pen.png` after the positive-control stroke. Export these with
 `hdc file recv` for visual inspection.

@@ -39,7 +39,7 @@ if len(revisions) != 4 or revisions[:3] != [revisions[0]] * 3 or revisions[3] <=
     raise SystemExit(f'Unexpected document revisions: {revisions}')
 if '"tools.blockFingerInput": Bool(true)' not in process_logs:
     raise SystemExit('Finger blocking was not enabled.')
-for phase in ('before', 'after'):
+for phase in ('before', 'after', 'pen'):
     run('file', 'recv', f'/data/local/tmp/photocraft-pinch-{phase}.png',
         str(args.output_dir / f'{phase}.png'))
 print(f'PASS: 20 OS pinch gestures, 20 staggered-release/echo replays; revisions {revisions}; pen paints.')

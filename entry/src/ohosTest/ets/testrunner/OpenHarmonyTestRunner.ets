@@ -70,6 +70,9 @@ export default class OpenHarmonyTestRunner implements TestRunner {
       native.command('{"id":"document.inspect"}');
       await this.wait(1000);
       await delegator.executeShellCommand('uitest screenCap -p /data/local/tmp/photocraft-pinch-after.png');
+      // Recenter after navigation so the positive-control stroke lands on pixels.
+      native.command('{"id":"view.fitOnScreen"}');
+      await this.wait(500);
       const pen = PointerMatrix.create(1, 3);
       pen.setPoint(0, 0, { x: 1300, y: 1000 });
       pen.setPoint(0, 1, { x: 1320, y: 1010 });
@@ -78,6 +81,7 @@ export default class OpenHarmonyTestRunner implements TestRunner {
       await this.wait(1000);
       native.command('{"id":"document.inspect"}');
       await this.wait(1000);
+      await delegator.executeShellCommand('uitest screenCap -p /data/local/tmp/photocraft-pinch-pen.png');
       await delegator.finishTest('Gestures and staggered-release replays complete; verify document revisions with scripts/test_pinch_simulator.py', 0);
     } catch (error) {
       await delegator.finishTest(`Pinch test failed: ${String(error)}`, 1);
