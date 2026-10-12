@@ -691,6 +691,103 @@ fn two_fingers_can_pinch_zoom() {
 }
 
 #[test]
+fn consecutive_two_finger_pinches_both_zoom() {
+    // Acceptance: rapid consecutive two-finger zoom/pan must both take effect (latch must
+    // not stick on a leftover Primary after the first gesture ends).
+    let mut h = harness();
+    let r = h.state().last_canvas_rect;
+    let mid = r.center();
+    let pinch = |h: &mut Harness<'static, PhotocraftApp>, spread: f32| {
+        let a = mid - vec2(spread, 0.0);
+        let b = mid + vec2(spread, 0.0);
+        h.input_mut().events.extend([pointer_button(a, true), touch(1, egui::TouchPhase::Start, a), touch(2, egui::TouchPhase::Start, b)]);
+        h.run_steps(1);
+        let a2 = mid - vec2(spread * 2.0, 0.0);
+        let b2 = mid + vec2(spread * 2.0, 0.0);
+        h.hover_at(mid);
+        h.input_mut().events.extend([egui::Event::PointerMoved(a2), touch(1, egui::TouchPhase::Move, a2), touch(2, egui::TouchPhase::Move, b2)]);
+        h.run_steps(2);
+        h.input_mut().events.extend([pointer_button(a2, false), touch(1, egui::TouchPhase::End, a2), touch(2, egui::TouchPhase::End, b2)]);
+        h.run_steps(1);
+        // Leftover Primary must not keep nav latched across the gap before the next pinch.
+        h.run_steps(1);
+    };
+    h.hover_at(mid);
+    h.run_steps(1);
+    let z0 = zoom(&h);
+    pinch(&mut h, 20.0);
+    let z1 = zoom(&h);
+    assert!(z1 > z0, "first pinch must zoom: {z0} -> {z1}");
+    pinch(&mut h, 24.0);
+    let z2 = zoom(&h);
+    assert!(z2 > z1, "second rapid pinch must also zoom: {z1} -> {z2}");
+    assert!(!h.state().touch_nav, "nav latch must clear between gestures");
+}
+
+#[test]
+fn staggered_pinch_does_not_flash_or_commit_ink() {
+    // Acceptance: staggered two-finger must not show a live stroke flash and must not commit.
+    let mut h = harness();
+    h.state_mut().ui.tool = crate::state::Tool::Brush;
+    let _ = h.state_mut().run("tools.setBrush", json!({"brush": {"size": 40, "hardness": 1.0}}));
+    let r = h.state().last_canvas_rect;
+    let a = r.center();
+    let b = a + vec2(48.0, 0.0);
+    h.hover_at(a);
+    h.run_steps(1);
+    let rev0 = h.state().session.active().unwrap().revision;
+    h.input_mut().events.extend([pointer_button(a, true), touch(1, egui::TouchPhase::Start, a)]);
+    h.run_steps(1);
+    assert!(
+        h.state().live_stroke.is_none() && h.state().drag.is_none(),
+        "pinch grace must suppress the first-finger press dab (no visual flash)"
+    );
+    h.input_mut().events.push(touch(2, egui::TouchPhase::Start, b));
+    h.run_steps(1);
+    assert!(h.state().touch_nav, "second finger enters touch-nav");
+    assert!(h.state().live_stroke.is_none() && h.state().drag.is_none(), "nav must keep tools clear");
+    let moved = a + vec2(30.0, 20.0);
+    h.input_mut().events.extend([
+        egui::Event::PointerMoved(moved),
+        touch(1, egui::TouchPhase::Move, moved),
+        touch(2, egui::TouchPhase::Move, b + vec2(30.0, 20.0)),
+    ]);
+    h.run_steps(2);
+    h.input_mut().events.extend([pointer_button(moved, false), touch(1, egui::TouchPhase::End, moved), touch(2, egui::TouchPhase::End, b + vec2(30.0, 20.0))]);
+    h.run_steps(2);
+    assert_eq!(h.state().session.active().unwrap().revision, rev0, "pinch must not commit ink");
+    assert!(!h.state().touch_nav);
+}
+
+#[test]
+fn one_finger_with_touch_events_paints_without_stylus() {
+    // Acceptance: without a stylus, a lone finger (Touch + Primary) must paint after pinch
+    // grace ends — deferred press re-arms the tool without a new OS primary_pressed.
+    let mut h = harness();
+    h.state_mut().ui.tool = crate::state::Tool::Brush;
+    let _ = h.state_mut().run("tools.setBrush", json!({"brush": {"size": 40, "hardness": 1.0}}));
+    let a = h.state().last_canvas_rect.center();
+    h.hover_at(a);
+    h.run_steps(1);
+    let rev0 = h.state().session.active().unwrap().revision;
+    h.input_mut().events.extend([pointer_button(a, true), touch(1, egui::TouchPhase::Start, a)]);
+    h.run_steps(1);
+    assert!(!h.state().touch_nav, "one finger must not enter touch-nav");
+    assert!(h.state().live_stroke.is_none(), "grace holds off the press dab");
+    // Hold through grace, then move so deferred press can start and paint.
+    h.run_steps(3);
+    let moved = a + vec2(40.0, 12.0);
+    h.input_mut().events.extend([egui::Event::PointerMoved(moved), touch(1, egui::TouchPhase::Move, moved)]);
+    h.run_steps(2);
+    h.input_mut().events.extend([pointer_button(moved, false), touch(1, egui::TouchPhase::End, moved)]);
+    h.run_steps(2);
+    assert!(
+        h.state().session.active().unwrap().revision > rev0,
+        "one finger with touch events must paint without a stylus"
+    );
+}
+
+#[test]
 fn blocking_finger_input_pans_with_one_finger_and_does_not_paint() {
     let mut h = harness();
     h.state_mut().ui.tool = crate::state::Tool::Brush;
