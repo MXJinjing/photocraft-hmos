@@ -1309,3 +1309,215 @@ fn stylus_connection_metadata_reaches_native_menu_and_clears_on_disconnect() {
         "status updates do not generate drawing input"
     );
 }
+
+#[test]
+fn axis_does_not_reclassify_a_finger_as_mouse() {
+    let mut state = super::State::default();
+    let mut events = vec![];
+    snapshot(&mut state, &[(1, 200., 200.)], &mut events);
+    state.push(
+        super::Input {
+            kind: "axis".into(),
+            action: 2,
+            zoom: 1.1,
+            x: 200.,
+            y: 200.,
+            ..Default::default()
+        },
+        2.,
+        &mut events,
+    );
+    assert_eq!(state.feed.source(), super::PointerSource::Touch);
+}
+
+#[test]
+fn mouse_echo_after_pinch_cannot_press_or_move_a_tool() {
+    let mut state = super::State::default();
+    let mut events = vec![];
+    snapshot(&mut state, &[(1, 200., 200.), (2, 400., 200.)], &mut events);
+    for empty in [false, true] {
+        snapshot(
+            &mut state,
+            if empty { &[] } else { &[(1, 200., 200.)] },
+            &mut events,
+        );
+        events.clear();
+        for action in [0, 2, 1] {
+            state.push(
+                super::Input {
+                    kind: "pointer".into(),
+                    action,
+                    x: 200.,
+                    y: 200.,
+                    ..Default::default()
+                },
+                2.,
+                &mut events,
+            );
+        }
+        assert!(events.is_empty(), "mouse echoes leaked: {events:?}");
+        assert_eq!(state.feed.source(), super::PointerSource::Touch);
+        assert!(state.pressed.is_none());
+    }
+    state.leftover_guard_until = None;
+    state.push(
+        super::Input {
+            kind: "pointer".into(),
+            ..Default::default()
+        },
+        2.,
+        &mut events,
+    );
+    assert_eq!(state.pressed, Some(egui::PointerButton::Primary));
+    assert_eq!(state.feed.source(), super::PointerSource::Mouse);
+}
+
+#[test]
+fn blocked_finger_with_interleaved_axis_never_edits_the_document() {
+    use photocraft_ui_egui::{PhotocraftApp, Services, state::Tool};
+    let ctx = egui::Context::default();
+    let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), Services::default());
+    app.run("file.new", serde_json::json!({"width":256,"height":256}))
+        .unwrap();
+    app.session
+        .edit_prefs(|p| p.tools.block_finger_input = true);
+    app.ui.tool = Tool::Brush;
+    let mut state = super::State {
+        feed: app.stylus.feed.clone(),
+        ..Default::default()
+    };
+    let render = |app: &mut PhotocraftApp, events: Vec<egui::Event>| {
+        let mut raw = egui::RawInput {
+            events,
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1200., 800.),
+            )),
+            ..Default::default()
+        };
+        app.host_input(&ctx, &mut raw);
+        let _ = ctx.run_logic(&raw, |ctx| app.host_logic(ctx));
+        let mut output = ctx.run_ui(raw, |ui| app.host_ui(ui));
+        output.textures_delta.clear();
+    };
+    for _ in 0..4 {
+        render(&mut app, vec![]);
+    }
+    let p = app.last_canvas_rect.center() * 2.;
+    let revision = app.session.active().unwrap().revision;
+    for _ in 0..10 {
+        state.leftover_guard_until = None;
+        let mut events = vec![];
+        snapshot(&mut state, &[(1, p.x, p.y)], &mut events);
+        // Last source in a batch must remain Touch even if axis arrives last.
+        state.push(
+            super::Input {
+                kind: "axis".into(),
+                action: 2,
+                zoom: 1.01,
+                x: p.x,
+                y: p.y,
+                ..Default::default()
+            },
+            2.,
+            &mut events,
+        );
+        render(&mut app, events);
+        let mut events = vec![];
+        snapshot(
+            &mut state,
+            &[(1, p.x - 30., p.y), (2, p.x + 30., p.y)],
+            &mut events,
+        );
+        render(&mut app, events);
+        let mut events = vec![];
+        snapshot(
+            &mut state,
+            &[(1, p.x - 50., p.y), (2, p.x + 50., p.y)],
+            &mut events,
+        );
+        render(&mut app, events);
+        let mut events = vec![];
+        snapshot(&mut state, &[], &mut events);
+        state.push(
+            super::Input {
+                kind: "axis".into(),
+                action: 3,
+                zoom: 1.,
+                x: p.x,
+                y: p.y,
+                ..Default::default()
+            },
+            2.,
+            &mut events,
+        );
+        for action in [0, 2, 1] {
+            state.push(
+                super::Input {
+                    kind: "pointer".into(),
+                    action,
+                    x: p.x,
+                    y: p.y,
+                    ..Default::default()
+                },
+                2.,
+                &mut events,
+            );
+        }
+        render(&mut app, events);
+        render(&mut app, vec![]);
+        assert_eq!(app.session.active().unwrap().revision, revision);
+    }
+}
+
+#[test]
+fn staggered_lift_keeps_remaining_finger_owned_beyond_the_settling_window() {
+    for remaining_id in [1, 2] {
+        let mut state = super::State::default();
+        let mut events = vec![];
+        snapshot(&mut state, &[(1, 200., 200.), (2, 400., 200.)], &mut events);
+        snapshot(&mut state, &[(remaining_id, 300., 200.)], &mut events);
+        // A remaining contact outlives the timer: ownership comes from its lifetime.
+        state.leftover_guard_until =
+            Some(std::time::Instant::now() - std::time::Duration::from_secs(1));
+        events.clear();
+        snapshot(&mut state, &[(remaining_id, 320., 210.)], &mut events);
+        state.push(
+            super::Input {
+                kind: "axis".into(),
+                action: 3,
+                zoom: 1.2,
+                x: 320.,
+                y: 210.,
+                ..Default::default()
+            },
+            2.,
+            &mut events,
+        );
+        for action in [0, 2, 1, 3] {
+            state.push(
+                super::Input {
+                    kind: "pointer".into(),
+                    action,
+                    x: 320.,
+                    y: 210.,
+                    ..Default::default()
+                },
+                2.,
+                &mut events,
+            );
+        }
+        assert_eq!(state.feed.source(), super::PointerSource::Touch);
+        assert_eq!(state.touches.len(), 1);
+        assert!(state.touch_nav_active);
+        assert!(state.pressed.is_none());
+        assert!(
+            !events
+                .iter()
+                .any(|event| matches!(event, egui::Event::PointerButton { pressed: true, .. }))
+        );
+        snapshot(&mut state, &[], &mut events);
+        assert!(!state.touch_nav_active);
+        assert!(state.touches.is_empty());
+    }
+}

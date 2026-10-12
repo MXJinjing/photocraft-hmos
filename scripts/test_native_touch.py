@@ -68,6 +68,13 @@ int main(){
     currentMouse.action=OH_NATIVEXCOMPONENT_MOUSE_PRESS;Mouse(&c,nullptr);
     currentMouse.action=OH_NATIVEXCOMPONENT_MOUSE_RELEASE;Mouse(&c,nullptr);
     currentMouse.action=OH_NATIVEXCOMPONENT_MOUSE_CANCEL;Mouse(&c,nullptr);
+    // Lift finger 1 first, then move finger 2 while still pressed before its UP.
+    tools[0]=tools[1]=OH_NATIVEXCOMPONENT_TOOL_TYPE_FINGER;
+    current={1,OH_NATIVEXCOMPONENT_DOWN,2,100,200,1,{{1,100,200,true},{2,300,200,true}}};Touch(&c,nullptr);
+    current={1,OH_NATIVEXCOMPONENT_UP,2,100,200,1,{{1,100,200,false,OH_NATIVEXCOMPONENT_UP},{2,300,200,false,OH_NATIVEXCOMPONENT_MOVE}}};Touch(&c,nullptr);
+    current={2,OH_NATIVEXCOMPONENT_MOVE,1,320,210,1,{{2,320,210,false,OH_NATIVEXCOMPONENT_MOVE}}};Touch(&c,nullptr);
+    current.x=340;current.touchPoints[0].x=340;Touch(&c,nullptr);
+    current.type=OH_NATIVEXCOMPONENT_UP;Touch(&c,nullptr);
 }
 '''
 with tempfile.TemporaryDirectory() as tmp:
@@ -82,10 +89,13 @@ assert packets[6]['action']==1
 assert packets[7]=={'kind':'axis','action':2,'x':100,'y':200,'dx':-4,'dy':-8,'zoom':1.2}
 assert packets[8]['zoom']==0
 assert packets[9]=={'kind':'hover_leave'}
-assert packets[10:]==[
+assert packets[10:14]==[
     {'kind':'pointer','action':2,'button':0,'x':100,'y':200},
     {'kind':'pointer','action':0,'button':0,'x':100,'y':200},
     {'kind':'pointer','action':1,'button':0,'x':100,'y':200},
     {'kind':'pointer','action':3},
 ]
+assert [len(p['points']) for p in packets[-5:]] == [2,1,1,1,0]
+assert packets[-3]['points'] == [{'id':2,'x':320,'y':210}]
+assert packets[-2]['points'] == [{'id':2,'x':340,'y':210}]
 print('Passed: native contact, navigation, proximity leave and genuine mouse events; cached NONE events ignored.')

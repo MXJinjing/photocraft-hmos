@@ -46,10 +46,12 @@ System clipboard, automatic recovery and large-image performance acceptance are 
 
 ## Touch regression checks
 
-Run `python3 scripts/test_native_touch.py` for the actual C++ Touch/Mouse/Axis/Hover callbacks, and `cargo test --locked --manifest-path native/rust/Cargo.toml --lib` for egui touch navigation, no-edit navigation, brush cursor visibility, pen priority and existing host services. XComponent `isPressed` is false during simulator MOVE events; contact lifetime uses touch phases instead.
+Run `python3 scripts/test_native_touch.py` for the actual C++ Touch/Mouse/Axis/Hover callbacks, and `cargo test --locked --manifest-path native/rust/Cargo.toml --lib` for egui touch navigation, no-edit navigation, axis/finger ownership, post-pinch mouse echoes, brush cursor visibility, pen priority and existing host services. XComponent `isPressed` is false during simulator MOVE events; contact lifetime uses touch phases instead.
 
 ## Stylus control and mouse cursors
 
 The title-bar Stylus control, immediately left of Discord, appears after the platform first reports a connected pen. The feed latches that discovery for the current app lifetime, so disconnecting the pen keeps its settings accessible; a pen contact alone does not count as a connection report.
 
 The native worker forwards the final egui cursor to ArkUI, preserving the UI pass cursor when merging the earlier logic output. `None` hides the system pointer while egui draws its brush tip or custom tool cursor, and while a lifted pen preview is waiting for actual movement; other cursor icons map to HarmonyOS text, crosshair, hand, resize and zoom styles. Blur, page disposal and background activation restore pointer visibility, and attachment/foreground changes invalidate the worker cache. Run `node scripts/test_native_cursor.cjs <typescript module path>` for the ArkTS adapter checks. Physical mouse/pen behaviour still requires Pad acceptance. Run `node scripts/test_pen_hover_preview.cjs <typescript module path>` for the hover encoder checks.
+
+Touch ownership covers both snapshots and mouse callbacks during navigation and the post-lift guard. Axis events cannot change a finger-owned pointer to Mouse and bypass `tools.blockFingerInput`. See [the simulator regression procedure](../docs/native/pinch-finger-rejection.md).
