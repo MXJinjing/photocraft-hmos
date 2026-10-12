@@ -115,6 +115,15 @@ pub struct State {
     pub feed: StylusFeed,
 }
 impl State {
+    fn finger_owns_pointer(&self) -> bool {
+        !self.touches.is_empty()
+            || self.touch_nav_active
+            || self.ignore_fingers
+            || self
+                .leftover_guard_until
+                .is_some_and(|until| Instant::now() < until)
+    }
+
     fn resume_guard(&self) -> PreviewResume {
         PreviewResume {
             cached: [
@@ -374,7 +383,12 @@ impl State {
                 if input.action == 1 {
                     self.axis_zoom = None;
                 }
-                self.feed.report(PointerSource::Mouse, None);
+                // Axis callbacks can interleave with touchscreen snapshots, including
+                // the lift frame. They do not establish a new pointer owner: changing
+                // Touch to Mouse bypasses the canvas's block-finger-input preference.
+                if !self.finger_owns_pointer() {
+                    self.feed.report(PointerSource::Mouse, None);
+                }
                 events.push(Event::PointerMoved(pos));
                 if input.zoom.is_finite() && input.zoom > 0.0 {
                     let ratio = input.zoom / self.axis_zoom.unwrap_or(1.0);
@@ -398,6 +412,12 @@ impl State {
                 }
             }
             "pointer" => {
+                // XComponent may replay a mouse callback after fingerContact was
+                // cleared by UP. Apply the same ownership/settling guard as touch
+                // snapshots, before cancellation or feed updates can clear it.
+                if input.source == PointerSource::Mouse && self.finger_owns_pointer() {
+                    return;
+                }
                 if input.action == 3 {
                     let resume = (self.preview_hidden
                         || input.source == PointerSource::Pen
