@@ -2738,6 +2738,8 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
         _ => alt,
     };
     // Two-or-more fingers: only pan/pinch-zoom the canvas; never start or commit a tool.
+    // Lone-finger pinch grace suppresses tools (no stroke flash) without taking the pan path;
+    // when it ends with a finger still down, deferred_touch_press re-arms the tool press.
     let touch_nav = if navigation_input {
         app.touch_nav = false;
         crate::touch_nav::abort_tools(app, &ctx);
@@ -2745,6 +2747,8 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
     } else {
         crate::touch_nav::update(app, &ctx, touch_eligible)
     };
+    let touch_tools_suppressed = crate::touch_nav::tools_suppressed(&ctx);
+    let deferred_touch_press = crate::touch_nav::take_deferred_press(&ctx);
 
     if under_dialog && !navigation_input {
         // With a colour dialog picker armed the image is its eyedropper, whatever the tool; Space
@@ -2799,6 +2803,8 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
         let d = xf.unmap_vec(d) / (view.zoom / ppp);
         view.center[0] -= d.x;
         view.center[1] -= d.y;
+    } else if touch_tools_suppressed {
+        // Pinch grace: hold off tool presses so a staggered second finger cannot flash ink.
     } else if !navigation_input && hand_pan && response.dragged() {
         let d = xf.unmap_vec(response.drag_delta()) / (view.zoom / ppp);
         view.center[0] -= d.x;
@@ -2915,8 +2921,8 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
         if strokes_live(tool)
             && app.drag.is_none()
             && response.is_pointer_button_down_on()
-            && ui.input(|i| i.pointer.primary_pressed())
-            && let Some(p) = ui.input(|i| i.pointer.press_origin()).filter(|p| rect.contains(*p))
+            && (deferred_touch_press || ui.input(|i| i.pointer.primary_pressed()))
+            && let Some(p) = ui.input(|i| i.pointer.press_origin()).or_else(|| ui.input(|i| i.pointer.interact_pos())).filter(|p| rect.contains(*p))
         {
             let d = xf.to_doc(p);
             // The press's own modifiers: a ⇧ that arrives with the click still connects the line.

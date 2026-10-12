@@ -58,6 +58,14 @@ fn snapshot(state: &mut super::State, points: &[(u64, f32, f32)], events: &mut V
     );
 }
 
+/// Expire the Primary-defer window and re-snapshot so a lone finger promotes.
+fn promote_pending(state: &mut super::State, points: &[(u64, f32, f32)], events: &mut Vec<egui::Event>) {
+    if let Some(pending) = state.pending_touch.as_mut() {
+        pending.at = std::time::Instant::now() - std::time::Duration::from_secs(1);
+    }
+    snapshot(state, points, events);
+}
+
 #[test]
 fn native_two_finger_navigation_changes_the_view_without_editing_document() {
     use photocraft_ui_egui::{PhotocraftApp, Services, state::Tool};
@@ -308,6 +316,7 @@ fn pen_takeover_releases_finger_in_place_not_at_pen_tip() {
     let mut events = vec![];
     // Finger primary at A (physical 10,20 → egui 5,10 with scale 2).
     snapshot(&mut state, &[(1, 10., 20.)], &mut events);
+    promote_pending(&mut state, &[(1, 10., 20.)], &mut events);
     assert_eq!(state.touch_pointer, Some(1));
     events.clear();
     // Pen down at B must not release the finger press at B (that rubber-bands A→B ink).
@@ -353,6 +362,7 @@ fn pen_hover_while_finger_down_does_not_rubber_band_to_tip() {
     let mut state = super::State::default();
     let mut events = vec![];
     snapshot(&mut state, &[(1, 10., 20.)], &mut events);
+    promote_pending(&mut state, &[(1, 10., 20.)], &mut events);
     events.clear();
     // Pen hover must suppress the finger in place; a PointerMoved to the tip while the
     // finger button is still down is exactly the finger→tip straight line bug.
@@ -422,7 +432,9 @@ fn two_finger_snapshot_does_not_synthesize_primary_tool_press() {
 fn second_finger_cancels_one_finger_primary_in_place() {
     let mut state = super::State::default();
     let mut events = vec![];
+    // Promote first so we exercise the cancel-in-place path (post-defer paint).
     snapshot(&mut state, &[(1, 100., 100.)], &mut events);
+    promote_pending(&mut state, &[(1, 100., 100.)], &mut events);
     assert_eq!(state.touch_pointer, Some(1));
     events.clear();
     snapshot(
@@ -444,6 +456,47 @@ fn second_finger_cancels_one_finger_primary_in_place() {
     );
     assert!(state.pressed.is_none() && state.touch_pointer.is_none());
     assert_eq!(state.touches.len(), 2);
+}
+
+#[test]
+fn staggered_pinch_never_synthesizes_primary_before_second_finger() {
+    let mut state = super::State::default();
+    let mut events = vec![];
+    snapshot(&mut state, &[(1, 100., 100.)], &mut events);
+    assert!(
+        state.pressed.is_none() && state.touch_pointer.is_none(),
+        "first finger of a possible pinch must not Primary yet: pressed={:?} touch_pointer={:?}",
+        state.pressed,
+        state.touch_pointer
+    );
+    assert!(state.pending_touch.is_some());
+    assert!(
+        !events
+            .iter()
+            .any(|e| matches!(e, egui::Event::PointerButton { pressed: true, .. })),
+        "no press-position ink before second finger: {events:?}"
+    );
+    events.clear();
+    snapshot(
+        &mut state,
+        &[(1, 100., 100.), (2, 300., 100.)],
+        &mut events,
+    );
+    assert!(state.touch_nav_active);
+    assert!(state.pending_touch.is_none());
+    assert!(state.pressed.is_none() && state.touch_pointer.is_none());
+    assert!(
+        !events
+            .iter()
+            .any(|e| matches!(e, egui::Event::PointerButton { .. })),
+        "staggered pinch must never press or release Primary: {events:?}"
+    );
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, egui::Event::PointerMoved(_))),
+        "entering multi from a deferred finger still needs a pinch anchor: {events:?}"
+    );
 }
 
 #[test]
@@ -480,6 +533,7 @@ fn leftover_finger_after_pinch_does_not_synthesize_primary() {
     state.leftover_guard_until = None; // expire platform re-report window for a fresh tap
     events.clear();
     snapshot(&mut state, &[(3, 200., 200.)], &mut events);
+    promote_pending(&mut state, &[(3, 200., 200.)], &mut events);
     assert_eq!(state.touch_pointer, Some(3));
     assert_eq!(state.pressed, Some(egui::PointerButton::Primary));
 }
@@ -500,6 +554,8 @@ fn leftover_finger_after_empty_snapshot_does_not_synthesize_primary() {
     assert!(state.leftover_guard_until.is_some());
     events.clear();
     // Remnant finger re-reported as a fresh single contact must not ink a dot.
+    // leftover_guard suppresses Primary without re-latching touch_nav_active (that used
+    // to extend the guard and swallow a rapid second pinch).
     snapshot(&mut state, &[(1, 120., 110.)], &mut events);
     assert!(
         state.pressed.is_none() && state.touch_pointer.is_none(),
@@ -513,7 +569,8 @@ fn leftover_finger_after_empty_snapshot_does_not_synthesize_primary() {
             .any(|e| matches!(e, egui::Event::PointerButton { pressed: true, .. })),
         "no primary press after empty-gap leftover: {events:?}"
     );
-    assert!(state.touch_nav_active);
+    assert!(!state.touch_nav_active);
+    assert!(state.pending_touch.is_none());
     snapshot(&mut state, &[], &mut events);
     assert!(!state.touch_nav_active);
 }
