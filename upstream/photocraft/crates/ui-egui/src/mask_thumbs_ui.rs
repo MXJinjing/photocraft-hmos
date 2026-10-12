@@ -146,7 +146,7 @@ pub fn paint(
         painter.rect_stroke(
             r,
             if t.pro { 0.0 } else { 4.0 },
-            Stroke::new(1.0, if t.pro { Color32::from_gray(20) } else { t.field_border }),
+            Stroke::new(1.0, if t.pro { Color32::from_gray(if t.dark() { 20 } else { 140 }) } else { t.field_border }),
             StrokeKind::Outside,
         );
         out.thumbs.push((kind, r));

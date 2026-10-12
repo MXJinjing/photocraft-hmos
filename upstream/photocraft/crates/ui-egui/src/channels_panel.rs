@@ -167,7 +167,7 @@ pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                 let c = ink.to_rgb().map(|v| (v.clamp(0.0, 1.0) * 255.0) as u8);
                 painter.rect_filled(Rect::from_min_size(thumb.right_bottom() - vec2(9.0, 9.0), vec2(9.0, 9.0)), 0.0, Color32::from_rgb(c[0], c[1], c[2]));
             }
-            painter.rect_stroke(thumb, 0.0, Stroke::new(1.0, if t.pro { Color32::from_gray(20) } else { t.field_border }), StrokeKind::Outside);
+            painter.rect_stroke(thumb, 0.0, Stroke::new(1.0, if t.pro { Color32::from_gray(if t.dark() { 20 } else { 140 }) } else { t.field_border }), StrokeKind::Outside);
             let italic = matches!(row, Row::QuickMask | Row::LayerMask) || matches!(row, Row::Alpha(i) if doc.channels[i].spot.is_some());
             let mut job = egui::text::LayoutJob::default();
             let font = if selected && !t.pro { theme::medium(12.5) } else { egui::FontId::proportional(12.0) };

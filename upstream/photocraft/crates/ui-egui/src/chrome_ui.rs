@@ -450,7 +450,7 @@ mod tests {
     fn status_bar_updates_dimensions_after_a_ruler_preference_change() {
         use egui_kittest::{Harness, kittest::Queryable};
         let mut failures = Vec::new();
-        for theme in [crate::theme::ThemeKind::Pro, crate::theme::ThemeKind::ProMedium] {
+        for theme in [crate::theme::ThemeKind::Pro, crate::theme::ThemeKind::ProMedium, crate::theme::ThemeKind::ProLight] {
             for width in [800.0, 1200.0] {
                 let builder = Harness::builder().with_size(vec2(width, 600.0)).with_max_steps(64);
                 let mut h = builder.build_eframe(move |cc| {

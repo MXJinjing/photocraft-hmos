@@ -1281,7 +1281,7 @@ mod tests {
 
     #[test]
     fn spectrum_popup_style_matches_main_menu_and_preserves_studio() {
-        for kind in [crate::theme::ThemeKind::Pro, crate::theme::ThemeKind::ProMedium, crate::theme::ThemeKind::Studio, crate::theme::ThemeKind::StudioLight] {
+        for kind in [crate::theme::ThemeKind::Pro, crate::theme::ThemeKind::ProMedium, crate::theme::ThemeKind::ProLight, crate::theme::ThemeKind::Studio, crate::theme::ThemeKind::StudioLight] {
             let ctx = egui::Context::default();
             crate::theme::apply(&ctx, kind);
             let tokens = crate::theme::Tokens::for_kind(kind);

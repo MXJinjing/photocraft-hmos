@@ -2,7 +2,8 @@
 //!
 //! - **Studio**: near-black surfaces, rounded cards, Inter + JetBrains Mono, soft violet
 //!   accent. Modelled on the look of modern pro editors (such as Photoshop 2025).
-//! - **Studio Light**: the same system on light surfaces.
+//! - **Pro Light**: the Pro (Photoshop-grammar) layout on light Spectrum surfaces.
+//! - **Studio Light**: the Studio system on light surfaces.
 //! - **Classic**: a deliberately Windows-2000-era look (grey bevels, square corners, navy selection)
 //!   for people who prefer it.
 //! - **Adwaita** (Light and Dark): the Studio layout in GNOME's libadwaita palette, so the app sits
@@ -27,6 +28,8 @@ pub enum ThemeKind {
     /// Photoshop's default (second) interface brightness: #535353 panels, #282828 canvas (default).
     #[default]
     ProMedium,
+    /// Photoshop's light interface brightness: light panels, dark text, same Pro chrome grammar.
+    ProLight,
     Studio,
     StudioLight,
     Classic,
@@ -44,9 +47,10 @@ pub enum ThemeKind {
 }
 
 impl ThemeKind {
-    pub const ALL: [ThemeKind; 10] = [
+    pub const ALL: [ThemeKind; 11] = [
         ThemeKind::Pro,
         ThemeKind::ProMedium,
+        ThemeKind::ProLight,
         ThemeKind::Studio,
         ThemeKind::StudioLight,
         ThemeKind::Classic,
@@ -60,6 +64,7 @@ impl ThemeKind {
         match self {
             ThemeKind::Pro => "Pro (Dark)",
             ThemeKind::ProMedium => "Pro (Medium Gray)",
+            ThemeKind::ProLight => "Pro (Light)",
             ThemeKind::Studio => "Studio (Dark)",
             ThemeKind::StudioLight => "Studio (Light)",
             ThemeKind::Classic => "Classic",
@@ -76,6 +81,7 @@ impl ThemeKind {
         match self {
             ThemeKind::Pro => "pro",
             ThemeKind::ProMedium => "proMedium",
+            ThemeKind::ProLight => "proLight",
             ThemeKind::Studio => "studio",
             ThemeKind::StudioLight => "studioLight",
             ThemeKind::Classic => "classic",
@@ -100,6 +106,7 @@ impl ThemeKind {
         match s.to_ascii_lowercase().replace([' ', '_', '-', '(', ')'], "").as_str() {
             "pro" | "prodark" | "photoshop" | "dark" => Some(ThemeKind::Pro),
             "promedium" | "promediumgray" | "medium" | "mediumgray" => Some(ThemeKind::ProMedium),
+            "prolight" | "prolightgray" => Some(ThemeKind::ProLight),
             "studio" | "studiodark" => Some(ThemeKind::Studio),
             "studiolight" | "light" => Some(ThemeKind::StudioLight),
             "classic" | "win2000" | "retro" => Some(ThemeKind::Classic),
@@ -201,6 +208,48 @@ impl Tokens {
                 tab_strip: Color32::from_rgb(74, 74, 74),
                 row_selected: Color32::from_rgb(107, 107, 107),
                 ..Tokens::for_kind(ThemeKind::Pro)
+            },
+            // Sampled from Photoshop's lightest Spectrum brightness (light panels, dark text).
+            ThemeKind::ProLight => Tokens {
+                kind,
+                chrome: Color32::from_rgb(234, 234, 234),
+                canvas: Color32::from_rgb(179, 179, 179),
+                canvas_dot: Color32::from_rgb(179, 179, 179),
+                dock: Color32::from_rgb(212, 212, 212),
+                card: Color32::from_rgb(234, 234, 234),
+                card_border: Color32::from_rgb(196, 196, 196),
+                field: Color32::from_rgb(250, 250, 250),
+                field_border: Color32::from_rgb(176, 176, 176),
+                hover: Color32::from_rgb(214, 214, 214),
+                pressed: Color32::from_rgb(196, 196, 196),
+                text: Color32::from_rgb(36, 36, 36),
+                text_dim: Color32::from_rgb(84, 84, 84),
+                text_faint: Color32::from_rgb(128, 128, 128),
+                icon: Color32::from_rgb(56, 56, 56),
+                accent: Color32::from_rgb(55, 142, 240),
+                accent_soft: Color32::from_rgb(200, 200, 200),
+                accent_border: Color32::from_rgb(55, 142, 240),
+                accent_text: Color32::WHITE,
+                separator: Color32::from_rgb(196, 196, 196),
+                shadow: Color32::from_black_alpha(50),
+                primary_bg: Color32::from_rgb(55, 142, 240),
+                primary_text: Color32::WHITE,
+                danger: Color32::from_rgb(200, 55, 55),
+                warning: Color32::from_rgb(170, 110, 10),
+                online: Color32::from_rgb(46, 184, 92),
+                radius_sm: 3.0,
+                radius: 4.0,
+                radius_lg: 6.0,
+                bevel: false,
+                pro: true,
+                round_chips: false,
+                tab_strip: Color32::from_rgb(220, 220, 220),
+                row_selected: Color32::from_rgb(200, 200, 200),
+                histogram_bg: Color32::from_rgb(60, 60, 60),
+                histogram_level: 240,
+                caption_close: Color32::from_rgb(196, 43, 28),
+                caption_close_text: Color32::WHITE,
+                scrim: Color32::from_black_alpha(110),
             },
             ThemeKind::Pro => Tokens {
                 kind,
@@ -993,6 +1042,8 @@ mod tests {
         assert_eq!(ThemeKind::from_name("dark"), Some(ThemeKind::Pro));
         assert_eq!(ThemeKind::from_name("studio"), Some(ThemeKind::Studio));
         assert_eq!(ThemeKind::from_name("Pro (Medium Gray)"), Some(ThemeKind::ProMedium));
+        assert_eq!(ThemeKind::from_name("Pro (Light)"), Some(ThemeKind::ProLight));
+        assert_eq!(ThemeKind::from_name("proLight"), Some(ThemeKind::ProLight));
         assert_eq!(ThemeKind::from_name("Solarized Dark"), Some(ThemeKind::SolarizedDark));
         assert_eq!(ThemeKind::from_name("solarized"), Some(ThemeKind::SolarizedDark));
         let m = Tokens::for_kind(ThemeKind::ProMedium);
@@ -1002,6 +1053,9 @@ mod tests {
         assert_eq!(ThemeKind::from_name("neon"), None);
         assert_eq!(ThemeKind::Pro.chrome_css(), "#323232");
         assert_eq!(ThemeKind::ProMedium.chrome_css(), "#535353");
+        assert_eq!(ThemeKind::ProLight.chrome_css(), "#EAEAEA");
+        let pl = Tokens::for_kind(ThemeKind::ProLight);
+        assert!(pl.pro && !pl.dark() && pl.kind == ThemeKind::ProLight && pl.card == Color32::from_rgb(234, 234, 234));
         assert_eq!(ThemeKind::Studio.chrome_css(), "#141415");
         assert_eq!(ThemeKind::StudioLight.chrome_css(), "#F6F6F8");
         assert_eq!(ThemeKind::Classic.chrome_css(), "#D4D0C8");

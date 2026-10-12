@@ -87,6 +87,7 @@ fn selected_theme(interface: &prefs::Interface, system: Option<egui::Theme>) -> 
     };
     if light {
         match interface.light_theme {
+            LightTheme::ProLight => ThemeKind::ProLight,
             LightTheme::StudioLight => ThemeKind::StudioLight,
             LightTheme::Classic => ThemeKind::Classic,
             LightTheme::Adwaita => ThemeKind::Adwaita,
@@ -1265,6 +1266,7 @@ fn appearance_rows(ui: &mut egui::Ui, obj: &mut Map<String, Value>, system: Opti
                 light_active,
                 &mut light,
                 &[
+                    ("proLight", ThemeKind::ProLight),
                     ("studioLight", ThemeKind::StudioLight),
                     ("classic", ThemeKind::Classic),
                     ("adwaita", ThemeKind::Adwaita),
