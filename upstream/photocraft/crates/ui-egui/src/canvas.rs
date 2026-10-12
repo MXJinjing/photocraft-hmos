@@ -268,6 +268,15 @@ pub(crate) fn marquee_ants(xf: &ViewXform, tool: Tool, a: [f64; 2], b: [f64; 2])
     if tool != Tool::EllipseMarquee {
         return vec![at(x0, y0), at(x1, y0), at(x1, y1), at(x0, y1)];
     }
+    // An axis-aligned view (rotation a multiple of 90 degrees) maps the ellipse onto the one
+    // inscribed in the snapped screen box of two opposite corners. Draw that, unsnapped: snapping
+    // each vertex on its own turns the nearly flat arcs at the edge midpoints into 1 px stairs,
+    // whose antialiased steps wash the ants out to grey on white and black.
+    let quarter = xf.rotation.rem_euclid(90.0);
+    if quarter < 1e-4 || 90.0 - quarter < 1e-4 {
+        let r = Rect::from_two_pos(at(x0, y0), at(x1, y1));
+        return crate::tool_feedback::ellipse_points(r);
+    }
     // As many vertices as the same ellipse would get drawn on screen (`ellipse_points`).
     let scr = Rect::from_points(&[xf.to_screen(x0 as f32, y0 as f32), xf.to_screen(x1 as f32, y1 as f32)]);
     let n = (((scr.width() + scr.height()) * 0.25) as usize).clamp(16, 256);

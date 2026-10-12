@@ -227,7 +227,13 @@ pub fn missing_message(session: DisplaySession, missing: &[AnyOf], distro: Distr
 /// Library directories to search: `LD_LIBRARY_PATH`, then the usual system and Flatpak paths.
 fn search_dirs(ld_library_path: Option<&str>) -> Vec<PathBuf> {
     let mut dirs: Vec<PathBuf> = ld_library_path.unwrap_or("").split(':').filter(|d| !d.is_empty()).map(PathBuf::from).collect();
-    let triplet = if cfg!(target_arch = "aarch64") { "aarch64-linux-gnu" } else { "x86_64-linux-gnu" };
+    let triplet = if cfg!(target_arch = "aarch64") {
+        "aarch64-linux-gnu"
+    } else if cfg!(target_arch = "riscv64") {
+        "riscv64-linux-gnu"
+    } else {
+        "x86_64-linux-gnu"
+    };
     for d in ["/app/lib", "/usr/local/lib", "/usr/lib64", "/lib64", "/usr/lib", "/lib"] {
         dirs.push(PathBuf::from(d));
     }
