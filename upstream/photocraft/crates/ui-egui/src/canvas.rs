@@ -14,7 +14,7 @@ use crate::state::{Tool, View};
 
 /// Largest texture side we upload; bigger documents display downsampled until the GPU path lands.
 pub const MAX_TEXTURE: u32 = 4096;
-const PEN_HOVER_TIP_OPACITY: f32 = 0.5;
+const PEN_HOVER_TIP_OPACITY: f32 = 0.3;
 
 pub(crate) struct ClonePreviewCache {
     key: String,
