@@ -1231,6 +1231,58 @@ mod tests {
     }
 
     #[test]
+    fn browser_finger_double_press_tolerates_offset_timing_and_tap_jitter() {
+        for (first_jitter, second_offset, gap) in [(0.0, 8.0, 0.1), (0.0, 0.0, 0.4), (8.0, 8.0, 0.1)] {
+            for source in [crate::stylus::PointerSource::Touch, crate::stylus::PointerSource::Pen] {
+                for size in [20.0, 40.0] {
+                    let ctx = egui::Context::default();
+                    let mut st = PresetUi::default();
+                    st.sizes.insert("patterns".into(), size);
+                    let (_, cell) = browser_frame_with_source(&ctx, &mut st, "patterns", 0.0, Vec::new(), source);
+                    browser_frame_with_source(&ctx, &mut st, "patterns", 0.01, Vec::new(), source);
+                    let start = cell.center();
+                    let first_end = start + vec2(first_jitter, 0.0);
+                    let second = start + vec2(second_offset, 0.0);
+                    browser_frame_with_source(&ctx, &mut st, "patterns", 0.02, touch_pointer(egui::TouchPhase::Start, start), source);
+                    browser_frame_with_source(&ctx, &mut st, "patterns", 0.08, touch_pointer(egui::TouchPhase::Move, first_end), source);
+                    browser_frame_with_source(&ctx, &mut st, "patterns", 0.1, touch_pointer(egui::TouchPhase::End, first_end), source);
+                    browser_frame_with_source(&ctx, &mut st, "patterns", 0.1 + gap, touch_pointer(egui::TouchPhase::Start, second), source);
+                    browser_frame_with_source(&ctx, &mut st, "patterns", 1.1, Vec::new(), source);
+                    let target = pos2(400.0, 180.0);
+                    browser_frame_with_source(&ctx, &mut st, "patterns", 1.2, touch_pointer(egui::TouchPhase::Move, target), source);
+                    let (released, _) = browser_frame_with_source(&ctx, &mut st, "patterns", 1.3, touch_pointer(egui::TouchPhase::End, target), source);
+                    assert!(
+                        released.iter().any(|e| matches!(e, Ev::Drop(k, _) if k == "preset")),
+                        "{source:?}: jitter {first_jitter}, offset {second_offset}, gap {gap}: {released:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn browser_scroll_or_expired_tap_cannot_arm_the_next_press() {
+        for (move_away, gap) in [(30.0, 0.1), (0.0, 0.6)] {
+            let ctx = egui::Context::default();
+            let mut st = PresetUi::default();
+            st.sizes.insert("patterns".into(), 40.0);
+            let (_, cell) = browser_frame(&ctx, &mut st, "patterns", 0.0, Vec::new());
+            browser_frame(&ctx, &mut st, "patterns", 0.01, Vec::new());
+            let start = cell.center();
+            browser_frame(&ctx, &mut st, "patterns", 0.02, touch_pointer(egui::TouchPhase::Start, start));
+            browser_frame(&ctx, &mut st, "patterns", 0.05, touch_pointer(egui::TouchPhase::Move, start + vec2(move_away, 0.0)));
+            browser_frame(&ctx, &mut st, "patterns", 0.08, touch_pointer(egui::TouchPhase::Move, start));
+            browser_frame(&ctx, &mut st, "patterns", 0.1, touch_pointer(egui::TouchPhase::End, start));
+            browser_frame(&ctx, &mut st, "patterns", 0.1 + gap, touch_pointer(egui::TouchPhase::Start, start));
+            browser_frame(&ctx, &mut st, "patterns", 1.6, Vec::new());
+            let target = pos2(400.0, 180.0);
+            browser_frame(&ctx, &mut st, "patterns", 1.7, touch_pointer(egui::TouchPhase::Move, target));
+            let (released, _) = browser_frame(&ctx, &mut st, "patterns", 1.8, touch_pointer(egui::TouchPhase::End, target));
+            assert!(!released.iter().any(|e| matches!(e, Ev::Drop(_, _) | Ev::Move(_, _))), "swipe {move_away}, gap {gap}: {released:?}");
+        }
+    }
+
+    #[test]
     fn browser_touch_tap_selects_without_dropping() {
         let ctx = egui::Context::default();
         let mut st = PresetUi::default();
