@@ -16,9 +16,9 @@ PhotoCraft's own source specific guidance is in `upstream/photocraft/AGENTS.md`;
 - The `upstream` remote points to `https://github.com/storytold/photocraft.git`; tag `v0.3.0` is an ancestor of this repository through the subtree merge.
 - Git remotes are local configuration and do not travel with clones. In a fresh clone, run `git remote add upstream https://github.com/storytold/photocraft.git` before fetching updates; the imported commit ancestry remains in the repository.
 - Do not replace the subtree with a tarball, initialize another `.git` inside it, shallow fetch it, squash its history, or force push the upstream remote.
-- **Upstream PhotoCraft syncs land on the long-lived `upstream` branch** (on this fork's `origin`), not on `main`. Do not create a new version-named tracking branch per release (`0.6.0` / `0.7.0`); keep one `upstream` line. Historical `0.6.0` / `0.7.0` branches may remain as archives. Syncs should not be folded into `main` by default until deliberately reviewed.
-- Distinguish names: the **remote** `upstream` is `https://github.com/storytold/photocraft.git`; the **branch** `upstream` is our fork's subtree tracking line.
-- For upstream changes: check out / branch from `origin/upstream`, fetch from the `upstream` remote, review the range, then `git subtree pull --prefix=upstream/photocraft upstream <reviewed-ref>` **without `--squash`**. Open a PR **into `upstream`**. Recheck HarmonyOS compatibility and the vendored dependency after each update.
+- **Upstream PhotoCraft syncs land on the long-lived `upstream-track` branch** (on this fork's `origin`), not on `main`. Do not create a new version-named tracking branch per release (`0.6.0` / `0.7.0`); keep one `upstream-track` line. Historical `0.6.0` / `0.7.0` branches may remain as archives. Syncs should not be folded into `main` by default until deliberately reviewed.
+- Distinguish names: the **remote** `upstream` is `https://github.com/storytold/photocraft.git`; the **branch** `upstream-track` is our fork's subtree tracking line (never name that branch `upstream`).
+- For upstream changes: check out / branch from `origin/upstream-track`, fetch from the `upstream` remote, review the range, then `git subtree pull --prefix=upstream/photocraft upstream <reviewed-ref>` **without `--squash`**. Open a PR **into `upstream-track`**. Recheck HarmonyOS compatibility and the vendored dependency after each update.
 - **HarmonyOS host features and fixes** (ArkTS/native adapter, Hmos-only UI wiring, etc.) keep using topic branches and PRs **into `main`**.
 - The root `build-profile.json5` contains local signing material and is ignored. `build-profile.example.json5` is the safe template. Never commit signing certificates, private keys or passwords.
 
@@ -26,10 +26,10 @@ PhotoCraft's own source specific guidance is in `upstream/photocraft/AGENTS.md`;
 
 | Role | Work dir | Branch / PR target | Notes |
 |------|----------|--------------------|-------|
-| Coding Man | `/workspace/photocraft-hmos-coding-man` | `sync/upstream-YYYYMMDD` → PR into **`upstream`** | Daily upstream subtree sync; x86-64 native build OK; do not merge; no device tests |
+| Coding Man | `/workspace/photocraft-hmos-coding-man` | `sync/upstream-YYYYMMDD` → PR into **`upstream-track`** | Daily upstream subtree sync; x86-64 native build OK; do not merge; no device tests |
 | Prominent Coder | `/workspace/photocraft-hmos-prominent-coder` | `fix/…` or `feat/…` → PR into **`main`** | Issues/PRs/host fixes; tests when possible; do not merge |
 | Programmer | `/workspace/photocraft-hmos-programmer` | `fix/…` or `feat/…` → PR into **`main`** | Host features/fixes as assigned; tests when possible; do not merge |
-| Project Manager | `/workspace/photocraft-hmos` | Reviews and merges PRs; pushes `main` and `upstream` | Only agent that merges; never delete the repo; never push unreviewed code |
+| Project Manager | `/workspace/photocraft-hmos` | Reviews and merges PRs; pushes `main` and `upstream-track` | Only agent that merges; never delete the repo; never push unreviewed code |
 
 Do not share checkouts. After cloning, add the `upstream` remote if missing. Prefer `gh` / existing GitHub login; do not force-push shared branches.
 
