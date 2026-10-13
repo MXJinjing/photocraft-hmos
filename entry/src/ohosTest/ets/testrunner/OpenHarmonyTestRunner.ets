@@ -1,5 +1,6 @@
 import { abilityDelegatorRegistry, TestRunner, Driver, PointerMatrix } from '@kit.TestKit';
 import native from 'libphotocraft.so';
+import { runBrushPreviewTest } from '../test/BrushPreviewTest';
 
 export default class OpenHarmonyTestRunner implements TestRunner {
   onPrepare(): void {}
@@ -9,6 +10,11 @@ export default class OpenHarmonyTestRunner implements TestRunner {
   }
 
   async onRun(): Promise<void> {
+    const parameters = abilityDelegatorRegistry.getArguments().parameters;
+    if (parameters['-s brushPreview'] === 'true' || parameters['brushPreview'] === 'true') {
+      await runBrushPreviewTest();
+      return;
+    }
     const delegator = abilityDelegatorRegistry.getAbilityDelegator();
     try {
       await delegator.startAbility({

@@ -752,16 +752,16 @@ mod tests {
         assert!(app.ui.brush_picker.is_none());
 
         app.session.edit_prefs(|p| p.tools.stylus_long_press = StylusLongPress::Off);
-        super::apply_pen_gesture(&mut app, crate::stylus::PenGesture::LongPress, [8.0, 8.0]);
+        super::apply_pen_gesture(&mut app, &egui::Context::default(), crate::stylus::PenGesture::LongPress, [8.0, 8.0]);
         assert!(app.ui.brush_picker.is_none());
 
         app.session.edit_prefs(|p| p.tools.stylus_double_tap = StylusDoubleTap::Off);
-        super::apply_pen_gesture(&mut app, crate::stylus::PenGesture::DoubleTap, [8.0, 8.0]);
+        super::apply_pen_gesture(&mut app, &egui::Context::default(), crate::stylus::PenGesture::DoubleTap, [8.0, 8.0]);
         assert_eq!(app.ui.tool, Tool::Brush);
         app.session.edit_prefs(|p| p.tools.stylus_double_tap = StylusDoubleTap::Eraser);
-        super::apply_pen_gesture(&mut app, crate::stylus::PenGesture::DoubleTap, [8.0, 8.0]);
+        super::apply_pen_gesture(&mut app, &egui::Context::default(), crate::stylus::PenGesture::DoubleTap, [8.0, 8.0]);
         assert_eq!(app.ui.tool, Tool::Eraser);
-        super::apply_pen_gesture(&mut app, crate::stylus::PenGesture::DoubleTap, [8.0, 8.0]);
+        super::apply_pen_gesture(&mut app, &egui::Context::default(), crate::stylus::PenGesture::DoubleTap, [8.0, 8.0]);
         assert_eq!(app.ui.tool, Tool::Brush);
     }
 

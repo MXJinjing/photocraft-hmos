@@ -82,8 +82,9 @@ pub(crate) fn outline(painter: &Painter, at: Pos2, rings: Vec<Vec<Vec2>>, centre
 
 /// Can this pass show an OS cursor bitmap? eframe's immediate viewports and its web integration
 /// don't upload cursor images; every desktop root viewport does (winit custom cursors).
+/// The OHOS host forwards stock cursor icons only, so its tool cursors must be painted.
 fn native(ctx: &egui::Context) -> bool {
-    cfg!(not(target_arch = "wasm32")) && ctx.viewport_id() == egui::ViewportId::ROOT
+    cfg!(all(not(target_arch = "wasm32"), not(target_env = "ohos"))) && ctx.viewport_id() == egui::ViewportId::ROOT
 }
 
 /// Bitmap pixels per egui point. winit takes an `NSCursor` image's dimensions as logical points on
