@@ -1,4 +1,4 @@
-# PhotoCraft for HarmonyOS
+# PhotoCraft For HarmonyOS
 
 [![ArkTS](https://img.shields.io/badge/UI-ArkTS%20%2F%20ETS-blue)](https://developer.huawei.com/consumer/cn/arkts/)
 [![Rust](https://img.shields.io/badge/native-Rust-orange?logo=rust&logoColor=white)](https://www.rust-lang.org/)
@@ -6,7 +6,7 @@
 [![License](https://img.shields.io/badge/license-MIT%20%2F%20Apache--2.0-black)](LICENSE)
 [![Status](https://img.shields.io/badge/status-early%20alpha-yellow)](https://github.com/MXJinjing/photocraft-hmos)
 
-面向 HarmonyOS 的分层图像编辑应用。
+**PhotoCraft For HarmonyOS** 的应用简称为 **PhotoCraft HMOS**，是面向 HarmonyOS 的分层图像编辑应用。
 
 PhotoCraft 是一款开源图像编辑器，支持图层、蒙版、文字、画笔，以及 Photoshop 分层文件（PSD）。本仓库为其在 **HarmonyOS** 上的原生适配版本，界面与操作尽量贴近上游桌面版。
 
