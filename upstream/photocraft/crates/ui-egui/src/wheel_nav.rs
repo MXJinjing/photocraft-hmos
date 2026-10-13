@@ -174,21 +174,23 @@ pub fn read(ctx: &Context, zoom_with_wheel: bool) -> Option<Wheel> {
     classify(Input { scroll, raw, zoom_delta, alt, zoom_with_wheel, notch })
 }
 
-/// Wheel/trackpad navigation must not also become a stroke from compatibility pointer events
-/// or a button still held. Keep ownership through release, including after wheel smoothing.
+/// Suppress new tool presses from wheel/trackpad compatibility pointer events through release,
+/// including after wheel smoothing. A contact already held before navigation keeps its tool
+/// input, even before egui's drag threshold or on the release frame.
 pub fn blocks_tool_input(ctx: &Context, navigated: bool) -> bool {
     let down = ctx.input(|i| i.pointer.any_down() || i.any_touches());
     let frame = ctx.cumulative_frame_nr();
     let id = Id::new("pc-wheel-contact");
     ctx.data_mut(|d| {
-        let previous = d.get_temp::<(u64, bool, bool)>(id);
-        if let Some((at, blocked, _)) = previous
+        let previous = d.get_temp::<(u64, bool, bool, bool)>(id);
+        if let Some((at, blocked, _, _)) = previous
             && at == frame
         {
             return blocked;
         }
-        let blocked = navigated || previous.is_some_and(|(_, _, held)| held);
-        d.insert_temp(id, (frame, blocked, blocked && down));
+        let was_down = previous.is_some_and(|(_, _, _, down)| down);
+        let blocked = previous.is_some_and(|(_, _, held, _)| held) || (navigated && !was_down);
+        d.insert_temp(id, (frame, blocked, blocked && down, down));
         blocked
     })
 }

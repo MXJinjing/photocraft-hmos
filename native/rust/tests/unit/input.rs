@@ -58,11 +58,12 @@ fn snapshot(state: &mut super::State, points: &[(u64, f32, f32)], events: &mut V
     );
 }
 
-/// Expire the Primary-defer window and re-snapshot so a lone finger promotes.
-fn promote_pending(state: &mut super::State, points: &[(u64, f32, f32)], events: &mut Vec<egui::Event>) {
-    if let Some(pending) = state.pending_touch.as_mut() {
-        pending.at = std::time::Instant::now() - std::time::Duration::from_secs(1);
-    }
+// Re-snapshot an already active first contact.
+fn promote_pending(
+    state: &mut super::State,
+    points: &[(u64, f32, f32)],
+    events: &mut Vec<egui::Event>,
+) {
     snapshot(state, points, events);
 }
 
@@ -337,9 +338,7 @@ fn pen_takeover_releases_finger_in_place_not_at_pen_tip() {
         "finger primary must release at finger A, not pen B: {events:?}"
     );
     assert!(
-        events
-            .iter()
-            .any(|e| matches!(e, egui::Event::PointerGone)),
+        events.iter().any(|e| matches!(e, egui::Event::PointerGone)),
         "finger pointer must PointerGone before pen owns the canvas: {events:?}"
     );
     assert!(
@@ -381,7 +380,10 @@ fn pen_hover_while_finger_down_does_not_rubber_band_to_tip() {
     );
     assert!(state.touches.is_empty());
     assert!(state.ignore_fingers);
-    assert!(state.pressed.is_none(), "finger must not remain pressed across hover move");
+    assert!(
+        state.pressed.is_none(),
+        "finger must not remain pressed across hover move"
+    );
     // Subsequent palm snapshots stay suppressed.
     let before = events.len();
     snapshot(&mut state, &[(1, 20., 30.)], &mut events);
@@ -392,11 +394,7 @@ fn pen_hover_while_finger_down_does_not_rubber_band_to_tip() {
 fn two_finger_snapshot_does_not_synthesize_primary_tool_press() {
     let mut state = super::State::default();
     let mut events = vec![];
-    snapshot(
-        &mut state,
-        &[(1, 100., 100.), (2, 300., 100.)],
-        &mut events,
-    );
+    snapshot(&mut state, &[(1, 100., 100.), (2, 300., 100.)], &mut events);
     assert!(
         state.pressed.is_none() && state.touch_pointer.is_none(),
         "multi-touch must not own a tool primary press"
@@ -437,11 +435,7 @@ fn second_finger_cancels_one_finger_primary_in_place() {
     promote_pending(&mut state, &[(1, 100., 100.)], &mut events);
     assert_eq!(state.touch_pointer, Some(1));
     events.clear();
-    snapshot(
-        &mut state,
-        &[(1, 100., 100.), (2, 300., 100.)],
-        &mut events,
-    );
+    snapshot(&mut state, &[(1, 100., 100.), (2, 300., 100.)], &mut events);
     let finger = egui::pos2(50., 50.);
     assert!(
         events.iter().any(|e| matches!(
@@ -459,43 +453,29 @@ fn second_finger_cancels_one_finger_primary_in_place() {
 }
 
 #[test]
-fn staggered_pinch_never_synthesizes_primary_before_second_finger() {
+fn first_finger_starts_immediately_and_second_finger_releases_primary() {
     let mut state = super::State::default();
     let mut events = vec![];
     snapshot(&mut state, &[(1, 100., 100.)], &mut events);
-    assert!(
-        state.pressed.is_none() && state.touch_pointer.is_none(),
-        "first finger of a possible pinch must not Primary yet: pressed={:?} touch_pointer={:?}",
-        state.pressed,
-        state.touch_pointer
-    );
-    assert!(state.pending_touch.is_some());
-    assert!(
-        !events
-            .iter()
-            .any(|e| matches!(e, egui::Event::PointerButton { pressed: true, .. })),
-        "no press-position ink before second finger: {events:?}"
-    );
-    events.clear();
-    snapshot(
-        &mut state,
-        &[(1, 100., 100.), (2, 300., 100.)],
-        &mut events,
-    );
-    assert!(state.touch_nav_active);
-    assert!(state.pending_touch.is_none());
-    assert!(state.pressed.is_none() && state.touch_pointer.is_none());
-    assert!(
-        !events
-            .iter()
-            .any(|e| matches!(e, egui::Event::PointerButton { .. })),
-        "staggered pinch must never press or release Primary: {events:?}"
-    );
+    assert_eq!(state.touch_pointer, Some(1));
     assert!(
         events
             .iter()
-            .any(|e| matches!(e, egui::Event::PointerMoved(_))),
-        "entering multi from a deferred finger still needs a pinch anchor: {events:?}"
+            .any(|e| matches!(e, egui::Event::PointerButton { pressed: true, .. }))
+    );
+    events.clear();
+    snapshot(&mut state, &[(1, 100., 100.), (2, 300., 100.)], &mut events);
+    assert!(state.touch_nav_active);
+    assert!(state.pressed.is_none() && state.touch_pointer.is_none());
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, egui::Event::PointerButton { pressed: false, .. }))
+    );
+    assert!(
+        !events
+            .iter()
+            .any(|e| matches!(e, egui::Event::PointerButton { pressed: true, .. }))
     );
 }
 
@@ -504,11 +484,7 @@ fn leftover_finger_after_pinch_does_not_synthesize_primary() {
     let mut state = super::State::default();
     let mut events = vec![];
     // Two-finger pinch / pan: navigation only.
-    snapshot(
-        &mut state,
-        &[(1, 100., 100.), (2, 300., 100.)],
-        &mut events,
-    );
+    snapshot(&mut state, &[(1, 100., 100.), (2, 300., 100.)], &mut events);
     assert!(state.touch_nav_active);
     assert!(state.pressed.is_none() && state.touch_pointer.is_none());
     events.clear();
@@ -526,7 +502,10 @@ fn leftover_finger_after_pinch_does_not_synthesize_primary() {
             .any(|e| matches!(e, egui::Event::PointerButton { pressed: true, .. })),
         "no primary press from leftover finger: {events:?}"
     );
-    assert!(state.touch_nav_active, "nav rejection stays until all fingers lift");
+    assert!(
+        state.touch_nav_active,
+        "nav rejection stays until all fingers lift"
+    );
     // Full lift clears nav latch so a later intentional single-finger can paint.
     snapshot(&mut state, &[], &mut events);
     assert!(!state.touch_nav_active);
@@ -542,11 +521,7 @@ fn leftover_finger_after_pinch_does_not_synthesize_primary() {
 fn leftover_finger_after_empty_snapshot_does_not_synthesize_primary() {
     let mut state = super::State::default();
     let mut events = vec![];
-    snapshot(
-        &mut state,
-        &[(1, 100., 100.), (2, 300., 100.)],
-        &mut events,
-    );
+    snapshot(&mut state, &[(1, 100., 100.), (2, 300., 100.)], &mut events);
     events.clear();
     // Platform quirk: empty snapshot between multi-touch and the remnant contact.
     snapshot(&mut state, &[], &mut events);
@@ -570,7 +545,6 @@ fn leftover_finger_after_empty_snapshot_does_not_synthesize_primary() {
         "no primary press after empty-gap leftover: {events:?}"
     );
     assert!(!state.touch_nav_active);
-    assert!(state.pending_touch.is_none());
     snapshot(&mut state, &[], &mut events);
     assert!(!state.touch_nav_active);
 }
@@ -1576,5 +1550,79 @@ fn staggered_lift_keeps_remaining_finger_owned_beyond_the_settling_window() {
         snapshot(&mut state, &[], &mut events);
         assert!(!state.touch_nav_active);
         assert!(state.touches.is_empty());
+    }
+}
+
+#[test]
+fn native_staggered_pinch_aborts_provisional_ink_and_commits_owned_ink() {
+    use photocraft_ui_egui::{PhotocraftApp, Services, state::Tool};
+    for owned in [false, true] {
+        let ctx = egui::Context::default();
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), Services::default());
+        app.run("file.new", serde_json::json!({"width": 256, "height": 256}))
+            .unwrap();
+        app.ui.tool = Tool::Brush;
+        let mut state = super::State {
+            feed: app.stylus.feed.clone(),
+            ..Default::default()
+        };
+        let mut now = 0.0;
+        let mut render = |app: &mut PhotocraftApp, events: Vec<egui::Event>| {
+            now += 1.0 / 60.0;
+            let mut raw = egui::RawInput {
+                events,
+                time: Some(now),
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1200., 800.),
+                )),
+                ..Default::default()
+            };
+            app.host_input(&ctx, &mut raw);
+            let _ = ctx.run_logic(&raw, |ctx| app.host_logic(ctx));
+            ctx.run_ui(raw, |ui| app.host_ui(ui)).textures_delta.clear();
+        };
+        for _ in 0..4 {
+            render(&mut app, vec![]);
+        }
+        let p = app.last_canvas_rect.center();
+        let revision = app.session.active().unwrap().revision;
+        let mut events = vec![];
+        snapshot(&mut state, &[(1, p.x * 2., p.y * 2.)], &mut events);
+        render(&mut app, std::mem::take(&mut events));
+        let moved = p + egui::vec2(20., 0.);
+        snapshot(&mut state, &[(1, moved.x * 2., moved.y * 2.)], &mut events);
+        render(&mut app, std::mem::take(&mut events));
+        if owned {
+            for _ in 0..5 {
+                render(&mut app, vec![]);
+            }
+        }
+        let before = app.ui.views[0].clone();
+        snapshot(
+            &mut state,
+            &[
+                (1, moved.x * 2., moved.y * 2.),
+                (2, moved.x * 2. + 100., moved.y * 2.),
+            ],
+            &mut events,
+        );
+        render(&mut app, std::mem::take(&mut events));
+        assert_eq!(
+            app.ui.views[0].center, before.center,
+            "joining finger must not replay pointer movement"
+        );
+        assert_eq!(
+            app.session.active().unwrap().revision,
+            revision + u64::from(owned),
+            "only an owned stroke commits before navigation"
+        );
+        snapshot(&mut state, &[], &mut events);
+        render(&mut app, events);
+        assert_eq!(
+            app.session.active().unwrap().revision,
+            revision + u64::from(owned),
+            "lifting navigation must not commit again"
+        );
     }
 }
