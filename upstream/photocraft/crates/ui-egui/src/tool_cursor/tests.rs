@@ -1,9 +1,9 @@
 use super::*;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), not(target_env = "ohos")))]
 use egui::{Event, Modifiers, PointerButton, pos2};
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), not(target_env = "ohos")))]
 use egui_kittest::Harness;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), not(target_env = "ohos")))]
 use serde_json::json;
 
 fn alpha(image: &CustomCursorImage, x: u16, y: u16) -> u8 {
@@ -38,8 +38,8 @@ fn bitmap_has_a_transparent_hotspot_and_the_correct_radius_at_each_dpi() {
 
 #[test]
 fn brush_tip_opacity_is_applied_after_rasterization() {
-    let full = rasterize(Shape::Circle { radius: 20.0, centre: false }, 1.0).unwrap();
-    let faded = rasterize_with_opacity(Shape::Circle { radius: 20.0, centre: false }, 1.0, 0.5).unwrap();
+    let full = rasterize(&Shape::Circle { radius: 20.0, centre: false }, 1.0).unwrap();
+    let faded = rasterize_with_opacity(&Shape::Circle { radius: 20.0, centre: false }, 1.0, 0.5).unwrap();
     let edge = full.hotspot[0] + 20;
     assert_eq!(alpha(&full, edge, full.hotspot[1]), 248);
     assert_eq!(alpha(&faded, edge, faded.hotspot[1]), 124);
@@ -51,13 +51,13 @@ fn brush_tip_opacity_is_applied_after_rasterization() {
 fn opacity_is_part_of_the_native_cursor_cache_key() {
     let ctx = egui::Context::default();
     let shape = Shape::Circle { radius: 20.0, centre: false };
-    let full = cached_image_with_opacity(&ctx, shape, 1.0, 1.0).unwrap();
-    let full_again = cached_image_with_opacity(&ctx, shape, 1.0, 1.0).unwrap();
+    let full = cached_image_with_opacity(&ctx, &shape, 1.0, 1.0).unwrap();
+    let full_again = cached_image_with_opacity(&ctx, &shape, 1.0, 1.0).unwrap();
     assert!(Arc::ptr_eq(&full.rgba, &full_again.rgba));
-    let faded = cached_image_with_opacity(&ctx, shape, 1.0, 0.5).unwrap();
+    let faded = cached_image_with_opacity(&ctx, &shape, 1.0, 0.5).unwrap();
     assert!(!Arc::ptr_eq(&full.rgba, &faded.rgba));
     assert_eq!(alpha(&faded, faded.hotspot[0] + 20, faded.hotspot[1]), 124);
-    let faded_again = cached_image_with_opacity(&ctx, shape, 1.0, 0.5).unwrap();
+    let faded_again = cached_image_with_opacity(&ctx, &shape, 1.0, 0.5).unwrap();
     assert!(Arc::ptr_eq(&faded.rgba, &faded_again.rgba));
 }
 
@@ -215,7 +215,7 @@ fn lifecycle_clears_sticky_images_and_respects_later_widgets() {
 }
 
 #[test]
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), not(target_env = "ohos")))]
 fn ordinary_brush_cursor_is_not_part_of_the_canvas_draw_list() {
     let ctx = egui::Context::default();
     ctx.add_plugin(CursorLifecycle);
@@ -233,6 +233,29 @@ fn ordinary_brush_cursor_is_not_part_of_the_canvas_draw_list() {
     let image = output.platform_output.cursor_image.unwrap();
     assert!(image.size[0] < 32, "oversized tips retain a small native hotspot");
     assert!(output.shapes.iter().any(|s| matches!(s.shape, egui::Shape::Circle(_))), "the full tip is not silently shrunk");
+}
+
+#[test]
+fn painted_cursor_backend_preserves_brush_opacity_and_crosshairs() {
+    let ctx = egui::Context::default();
+    ctx.add_plugin(CursorLifecycle);
+    // Non-root viewports use the same painted backend as the OHOS root.
+    let viewport = egui::ViewportId::from_hash_of("painted-cursor-test");
+    let mut raw = egui::RawInput { viewport_id: viewport, ..Default::default() };
+    raw.viewports.insert(viewport, Default::default());
+    let at = egui::pos2(100.0, 100.0);
+    let mut output = ctx.run_ui(raw, |ui| {
+        let icon = circle_with_opacity(ui.painter(), at, 20.0, false, 0.5);
+        ui.ctx().set_cursor_icon(icon);
+        crosshair(ui.painter(), at + egui::vec2(60.0, 0.0), 8.0, 2.0);
+    });
+    output.textures_delta.clear();
+    assert!(output.platform_output.cursor_image.is_none());
+    assert_eq!(output.platform_output.cursor_icon, CursorIcon::None);
+    assert!(output.shapes.iter().any(|s| matches!(&s.shape,
+        egui::Shape::Circle(c) if c.center == at && c.radius == 20.0
+            && c.stroke.width > 0.0 && c.stroke.color.a() > 0 && c.stroke.color.a() < 255)));
+    assert!(output.shapes.iter().any(|s| matches!(s.shape, egui::Shape::LineSegment { .. })));
 }
 
 /// Run explicitly for visual QA: native cursors are absent from GPU screenshots.
@@ -278,7 +301,7 @@ fn write_cursor_preview() {
     std::fs::write(path, png).unwrap();
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), not(target_env = "ohos")))]
 fn harness() -> Harness<'static, crate::PhotocraftApp> {
     let mut app = crate::PhotocraftApp::new(photocraft_engine::Session::new(), Default::default());
     app.run("file.new", json!({"width": 200, "height": 200})).unwrap();
@@ -307,7 +330,7 @@ fn harness() -> Harness<'static, crate::PhotocraftApp> {
 }
 
 #[test]
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), not(target_env = "ohos")))]
 fn brush_hover_uses_an_os_bitmap_that_survives_motion_but_not_tool_or_panel_changes() {
     let mut h = harness();
     let initial = h.output().platform_output.cursor_image.clone().expect("brush hover must reach the OS, not the painter");
@@ -345,7 +368,7 @@ fn brush_hover_uses_an_os_bitmap_that_survives_motion_but_not_tool_or_panel_chan
 }
 
 #[test]
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), not(target_env = "ohos")))]
 fn painting_preference_and_zoom_change_the_native_cursor_without_changing_pointer_input() {
     let mut h = harness();
     let image = h.output().platform_output.cursor_image.clone().unwrap();
