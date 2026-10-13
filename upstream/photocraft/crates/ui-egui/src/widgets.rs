@@ -276,6 +276,11 @@ pub fn compact_value_field(ui: &mut Ui, value: &mut f32, range: std::ops::RangeI
     value_field_box(ui, value, range, suffix, vec2(width, height), 0.0, FieldOpts::default()).0
 }
 
+/// Compact numeric field returning its visible box for adjacent controls.
+pub fn compact_value_field_with_rect(ui: &mut Ui, value: &mut f32, range: std::ops::RangeInclusive<f32>, suffix: &str, width: f32, height: f32) -> (Response, Rect) {
+    value_field_box(ui, value, range, suffix, vec2(width, height), 0.0, FieldOpts::default())
+}
+
 /// A size dialog's unit key (`px`, `in`, `cm`, `mm`, `pt`, `pica`, `percent`) as a unit.
 pub fn unit_of_key(key: &str) -> photocraft_engine::prefs::Unit {
     use photocraft_engine::prefs::Unit;
