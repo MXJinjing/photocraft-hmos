@@ -7,9 +7,9 @@
     clippy::todo,
     clippy::unreachable
 )]
-mod bridge;
 #[cfg(any(target_env = "ohos", test))]
 mod appearance;
+mod bridge;
 #[cfg(any(target_env = "ohos", test))]
 mod chrome;
 #[cfg(any(target_env = "ohos", test))]
@@ -18,6 +18,7 @@ mod cursor;
 mod display_color;
 #[cfg(any(target_env = "ohos", test))]
 mod documents;
+mod file_open;
 #[cfg(any(target_env = "ohos", test))]
 mod ime;
 mod input;
@@ -158,9 +159,9 @@ fn services(
     }
 }
 // SAFETY: C++ passes a valid pointer/length pair for the duration of each call. Copy
-// immediately; never retain a borrowed C++ buffer. Reject allocation-sized hostile inputs.
+// immediately; never retain a borrowed C++ buffer. Enforce slice addressability.
 unsafe fn bytes<'a>(ptr: *const u8, len: usize) -> Option<&'a [u8]> {
-    if len > 256 * 1024 * 1024 || (ptr.is_null() && len != 0) {
+    if len > isize::MAX as usize || (ptr.is_null() && len != 0) {
         return None;
     }
     if len == 0 {
@@ -168,6 +169,66 @@ unsafe fn bytes<'a>(ptr: *const u8, len: usize) -> Option<&'a [u8]> {
     }
     Some(unsafe { std::slice::from_raw_parts(ptr, len) })
 }
+fn copy_bytes(data: &[u8]) -> Result<Vec<u8>, String> {
+    let mut bytes = Vec::new();
+    bytes
+        .try_reserve_exact(data.len())
+        .map_err(|e| format!("Not enough memory to open file: {e}"))?;
+    bytes.extend_from_slice(data);
+    Ok(bytes)
+}
+
+fn finish_file(id: Option<u64>, result: bridge::Reply) {
+    if let Some(id) = id {
+        bridge::reply(id, result);
+    } else {
+        match result {
+            Ok((name, data)) => send(Message::Open(name, data)),
+            Err(error) => bridge::notify(0, "error", &error, &[]),
+        }
+    }
+}
+
+// SAFETY: The platform holds the original file open until the synchronous duplicate returns.
+unsafe fn open_file(id: Option<u64>, name: String, fd: i32) {
+    let file = match unsafe { file_open::duplicate(fd) } {
+        Ok(file) => file,
+        Err(error) => {
+            finish_file(id, Err(error));
+            return;
+        }
+    };
+    // Do not read on the render worker: it can be waiting for this picker reply.
+    if let Err(error) = std::thread::Builder::new()
+        .name("photocraft-file-open".into())
+        .spawn(move || finish_file(id, file_open::read(file).map(|data| (name, data))))
+    {
+        finish_file(id, Err(format!("Cannot start file reader: {error}")));
+    }
+}
+
+/// # Safety
+/// `text`/`n` must be readable and `fd` open until this call returns.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pc_reply_file(id: u64, text: *const u8, n: usize, fd: i32) {
+    let Some(text) = (unsafe { bytes(text, n) }) else {
+        bridge::reply(id, Err("Invalid file name buffer".into()));
+        return;
+    };
+    unsafe { open_file(Some(id), String::from_utf8_lossy(text).into_owned(), fd) };
+}
+
+/// # Safety
+/// `text`/`n` must be readable and `fd` open until this call returns.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pc_open_file(text: *const u8, n: usize, fd: i32) {
+    let Some(text) = (unsafe { bytes(text, n) }) else {
+        bridge::notify(0, "error", "Invalid file name buffer", &[]);
+        return;
+    };
+    unsafe { open_file(None, String::from_utf8_lossy(text).into_owned(), fd) };
+}
+
 /// # Safety
 /// Pointer/length pairs must reference valid, readable memory until this call returns.
 /// The notification function supplied to pc_init must remain valid for the process lifetime.
@@ -222,16 +283,18 @@ pub unsafe extern "C" fn pc_reply(
     len: usize,
 ) {
     let Some(text) = (unsafe { bytes(text, text_len) }) else {
+        bridge::reply(id, Err("Invalid reply text buffer".into()));
         return;
     };
     let Some(data) = (unsafe { bytes(data, len) }) else {
+        bridge::reply(id, Err("Invalid reply data buffer".into()));
         return;
     };
     let text = String::from_utf8_lossy(text).into_owned();
     bridge::reply(
         id,
         if ok {
-            Ok((text, data.to_vec()))
+            copy_bytes(data).map(|data| (text, data))
         } else {
             Err(text)
         },
@@ -243,10 +306,13 @@ pub unsafe extern "C" fn pc_reply(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pc_open(text: *const u8, n: usize, data: *const u8, len: usize) {
     if let (Some(text), Some(data)) = (unsafe { bytes(text, n) }, unsafe { bytes(data, len) }) {
-        send(Message::Open(
-            String::from_utf8_lossy(text).into_owned(),
-            data.to_vec(),
-        ));
+        match copy_bytes(data) {
+            Ok(data) => send(Message::Open(
+                String::from_utf8_lossy(text).into_owned(),
+                data,
+            )),
+            Err(error) => bridge::notify(0, "error", &error, &[]),
+        }
     }
 }
 /// # Safety
@@ -329,6 +395,9 @@ fn worker(config: Config, rx: mpsc::Receiver<Message>) {
         photocraft_engine::Session::new(),
         services(&config.files, documents.clone(), &appearance),
     );
+    // Native file opens and drag imports must decode off the render worker so the
+    // editor keeps drawing the opening tab and its progress indicator.
+    app.background_jobs = true;
     app.session.print_service = Some(|pdf, metadata| {
         bridge::request("print", &metadata.to_string(), pdf).map(|(message, _)| message)
     });

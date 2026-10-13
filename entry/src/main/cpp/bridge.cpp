@@ -39,6 +39,8 @@ void pc_close();
 void pc_input(const uint8_t*,size_t);
 void pc_reply(uint64_t,bool,const uint8_t*,size_t,const uint8_t*,size_t);
 void pc_open(const uint8_t*,size_t,const uint8_t*,size_t);
+void pc_reply_file(uint64_t,const uint8_t*,size_t,int32_t);
+void pc_open_file(const uint8_t*,size_t,int32_t);
 void pc_command(const uint8_t*,size_t);
 }
 namespace {
@@ -284,6 +286,24 @@ napi_value Open(napi_env env,napi_callback_info info) {
     auto name=String(env,args[0]);void* data=nullptr;size_t size=0;napi_get_arraybuffer_info(env,args[1],&data,&size);
     pc_open(reinterpret_cast<const uint8_t*>(name.data()),name.size(),static_cast<uint8_t*>(data),size);return Undefined(env);
 }
+napi_value ReplyFile(napi_env env,napi_callback_info info) {
+    size_t n=3;napi_value args[3];napi_get_cb_info(env,info,&n,args,nullptr,nullptr);
+    if(n!=3)return Undefined(env);
+    double id=0;int32_t fd=-1;
+    napi_get_value_double(env,args[0],&id);napi_get_value_int32(env,args[2],&fd);
+    auto name=String(env,args[1]);
+    // Rust duplicates fd before returning; ArkTS still owns and closes the original.
+    pc_reply_file(static_cast<uint64_t>(id),reinterpret_cast<const uint8_t*>(name.data()),name.size(),fd);
+    return Undefined(env);
+}
+napi_value OpenFile(napi_env env,napi_callback_info info) {
+    size_t n=2;napi_value args[2];napi_get_cb_info(env,info,&n,args,nullptr,nullptr);
+    if(n!=2)return Undefined(env);
+    int32_t fd=-1;napi_get_value_int32(env,args[1],&fd);
+    auto name=String(env,args[0]);
+    pc_open_file(reinterpret_cast<const uint8_t*>(name.data()),name.size(),fd);
+    return Undefined(env);
+}
 napi_value Active(napi_env env,napi_callback_info info) {
     size_t n=1;napi_value arg;bool active=false;napi_get_cb_info(env,info,&n,&arg,nullptr,nullptr);
     if(n)napi_get_value_bool(env,arg,&active);pc_active(active);return Undefined(env);
@@ -301,6 +321,8 @@ napi_value Init(napi_env env,napi_value exports) {
         {"input",nullptr,Input,nullptr,nullptr,nullptr,napi_default,nullptr},
         {"reply",nullptr,Reply,nullptr,nullptr,nullptr,napi_default,nullptr},
         {"open",nullptr,Open,nullptr,nullptr,nullptr,napi_default,nullptr},
+        {"replyFile",nullptr,ReplyFile,nullptr,nullptr,nullptr,napi_default,nullptr},
+        {"openFile",nullptr,OpenFile,nullptr,nullptr,nullptr,napi_default,nullptr},
         {"active",nullptr,Active,nullptr,nullptr,nullptr,napi_default,nullptr},
         {"close",nullptr,Close,nullptr,nullptr,nullptr,napi_default,nullptr},
         {"command",nullptr,Command,nullptr,nullptr,nullptr,napi_default,nullptr}
