@@ -7,7 +7,8 @@
 //!   Appearance (Window › Theme), Services, Hide, Hide Others, Show All and Quit (File › Exit,
 //!   still the app's own `file.exit` so the unsaved-changes prompt runs). The other Craft apps
 //!   use the same app menu;
-//! - **Window** gets Minimize, Zoom and Bring All to Front, and **Help** the system search field;
+//! - **Window** gets Minimize, Zoom and Bring All to Front, with the open documents after it
+//!   (where a Mac app lists its windows), and **Help** the system search field;
 //! - **clashes** with the system's keys (⌘H, ⌘M, ⌘W, ⌘,) are resolved in PhotoCraft's favour, and
 //!   reported; Hide and Minimize move to ⌃⌘H and ⌃⌘M, as Photoshop does.
 //!
@@ -237,28 +238,53 @@ fn tidy(nodes: Vec<Node>) -> Vec<Node> {
 
 /// A hash of everything a native menu can only change by rebuilding: menus, roles, item ids,
 /// kinds (plain or check), shortcuts and submenu labels. Labels, enabled and checked are updated
-/// in place.
+/// in place. Window's list of open documents is left out: opening or closing a document rebuilds
+/// only the Window menu ([`window_key`]).
 pub fn structure_key(bar: &MenuBar) -> u64 {
-    fn walk(nodes: &[Node], h: &mut DefaultHasher) {
-        for n in nodes {
-            match n {
-                Node::Item(it) => ('i', &it.id, it.checked.is_some(), &it.shortcut, it.role).hash(h),
-                Node::Separator => '-'.hash(h),
-                Node::Submenu { label, children, role } => {
-                    ('[', label, role).hash(h);
-                    walk(children, h);
-                    ']'.hash(h);
-                }
-                Node::Standard(s) => ('s', s).hash(h),
-            }
-        }
-    }
     let mut h = DefaultHasher::new();
     for m in &bar.menus {
         (&m.title, m.role).hash(&mut h);
-        walk(&m.children, &mut h);
+        if m.role == MenuRole::Window {
+            let mut rest: Vec<Node> = m.children.iter().filter(|n| !is_document(n)).cloned().collect();
+            while matches!(rest.last(), Some(Node::Separator)) {
+                rest.pop();
+            }
+            hash_nodes(&rest, &mut h);
+        } else {
+            hash_nodes(&m.children, &mut h);
+        }
     }
     h.finish()
+}
+
+/// The Window menu's structure, its open documents included: when it changes and nothing else
+/// did, a native menu rebuilds just the Window menu.
+pub fn window_key(bar: &MenuBar) -> u64 {
+    let mut h = DefaultHasher::new();
+    if let Some(m) = bar.menu(MenuRole::Window) {
+        hash_nodes(&m.children, &mut h);
+    }
+    h.finish()
+}
+
+/// Window › <document> (see [`crate::menus::DOCUMENT_ITEM`]).
+fn is_document(n: &Node) -> bool {
+    matches!(n, Node::Item(it) if it.id.starts_with(crate::menus::DOCUMENT_ITEM))
+}
+
+fn hash_nodes(nodes: &[Node], h: &mut DefaultHasher) {
+    for n in nodes {
+        match n {
+            Node::Item(it) => ('i', &it.id, it.checked.is_some(), &it.shortcut, it.role).hash(h),
+            Node::Separator => '-'.hash(h),
+            Node::Submenu { label, children, role } => {
+                ('[', label, role).hash(h);
+                hash_nodes(children, h);
+                ']'.hash(h);
+            }
+            Node::Standard(s) => ('s', s).hash(h),
+        }
+    }
 }
 
 // ----------------------------------------------------------------------------- shortcuts
@@ -447,9 +473,11 @@ pub fn mac_layout(bar: &MenuBar, lang: Lang) -> Layout {
         None => Node::Standard(Standard::Minimize),
     };
     if let Some(window) = bar.menus.iter_mut().find(|m| m.role == MenuRole::Window) {
+        let (docs, rest): (Vec<Node>, Vec<Node>) = std::mem::take(&mut window.children).into_iter().partition(is_document);
         let mut children = vec![minimize, Node::Standard(Standard::Zoom), Node::Separator];
-        children.append(&mut window.children);
-        children.extend([Node::Separator, Node::Standard(Standard::BringAllToFront)]);
+        children.extend(rest);
+        children.extend([Node::Separator, Node::Standard(Standard::BringAllToFront), Node::Separator]);
+        children.extend(docs);
         window.children = children;
     }
 
@@ -549,7 +577,8 @@ fn translate(bar: &mut MenuBar, lang: Lang) {
     fn walk(nodes: &mut [Node], lang: Lang) {
         for n in nodes {
             match n {
-                Node::Item(it) if it.role.is_none() => it.label = tr_id(lang, &it.id, &it.label).to_string(),
+                // A document's name is shown as it is.
+                Node::Item(it) if it.role.is_none() && !it.id.starts_with(crate::menus::DOCUMENT_ITEM) => it.label = tr_id(lang, &it.id, &it.label).to_string(),
                 Node::Submenu { label, children, role } => {
                     if role.is_none() {
                         *label = tr(lang, label).to_string();
@@ -710,7 +739,8 @@ pub(crate) fn had_input(ctx: &egui::Context) -> bool {
     ctx.input(|i| i.events.iter().any(|e| matches!(e, egui::Event::Key { pressed: true, .. } | egui::Event::PointerButton { pressed: false, .. })))
 }
 
-/// What the menus' rows depend on, cheaply: commands run, the documents and their revisions,
+/// What the menus' rows depend on, cheaply: commands run, the documents (their names, in tab
+/// order, for the Window menu) and the active one's revision,
 /// selection, recent files, panels and view state, the language. `input` forces a change on
 /// frames with a click or key press, which covers state the hash doesn't list.
 pub(crate) fn state_hash(app: &PhotocraftApp, input: Option<u64>) -> u64 {
@@ -719,6 +749,9 @@ pub(crate) fn state_hash(app: &PhotocraftApp, input: Option<u64>) -> u64 {
     let s = &app.session;
     s.journal.len().hash(&mut h);
     s.active_index().hash(&mut h);
+    for d in s.documents() {
+        (d.doc.id.0, &d.doc.name).hash(&mut h);
+    }
     s.clipboard.is_some().hash(&mut h);
     // A running job greys the commands that would change its document.
     s.has_jobs().hash(&mut h);
@@ -815,7 +848,7 @@ mod tests {
         assert_eq!(l.bar.find(MINIMIZE).unwrap().shortcut.as_deref(), Some("Ctrl+Cmd+M"));
         let window = l.bar.menu(MenuRole::Window).unwrap();
         assert_eq!(ids(&window.children)[..3], [MINIMIZE.to_string(), "<Zoom>".into(), "---".into()]);
-        assert_eq!(ids(&window.children).last().unwrap(), "<BringAllToFront>");
+        assert!(ids(&window.children).ends_with(&["<BringAllToFront>".into(), "---".into(), "window.document.0".into()]));
         let file = l.bar.menus.iter().find(|m| m.title == "File").unwrap();
         assert!(!file.children.contains(&Node::Standard(Standard::CloseWindow)), "⌘W stays File › Close");
     }
@@ -894,7 +927,8 @@ mod tests {
     }
 
     /// A native menu can't turn a plain item into a check item in place: opening the first
-    /// document must not change any item's kind, or the whole menu is rebuilt.
+    /// document must not change any item's kind, or the whole menu is rebuilt. Window's list of
+    /// documents gains a row, which rebuilds only the Window menu.
     #[test]
     fn opening_a_document_changes_state_not_structure() {
         let (a, b) = (crate::menus::menu_items(&app(false)), crate::menus::menu_items(&app(true)));
@@ -902,7 +936,31 @@ mod tests {
         let (ka, kb) = (kind(&a), kind(&b));
         let flips: Vec<&String> = ka.iter().filter(|(id, k)| kb.get(*id).is_some_and(|o| o != *k)).map(|(id, _)| id).collect();
         assert!(flips.is_empty(), "items that change kind: {flips:?}");
-        assert_eq!(structure_key(&layout(false).bar), structure_key(&layout(true).bar));
+        let (no_doc, one_doc) = (layout(false).bar, layout(true).bar);
+        assert_eq!(structure_key(&no_doc), structure_key(&one_doc));
+        assert_ne!(window_key(&no_doc), window_key(&one_doc), "the Window menu is rebuilt for its new row");
+    }
+
+    /// #2991: the open documents follow Bring All to Front, where a Mac app lists its windows,
+    /// the active one checked. Switching documents moves the check without a rebuild.
+    #[test]
+    fn the_documents_follow_bring_all_to_front() {
+        let none = ids(&layout(false).bar.menu(MenuRole::Window).unwrap().children);
+        assert_eq!(none.last().map(String::as_str), Some("<BringAllToFront>"));
+
+        let mut a = app(true);
+        a.run("file.new", json!({"width": 32, "height": 32})).unwrap();
+        a.sync_views();
+        let bar = photocraft_layout(&crate::menus::menu_items(&a), Lang::EN, "auto").bar;
+        let window = ids(&bar.menu(MenuRole::Window).unwrap().children);
+        assert_eq!(window[window.len() - 4..], ["<BringAllToFront>", "---", "window.document.0", "window.document.1"]);
+        assert_eq!(bar.find("window.document.1").and_then(|i| i.checked), Some(true));
+        assert_eq!(bar.find("window.document.0").and_then(|i| i.checked), Some(false));
+
+        a.session.set_active(0);
+        let switched = photocraft_layout(&crate::menus::menu_items(&a), Lang::EN, "auto").bar;
+        assert_eq!(switched.find("window.document.0").and_then(|i| i.checked), Some(true));
+        assert_eq!((structure_key(&switched), window_key(&switched)), (structure_key(&bar), window_key(&bar)), "a check moves in place");
     }
 
     #[test]
@@ -1100,6 +1158,56 @@ mod tests {
             assert!(!synced.borrow().last().unwrap().find("edit.cut").unwrap().enabled, "Cut must be disabled at an empty caret");
             assert!(app.session.clipboard.is_none(), "text Cut must not copy rendered pixels");
         }
+    }
+
+    /// Select > All, Edit > Copy and Edit > Paste work on the text being typed, not on pixels (#2893).
+    #[test]
+    fn copy_and_paste_type_from_native_menu() {
+        let synced = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let mut app = app(true);
+        let ctx = egui::Context::default();
+        let id = photocraft_doc::LayerId(app.run("type.create", json!({"text": "Hello", "size": 12, "x": 4, "y": 24})).unwrap()["layer"].as_u64().unwrap());
+        crate::menus::invoke(&mut app, &ctx, "type.editText", json!({})).unwrap();
+        if let Some(e) = app.ui.text_edit.as_mut() {
+            (e.anchor, e.caret) = (5, 5);
+        }
+        let layers = app.session.active().unwrap().doc.layers.len();
+        let click = |app: &mut PhotocraftApp, id: &str| {
+            app.services.native_menu = Some(NativeMenu::new(Box::new(Fake { synced: synced.clone(), events: vec![Event::Click(id.into())] })));
+            let mut raw = egui::RawInput::default();
+            app.services.native_menu.as_mut().unwrap().raw_input(&mut raw);
+            let mut out = ctx.run_ui(raw, |ui| {
+                run(app, ui.ctx());
+                sync(app, ui.ctx());
+            });
+            out.textures_delta.clear();
+            out
+        };
+        let text = |app: &PhotocraftApp| match &app.session.active().unwrap().doc.layer(id).unwrap().content {
+            photocraft_doc::LayerContent::Text(t) => t.text.clone(),
+            _ => panic!("type layer changed kind"),
+        };
+
+        click(&mut app, "select.all");
+        let edit = app.ui.text_edit.as_ref().unwrap();
+        assert_eq!((edit.anchor, edit.caret), (0, 5), "Select > All selects the characters");
+        let bar = synced.borrow().last().cloned().unwrap();
+        assert!(bar.find("edit.copy").unwrap().enabled, "Copy is enabled for selected characters");
+        assert!(bar.find("edit.paste").unwrap().enabled, "Paste is enabled while typing");
+
+        let out = click(&mut app, "edit.copy");
+        assert_eq!(out.platform_output.commands, [egui::OutputCommand::CopyText("Hello".into())]);
+        assert!(app.session.clipboard.is_none(), "text Copy must not copy rendered pixels");
+
+        let out = click(&mut app, "edit.paste");
+        let asked = out.viewport_output.values().any(|v| v.commands.contains(&egui::ViewportCommand::RequestPaste));
+        assert!(asked, "Edit > Paste asks the window for the clipboard text");
+        // The text arrives as a Paste event next frame and replaces the selection.
+        let raw = egui::RawInput { events: vec![egui::Event::Paste("World".into())], ..Default::default() };
+        frame(&ctx, raw, |ui| crate::shortcuts::handle(&mut app, ui.ctx()));
+        assert_eq!(text(&app), "World");
+        assert_eq!(app.session.active().unwrap().doc.layers.len(), layers, "no pixel layer was pasted");
+        assert!(!app.ui.status_error, "{}", app.ui.status);
     }
 
     #[test]

@@ -16,6 +16,8 @@
 //!   selection tools do their own ⌘ handling in `canvas` (⌘ inside the selection cuts the
 //!   selected pixels, outside it moves the layer, #896), and the Hand, Zoom, Crop, Slice, Path
 //!   Selection, shape, Pen and Type tools keep ⌘ for themselves.
+//! - `~` (the backtick key) with the Brush or Pencil: a stroke started while it is held erases,
+//!   with that tool's own brush ([`erase_held`], #3439).
 //!
 //! The current tool is never changed, so releasing the key gives the previous tool back. A
 //! temporary tool that started a drag lasts until the button is released, as in Photoshop.
@@ -77,11 +79,17 @@ pub fn cmd_moves(t: Tool) -> bool {
                 | Tool::RotateView
                 | Tool::Zoom
                 | Tool::Crop
+                | Tool::PerspectiveCrop
                 | Tool::Slice
                 | Tool::SliceSelect
                 | Tool::PathSelection
                 | Tool::DirectSelection
                 | Tool::Pen
+                | Tool::FreeformPen
+                | Tool::CurvaturePen
+                | Tool::AddAnchorPoint
+                | Tool::DeleteAnchorPoint
+                | Tool::ConvertPoint
                 | Tool::RectMarquee
                 | Tool::EllipseMarquee
                 | Tool::Lasso
@@ -117,8 +125,13 @@ pub fn is_temporary(id: &str) -> bool {
 
 /// The key binding of a temporary tool in effect (`None` when removed or unparsable).
 pub fn binding(app: &PhotocraftApp, t: Temporary) -> Option<KeyboardShortcut> {
-    let def = photocraft_engine::prefs::TEMPORARY_TOOLS.iter().find(|x| x.0 == t.id()).map(|x| x.2);
-    parse(app.session.prefs().shortcut(t.id(), def)?)
+    binding_of(app, t.id())
+}
+
+/// [`binding`] by id.
+fn binding_of(app: &PhotocraftApp, id: &str) -> Option<KeyboardShortcut> {
+    let def = photocraft_engine::prefs::TEMPORARY_TOOLS.iter().find(|x| x.0 == id).map(|x| x.2);
+    parse(app.session.prefs().shortcut(id, def)?)
 }
 
 /// Is `sc` held: its key down with at least its modifiers (more may be held, so ⇧ still squares
@@ -163,6 +176,20 @@ pub fn held_tool(app: &PhotocraftApp, ctx: &egui::Context) -> Option<Temporary> 
     let held = best.map(|(_, t, sc)| if t == Temporary::ZoomIn && alt && !sc.modifiers.alt { Temporary::ZoomOut } else { t });
     // A bound key (⌘Space is Zoom In) wins over ⌘ alone.
     held.or(cmd_move.then_some(Temporary::Move))
+}
+
+/// The binding id of the Brush and Pencil erase key (`prefs::TEMPORARY_TOOLS`).
+const ERASE: &str = "tools.temporary.erase";
+
+/// Tools whose strokes the erase key turns into erasing strokes with their own brush.
+pub fn erases_while_held(t: Tool) -> bool {
+    matches!(t, Tool::Brush | Tool::Pencil)
+}
+
+/// Is the erase key (`~` by default) held with a tool that [`erases_while_held`]? Never while a
+/// text field has the keyboard.
+pub fn erase_held(app: &PhotocraftApp, ctx: &egui::Context) -> bool {
+    erases_while_held(app.ui.tool) && !ctx.text_edit_focused() && binding_of(app, ERASE).is_some_and(|sc| ctx.input(|i| held(i, &sc)))
 }
 
 /// Is the reposition key (the Hand key, any modifiers) down?

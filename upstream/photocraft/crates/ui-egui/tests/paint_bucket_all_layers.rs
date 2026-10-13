@@ -88,6 +88,7 @@ fn pixels(h: &Harness, layer: LayerId) -> Vec<[f32; 4]> {
 
 #[test]
 fn all_layers_checkbox_limits_bucket_fill_to_the_visible_color() {
+    let _gpu = photocraft_testkit::gpu_lock();
     let Some(mut h) = harness() else { return };
     h.run_steps(4);
     for all_layers in [false, true] {

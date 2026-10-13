@@ -11,6 +11,7 @@
 //! adapter exists (like `crop_beyond_canvas.rs`).
 
 use egui::{Key, Modifiers, PointerButton, Pos2, pos2, vec2};
+use egui_kittest::kittest::Queryable;
 use photocraft_ui_egui::PhotocraftApp;
 use photocraft_ui_egui::canvas::ViewXform;
 use photocraft_ui_egui::control::{ControlRequest, handle};
@@ -23,6 +24,8 @@ fn harness() -> Option<Harness> {
         egui_kittest::Harness::builder().with_size(egui::vec2(900.0, 640.0)).with_max_steps(64).wgpu().build_eframe(|cc| {
             PhotocraftApp::setup_context(&cc.egui_ctx, Default::default());
             let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), Default::default());
+            // The queries below use English labels; don't follow the system locale.
+            app.session.prefs.edit(|p| p.interface.language = "en".into());
             if let Some(rs) = cc.wgpu_render_state.as_ref() {
                 app.set_wgpu(rs.clone());
             }
@@ -102,7 +105,73 @@ fn setup() -> Option<Harness> {
 }
 
 #[test]
+fn a_ratio_dropdown_updates_the_preview_and_enter_without_touching_a_handle() {
+    let Some(mut h) = setup() else { return };
+    h.get_by_value("Ratio").click();
+    h.run_steps(3);
+    h.get_by_label("1 : 1 (Square)").click();
+    h.run_steps(3);
+    assert_eq!(h.state().ui.crop_rect, Some([50.0, 0.0, 250.0, 200.0]));
+    if let Some(dir) = std::env::var_os("CRAFT_UI_VISUAL_FIXTURES") {
+        let dir = std::path::PathBuf::from(dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        h.render().unwrap().save(dir.join("photocraft-crop-square.png")).unwrap();
+    }
+    h.key_press(Key::Enter);
+    h.run_steps(3);
+    assert_eq!(h.state().session.active().unwrap().doc.size, photocraft_doc::Size::new(200, 200));
+}
+
+#[test]
+fn the_swap_button_and_x_apply_the_same_inscribed_ratio() {
+    let Some(mut h) = setup() else { return };
+    let original = [30.0, 20.0, 270.0, 180.0];
+    h.state_mut().ui.crop_rect = Some(original);
+    h.state_mut().ui.tool_options.crop_ratio = "3:2".into();
+    h.run_steps(3);
+    let before = mid(screen_box(&h));
+    h.get_by_label("Swaps height and width").click();
+    h.run_steps(3);
+    let button = h.state().ui.crop_rect.unwrap();
+    assert_eq!(h.state().ui.tool_options.crop_ratio, "2:3");
+    assert!(((button[2] - button[0]) / (button[3] - button[1]) - 2.0 / 3.0).abs() < 1e-10);
+    assert!(button[0] >= original[0] && button[2] <= original[2] && button[1] >= original[1] && button[3] <= original[3]);
+    assert!(mid(screen_box(&h)).distance(before) < 0.01);
+    h.state_mut().ui.crop_rect = Some(original);
+    h.state_mut().ui.tool_options.crop_ratio = "3:2".into();
+    h.run_steps(3);
+    h.key_press(Key::X);
+    h.run_steps(3);
+    assert_eq!(h.state().ui.crop_rect, Some(button));
+    assert!(mid(screen_box(&h)).distance(before) < 0.01);
+}
+
+#[test]
+fn a_resize_renders_the_frame_and_image_with_the_same_camera() {
+    let Some(mut h) = setup() else { return };
+    let box0 = screen_box(&h);
+    let c = mid(box0);
+    let right = pos2(box0[1].x, c.y);
+    drag(&mut h, right, right - vec2(48.0, 0.0), 6, |h, i| {
+        let img = h.render().expect("render");
+        let b = screen_box(h);
+        // The left edge also moves inward with Auto Center Preview. Sample either side
+        // away from the handles and the red patch: white inside, dimmed white outside.
+        let y = c.y + 70.0;
+        for x in [b[0].x - 5.0, b[1].x + 5.0] {
+            let px = img.get_pixel(x.round() as u32, y.round() as u32);
+            assert!(px[0] < 230 && px[1] < 230 && px[2] < 230, "frame {i}, outside at {x}: {px:?}");
+        }
+        for x in [b[0].x + 5.0, b[1].x - 5.0] {
+            let px = img.get_pixel(x.round() as u32, y.round() as u32);
+            assert!(px[0] > 245 && px[1] > 245 && px[2] > 245, "frame {i}, inside at {x}: {px:?}");
+        }
+    });
+}
+
+#[test]
 fn dragging_inside_moves_the_image_and_the_box_stays_centred() {
+    let _gpu = photocraft_testkit::gpu_lock();
     let Some(mut h) = setup() else { return };
     assert!(!photocraft_ui_egui::crop_ui::pending(h.state()), "the untouched frame");
     let c = h.state().last_canvas_rect.center();
@@ -133,6 +202,7 @@ fn dragging_inside_moves_the_image_and_the_box_stays_centred() {
 
 #[test]
 fn a_resize_keeps_the_box_centre_after_a_space_pan() {
+    let _gpu = photocraft_testkit::gpu_lock();
     let Some(mut h) = setup() else { return };
     // Space held: the temporary Hand pans the view 80, 40.
     let c = h.state().last_canvas_rect.center();

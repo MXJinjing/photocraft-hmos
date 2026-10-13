@@ -50,6 +50,8 @@ fn type_layers_offer_free_transform_but_not_distort_or_perspective() {
         path_name: None,
         transform: false,
         pasteboard: false,
+        anchor: None,
+        text: false,
     };
     assert!(crate::canvas_tool_menu::available(&app, &menu, "edit.freeTransform"));
     assert!(!crate::canvas_tool_menu::available(&app, &menu, "edit.transform.distort"));
@@ -84,4 +86,31 @@ fn free_transform_with_a_selection_frames_and_moves_the_whole_type_layer() {
     assert!(moved.x0.abs_diff(whole.x0 + 10) <= 1 && moved.width().abs_diff(whole.width()) <= 1, "{whole:?} -> {moved:?}");
     let st = app.session.active().unwrap();
     assert!(matches!(st.doc.layer(id).unwrap().content, photocraft_doc::LayerContent::Text(_)), "still editable type");
+}
+
+/// ⌘-drag (distort) and ⌘⌥⇧-drag (perspective) of a corner on editable type scale like a plain
+/// corner drag (#3010): the box stays a parallelogram and the commit keeps the type live, instead
+/// of a distorted box the engine then refuses.
+#[test]
+fn distort_and_perspective_corner_drags_scale_editable_type() {
+    use crate::canvas::ToolEvent;
+    let ctx = egui::Context::default();
+    let cmd = egui::Modifiers::COMMAND;
+    for mods in [cmd, cmd | egui::Modifiers::ALT | egui::Modifiers::SHIFT] {
+        let mut app = app();
+        crate::menus::invoke(&mut app, &ctx, "edit.freeTransform", json!({})).unwrap();
+        let q0 = app.ui.transform.as_ref().unwrap().quad;
+        let [x, y] = q0[1];
+        crate::transform_tool::pointer(&mut app, ToolEvent::Down { x, y, pressure: 1.0 }, mods);
+        crate::transform_tool::pointer(&mut app, ToolEvent::Move { x: x + 15.0, y: y - 10.0, pressure: 1.0 }, mods);
+        crate::transform_tool::pointer(&mut app, ToolEvent::Up { x: x + 15.0, y: y - 10.0 }, mods);
+        let q = app.ui.transform.as_ref().unwrap().quad;
+        assert_ne!(q, q0, "the drag scaled the box ({mods:?})");
+        let skew = (0..2).map(|k| (q[0][k] + q[2][k] - q[1][k] - q[3][k]).abs()).fold(0.0, f64::max);
+        assert!(skew < 1e-6, "the box stays a parallelogram ({mods:?}): {q:?}");
+        crate::transform_tool::commit(&mut app);
+        assert_eq!(app.ui.status, "", "{mods:?}");
+        let st = app.session.active().unwrap();
+        assert!(matches!(st.doc.layer(st.active_layer.unwrap()).unwrap().content, photocraft_doc::LayerContent::Text(_)), "still editable type");
+    }
 }

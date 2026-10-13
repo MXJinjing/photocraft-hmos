@@ -128,6 +128,14 @@ impl Smoother {
         }
     }
 
+    /// The string between the brush and the pointer: `(brush, pointer)` document positions while
+    /// smoothing holds the brush back from the last input point, `None` when they coincide (or
+    /// smoothing is off). The canvas draws it, as Photoshop does for Pulled String Mode.
+    pub fn string(&self) -> Option<([f64; 2], [f64; 2])> {
+        let (pos, last) = (self.pos?, self.last_input?);
+        (self.active() && (pos.x != last.x || pos.y != last.y)).then_some(([pos.x, pos.y], [last.x, last.y]))
+    }
+
     /// End of stroke: with Catch-Up On Stroke End the brush finishes at the last pointer position.
     pub fn finish(&mut self, out: &mut Vec<StrokePoint>) {
         if !self.active() || !self.cfg.catch_up_on_end {
@@ -666,6 +674,11 @@ impl DabGenerator {
     /// smoothing still catching up)? The canvas then keeps feeding it the held point.
     pub fn wants_time(&self) -> bool {
         self.walker.interval.is_some() || self.smoother.lagging()
+    }
+
+    /// See [`Smoother::string`].
+    pub fn smoothing_string(&self) -> Option<([f64; 2], [f64; 2])> {
+        self.smoother.string()
     }
 
     pub fn new(brush: &BrushSettings, zoom: f32) -> Self {

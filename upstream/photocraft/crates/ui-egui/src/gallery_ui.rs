@@ -52,7 +52,10 @@ fn default_params(f: GalleryFilter) -> Map<String, Value> {
     for p in parse_spec(f.params_doc()) {
         let v = match p.kind {
             Kind::Range { default, .. } => json!(default),
-            Kind::Choice(c) => json!(c[0]),
+            Kind::Choice { options, default } => {
+                let initial = default.as_deref().or_else(|| options.first().map(String::as_str)).unwrap_or("");
+                json!(initial)
+            }
             Kind::Bool(b) => json!(b),
             _ => continue,
         };
@@ -685,8 +688,9 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
                         widgets::slider_row(ui, &label, &mut v, min..=max, "", None);
                         e.params.insert(p.key, json!(v.round()));
                     }
-                    Kind::Choice(options) => {
-                        let mut c = e.params.get(&p.key).and_then(Value::as_str).unwrap_or(&options[0]).to_string();
+                    Kind::Choice { options, default } => {
+                        let initial = default.as_deref().or_else(|| options.first().map(String::as_str)).unwrap_or("");
+                        let mut c = e.params.get(&p.key).and_then(Value::as_str).unwrap_or(initial).to_string();
                         let labels: Vec<String> = options.iter().map(|o| crate::filter_dialog::label(o)).collect();
                         let opts: Vec<(String, &str)> = options.iter().cloned().zip(labels.iter().map(String::as_str)).collect();
                         ui.horizontal(|ui| {

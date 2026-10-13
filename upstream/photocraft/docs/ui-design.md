@@ -26,7 +26,8 @@ The toolbar's foreground and background colour chips follow the `Tokens::round_c
 ## Rules
 
 - **Colours and radii come from tokens.** Read them with `Tokens::get(ctx)`; never hard-code a colour in a widget.
-- **Shared widgets live in `widgets.rs`:** `card` (panel group; Pro renders a Photoshop tab strip), `value_field`, `slider`/`slider_row`, `toggle`/`checkbox`, `primary_button`/`secondary_button`, `dropdown` (with a chevron icon), `hairline`/`vline`.
+- **Shared widgets live in `widgets.rs`:** `card` (panel group; Pro renders a Photoshop tab strip), `value_field`, `slider`/`slider_row`, `toggle`/`checkbox`, `primary_button`/`secondary_button`, `dropdown` (with a chevron icon), `hairline`/`vline`, `elided_label`.
+- **A label never overflows its row.** Wrap by default. Beside a fixed-width control, or anywhere the row cannot reflow, use `widgets::elided_label(ui, text, max_w)`: a longer translation shrinks with `…` and shows the full string on hover instead of running over its neighbours (#3580). A *redundant* caption may be dropped on a narrow dock where its control already carries the meaning (e.g. the Layers lock icons); an *essential* one elides. This mirrors Photoshop: a fixed layout with elision and tooltips, not per-locale reflow.
 - **Icons:** Lucide SVGs in `assets/icons` (ISC licence), embedded via `icon_data.rs`. Regenerate that file when you add icons.
 - **Fonts:** Inter (UI) and JetBrains Mono (numbers), both OFL. Named families `medium` and `semibold` are available via `theme::medium()` and `theme::semibold()`.
 - **Photoshop layout grammar (Pro):**
@@ -55,7 +56,19 @@ curl -sfL -o assets/icons/<name>.svg https://raw.githubusercontent.com/lucide-ic
 | Quick layer pick | `quick_pick.rs` | macOS: ⌘⌥⌃-click with any tool selects the topmost visible layer with pixels under the pointer (`layer.pickAt`) without switching tools; the drag and release are swallowed. Windows/Linux have no third modifier distinct from the ⌃⌥ brush resize, so the gesture is a no-op there (use the Move tool's Auto-Select). A failed pick is a status-bar error. |
 | Layers rows | `panels.rs` | Double-click: on the name renames in place; on the Background makes it a normal layer; on an adjustment or fill thumbnail opens its Properties; on a Smart Object thumbnail opens its contents (Edit Contents); anywhere else on the row opens Layer Style. |
 | Layer masks | `panels.rs` | Clicking the mask thumbnail targets the mask (corner-bracket frame; the tab reads "Layer, Layer Mask/8"). Brush, eraser (paints background colour), gradient, bucket and moving the selected pixels (⌘-drag, `select.float`; the hole takes the background colour) then send `"target": "mask"`. Adjustment and fill layers target their mask automatically. |
+| Path thumbnails | `vector_ui.rs` | Ctrl/Cmd-click the thumbnail of a Work Path, saved path or layer path to load it as a selection; Shift adds, Alt subtracts, Shift+Alt intersects. Clicking the row name only selects the path. |
 | Levels / Curves | `tone.rs` | Histogram of the image *below* the adjustment. Curves: click to add a point, drag out to delete. Every change is a coalesced `layer.setAdjustment`, so one drag = one undo step and the canvas updates at full resolution on the GPU. |
+| Shape Stroke Options | `shape_stroke_ui.rs`, `vector_ui.rs` | Direct editing: valid changes apply immediately, with one numeric drag per undo step in Properties. Escape/outside click closes the popup and retains changes; a child dropdown keeps the parent open. The options bar sets new-shape defaults; Properties edits the selected shape. |
+
+Shape Stroke Options (updated 2026-10-11) sizes to its content and scrolls only when necessary.
+It has no Apply/Cancel footer. Solid, Dashed and Dotted are full clickable rows with line
+samples and visible selection; opening the editor alone never changes a shape. Invalid pending
+numeric input leaves the last valid style in effect. Fill and Stroke use clickable swatches
+and the existing compact colour picker, preserving alpha and offering No Color. The style
+button remains available when no stroke is set; deliberately choosing a stroke colour or
+style enables a 3 px stroke. Colours, borders and selection treatments come from theme tokens.
+These tool defaults are serde state, but are not restored across app restarts. See
+[`shape-strokes.md`](shape-strokes.md) for geometry, colour-management and persistence limits.
 
 While editing type, hold Ctrl (Windows/Linux) or Command (macOS) for an oriented transform
 frame. Drag inside to move, a corner to scale (Shift keeps proportions; Alt/Option scales about
@@ -84,7 +97,31 @@ The app's top bar (`panels::title_bar`) starts with the brand mark (the app icon
 - **macOS:** the traffic lights sit over the integrated title strip (`integrated_titlebar`).
 - **Narrow windows** drop controls that are also in a menu before anything overlaps: Discord (Help › Discord), then the theme toggle, then search (Edit › Search), then the workspace switcher narrows (Window › Workspace).
 
+## Compact tool controls
+
+The toolbar scrolls its tool rows when two columns still exceed the available height. Foreground
+and background colours stay visible below those rows, together with Pro's Quick Mask and Screen
+Mode controls. Long options rows scroll horizontally. Both scrollers bring newly focused
+controls into view and retain the existing tool actions and popups.
+
+The offscreen regression fixture uses production panels, fonts and SVG loaders across every
+theme, 800×480 and 1280×720 point viewports, and 1×, 1.5× and 2× display scales. To retain its
+60 initial/scrolled PNGs while running the compact geometry and interaction checks:
+
+```sh
+CRAFT_UI_VISUAL_FIXTURES=/tmp/photocraft-compact cargo test -p photocraft-ui-egui --lib compact_visual_regressions -- --nocapture
+```
+
+Keyboard tests clear the configurable `window.togglePanels` canvas shortcut through preferences,
+then send normal Tab and Space events through the app's shortcut dispatcher. They exercise
+focus traversal and activation with that nondefault binding; default canvas Tab still toggles
+panels. These offscreen checks do not establish native window or platform input acceptance.
+
 ## Menus
+
+Horizontal and vertical ruler ticks, labels and pointer markers are clipped to their respective
+strips. Their intersection is a clear origin square, including when the view is panned, flipped
+or rotated; the origin square retains its ruler-unit context menu.
 
 An embedding application's `panels.menu_bar` and `panels.rail` flags belong to its current
 session. Restoring a saved workspace or remembered panel layout preserves both flags, including
@@ -129,11 +166,9 @@ change the current window's decorations; the next launch reads the saved choice.
 
 Edit → Preferences → Interface → UI Scale applies immediately. Auto follows the operating
 system's display scale, including fractional scales such as 125%, 150% and 175% (on Linux,
-Wayland's fractional scale or X11's `Xft.dpi`). Only when the system reports no scaling (100%) on
-a 4K or larger monitor does Auto use 200%, so text and controls remain readable. Detection uses the current monitor,
-including portrait displays, and updates when the window moves between monitors. If monitor
-size is unavailable, Auto follows system DPI. The fixed choices (75% to 300%) set an absolute UI
-scale, allowing large 4K displays to use smaller controls when desired. Canvas zoom shortcuts
+Wayland's fractional scale or X11's `Xft.dpi`), and updates when the window moves between
+monitors. A 4K display the system runs at 100% stays at 100% (#1278). The fixed choices (75% to
+300%) set an absolute UI scale, for example 200% on an unscaled 4K display. Canvas zoom shortcuts
 continue to control the document independently of UI scaling.
 
 Interface → UI Font Size changes interface text independently of UI Scale and canvas zoom.
@@ -188,9 +223,9 @@ themselves). A test fails when a `tl!` literal, a menu string, a blend mode name
 preference label has no entry in a language marked `complete_menus`. Not translated: status-bar
 messages and errors (they stay English, also for agents), names that are user data (layers, styles,
 documents), strings assembled with `format!` that were not converted to `fmt`/`trn`. Not done yet:
-right-to-left layout and locale-aware number and date formats. Auto follows the OS UI language
-on native (`LANG`/`LC_*`, the macOS preferred languages and the Windows user locale) and, on
-the web build, `?lang=` then `navigator.languages`.
+right-to-left layout inside panels and dialogs (the shell mirrors, `direction.rs`),
+locale-aware number and date formats, automatic language detection on the web build (native
+builds read `LANG`/`LC_*`, the macOS preferred languages and the Windows user locale).
 
 Camera Raw has explicit coverage for all ten available languages, including Korean and
 Simplified Chinese. Its contextual `cameraRaw` entries distinguish tonal regions,

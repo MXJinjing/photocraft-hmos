@@ -111,9 +111,10 @@ pub fn ldconfig_has(output: &str, soname: &str, arch_tag: Option<&str>) -> bool 
     })
 }
 
-/// A real `ldconfig -p` listing starts with "N libs found in cache".
+/// A real `ldconfig -p` listing starts with "N libs found in cache" (translated on a system whose
+/// locale `LC_ALL=C` doesn't reach): a count, then the cache's name.
 fn ldconfig_output_is_valid(output: &str) -> bool {
-    output.lines().next().is_some_and(|l| l.contains("libs found in cache"))
+    output.lines().next().is_some_and(|l| l.split_whitespace().next().is_some_and(|n| n.parse::<u32>().is_ok()))
 }
 
 /// Where we look for libraries, and what we found there.
@@ -227,7 +228,13 @@ pub fn missing_message(session: DisplaySession, missing: &[AnyOf], distro: Distr
 /// Library directories to search: `LD_LIBRARY_PATH`, then the usual system and Flatpak paths.
 fn search_dirs(ld_library_path: Option<&str>) -> Vec<PathBuf> {
     let mut dirs: Vec<PathBuf> = ld_library_path.unwrap_or("").split(':').filter(|d| !d.is_empty()).map(PathBuf::from).collect();
-    let triplet = if cfg!(target_arch = "aarch64") { "aarch64-linux-gnu" } else { "x86_64-linux-gnu" };
+    let triplet = if cfg!(target_arch = "aarch64") {
+        "aarch64-linux-gnu"
+    } else if cfg!(target_arch = "riscv64") {
+        "riscv64-linux-gnu"
+    } else {
+        "x86_64-linux-gnu"
+    };
     for d in ["/app/lib", "/usr/local/lib", "/usr/lib64", "/lib64", "/usr/lib", "/lib"] {
         dirs.push(PathBuf::from(d));
     }
@@ -239,7 +246,9 @@ fn search_dirs(ld_library_path: Option<&str>) -> Vec<PathBuf> {
 /// `ldconfig -p`, from the usual locations (`/sbin` isn't on a normal user's PATH on Debian).
 fn read_ldconfig() -> Option<String> {
     for cmd in ["/sbin/ldconfig", "/usr/sbin/ldconfig", "ldconfig"] {
-        if let Ok(out) = std::process::Command::new(cmd).arg("-p").output()
+        // The listing is parsed, so it must be the untranslated one: a German system prints
+        // "5522 Bibliotheken im Cache", which `ldconfig_output_is_valid` took for no cache at all.
+        if let Ok(out) = std::process::Command::new(cmd).arg("-p").env("LC_ALL", "C").output()
             && out.status.success()
         {
             let text = String::from_utf8_lossy(&out.stdout).into_owned();
@@ -254,6 +263,12 @@ fn read_ldconfig() -> Option<String> {
 /// This system's linker cache and library directories.
 fn system_probe() -> Probe {
     Probe { ldconfig: read_ldconfig(), dirs: search_dirs(std::env::var("LD_LIBRARY_PATH").ok().as_deref()) }
+}
+
+/// Whether the linker cache lists `soname`; `None` when the cache can't be read, which proves
+/// nothing (musl, NixOS, some containers).
+pub fn cached(soname: &str) -> Option<bool> {
+    read_ldconfig().map(|text| ldconfig_has(&text, soname, ldconfig_arch_tag()))
 }
 
 /// Are all the libraries `session` needs found on this system? (For choosing a display server:
@@ -319,6 +334,10 @@ mod tests {
     fn ldconfig_parsing_matches_name_and_architecture() {
         assert!(ldconfig_output_is_valid(CACHE));
         assert!(!ldconfig_output_is_valid("ldconfig: command not found"));
+        // A translated listing is still a listing (it used to be rejected, so the check was
+        // silently skipped on non-English systems).
+        assert!(ldconfig_output_is_valid("5522 Bibliotheken im Cache »/etc/ld.so.cache« gefunden\n\tlibz.so.1 (libc6,x86-64) => /usr/lib/libz.so.1\n"));
+        assert!(!ldconfig_output_is_valid("Error: kein Cache\n"));
         assert!(ldconfig_has(CACHE, "libxkbcommon.so.0", Some("x86-64")));
         // Only the 32-bit build is installed: doesn't count for a 64-bit app.
         assert!(!ldconfig_has(CACHE, "libxkbcommon-x11.so.0", Some("x86-64")));

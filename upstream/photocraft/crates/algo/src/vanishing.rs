@@ -114,6 +114,73 @@ impl VpPlane {
         });
         Lifted { focal: f, center: c, pts }
     }
+
+    /// Turn of each corner (`sin` of the angle between consecutive edges, positive when the
+    /// corners run clockwise on screen); `None` when an edge is shorter than a pixel or a corner
+    /// is not finite.
+    fn turns(&self) -> Option<[f64; 4]> {
+        let q = &self.corners;
+        if q.iter().flatten().any(|v| !v.is_finite() || v.abs() > 1e9) {
+            return None;
+        }
+        let e = |i: usize| [q[(i + 1) % 4][0] - q[i][0], q[(i + 1) % 4][1] - q[i][1]];
+        let mut out = [0.0; 4];
+        for (i, t) in out.iter_mut().enumerate() {
+            let (a, b) = (e(i), e((i + 1) % 4));
+            let (la, lb) = (a[0].hypot(a[1]), b[0].hypot(b[1]));
+            if la < 1.0 || lb < 1.0 {
+                return None;
+            }
+            *t = (a[0] * b[1] - a[1] * b[0]) / (la * lb);
+        }
+        Some(out)
+    }
+
+    /// How usable the plane is, the way Photoshop colours its grid: [`PlaneCheck::Invalid`] for
+    /// a quad that isn't convex (self-intersecting, a corner pushed inside, a near-straight or
+    /// near-zero corner), [`PlaneCheck::Questionable`] for a convex quad whose perspective can't
+    /// come from a camera centred at `center` (or with a corner sharper than 10°), else
+    /// [`PlaneCheck::Valid`].
+    pub fn check(&self, center: [f64; 2]) -> PlaneCheck {
+        let Some(t) = self.turns() else { return PlaneCheck::Invalid };
+        let same_sign = t.iter().all(|v| *v > 0.0) || t.iter().all(|v| *v < 0.0);
+        let min = t.iter().fold(f64::MAX, |m, v| m.min(v.abs()));
+        if !same_sign || min < 1f64.to_radians().sin() || self.homography().is_none() {
+            return PlaneCheck::Invalid;
+        }
+        if min < 10f64.to_radians().sin() {
+            return PlaneCheck::Questionable;
+        }
+        // Both vanishing points finite but no real focal length fits them.
+        let q = &self.corners;
+        let (v1, v2) = (meet(q[0], q[1], q[3], q[2]), meet(q[0], q[3], q[1], q[2]));
+        let finite = |v: V3| v[2].abs() > 1e-9 * (v[0].abs() + v[1].abs()).max(1.0);
+        if finite(v1) && finite(v2) && self.focal(center).is_none() {
+            return PlaneCheck::Questionable;
+        }
+        PlaneCheck::Valid
+    }
+
+    /// The same quad with its corners clockwise on screen, starting at the top-left one
+    /// (the order [`paste`] and [`Scene::tear_off`] expect), however they were clicked.
+    pub fn normalized(&self) -> VpPlane {
+        let mut q = self.corners;
+        if self.turns().is_some_and(|t| t.iter().sum::<f64>() < 0.0) {
+            q = [q[0], q[3], q[2], q[1]];
+        }
+        let first = (0..4).min_by(|&a, &b| (q[a][0] + q[a][1]).total_cmp(&(q[b][0] + q[b][1]))).unwrap_or(0);
+        VpPlane { corners: [q[first], q[(first + 1) % 4], q[(first + 2) % 4], q[(first + 3) % 4]] }
+    }
+}
+
+/// Plane validity ([`VpPlane::check`]): Photoshop draws a valid plane's grid blue, a doubtful
+/// one yellow and an invalid one red.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum PlaneCheck {
+    Valid,
+    Questionable,
+    Invalid,
 }
 
 impl Lifted {
@@ -361,6 +428,25 @@ mod tests {
         assert!((f - 500.0).abs() < 1.0, "{f}");
         let (lu, lv) = pl.lift(f, c).lengths();
         assert!((lu / lv - 2.0).abs() < 0.01, "aspect {}", lu / lv);
+    }
+
+    #[test]
+    fn plane_check_and_corner_order() {
+        let c = [400.0, 300.0];
+        assert_eq!(floor_quad(500.0, c).check(c), PlaneCheck::Valid);
+        let square = VpPlane { corners: [[10.0, 10.0], [110.0, 10.0], [110.0, 110.0], [10.0, 110.0]] };
+        assert_eq!(square.check(c), PlaneCheck::Valid, "fronto-parallel");
+        let bowtie = VpPlane { corners: [[10.0, 10.0], [110.0, 110.0], [110.0, 10.0], [10.0, 110.0]] };
+        assert_eq!(bowtie.check(c), PlaneCheck::Invalid);
+        let dent = VpPlane { corners: [[10.0, 10.0], [110.0, 10.0], [40.0, 40.0], [10.0, 110.0]] };
+        assert_eq!(dent.check(c), PlaneCheck::Invalid, "concave");
+        let sliver = VpPlane { corners: [[10.0, 10.0], [300.0, 10.0], [300.0, 40.0], [200.0, 40.0]] };
+        assert_eq!(sliver.check(c), PlaneCheck::Questionable, "a corner sharper than 10°");
+        let nan = VpPlane { corners: [[f64::NAN, 10.0], [110.0, 10.0], [110.0, 110.0], [10.0, 110.0]] };
+        assert_eq!(nan.check(c), PlaneCheck::Invalid);
+        // Clicked counter-clockwise from the bottom-right: clockwise from the top-left.
+        let ccw = VpPlane { corners: [[110.0, 110.0], [110.0, 10.0], [10.0, 10.0], [10.0, 110.0]] };
+        assert_eq!(ccw.normalized(), square);
     }
 
     #[test]

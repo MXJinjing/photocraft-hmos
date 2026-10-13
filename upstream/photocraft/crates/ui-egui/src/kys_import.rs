@@ -65,6 +65,7 @@ pub fn import_text(app: &mut PhotocraftApp, file_name: &str, text: &str) -> Resu
     f.insert("selected".into(), json!(""));
     f.insert("capture".into(), json!(false));
     f.insert("message".into(), json!(message));
+    f.insert("messageWarning".into(), json!(false));
     Ok(json!({
         "dialog": id,
         "name": set.name,

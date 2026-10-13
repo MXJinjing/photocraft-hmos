@@ -55,6 +55,38 @@ fn browse_runs_a_script_file() {
 }
 
 #[test]
+fn recording_browse_script_captures_each_effect_once() {
+    let mut s = Session::new();
+    s.execute("file.new", json!({"width": 12, "height": 8})).unwrap();
+    s.execute("actions.record", json!({"name": "Rotate script"})).unwrap();
+    let run = s.execute("file.scripts.browse", json!({"steps": [["image.imageRotation.90cw", {}]]})).unwrap();
+    assert_eq!(run["ok"], true);
+    assert_eq!((s.active().unwrap().doc.size.width, s.active().unwrap().doc.size.height), (8, 12));
+    let done = s.execute("actions.stop", json!({})).unwrap();
+    assert_eq!(done["steps"], 1, "Browse must not be recorded a second time");
+    let recorded = s.execute("actions.get", json!({"action": "Rotate script"})).unwrap();
+    assert_eq!(recorded["steps"], json!([["image.imageRotation.90cw", {}]]));
+
+    s.execute("image.imageRotation.90ccw", json!({})).unwrap();
+    assert_eq!((s.active().unwrap().doc.size.width, s.active().unwrap().doc.size.height), (12, 8));
+    let replay = s.execute("actions.play", json!({"action": "Rotate script"})).unwrap();
+    assert_eq!(replay["ran"], 1);
+    assert_eq!((s.active().unwrap().doc.size.width, s.active().unwrap().doc.size.height), (8, 12));
+}
+
+#[test]
+fn standalone_browse_script_still_runs_and_journals_concrete_commands() {
+    let mut s = Session::new();
+    s.execute("file.new", json!({"width": 12, "height": 8})).unwrap();
+    let start = s.journal.len();
+    let result = s.execute("file.scripts.browse", json!({"steps": [["image.imageRotation.90cw", {}]]})).unwrap();
+    assert_eq!(result["ok"], true);
+    assert_eq!(s.journal.len(), start + 2, "the child and Browse retain their diagnostic journal entries");
+    assert_eq!(s.journal[start].0, "image.imageRotation.90cw");
+    assert_eq!((s.active().unwrap().doc.size.width, s.active().unwrap().doc.size.height), (8, 12));
+}
+
+#[test]
 fn script_events_fire_on_new_and_close() {
     let mut s = Session::new();
     let r = s
@@ -111,6 +143,92 @@ fn droplets_are_written_and_run() {
     let out = photocraft_codecs::decode(&std::fs::read(format!("{dir}/out/img0.png")).unwrap()).unwrap();
     assert_eq!(out.dimensions(), (20, 40));
     assert!(s.execute("file.automate.createDroplet", json!({"path": path, "steps": [["bogus", {}]]})).is_err());
+}
+
+#[cfg(unix)]
+#[test]
+fn droplet_shim_passes_shell_metacharacters_as_a_literal_path() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = tmp("droplet-shell-quote");
+    let path = format!("{dir}/Droplet's \"quote\" $HOME `printf expanded` $(touch shim-injected) \\\nline");
+    let mut session = Session::new();
+    let result = session.execute("file.automate.createDroplet", json!({"path": path, "steps": [["file.new", {}]]})).unwrap();
+    let droplet = result["path"].as_str().unwrap();
+    let shim = result["shim"].as_str().unwrap();
+
+    let cli = format!("{dir}/cli stub");
+    let capture = format!("{dir}/captured path");
+    let marker = format!("{dir}/shim-injected");
+    let input = format!("{dir}/input file");
+    std::fs::write(
+        &cli,
+        "#!/bin/sh\nif [ \"$#\" -ne 3 ] || [ \"$1\" != droplet ] || [ \"$3\" != \"$PHOTOCRAFT_EXPECTED_INPUT\" ]; then exit 90; fi\nprintf '%s' \"$2\" > \"$PHOTOCRAFT_CAPTURE\"\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&cli, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let output = std::process::Command::new(shim)
+        .arg(&input)
+        .current_dir(&dir)
+        .env("PHOTOCRAFT_CLI", &cli)
+        .env("PHOTOCRAFT_CAPTURE", &capture)
+        .env("PHOTOCRAFT_EXPECTED_INPUT", &input)
+        .output()
+        .unwrap();
+
+    assert!(output.status.success(), "shim exited {:?}: {}", output.status, String::from_utf8_lossy(&output.stderr));
+    assert!(!std::path::Path::new(&marker).exists(), "filename command substitution ran");
+    let expected = std::fs::canonicalize(droplet).unwrap();
+    assert_eq!(std::fs::read(&capture).unwrap(), expected.to_string_lossy().as_bytes());
+}
+
+#[test]
+fn droplets_carry_the_actions_their_play_steps_call() {
+    use crate::actions_cmds::Action;
+    let dir = tmp("droplet-called");
+    let inputs = images(&dir, 2, 40, 20);
+    let mut s = Session::new();
+    let act = |name: &str, steps: Value| -> Action { serde_json::from_value(json!({"name": name, "steps": steps})).unwrap() };
+    s.actions.list = vec![
+        act("Unrelated", json!([["image.imageRotation.180", {}]])),
+        act("Rotate", json!([["image.imageRotation.90cw", {}]])),
+        // Calls Rotate by index (as the panel records it) and itself (caught at run time).
+        act("Outer", json!([["actions.play", {"action": 1}]])),
+        act("Loop", json!([["actions.play", {"action": "Loop"}]])),
+    ];
+    let make = |s: &mut Session, name: &str, steps: Value| {
+        let path = format!("{dir}/{name}");
+        let out = format!("{dir}/out-{name}");
+        s.execute("file.automate.createDroplet", json!({"path": path, "steps": steps, "format": "png", "output": out, "shim": false})).unwrap()["path"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    };
+    let dp = make(&mut s, "Outer", json!([["actions.play", {"action": "Outer"}]]));
+    let looping = make(&mut s, "Loop", json!([["actions.play", {"action": "Loop"}]]));
+    let v: Value = serde_json::from_slice(&std::fs::read(&dp).unwrap()).unwrap();
+    assert!(v.get("actions").is_none(), "the CLI reads `actions` as an action set");
+    let names: Vec<&str> = v["calledActions"].as_array().unwrap().iter().map(|a| a["name"].as_str().unwrap()).collect();
+    assert_eq!(names, ["Rotate", "Outer"], "only the called actions, transitively");
+
+    // A fresh session, as `photocraft-cli droplet` and the droplet shim use.
+    let mut fresh = Session::new();
+    let r = fresh.execute("file.automate.runDroplet", json!({"droplet": dp, "input": [dir.clone()]})).unwrap();
+    assert_eq!(r["files"].as_array().unwrap().len(), inputs.len(), "{r}");
+    let out = photocraft_codecs::decode(&std::fs::read(format!("{dir}/out-Outer/img0.png")).unwrap()).unwrap();
+    assert_eq!(out.dimensions(), (20, 40));
+    let r = fresh.execute("file.automate.runDroplet", json!({"droplet": looping, "input": [dir.clone()]})).unwrap();
+    assert_eq!(r["errors"].as_array().unwrap().len(), inputs.len(), "a self-call fails instead of looping: {r}");
+
+    // Droplets written before `calledActions` still run.
+    let old = format!("{dir}/old.pcdroplet");
+    std::fs::write(
+        &old,
+        json!({"photocraftDroplet": 1, "action": {"steps": [["image.imageRotation.90cw", {}]]}, "options": {"output": format!("{dir}/out-old")}}).to_string(),
+    )
+    .unwrap();
+    let r = fresh.execute("file.automate.runDroplet", json!({"droplet": old, "input": [dir.clone()]})).unwrap();
+    assert_eq!(r["files"].as_array().unwrap().len(), inputs.len(), "{r}");
 }
 
 #[test]
@@ -222,8 +340,8 @@ fn a_failed_step_inside_a_called_action_fails_scripts_and_batch() {
     images(&dir, 1, 8, 4);
     let mut s = Session::new();
     s.execute("file.new", json!({"width": 8, "height": 6})).unwrap();
-    s.actions.list.push(Action { name: "Rotate".into(), steps: vec![("image.imageRotation.90cw".into(), json!({}))] });
-    s.actions.list.push(Action { name: "Bad".into(), steps: vec![("layer.delete".into(), json!({"layer": 999_999}))] });
+    s.actions.list.push(Action { name: "Rotate".into(), steps: vec![("image.imageRotation.90cw".into(), json!({}))], disabled: Default::default() });
+    s.actions.list.push(Action { name: "Bad".into(), steps: vec![("layer.delete".into(), json!({"layer": 999_999}))], disabled: Default::default() });
     // A script stops at the failed call and reports it.
     let r = s.execute("file.scripts.browse", json!({"steps": [["actions.play", {"action": "Bad"}], ["image.imageRotation.90cw", {}]]})).unwrap();
     assert_eq!(r["ok"], false, "{r}");
@@ -240,6 +358,6 @@ fn a_failed_step_inside_a_called_action_fails_scripts_and_batch() {
     assert!(r["errors"][0]["error"].as_str().unwrap().contains("no such layer"), "{r}");
     // An action that batches itself stops as a recursive call instead of overflowing the stack.
     let inner = json!({"steps": [["actions.play", {"action": "Loop"}]], "input": dir.clone(), "output": format!("{dir}/inner"), "format": "png"});
-    s.actions.list.push(Action { name: "Loop".into(), steps: vec![("file.automate.batch".into(), inner)] });
+    s.actions.list.push(Action { name: "Loop".into(), steps: vec![("file.automate.batch".into(), inner)], disabled: Default::default() });
     batch(&mut s, "Loop");
 }

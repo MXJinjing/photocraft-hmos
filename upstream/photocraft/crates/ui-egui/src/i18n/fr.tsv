@@ -18,6 +18,25 @@
 # « : ; ? ! » and "%", and inside guillemets « … ». Product and technology names (PhotoCraft,
 # ArtCraft, OpenType, Lab ...) stay as they are; RGB/CMYK read RVB/CMJN; the trailing "…" of
 # dialog commands is kept.
+
+# Guide layout dialog
+	Rows	Lignes
+	Number	Nombre
+	Margin	Marge
+	Top:	Haut :
+	Left:	Gauche :
+	Bottom:	Bas :
+	Right:	Droite :
+	Target:	Cible :
+	Selected Artboards	Plans de travail sélectionnés
+	Center Columns	Centrer les colonnes
+	Clear Existing Guides	Effacer les repères existants
+	Invalid guide layout	Disposition des repères non valide
+	Leave empty for automatic size	Laisser vide pour une taille automatique
+	5 Columns, 3 Rows	5 colonnes, 3 lignes
+	8 Columns	8 colonnes
+	12 Columns	12 colonnes
+
 	File	Fichier
 	Edit	Édition
 	Image	Image
@@ -368,6 +387,7 @@
 	Select Linked Layers	Sélectionner les calques liés
 	Merge Layers	Fusionner les calques
 	Merge Down	Fusionner avec le calque inférieur
+	Merge Group	Fusionner le groupe
 	Merge Visible	Fusionner les calques visibles
 	Stamp Visible	Tamponner les calques visibles
 	Stamp Down	Tamponner sur le calque inférieur
@@ -471,6 +491,12 @@
 	Color Range…	Plage de couleurs…
 	Focus Area…	Zone de mise au point…
 	Select and Mask…	Sélectionner et masquer…
+# Select and Mask dialog labels
+	Smart Radius	Rayon dynamique
+	Shift Edge	Décaler le contour
+	Decontaminate	Décontaminer
+	Output	Sortie
+	Refine Edge	Améliorer le contour
 	Modify	Modifier
 	Border…	Bordure…
 	Smooth…	Lisser…
@@ -670,6 +696,9 @@
 	New Workspace…	Nouvel espace de travail…
 	Delete Workspace…	Supprimer l'espace de travail…
 	Reset Workspace	Réinitialiser l'espace de travail
+	Reset Tool	Réinitialiser l'outil
+	Reset All Tools	Réinitialiser tous les outils
+	Reset all tools to their default settings?	Réinitialiser tous les outils à leurs paramètres par défaut ?
 	Lock Workspace	Verrouiller l'espace de travail
 	Theme	Thème
 	Pro Theme	Thème Pro
@@ -736,6 +765,7 @@
 	Split Warp Horizontally	Diviser la déformation horizontalement
 	Split Warp Vertically	Diviser la déformation verticalement
 	Statistics…	Statistiques…
+	Refine Strokes	Traits d'affinement
 @plural	{n} item|{n} items	{n} élément|{n} éléments
 	Auto	Auto
 	(print to the printer)	(imprimer sur l'imprimante)
@@ -808,6 +838,9 @@
 	Bend:	Courbure :
 	Bicubic	Bicubique
 	Bicubic (smooth gradients)	Bicubique (dégradés lisses)
+	Automatic	Automatique
+	Bicubic Smoother (enlargement)	Bicubique plus lisse (agrandissement)
+	Bicubic Sharper (reduction)	Bicubique plus net (réduction)
 	Bilinear	Bilinéaire
 	Black	Noir
 	Black & White	Noir et blanc
@@ -864,6 +897,7 @@
 	Click to zoom in  ·  {key}-click to zoom out  ·  drag right/left to zoom in/out	Cliquez pour zoomer  ·  {key}-clic pour dézoomer  ·  faites glisser vers la droite/gauche pour zoomer/dézoomer
 	Click with the Note tool to add a note.	Cliquez avec l'outil Note pour ajouter une note.
 	Click: corner · Drag: smooth · Click first point: close · {key} finish · Esc cancel	Clic : angle · Glisser : lisse · Clic sur le premier point : fermer · {key} : terminer · Échap : annuler
+	Click: corner · Drag: smooth · {alt}-drag: break handle · Click or drag first point: close · {key} finish · Esc cancel	Clic : angle · Glisser : lisse · {alt}+glisser : briser la poignée · Clic ou glisser sur le premier point : fermer · {key} : terminer · Échap : annuler
 	Clip to layer below	Découper selon le calque inférieur
 	Clipped	Découpé
 	Close Style Options	Fermer les options de style
@@ -1484,6 +1518,7 @@
 	White Balance: As Shot	Balance des blancs : telle quelle
 	Whites	Blancs
 	Width	Largeur
+	Slant	Inclinaison
 	Width:	Largeur :
 	Work Path	Tracé de travail
 	Yellow	Jaune
@@ -1501,6 +1536,9 @@
 	↑↓ navigate   {key} run   esc close	↑↓ naviguer   {key} exécuter   échap fermer
 	Version {version}	Version {version}
 	New Document	Nouveau document
+	New Document With Mask	Nouveau document avec masque
+	New Layer With Mask	Nouveau calque avec masque
+	New Layer	Nouveau calque
 	Preset Name	Nom du préréglage
 	No saved presets yet.	Aucun préréglage enregistré pour le moment.
 	Error	Erreur
@@ -1592,6 +1630,8 @@
 	Highlights from:	Hautes lumières à partir de :
 	History Brush Tool	Outil Pinceau d'historique
 	Horizontal Type Tool	Outil Texte horizontal
+	Horizontal Type Mask Tool	Outil Masque de texte horizontal
+	Vertical Type Mask Tool	Outil Masque de texte vertical
 	Image Size:	Taille de l'image :
 	Inches	Pouces
 	Indexed	Indexé
@@ -1646,10 +1686,15 @@
 	Paints from the document's opening state	Peint à partir de l'état d'ouverture du document
 	Path Selection Tool	Outil Sélection de tracé
 	Direct Selection Tool	Outil Sélection directe
+	Add Anchor Point Tool	Outil Ajout de point d'ancrage
+	Delete Anchor Point Tool	Outil Suppression de point d'ancrage
+	Click a segment to add an anchor point · {alt}-click an anchor to delete it	Cliquez sur un segment pour ajouter un point d'ancrage · {alt}-clic sur un point d'ancrage pour le supprimer
+	Click an anchor point to delete it · {alt}-click a segment to add one	Cliquez sur un point d'ancrage pour le supprimer · {alt}-clic sur un segment pour en ajouter un
 	Pattern Overlay	Superposition de motif
 	Pen Pressure	Pression du stylet
 	Pen Tilt	Inclinaison du stylet
 	Pen Tool	Outil Plume
+	Convert Point Tool	Outil Conversion de point
 	Photo	Photo
 	PhotoCraft website	Site web de PhotoCraft
 	Picas	Picas
@@ -1775,6 +1820,7 @@
 	Cache tile size	Taille des tuiles du cache
 	Camera Raw Defaults	Valeurs par défaut de Camera Raw
 	Canvas border	Bordure du canevas
+	Show canvas dots	Afficher les points du canevas
 	Canvas color	Couleur du canevas
 	Canvas custom color	Couleur personnalisée du canevas
 	Color picker	Sélecteur de couleurs
@@ -1891,6 +1937,7 @@
 	Show only crosshair while painting	N'afficher que le réticule pendant la peinture
 	Show slice numbers	Afficher les numéros de tranche
 	Show tooltips	Afficher les info-bulles
+	Enable animations	Activer les animations
 	Show highlight on rollover	Afficher la mise en surbrillance au survol
 	Show transformation values	Afficher les valeurs de transformation
 	Slice color	Couleur des tranches
@@ -2065,8 +2112,11 @@
 	Developing {name}	Développement de {name}
 	Cancelled {label}	{label} : annulé
 	Esc to cancel	Échap pour annuler
+	Opened {name}	Ouvert : {name}
 	Opening {name}	Ouverture de {name}
+	Saved {name}	Enregistré : {name}
 	Saving {name}	Enregistrement de {name}
+	Saving {percent}	Enregistrement {percent}
 	A save to {name} is still running; try again when it finishes	Un enregistrement de {name} est encore en cours ; réessayez lorsqu’il sera terminé
 	{label} is writing the file and can no longer be cancelled	{label} écrit le fichier et ne peut plus être annulé
 	Opening {name}…	Ouverture de {name}…
@@ -2551,6 +2601,7 @@
 	Edit › Paste	Édition › Coller
 	Use File › Open, or paste a copied image with {paste}.	Utilisez Fichier › Ouvrir, ou collez une image copiée avec {paste}.
 	Mixer Brush Tool	Outil Pinceau mélangeur
+	Color Replacement Tool	Outil Remplacement de couleur
 	Invalid {mode} profile	Profil {mode} non valide
 	Unnamed {mode} profile	Profil {mode} sans nom
 	Show bounding box when dragging layer	Afficher le cadre de sélection lors du déplacement du calque
@@ -2592,6 +2643,8 @@ cameraRaw	Blending	Fusion
 	Patch Tool	Outil Pièce
 	Patch:	Pièce :
 	Lasso around an area, then drag the selection	Entourez une zone au lasso, puis faites glisser la sélection
+	Transform On Drop	Transformer au dépôt
+	Scale or rotate the moved area, then press {key}	Mettez à l'échelle ou faites pivoter la zone déplacée, puis appuyez sur {key}
 	Now drag the selection onto another area	Faites maintenant glisser la sélection vers une autre zone
 
 # Warp grid presets (#388)
@@ -2619,6 +2672,9 @@ cameraRaw	Blending	Fusion
 	Structure:	Structure :
 	Content-Aware Move Tool	Outil Déplacement selon le contenu
 	TIFF Options	Options TIFF
+	Targa Options	Options Targa
+	24 bits/pixel	24 bits/pixel
+	32 bits/pixel	32 bits/pixel
 	Including layers will increase file size.	L'inclusion des calques augmentera la taille du fichier.
 	Discard Layers and Save a Copy	Supprimer les calques et enregistrer une copie
 	Don't show again	Ne plus afficher
@@ -2707,6 +2763,21 @@ cameraRaw	Blending	Fusion
 	Domed	Bombé
 	Domed (Inverted)	Bombé (inversé)
 	Diagonal (Descending)	Diagonale (descendante)
+	Contour Editor	Éditeur de contour
+	Anti-aliased	Lissé
+	Corner	Angle
+	Gloss Contour	Contour brillant
+	Contour	Contour
+	Cone - Inverted	Cône - inversé
+	Cove - Deep	Crique - profonde
+	Cove - Shallow	Crique - peu profonde
+	Gaussian	Gaussienne
+	Half Round	Demi-arrondi
+	Ring	Anneau
+	Ring - Double	Anneau - double
+	Rolling Slope - Descending	Pente ondulée - descendante
+	Rounded Steps	Paliers arrondis
+	Sawtooth 1	Dents de scie 1
 
 	Red Eye Tool	Outil Yeux rouges
 	Pupil Size	Taille de la pupille
@@ -2865,14 +2936,132 @@ fontWeight	Italic	Italique
 	Quick Selection found nothing there	La Sélection rapide n'a rien trouvé à cet endroit
 	Object Selection found nothing there — try a tighter rectangle	La Sélection d'objet n'a rien trouvé à cet endroit — essayez un rectangle plus serré
 	No subject found — try a rectangle around the object	Aucun sujet trouvé — essayez un rectangle autour de l'objet
+	Click the first point or press {key} to close · {del} removes a point · Esc cancels	Cliquez sur le premier point ou appuyez sur {key} pour fermer · {del} supprime un point · Échap annule
+	Click, then move along an edge · click to fasten a point · {alt}-click for a straight segment · double-click to close	Cliquez, puis suivez un contour · cliquez pour fixer un point · {alt}-clic pour un segment droit · double-cliquez pour fermer
+	Follows only edges this close to the pointer ([ and ] change it)	Ne suit que les contours aussi proches du pointeur ([ et ] le modifient)
+	Higher values follow only edges that contrast sharply with their surroundings	Plus la valeur est élevée, plus seuls les contours très contrastés sont suivis
+	How often fastening points are placed by themselves	Fréquence de pose automatique des points d’ancrage
+	Appearance Settings…	Réglages d’apparence…
+	Add to favorites	Ajouter aux favoris
+	Remove from favorites	Retirer des favoris
+# File Info ▸ Camera Data (read-only EXIF fields; "Make" is the camera maker, not the verb).
+cameraData	Make	Marque
+cameraData	Model	Modèle
+cameraData	Date Taken	Date de prise de vue
+cameraData	Exposure	Temps de pose
+cameraData	F-Stop	Ouverture
+cameraData	ISO Speed	Sensibilité ISO
+cameraData	Focal Length	Focale
+cameraData	Focal Length (35 mm)	Focale (35 mm)
+cameraData	Lens	Objectif
+# Shared panel docking
+	Activate Panel	Activer le panneau
+	Change Panel Group	Modifier le groupe de panneaux
+	Change Panel Layout	Modifier la disposition des panneaux
+	Close Panel	Fermer le panneau
+	Dock Panel	Ancrer le panneau
+	Float Panel	Panneau flottant
+	Move Panel	Déplacer le panneau
+	Group with	Grouper avec
+	Panel menu	Menu du panneau
+	Resize panel window	Redimensionner la fenêtre du panneau
+	Resize panels	Redimensionner les panneaux
 	Use Classic Mode	Utiliser le mode classique
 	Auto Center Preview	Centrer automatiquement l'aperçu
 	Next Document	Document suivant
 	Previous Document	Document précédent
 	W x H x Resolution	L x H x Résolution
 	Front Image	Image de premier plan
+	Frame Tool	Outil Cadre
+	Create a new rectangular frame	Créer un cadre rectangulaire
+	Create a new elliptical frame	Créer un cadre elliptique
+	Include in playback	Inclure dans la lecture
+	Perspective Crop Tool	Outil Recadrage perspective
+	Show Grid	Afficher la grille
+	Drag a box or click four corners · drag the corners onto the edges of a skewed shape · {commit} commits · Esc cancels	Tracez un cadre ou cliquez sur quatre coins · faites glisser les coins sur les bords d'une forme inclinée · {commit} valide · Échap annule
+	Artboard Tool	Outil Plan de travail
+	Make Portrait	Format portrait
+	Make Landscape	Format paysage
+	Add New Artboard	Ajouter un plan de travail
+	Freeform Pen Tool	Outil Plume libre
+	Curvature Pen Tool	Outil Plume de courbure
+	Curve Fit:	Ajustement de courbe :
+	Drag: draw freehand · {alt}-click: straight segment · Release on the start point: close	Glisser : dessin à main levée · {alt}-clic : segment droit · Relâcher sur le point de départ : fermer
+	Click: smooth point · Double-click: corner · Drag a point: move · Click first point: close · {key} finish	Clic : point lisse · Double-clic : angle · Glisser un point : déplacer · Clic sur le premier point : fermer · {key} : terminer
+	New Crop Preset…	Nouveau paramètre prédéfini de recadrage…
+	Delete Crop Preset…	Supprimer le paramètre prédéfini de recadrage…
+	Select the crop presets to delete:	Sélectionnez les paramètres prédéfinis de recadrage à supprimer :
+	Select the crop presets to delete	Sélectionnez les paramètres prédéfinis de recadrage à supprimer
+	Enter a name for the crop preset	Saisissez un nom pour le paramètre prédéfini de recadrage
+	There is no crop size or ratio to save	Aucune taille ni proportion de recadrage à enregistrer
+	Scale:	Échelle :
+	Snap to Origin	Aligner sur l'origine
 	Search settings…	Rechercher des réglages…
 	No matching settings	Aucun réglage correspondant
+	Loading fonts…	Chargement des polices…
+	Tool	Outil
+	Simulate Pressure	Simuler la pression
+	Stroke Path…	Contourner le tracé…
+	Background Eraser	Gomme d'arrière-plan
+	Healing Brush	Pinceau correcteur
+	Spot Healing Brush	Correcteur localisé
+	Smudge	Doigt
+	Sponge	Éponge
+	Amount:	Quantité :
+	Protect:	Protéger :
+	Protect skin tones	Protéger les tons chair
+	Edit points to modify the curve	Modifier les points pour changer la courbe
+	Draw to modify the curve	Dessiner pour changer la courbe
+curves	Smooth	Lisser
+	Smooth the curve values	Lisser les valeurs de la courbe
+	Drag to draw the curve · {key}-click draws a straight line	Faites glisser pour dessiner la courbe · {key}-clic trace une ligne droite
+	Grid Size:	Taille de la grille :
+	Vanishing Point: click four corners to create a plane	Point de fuite : cliquez sur quatre coins pour créer un plan
+	Vanishing Point is not active	Point de fuite n’est pas actif
+	Apply Vanishing Point ({key})	Appliquer le point de fuite ({key})
+	Fix the red plane first: its corners must form a convex quad	Corrigez d’abord le plan rouge : ses coins doivent former un quadrilatère convexe
+# Select and Mask view modes (#1754)
+	Onion Skin	Pelure d'oignon
+	Marching Ants	Fourmis en marche
+	On Black	Sur fond noir
+	On White	Sur fond blanc
+	On Layers	Sur les calques
+	Show Edge	Afficher le bord
+	Show Original	Afficher l'original
+	F cycles the views; hold X to see the image	F fait défiler les vues ; maintenez X pour voir l'image
+# Select and Mask Refine Edge Brush (#2972)
+	Refine Edge Brush (R)	Pinceau d'amélioration du contour (R)
+	Expand Detection Area	Étendre la zone de détection
+	Restore Original Edge	Restaurer le contour d'origine
+	Paint over hair or fur on the image; Alt paints the other mode	Peignez sur les cheveux ou la fourrure dans l'image ; Alt peint dans l'autre mode
+	Clear Brush Strokes	Effacer les traits de pinceau
+	Show rulers	Afficher les règles
+
+# Color Sampler (added with the i18n coverage repair)
+	Click to place · Alt-click or drag off-canvas to remove	Cliquez pour placer · Alt-clic ou glisser hors du canevas pour supprimer
+	No document open	Aucun document ouvert
+	{n} of {max} sample points	{n} sur {max} points d'échantillonnage
+# Print dialog (#2697)
+	Emulsion Down	Émulsion verso
+	Functions	Fonctions
+	Print Resolution:	Résolution d’impression :
+	Use Previous Layer to Create Clipping Mask	Utiliser le calque précédent pour créer un masque de découpe
+	Fill with {mode}-neutral color (white)	Remplir avec la couleur neutre de {mode} (blanc)
+	Fill with {mode}-neutral color (black)	Remplir avec la couleur neutre de {mode} (noir)
+	Fill with {mode}-neutral color (50% gray)	Remplir avec la couleur neutre de {mode} (gris 50 %)
+	(No neutral color exists for {mode} mode.)	(Il n’existe aucune couleur neutre pour le mode {mode}.)
+	Apply mask to layer before removing?	Appliquer le masque au calque avant de le supprimer ?
+	The layer or its mask changed. Drag the mask onto the Trash again.	Le calque ou son masque a changé. Faites de nouveau glisser le masque sur la corbeille.
+	Delete the vector mask?	Supprimer le masque vectoriel ?
+# View › Guides › New Guide… › Color
+	Light Blue	Bleu clair
+	Light Red	Rouge clair
+	Medium Blue	Bleu moyen
+	Light Gray	Gris clair
+	Remove after each stroke	Supprimer après chaque trait
+	Apply the removal ({key})	Appliquer la suppression ({key})
+	Strokes to remove: {n} (Enter applies, Esc cancels)	Traits à supprimer : {n} (Entrée applique, Échap annule)
+
 
 # Status bar panel controls
 	Only show canvas	Afficher uniquement la zone de travail

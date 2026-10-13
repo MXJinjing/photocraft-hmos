@@ -29,7 +29,14 @@ pub const STYLUS_LONG_PRESS_OPTIONS: &[(StylusLongPress, &str)] = &[(StylusLongP
 impl ChromeState {
     /// Is the Home screen up, given the current number of open documents? With no documents it
     /// shows by itself when `auto_show` (Preferences › General › Auto show the Home Screen).
-    pub fn shows_home(&self, documents: usize, auto_show: bool) -> bool {
+    ///
+    /// `home` stores the document count when Home was opened so File › New / Open can leave it.
+    /// Closing a tab that returns to that count must not bring Home back (#3981): once the
+    /// document set has changed, the overlay is gone until the user opens Home again.
+    pub fn shows_home(&mut self, documents: usize, auto_show: bool) -> bool {
+        if self.home.is_some_and(|n| n != documents) {
+            self.home = None;
+        }
         (documents == 0 && auto_show) || self.home == Some(documents)
     }
 }
@@ -155,7 +162,8 @@ pub fn status_bar_pro(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         &app.session.prefs().units_and_rulers,
     );
     let mut pct = app.ui.views[i].zoom * 100.0;
-    if widgets::value_field(ui, &mut pct, crate::zoom_levels::percent_range(&app.ui.views[i]), "%", 64.0).changed() {
+    let control_h = crate::panels::status_bar_heights(&t).1;
+    if widgets::compact_value_field(ui, &mut pct, crate::zoom_levels::percent_range(&app.ui.views[i]), "%", 64.0, control_h).changed() {
         app.ui.views[i].zoom = crate::zoom_levels::clamp(pct / 100.0, app.ui.views[i].doc_size);
         app.ui.views[i].fit_pending = false;
     }
@@ -166,7 +174,8 @@ pub fn status_bar_pro(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     if resp.hovered() {
         ui.painter().rect_filled(r, t.radius_sm, t.hover);
     }
-    icons::paint(ui, r, "chevron-right", 11.0, t.text_dim);
+    // Points along the bar, away from the zoom field.
+    icons::paint(ui, r, if crate::direction::is_rtl() { "chevron-left" } else { "chevron-right" }, 11.0, t.text_dim);
     let resp = resp.on_hover_text(tl!("Show"));
     egui::Popup::menu(&resp).show(|ui| {
         crate::widgets::style_spectrum_popup_menu(ui);
@@ -261,7 +270,7 @@ pub fn drain_stylus_gestures(app: &mut PhotocraftApp, ctx: &egui::Context) {
     }
     let at = stylus_menu_point(app, ctx);
     for gesture in gestures {
-        apply_pen_gesture(app, gesture, at);
+        apply_pen_gesture(app, ctx, gesture, at);
     }
     ctx.request_repaint();
 }
@@ -288,7 +297,7 @@ fn stylus_menu_point(app: &PhotocraftApp, ctx: &egui::Context) -> [f32; 2] {
     [c.x, c.y]
 }
 
-fn apply_pen_gesture(app: &mut PhotocraftApp, gesture: crate::stylus::PenGesture, at: [f32; 2]) {
+fn apply_pen_gesture(app: &mut PhotocraftApp, ctx: &egui::Context, gesture: crate::stylus::PenGesture, at: [f32; 2]) {
     if app.drag.is_some() {
         return;
     }
@@ -300,7 +309,7 @@ fn apply_pen_gesture(app: &mut PhotocraftApp, gesture: crate::stylus::PenGesture
         },
         crate::stylus::PenGesture::LongPress => {
             if app.session.prefs().tools.stylus_long_press == StylusLongPress::ContextMenu {
-                toggle_canvas_context_menu(app, at);
+                toggle_canvas_context_menu(app, ctx, at);
             }
         }
     }
@@ -308,7 +317,7 @@ fn apply_pen_gesture(app: &mut PhotocraftApp, gesture: crate::stylus::PenGesture
 
 /// Show the menu a canvas right-click would open, or hide it if one is already up.
 /// `at` is the menu's top-left in screen points (the last pen lift, when available).
-fn toggle_canvas_context_menu(app: &mut PhotocraftApp, at: [f32; 2]) {
+fn toggle_canvas_context_menu(app: &mut PhotocraftApp, ctx: &egui::Context, at: [f32; 2]) {
     if !at.iter().all(|v| v.is_finite()) {
         return;
     }
@@ -319,12 +328,12 @@ fn toggle_canvas_context_menu(app: &mut PhotocraftApp, at: [f32; 2]) {
         return;
     }
     if app.ui.transform.as_ref().is_some_and(|t| t.warp.is_none()) {
-        let _ = crate::canvas_tool_menu::open_transform(app, at);
+        let _ = crate::canvas_tool_menu::open_transform(app, ctx, at);
         return;
     }
     let tool = app.ui.tool;
     if tool == crate::state::Tool::Move {
-        open_layer_menu_at(app, at);
+        open_layer_menu_at(app, ctx, at);
         return;
     }
     if crate::paint_mouse::has_brush_picker(tool) && !crate::paint_mouse::right_erases(app, tool) {
@@ -333,15 +342,15 @@ fn toggle_canvas_context_menu(app: &mut PhotocraftApp, at: [f32; 2]) {
         app.ui.brush_picker = Some(at);
         return;
     }
-    if !crate::canvas_tool_menu::open(app, tool, at) {
-        open_layer_menu_at(app, at);
+    if !crate::canvas_tool_menu::open(app, ctx, tool, at) {
+        open_layer_menu_at(app, ctx, at);
     }
 }
 
-fn open_layer_menu_at(app: &mut PhotocraftApp, at: [f32; 2]) {
+fn open_layer_menu_at(app: &mut PhotocraftApp, ctx: &egui::Context, at: [f32; 2]) {
     let Some(xf) = crate::canvas::ViewXform::active(app) else { return };
     let d = xf.to_doc(egui::pos2(at[0], at[1]));
-    let _ = crate::layer_pick_ui::open(app, at, d[0], d[1]);
+    let _ = crate::layer_pick_ui::open(app, ctx, at, d[0], d[1]);
 }
 
 /// Home button at the very start of Photoshop 2026's options bar: toggles the Home (start)
@@ -537,6 +546,30 @@ mod tests {
         c.home = Some(2);
         assert!(c.shows_home(2, true));
         assert!(!c.shows_home(3, true));
+        assert!(c.home.is_none(), "leaving Home by opening a document dismisses it");
+        c.home = Some(1);
+        assert!(!c.shows_home(2, true));
+        assert!(!c.shows_home(1, true), "closing back to the stored count must not re-open Home");
+        assert!(c.home.is_none());
+    }
+
+    #[test]
+    fn closing_a_tab_does_not_return_to_home() {
+        use crate::PhotocraftApp;
+        use photocraft_engine::Session;
+        use serde_json::json;
+
+        let mut app = PhotocraftApp::new(Session::new(), crate::Services::default());
+        app.run("file.new", json!({"width": 8, "height": 8, "name": "Keep"})).unwrap();
+        let n = app.session.documents().len();
+        app.ui.chrome.home = Some(n);
+        assert!(app.ui.chrome.shows_home(n, true));
+        app.run("file.new", json!({"width": 8, "height": 8, "name": "Other"})).unwrap();
+        assert!(!app.ui.chrome.shows_home(app.session.documents().len(), true));
+        app.run("file.close", json!({"document": 1, "discard": true})).unwrap();
+        assert_eq!(app.session.documents().len(), 1);
+        assert!(!app.ui.chrome.shows_home(1, true), "Home must stay dismissed after closing the extra tab");
+        assert_eq!(app.session.documents()[0].doc.name, "Keep");
     }
 
     #[test]
@@ -713,9 +746,9 @@ mod tests {
         let mut app = crate::PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
         app.ui.tool = Tool::Brush;
         app.session.edit_prefs(|p| p.tools.stylus_long_press = StylusLongPress::ContextMenu);
-        super::toggle_canvas_context_menu(&mut app, [12.0, 34.0]);
+        super::toggle_canvas_context_menu(&mut app, &egui::Context::default(), [12.0, 34.0]);
         assert_eq!(app.ui.brush_picker, Some([12.0, 34.0]));
-        super::toggle_canvas_context_menu(&mut app, [12.0, 34.0]);
+        super::toggle_canvas_context_menu(&mut app, &egui::Context::default(), [12.0, 34.0]);
         assert!(app.ui.brush_picker.is_none());
 
         app.session.edit_prefs(|p| p.tools.stylus_long_press = StylusLongPress::Off);

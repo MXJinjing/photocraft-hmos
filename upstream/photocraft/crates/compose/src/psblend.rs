@@ -210,13 +210,7 @@ pub fn composite(mode: BlendMode, backdrop: [f32; 4], source: [f32; 4], opacity:
         return [r[0], r[1], r[2], ao];
     }
     if mode == BlendMode::Normal {
-        // Fast path: B(Cb, Cs) = Cs.
-        if ao <= 0.0 {
-            return [0.0; 4];
-        }
-        let kb = ab * (1.0 - as_);
-        let inv = 1.0 / ao;
-        return [(kb * backdrop[0] + as_ * source[0]) * inv, (kb * backdrop[1] + as_ * source[1]) * inv, (kb * backdrop[2] + as_ * source[2]) * inv, ao];
+        return normal_rgb(backdrop, source, as_, ao);
     }
     let cb = [backdrop[0], backdrop[1], backdrop[2]];
     let cs = [source[0], source[1], source[2]];
@@ -230,6 +224,29 @@ pub fn composite(mode: BlendMode, backdrop: [f32; 4], source: [f32; 4], opacity:
     }
     out[3] = ao;
     out
+}
+
+/// Normal mixing outside Lab, for callers that select the blend space once per buffer.
+#[inline]
+pub(crate) fn composite_normal_rgb(backdrop: [f32; 4], source: [f32; 4], opacity: f32) -> [f32; 4] {
+    let ab = backdrop[3];
+    let as_ = source[3] * opacity;
+    if as_ <= 0.0 {
+        return backdrop;
+    }
+    let ao = as_ + ab * (1.0 - as_);
+    normal_rgb(backdrop, source, as_, ao)
+}
+
+#[inline]
+fn normal_rgb(backdrop: [f32; 4], source: [f32; 4], as_: f32, ao: f32) -> [f32; 4] {
+    // B(Cb, Cs) = Cs. Keep the scalar composite's operation order and straight alpha.
+    if ao <= 0.0 {
+        return [0.0; 4];
+    }
+    let kb = backdrop[3] * (1.0 - as_);
+    let inv = 1.0 / ao;
+    [(kb * backdrop[0] + as_ * source[0]) * inv, (kb * backdrop[1] + as_ * source[1]) * inv, (kb * backdrop[2] + as_ * source[2]) * inv, ao]
 }
 
 /// Photoshop's "Blend Text Colors Using Gamma" (Color Settings › Advanced, on at 1.45 by

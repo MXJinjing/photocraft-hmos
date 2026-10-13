@@ -261,8 +261,8 @@ fn tiled_refinement_release_comparison() {
         let region = trim_region(Region { bbox: canvas, mask }).unwrap();
         let reader = region_reader(&region);
         let p = RefineParams { radius: 64.0, shift_edge: 100.0, ..Default::default() };
-        let old = refine_mask_with(&sampler, &reader, region.bbox, canvas, &p, repeated).unwrap();
-        let new = refine_mask_with(&sampler, &reader, region.bbox, canvas, &p, morph).unwrap();
+        let old = refine_mask_with(&sampler, &reader, region.bbox, canvas, &p, None, repeated).unwrap();
+        let new = refine_mask_with(&sampler, &reader, region.bbox, canvas, &p, None, morph).unwrap();
         assert_eq!(new.bbox, old.bbox);
         assert_eq!(new.mask, old.mask);
         let (mut old_ms, mut new_ms) = (Vec::new(), Vec::new());
@@ -270,9 +270,9 @@ fn tiled_refinement_release_comparison() {
             let mut measure = |fast: bool| {
                 let start = Instant::now();
                 let out = if fast {
-                    refine_mask_with(&sampler, black_box(&reader), region.bbox, canvas, &p, morph)
+                    refine_mask_with(&sampler, black_box(&reader), region.bbox, canvas, &p, None, morph)
                 } else {
-                    refine_mask_with(&sampler, black_box(&reader), region.bbox, canvas, &p, repeated)
+                    refine_mask_with(&sampler, black_box(&reader), region.bbox, canvas, &p, None, repeated)
                 }
                 .unwrap();
                 let elapsed = start.elapsed().as_secs_f64() * 1000.0;

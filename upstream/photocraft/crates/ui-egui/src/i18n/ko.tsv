@@ -7,6 +7,24 @@
 # Licensed MIT OR Apache-2.0. See LICENSE-translations.txt and ATTRIBUTION.md.
 # Product names and technology names retain their spelling.
 
+# Guide layout dialog
+	Columns	열
+	Rows	행
+	Number	개수
+	Top:	위:
+	Left:	왼쪽:
+	Bottom:	아래:
+	Right:	오른쪽:
+	Target:	대상:
+	Selected Artboards	선택한 아트보드
+	Center Columns	열 가운데 정렬
+	Clear Existing Guides	기존 안내선 지우기
+	Invalid guide layout	잘못된 안내선 레이아웃
+	Leave empty for automatic size	자동 크기를 사용하려면 비워 두세요
+	5 Columns, 3 Rows	5열, 3행
+	8 Columns	8열
+	12 Columns	12열
+
 	File	파일
 	Edit	편집
 	Image	이미지
@@ -357,6 +375,7 @@
 	Select Linked Layers	연결된 레이어 선택
 	Merge Layers	레이어 병합
 	Merge Down	아래 레이어와 병합
+	Merge Group	그룹 병합
 	Merge Visible	보이는 레이어 병합
 	Stamp Visible	보이는 레이어의 병합 사본 만들기
 	Select Layer Above	위 레이어 선택
@@ -466,6 +485,12 @@
 	Color Range…	색상 범위…
 	Focus Area…	초점 영역…
 	Select and Mask…	선택 및 마스크…
+# Select and Mask dialog labels
+	Smart Radius	고급 반경
+	Shift Edge	가장자리 이동
+	Decontaminate	오염 제거
+	Output	출력
+	Refine Edge	가장자리 다듬기
 	Modify	수정
 	Border…	테두리…
 	Smooth…	매끄럽게…
@@ -655,6 +680,9 @@
 	New Workspace…	새 작업 영역…
 	Delete Workspace…	작업 영역 삭제…
 	Reset Workspace	작업 영역 초기화
+	Reset Tool	도구 초기화
+	Reset All Tools	모든 도구 초기화
+	Reset all tools to their default settings?	모든 도구를 기본 설정으로 초기화하시겠습니까?
 	Lock Workspace	작업 영역 잠금
 	Theme	테마
 	Pro Theme	프로 테마
@@ -721,6 +749,7 @@
 	Split Warp Horizontally	뒤틀기 가로로 분할
 	Split Warp Vertically	뒤틀기 세로로 분할
 	Statistics…	통계…
+	Refine Strokes	다듬기 획
 @plural	{n} item|{n} items	항목 {n}개
 	Auto	자동
 	(print to the printer)	(프린터로 인쇄)
@@ -794,6 +823,9 @@
 	Bend:	구부림:
 	Bicubic	쌍입방
 	Bicubic (smooth gradients)	쌍입방(부드러운 그레이디언트)
+	Automatic	자동
+	Bicubic Smoother (enlargement)	쌍입방 더 부드럽게(확대)
+	Bicubic Sharper (reduction)	쌍입방 더 선명하게(축소)
 	Bilinear	쌍선형
 	Black	검정
 	Black & White	흑백
@@ -851,6 +883,7 @@
 	Click to zoom in  ·  {key}-click to zoom out  ·  drag right/left to zoom in/out	클릭하여 확대 · {key} 키를 누른 채 클릭하여 축소 · 오른쪽/왼쪽으로 드래그하여 확대/축소
 	Click with the Note tool to add a note.	메모 도구로 클릭하여 메모를 추가하세요.
 	Click: corner · Drag: smooth · Click first point: close · {key} finish · Esc cancel	클릭: 모서리 · 드래그: 곡선 · 첫 점 클릭: 닫기 · {key}: 완료 · Esc: 취소
+	Click: corner · Drag: smooth · {alt}-drag: break handle · Click or drag first point: close · {key} finish · Esc cancel	클릭: 모서리 · 드래그: 곡선 · {alt}+드래그: 핸들 분리 · 첫 점 클릭 또는 드래그: 닫기 · {key}: 완료 · Esc: 취소
 	Clip to layer below	아래 레이어에 클리핑
 	Clipped	클리핑됨
 	Close Style Options	스타일 옵션 닫기
@@ -1474,6 +1507,7 @@
 	White Balance: As Shot	화이트 밸런스: 촬영 시 설정
 	Whites	흰색 계열
 	Width	너비
+	Slant	기울기
 	Width:	너비:
 	Work Path	작업 패스
 	Yellow	노랑
@@ -1491,6 +1525,8 @@
 	↑↓ navigate   {key} run   esc close	↑↓ 이동   {key} 실행   esc 닫기
 	Version {version}	버전 {version}
 	New Document	새 문서
+	New Document With Mask	새 문서(마스크 포함)
+	New Layer With Mask	새 레이어(마스크 포함)
 	Saved	저장됨
 	Save Preset…	사전 설정 저장…
 	Preset Name	사전 설정 이름
@@ -1585,6 +1621,8 @@
 	Highlights from:	밝은 영역 시작:
 	History Brush Tool	작업 내역 브러시 도구
 	Horizontal Type Tool	수평 문자 도구
+	Horizontal Type Mask Tool	수평 문자 마스크 도구
+	Vertical Type Mask Tool	세로 문자 마스크 도구
 	Image Size:	이미지 크기:
 	Inches	인치
 	Indexed	인덱스
@@ -1639,10 +1677,15 @@
 	Paints from the document's opening state	문서를 열었을 때의 상태로 칠하기
 	Path Selection Tool	패스 선택 도구
 	Direct Selection Tool	직접 선택 도구
+	Add Anchor Point Tool	기준점 추가 도구
+	Delete Anchor Point Tool	기준점 삭제 도구
+	Click a segment to add an anchor point · {alt}-click an anchor to delete it	세그먼트를 클릭하여 기준점 추가 · {alt}-클릭: 기준점 삭제
+	Click an anchor point to delete it · {alt}-click a segment to add one	기준점을 클릭하여 삭제 · {alt}-클릭: 세그먼트에 기준점 추가
 	Pattern Overlay	패턴 오버레이
 	Pen Pressure	펜 압력
 	Pen Tilt	펜 기울기
 	Pen Tool	펜 도구
+	Convert Point Tool	기준점 변환 도구
 	Photo	사진
 	PhotoCraft website	PhotoCraft 웹사이트
 	Picas	파이카
@@ -1768,6 +1811,7 @@
 	Cache tile size	캐시 타일 크기
 	Camera Raw Defaults	Camera Raw 기본값
 	Canvas border	캔버스 테두리
+	Show canvas dots	캔버스 점 표시
 	Canvas color	캔버스 색상
 	Canvas custom color	캔버스 사용자 정의 색상
 	Color picker	색상 피커
@@ -1884,6 +1928,7 @@
 	Show only crosshair while painting	칠하는 동안 십자선만 표시
 	Show slice numbers	분할 영역 번호 표시
 	Show tooltips	도구 설명 표시
+	Enable animations	애니메이션 사용
 	Show highlight on rollover	롤오버 시 강조 표시
 	Show transformation values	변형 값 표시
 	Slice color	분할 영역 색상
@@ -2059,8 +2104,11 @@
 	Developing {name}	{name} 현상 중
 	Cancelled {label}	{label} 작업을 취소했습니다
 	Esc to cancel	Esc 키로 취소
+	Opened {name}	{name} 열림
 	Opening {name}	{name} 여는 중
+	Saved {name}	{name} 저장됨
 	Saving {name}	{name} 저장 중
+	Saving {percent}	저장 중 {percent}
 	A save to {name} is still running; try again when it finishes	{name}에 저장하는 작업이 아직 진행 중입니다. 완료된 후 다시 시도하세요
 	{label} is writing the file and can no longer be cancelled	{label}: 파일을 쓰는 중이므로 더 이상 취소할 수 없습니다
 	Opening {name}…	{name} 여는 중…
@@ -2086,6 +2134,8 @@
 	Show bounding box when dragging layer	레이어를 드래그할 때 테두리 상자 표시
 	System title bar	시스템 제목 표시줄
 	Mixer Brush Tool	혼합 브러시 도구
+	Color Replacement Tool	색상 대체 도구
+	Color Replacement	색상 대체
 	Rendering Mode	렌더링 모드
 	Automatic (recommended)	자동(권장)
 	CPU / Compatibility	CPU / 호환성
@@ -2120,6 +2170,8 @@ cameraRaw	Color	색상
 	Patch Tool	패치 도구
 	Patch:	패치:
 	Lasso around an area, then drag the selection	올가미로 영역을 둘러싼 다음 선택 영역을 드래그하세요
+	Transform On Drop	놓을 때 변형
+	Scale or rotate the moved area, then press {key}	이동한 영역의 크기를 조절하거나 회전한 다음 {key} 키를 누르세요
 	Now drag the selection onto another area	이제 선택 영역을 다른 영역으로 드래그하세요
 
 # Warp grid presets merged on main in #388.
@@ -2783,6 +2835,9 @@ cameraRaw	Color	색상
 	Structure:	구조:
 	Content-Aware Move Tool	내용 인식 이동 도구
 	TIFF Options	TIFF 옵션
+	Targa Options	Targa 옵션
+	24 bits/pixel	24비트/픽셀
+	32 bits/pixel	32비트/픽셀
 	Including layers will increase file size.	레이어를 포함하면 파일 크기가 커집니다.
 	Discard Layers and Save a Copy	레이어를 삭제하고 사본 저장
 	Don't show again	다시 표시 안 함
@@ -2873,6 +2928,19 @@ cameraRaw	Color	색상
 	Domed	돔
 	Domed (Inverted)	돔(반전)
 	Diagonal (Descending)	대각선(내림)
+	Contour Editor	윤곽선 편집기
+	Anti-aliased	앤티 앨리어스
+	Corner	모퉁이
+	Gloss Contour	광택 윤곽선
+	Contour	윤곽선
+	Cone - Inverted	원뿔 - 반전
+	Cove - Deep	후미 - 깊게
+	Cove - Shallow	후미 - 얕게
+	Half Round	반원
+	Ring - Double	링 - 이중
+	Rolling Slope - Descending	구르는 경사 - 내림차순
+	Rounded Steps	둥근 계단
+	Sawtooth 1	톱니 1
 
 	Red Eye Tool	적목 현상 도구
 	Red Eye	적목 현상
@@ -3026,14 +3094,143 @@ fontWeight	Italic	기울임
 	Quick Selection found nothing there	빠른 선택으로 해당 위치에서 아무것도 찾지 못했습니다
 	Object Selection found nothing there — try a tighter rectangle	개체 선택으로 해당 위치에서 아무것도 찾지 못했습니다 — 더 좁은 사각형을 사용해 보세요
 	No subject found — try a rectangle around the object	피사체를 찾을 수 없습니다 — 개체 주위에 사각형을 그려 보세요
+	Auto Erase	자동 지우기
+	Click the first point or press {key} to close · {del} removes a point · Esc cancels	첫 점을 클릭하거나 {key}를 눌러 닫기 · {del}로 점 제거 · Esc로 취소
+	Click, then move along an edge · click to fasten a point · {alt}-click for a straight segment · double-click to close	클릭한 다음 가장자리를 따라 이동 · 클릭하여 고정점 추가 · {alt}-클릭으로 직선 구간 · 두 번 클릭하여 닫기
+	Follows only edges this close to the pointer ([ and ] change it)	포인터에서 이 거리 안의 가장자리만 따라감([ 및 ]로 변경)
+	Higher values follow only edges that contrast sharply with their surroundings	값이 높을수록 주변과 대비가 강한 가장자리만 따라감
+	How often fastening points are placed by themselves	고정점이 자동으로 놓이는 빈도
+	Scrubby Zoom	스크러비 확대/축소
+	{mode} Color · {bits} bit	{mode} 색상 · {bits}비트
+	Drag a crop box · drag inside to move · edges resize ({ratio} ratio, {centre} centre) · Space moves while drawing · arrows nudge · X swaps orientation · {commit} commits · Esc cancels	드래그하여 자르기 상자 만들기 · 안쪽을 드래그하여 이동 · 가장자리로 크기 조절({ratio} 비율, {centre} 중심) · 그리는 중 Space로 이동 · 화살표로 미세 이동 · X로 방향 전환 · {commit} 적용 · Esc 취소
+	Appearance Settings…	화면 설정…
+	Add to favorites	즐겨찾기에 추가
+	Remove from favorites	즐겨찾기에서 제거
+# File Info ▸ Camera Data (read-only EXIF fields; "Make" is the camera maker, not the verb).
+	Camera Data	카메라 데이터
+cameraData	Make	제조사
+cameraData	Model	모델
+cameraData	Date Taken	촬영 날짜
+cameraData	Exposure	노출 시간
+cameraData	F-Stop	조리개 값
+cameraData	ISO Speed	ISO 감도
+cameraData	Focal Length	초점 거리
+cameraData	Focal Length (35 mm)	초점 거리(35mm 환산)
+cameraData	Lens	렌즈
+# Shared panel docking
+	Activate Panel	패널 활성화
+	Change Panel Group	패널 그룹 변경
+	Change Panel Layout	패널 레이아웃 변경
+	Close Panel	패널 닫기
+	Dock Panel	패널 도킹
+	Float Panel	패널 띄우기
+	Move Panel	패널 이동
+	Group with	다음과 그룹화
+	Panel menu	패널 메뉴
+	Resize panel window	패널 창 크기 조절
+	Resize panels	패널 크기 조절
 	Use Classic Mode	클래식 모드 사용
 	Auto Center Preview	미리 보기 자동 가운데 맞춤
 	Next Document	다음 문서
 	Previous Document	이전 문서
 	W x H x Resolution	폭 x 높이 x 해상도
 	Front Image	전면 이미지
+	Frame Tool	프레임 도구
+	Create a new rectangular frame	새 사각형 프레임 만들기
+	Create a new elliptical frame	새 타원형 프레임 만들기
+	Include in playback	재생에 포함
+	Perspective Crop Tool	원근 자르기 도구
+	Show Grid	격자 표시
+	Drag a box or click four corners · drag the corners onto the edges of a skewed shape · {commit} commits · Esc cancels	상자를 드래그하거나 네 모서리를 클릭 · 모서리를 기울어진 모양의 가장자리로 드래그 · {commit} 적용 · Esc 취소
+	Artboard Tool	아트보드 도구
+	Make Portrait	세로 방향으로
+	Make Landscape	가로 방향으로
+	Add New Artboard	새 아트보드 추가
+	W	폭
+	H	높이
+	Freeform Pen Tool	자유 형태 펜 도구
+	Curvature Pen Tool	곡률 펜 도구
+	Curve Fit:	곡선 맞춤:
+	Drag: draw freehand · {alt}-click: straight segment · Release on the start point: close	드래그: 자유롭게 그리기 · {alt}-클릭: 직선 세그먼트 · 시작점에서 놓기: 닫기
+	Click: smooth point · Double-click: corner · Drag a point: move · Click first point: close · {key} finish	클릭: 매끄러운 점 · 더블 클릭: 모서리 · 점 드래그: 이동 · 첫 점 클릭: 닫기 · {key}: 완료
+	New Crop Preset…	새 자르기 사전 설정…
+	Delete Crop Preset…	자르기 사전 설정 삭제…
+	Select the crop presets to delete:	삭제할 자르기 사전 설정을 선택하십시오:
+	Select the crop presets to delete	삭제할 자르기 사전 설정을 선택하십시오
+	Enter a name for the crop preset	자르기 사전 설정의 이름을 입력하십시오
+	There is no crop size or ratio to save	저장할 자르기 크기나 비율이 없습니다
+	Scale:	비율:
+	Snap to Origin	원점에 스냅
 	Search settings…	설정 검색…
 	No matching settings	일치하는 설정 없음
+	Loading fonts…	글꼴 불러오는 중…
+	Simulate Pressure	압력 시뮬레이션
+	Stroke Path…	패스 획…
+	Background Eraser	배경 지우개
+	Clone Stamp	복제 도장
+	Healing Brush	복구 브러시
+	Spot Healing Brush	스팟 복구 브러시
+	History Brush	작업 내역 브러시
+	Smudge	손가락
+	Dodge	닷지
+	Burn	번
+	Amount:	양:
+	Protect:	보호:
+	Protect skin tones	피부톤 보호
+	Edit points to modify the curve	점을 편집하여 곡선 수정
+	Draw to modify the curve	그려서 곡선 수정
+curves	Smooth	매끄럽게
+	Smooth the curve values	곡선 값을 매끄럽게 하기
+	Drag to draw the curve · {key}-click draws a straight line	드래그하여 곡선 그리기 · {key}-클릭으로 직선 그리기
+	Edit Plane	평면 편집
+	Create Plane	평면 만들기
+	Grid Size:	격자 크기:
+	Vanishing Point: click four corners to create a plane	소실점: 네 모서리를 클릭하여 평면을 만드십시오
+	Vanishing Point is not active	소실점이 활성화되어 있지 않습니다
+	Apply Vanishing Point ({key})	소실점 적용 ({key})
+	Fix the red plane first: its corners must form a convex quad	먼저 빨간색 평면을 수정하십시오: 모서리가 볼록 사각형을 이루어야 합니다
+# Select and Mask view modes (#1754)
+	Onion Skin	어니언 스킨
+	Marching Ants	점선 윤곽
+	On Black	검정 배경
+	On White	흰색 배경
+	On Layers	레이어 위
+	Show Edge	가장자리 표시
+	Show Original	원본 표시
+	F cycles the views; hold X to see the image	F로 보기 전환, X를 누르고 있으면 이미지 표시
+# Select and Mask Refine Edge Brush (#2972)
+	Refine Edge Brush (R)	가장자리 다듬기 브러시 (R)
+	Expand Detection Area	감지 영역 확장
+	Restore Original Edge	원래 가장자리 복원
+	Paint over hair or fur on the image; Alt paints the other mode	이미지의 머리카락이나 털 위를 칠합니다. Alt는 다른 모드로 칠합니다
+	Clear Brush Strokes	브러시 획 지우기
+	Show rulers	눈금자 표시
+
+# Color Sampler (added with the i18n coverage repair)
+	Click to place · Alt-click or drag off-canvas to remove	클릭하여 배치 · Alt-클릭 또는 캔버스 밖으로 드래그하여 제거
+	No document open	열린 문서 없음
+	{n} of {max} sample points	{max}개 중 {n}개의 샘플 지점
+# Print dialog (#2697)
+	Emulsion Down	감광면 아래로
+	Functions	기능
+	Print Resolution:	인쇄 해상도:
+	Use Previous Layer to Create Clipping Mask	이전 레이어를 사용하여 클리핑 마스크 만들기
+	Fill with {mode}-neutral color (white)	{mode} 중립 색상으로 채우기(흰색)
+	Fill with {mode}-neutral color (black)	{mode} 중립 색상으로 채우기(검정)
+	Fill with {mode}-neutral color (50% gray)	{mode} 중립 색상으로 채우기(50% 회색)
+	(No neutral color exists for {mode} mode.)	({mode} 모드에는 중립 색상이 없습니다.)
+	Apply mask to layer before removing?	제거하기 전에 마스크를 레이어에 적용하시겠습니까?
+	The layer or its mask changed. Drag the mask onto the Trash again.	레이어 또는 마스크가 변경되었습니다. 마스크를 휴지통으로 다시 드래그하세요.
+	Delete the vector mask?	벡터 마스크를 삭제하시겠습니까?
+# View › Guides › New Guide… › Color
+	Light Blue	연한 파랑
+	Light Red	연한 빨강
+	Medium Blue	중간 파랑
+	Light Gray	연한 회색
+	Remove after each stroke	획마다 제거
+	Apply the removal ({key})	제거 적용 ({key})
+	Strokes to remove: {n} (Enter applies, Esc cancels)	제거할 획: {n} (Enter 적용, Esc 취소)
+
 
 # Status bar panel controls
 	Only show canvas	캔버스만 표시

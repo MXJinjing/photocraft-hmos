@@ -296,6 +296,13 @@ impl Profile {
         self.a2b.iter().all(Option::is_none) && (self.matrix.is_some() && self.trc.is_some() || self.gray_trc.is_some())
     }
 
+    /// Whether colours can be converted into this profile for every intent. Input profiles with
+    /// only AToB tables (Apple's Wide Color Sharing Profile on iPhone photos) can't: they
+    /// describe a source but have no PCS → device path.
+    pub fn can_be_destination(&self) -> bool {
+        [Intent::Perceptual, Intent::RelativeColorimetric, Intent::Saturation].into_iter().all(|i| self.pcs_to_device(i).is_ok())
+    }
+
     fn lut_for(luts: &[Option<Lut>; 3], intent: Intent) -> Option<&Lut> {
         let i = match intent {
             Intent::Perceptual => 0,

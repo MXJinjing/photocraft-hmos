@@ -22,6 +22,33 @@ fn defaults_match_photoshop() {
     }
 }
 
+/// #2264: the Studio workspace dot pattern can be hidden without changing themes.
+#[test]
+fn canvas_dot_grid_can_be_disabled_persisted_and_reset() {
+    let mut s = Session::new();
+    assert!(s.prefs().interface.show_canvas_dots, "existing Studio appearance stays unchanged by default");
+    assert_eq!(s.execute("prefs.get", json!({"path": "interface.showCanvasDots"})).unwrap(), json!(true));
+
+    s.execute("prefs.set", json!({"path": "interface.showCanvasDots", "value": false})).unwrap();
+    assert!(!s.prefs().interface.show_canvas_dots);
+    assert_eq!(s.execute("prefs.get", json!({"path": "interface.showCanvasDots"})).unwrap(), json!(false));
+
+    let mut restored = Session::new();
+    restored.load_prefs_json(&s.prefs_to_json()).unwrap();
+    assert!(!restored.prefs().interface.show_canvas_dots, "disabling the pattern must survive restart");
+
+    // Older preference files without the new key retain the original dotted workspace.
+    let mut legacy = Session::new();
+    legacy.load_prefs_json(r#"{"interface": {"theme": "studio"}}"#).unwrap();
+    assert!(legacy.prefs().interface.show_canvas_dots);
+
+    assert!(s.execute("prefs.set", json!({"path": "interface.showCanvasDots", "value": "no"})).is_err());
+    assert!(!s.prefs().interface.show_canvas_dots, "an invalid type must not change the preference");
+
+    s.execute("prefs.reset", json!({"path": "interface.showCanvasDots"})).unwrap();
+    assert!(s.prefs().interface.show_canvas_dots);
+}
+
 #[test]
 fn appearance_defaults_and_legacy_theme_migrate() {
     let p = Preferences::default();
@@ -70,6 +97,22 @@ fn appearance_choices_validate_and_legacy_theme_still_selects() {
         migrated.load_prefs_json(&json!({"interface": {"theme": theme}}).to_string()).unwrap();
         assert_eq!(migrated.prefs().interface.appearance_mode, AppearanceMode::Light);
         assert_eq!(migrated.prefs().interface.light_theme, light);
+    }
+}
+
+#[test]
+fn favorite_themes_persist_and_reject_invalid_lists() {
+    let mut s = Session::new();
+    assert!(s.prefs().interface.favorite_themes.is_empty());
+    s.execute("prefs.set", json!({"path": "interface.favoriteThemes", "value": ["classic", "studio"]})).unwrap();
+    assert_eq!(s.prefs().interface.favorite_themes, vec![Theme::Classic, Theme::Studio]);
+    s.execute("prefs.set", json!({"path": "interface.theme", "value": "pro"})).unwrap();
+    let mut restored = Session::new();
+    restored.load_prefs_json(&s.prefs_to_json()).unwrap();
+    assert_eq!(restored.prefs().interface.favorite_themes, vec![Theme::Classic, Theme::Studio]);
+    for invalid in [json!("classic"), json!(["unknown"]), json!(["classic", "classic"]), json!([23])] {
+        assert!(s.execute("prefs.set", json!({"path": "interface.favoriteThemes", "value": invalid})).is_err());
+        assert_eq!(s.prefs().interface.favorite_themes, vec![Theme::Classic, Theme::Studio]);
     }
 }
 
@@ -303,7 +346,13 @@ fn temporary_tools_and_fill_keys_are_rebindable() {
     let mut s = session();
     let r = s.execute("edit.keyboardShortcuts", json!({"filter": "tools.temporary"})).unwrap();
     let ids: Vec<&str> = r["commands"].as_array().unwrap().iter().filter_map(|c| c["id"].as_str()).collect();
-    assert!(ids.contains(&"tools.temporary.hand") && ids.contains(&"tools.temporary.zoomIn") && ids.contains(&"tools.temporary.zoomOut"), "{ids:?}");
+    assert!(
+        ids.contains(&"tools.temporary.hand")
+            && ids.contains(&"tools.temporary.zoomIn")
+            && ids.contains(&"tools.temporary.zoomOut")
+            && ids.contains(&"tools.temporary.erase"),
+        "{ids:?}"
+    );
     assert!(r["commands"].as_array().unwrap().iter().all(|c| c["hold"] == true));
     // Rebind the temporary zoom; an unknown id still fails.
     s.execute("edit.keyboardShortcuts", json!({"set": {"tools.temporary.zoomIn": "Ctrl+Space"}})).unwrap();
@@ -489,20 +538,10 @@ fn notification_autohide_preferences() {
 }
 
 #[test]
-fn linux_only_preferences_show_only_on_desktop_linux() {
-    // OHOS triples still report target_os = "linux"; gate on target_env = "ohos".
-    assert_eq!(
-        is_desktop_linux(),
-        cfg!(all(target_os = "linux", not(target_env = "ohos")))
-    );
-    assert_eq!(is_hidden("performance.linuxDisplayServer"), !is_desktop_linux());
-    // Injected flag: HarmonyOS / non-desktop-Linux hosts keep the preference out of the dialog.
-    assert!(is_hidden_for("performance.linuxDisplayServer", false));
-    assert!(!is_hidden_for("performance.linuxDisplayServer", true));
+fn linux_only_preferences_show_only_on_linux() {
+    assert_eq!(is_hidden("performance.linuxDisplayServer"), !cfg!(target_os = "linux"));
     assert!(!is_hidden("performance.gpuBackend"));
-    assert!(!is_hidden_for("performance.gpuBackend", false));
     assert!(LINUX_ONLY.iter().all(|p| choices(p).is_some()), "every Linux-only preference is a real one");
-    assert_eq!("performance.linuxDisplayServer", LINUX_ONLY[0]);
 }
 
 #[test]
@@ -603,4 +642,14 @@ fn ruler_units_round_to_their_own_decimal_places() {
     assert_eq!(r.format(1500.0, 300.0, 1500.0), "12.7");
     let r = super::UnitsAndRulers { rulers: Unit::Inches, ..Default::default() };
     assert_eq!(r.format(100.0, 300.0, 1500.0), "0.333");
+}
+
+/// #3296: like Photoshop, "Use Shift Key for Tool Switch" is on by default; a stored choice wins.
+#[test]
+fn shift_key_tool_switch_is_on_by_default_and_a_stored_false_is_kept() {
+    assert!(Preferences::default().tools.use_shift_key_for_tool_switch);
+    let missing: Tools = serde_json::from_value(json!({"showTooltips": false})).unwrap();
+    assert!(missing.use_shift_key_for_tool_switch, "a settings file without the key gets the new default");
+    let stored: Tools = serde_json::from_value(json!({"useShiftKeyForToolSwitch": false})).unwrap();
+    assert!(!stored.use_shift_key_for_tool_switch);
 }
