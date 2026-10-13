@@ -2,6 +2,9 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const ts = require(process.argv[2] || 'typescript');
+// SDK contract: async loading requires disabling ArkUI's automatic prefetch.
+const page = fs.readFileSync('entry/src/main/ets/pages/Index.ets', 'utf8');
+assert.match(page, /\.onDrop\(\(event: DragEvent\): void => \{ this\.dropImages\(event\); \}, \{ disableDataPrefetch: true \}\)/);
 const UTD = { IMAGE: 'general.image', FILE_URI: 'general.file-uri', FILE: 'general.file', OPENHARMONY_PIXEL_MAP: 'openharmony.pixel-map' };
 let calls = [], content = new Uint8Array([1, 2, 3, 4, 5]), offset = 0, size = 5, zeroRead = false, failRead = false, failPack = false;
 let serial = 0, pendingRead, releaseRead;

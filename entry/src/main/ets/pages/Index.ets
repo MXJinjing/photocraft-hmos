@@ -333,7 +333,8 @@ struct Index {
           event.dragBehavior = DragBehavior.COPY;
           event.setResult(DragResult.DROP_ENABLED);
         })
-        .onDrop((event: DragEvent): void => { this.dropImages(event); })
+        // Required by startDataLoading: avoid the default prefetch consuming UDMF data.
+        .onDrop((event: DragEvent): void => { this.dropImages(event); }, { disableDataPrefetch: true })
         .onHoverMove((event: HoverEvent): void => { this.sendPenHoverMove(event); })
         .onHover((isHover: boolean): void => { this.sendPenHoverLeave(isHover); })
         .id('photocraft-editor').focusable(true).defaultFocus(true).focusOnTouch(true)
