@@ -43,7 +43,7 @@ pub fn margin(layer: &Layer) -> i32 {
             Effect::DropShadow(s) | Effect::InnerShadow(s) => s.distance + s.size,
             Effect::OuterGlow(g) | Effect::InnerGlow(g) => g.size,
             Effect::Stroke(s) => s.size,
-            Effect::Satin(s) => s.distance + s.size,
+            Effect::Satin(s) => satin_distance(s) + s.size,
             Effect::BevelEmboss(b) => b.size + b.soften,
             _ => 0.0,
         };
@@ -878,8 +878,18 @@ fn dilate(s: &Map, r: f32) -> Map {
 fn contour_lut(c: &Contour) -> Option<Vec<f32>> {
     match c {
         Contour::Linear => None,
-        Contour::Custom { points, .. } => Some(crate::adjust::curve_lut(points)),
+        Contour::Custom { points, corners, .. } => Some(crate::adjust::contour_curve_lut(points, corners)),
     }
+}
+
+/// Satin's coverage transfer: the contour read from its far end, `|c(1 − v) − c(1)|`. Measured in
+/// Photoshop 27.11: Cone and Cone − Inverted Satins are identical, and a Gaussian Satin runs under
+/// the diagonal (0.36 at 0.5) while the same Gaussian on a glow or gloss runs over it (0.65).
+/// `None` = identity.
+pub fn satin_lut(c: &Contour) -> Option<Vec<f32>> {
+    let lut = contour_lut(c)?;
+    let end = lut.last().copied().unwrap_or(1.0);
+    Some(lut.iter().rev().map(|v| (v - end).abs()).collect())
 }
 
 /// Interpolated lookup in a 0..=1 table (as the GPU's `lut()`).
@@ -1114,27 +1124,24 @@ fn shadow_map(shape: &Map, s: &Shadow, light: &GlobalLight, inner: bool, origin:
 }
 
 fn glow_map(shape: &Map, g: &Glow, inner: bool, origin: (i32, i32)) -> Map {
-    let src = if inner {
-        match g.source {
-            GlowSource::Edge => shape.clone().map(|a| 1.0 - a),
-            GlowSource::Center => shape.clone(),
-        }
-    } else {
-        shape.clone()
-    };
+    // An inner glow is built from the edge inwards; a centre-source glow is its inverse, taken
+    // after the contour and Range (Photoshop 27.11, measured: the centre glow is exactly
+    // 1 − the edge glow, for both techniques).
+    let src = if inner { shape.clone().map(|a| 1.0 - a) } else { shape.clone() };
     let mut m = match g.technique {
         GlowTechnique::Precise => {
-            // An inner glow, from either source, measures from the edge inwards; a centre glow is
-            // the inverse below (the distance outside is ≤ 0 everywhere inside, #966).
+            // Coverage falls linearly from 0.5 at the edge to 0 at `size + 1` px (centre to
+            // centre), solid within the spread / choke: after the default 50 % Range that is
+            // Photoshop's 1 − D / (size + 1) beyond the solid part (measured: outer and inner,
+            // sizes 10 and 20, spread 0 and 40 %, choke 0 and 30 %: within 1 level; other Range
+            // values are unmeasured). The distances here are 0.5 px short of centre to centre.
             let d = if inner { dist_inside(shape) } else { dist_outside(&src) };
             let solid = g.size * g.spread;
-            let soft = (g.size - solid).max(1e-3);
+            let soft = (g.size + 1.0 - solid).max(1e-3);
             let mut m = Map::new(shape.w, shape.h, 0.0);
             for (o, d) in m.v.iter_mut().zip(d) {
-                *o = if d <= solid { 1.0 } else { (1.0 - (d - solid) / soft).clamp(0.0, 1.0) };
-            }
-            if inner && g.source == GlowSource::Center {
-                m = m.map(|v| 1.0 - v);
+                let d = d + 0.5;
+                *o = if d <= solid { 1.0 } else { 0.5 * (1.0 - (d - solid) / soft).clamp(0.0, 1.0) };
             }
             m
         }
@@ -1142,16 +1149,13 @@ fn glow_map(shape: &Map, g: &Glow, inner: bool, origin: (i32, i32)) -> Map {
             let (r, bw) = spread_split(g.size, g.spread);
             let mut m = dilate(&src, r);
             blur(&mut m, bw);
-            if inner && g.source == GlowSource::Center {
-                // Brightest in the middle: coverage from the distance to the edge.
-                let mut e = dilate(&shape.clone().map(|a| 1.0 - a), r);
-                blur(&mut e, bw);
-                m = e.map(|v| 1.0 - v);
-            }
             m
         }
     };
     m = apply_lut(m, glow_lut(g));
+    if inner && g.source == GlowSource::Center {
+        m = m.map(|v| 1.0 - v);
+    }
     noise(&mut m, g.noise, origin.0, origin.1);
     if inner {
         for (v, a) in m.v.iter_mut().zip(&shape.v) {
@@ -1461,7 +1465,9 @@ pub fn bevel_geom(b: &Bevel) -> BevelGeom {
     BevelGeom {
         paint,
         width,
-        depth: b.depth * if smooth { width } else { size } * sign,
+        // A bevel rises `depth × width / 2` px: Smooth with a slope falling from `depth` at the
+        // edge (the tent), a chisel with the constant slope of its ramp (see `bevel_chisel_h`).
+        depth: b.depth * if smooth { width } else { size / 2.0 } * sign,
         pillow: b.style == BevelStyle::PillowEmboss,
         chisel_soft: if b.technique == BevelTechnique::ChiselSoft { (size / 4.0).max(1.0) } else { 0.0 },
     }
@@ -1482,10 +1488,13 @@ fn bevel_height(shape: &Map, b: &Bevel, g: &BevelGeom, tex: &TextureCtx, pattern
         let sharp = sharp_edges(shape);
         let (din, dout) = (bevel_dist_inside(shape, &sharp, size), bevel_dist_outside(shape, &sharp, size));
         let mut h = Map::new(shape.w, shape.h, 0.0);
+        let soft = g.chisel_soft > 0.0;
         for i in 0..h.v.len() {
-            h.v[i] = bevel_chisel_h(g.paint, size, din[i], dout[i]);
+            h.v[i] = bevel_chisel_h(g.paint, size, din[i], dout[i], soft);
         }
-        if g.chisel_soft > 0.0 {
+        // Inner and outer Chisel Soft are not blurred in Photoshop (their facets equal Chisel
+        // Hard's across a straight edge); emboss styles keep the blur until measured.
+        if soft && g.paint == BevelPaint::Both {
             tent(&mut h, g.chisel_soft);
         }
         h
@@ -1527,17 +1536,46 @@ pub struct TextureCtx<'a> {
 }
 
 /// Chiselled height from the inside / outside distances (keep in sync with `fs_mbevelh`).
-pub fn bevel_chisel_h(paint: BevelPaint, size: f32, din: f32, dout: f32) -> f32 {
+///
+/// Photoshop 27.11, measured across straight edges (sizes 10 and 20, depth 100 and 300): a chisel
+/// facet has the constant slope `depth × size / (2 (size + 1))`, i.e. one height step of
+/// `1 / (size + 1)` per pixel at the `depth × size / 2` scale of [`bevel_geom`]. Inner Hard's ramp
+/// runs from half a pixel beyond the edge to `size + ½` (the facet is flat right up to the edge
+/// pixel); Inner Soft starts a pixel further out, so its edge pixel is steeper; Outer Hard ends a
+/// pixel further out. All within 1 level of Photoshop on those profiles.
+pub fn bevel_chisel_h(paint: BevelPaint, size: f32, din: f32, dout: f32, soft: bool) -> f32 {
+    let ramp = size + 1.0;
     match paint {
-        BevelPaint::Outer => 1.0 - (dout / size).clamp(0.0, 1.0),
-        BevelPaint::Both => {
-            if din > 0.0 {
-                0.5 + 0.5 * (din / (size / 2.0)).clamp(0.0, 1.0)
+        BevelPaint::Outer if !soft => {
+            let top = (size + 2.0) / ramp;
+            if dout > 0.0 { ((size + 1.5 - dout) / ramp).clamp(0.0, top) } else { top }
+        }
+        // Outer Soft: Outer Hard's ramp a pixel shorter, with a steeper edge pixel.
+        BevelPaint::Outer => {
+            if dout > 0.0 {
+                1.0 - ((dout + 0.5) / ramp).clamp(0.0, 1.0)
             } else {
-                0.5 - 0.5 * (dout / (size / 2.0)).clamp(0.0, 1.0)
+                (size + 2.0) / ramp
             }
         }
-        BevelPaint::Inner => (din / size).clamp(0.0, 1.0),
+        BevelPaint::Both => {
+            let half = size / 2.0 + 0.5;
+            if din > 0.0 { 0.5 + 0.5 * (din / half).clamp(0.0, 1.0) } else { 0.5 - 0.5 * (dout / half).clamp(0.0, 1.0) }
+        }
+        BevelPaint::Inner if soft => {
+            if din > 0.0 {
+                ((din + 1.5) / ramp).clamp(0.0, (size + 2.0) / ramp)
+            } else {
+                0.0
+            }
+        }
+        BevelPaint::Inner => {
+            if din > 0.0 {
+                ((din + 0.5) / ramp).clamp(0.0, 1.0)
+            } else {
+                0.0
+            }
+        }
     }
 }
 
@@ -1555,7 +1593,9 @@ fn bevel_maps(shape: &Map, b: &Bevel, light: &GlobalLight, tex: &TextureCtx, pat
     // past the blur's reach (a raised 4-neighbour: it still slopes; psd-tools layer_effects'
     // emboss shadow runs one row past it), outer bevels don't (Photoshop oracle
     // bevel-outer-smooth).
-    let reach_past = g.paint == BevelPaint::Both;
+    // Outer chisel bevels too: the pixel where their ramp reaches zero still slopes (Photoshop
+    // 27.11 shades it, half strength, at `size + 1½` px out).
+    let reach_past = g.paint == BevelPaint::Both || (g.paint == BevelPaint::Outer && b.technique != BevelTechnique::Smooth);
     let on_bevel = |x: i64, y: i64| {
         hmap.get(x, y) > BEVEL_H_EPS || (reach_past && [(1, 0), (-1, 0), (0, 1), (0, -1)].iter().any(|(dx, dy)| hmap.get(x + dx, y + dy) > BEVEL_H_EPS))
     };
@@ -1659,8 +1699,14 @@ impl FxMaps {
     }
 }
 
+/// The distance the two satin copies are offset by. Photoshop draws Distance 0 as 1 px (an
+/// edge band of 2/size, measured in Photoshop 27.11), not as two copies cancelling out.
+pub fn satin_distance(s: &photocraft_doc::effects::Satin) -> f32 {
+    s.distance.max(1.0)
+}
+
 fn satin_map(shape: &Map, s: &photocraft_doc::effects::Satin) -> Map {
-    let (dx, dy) = offset(s.angle, s.distance);
+    let (dx, dy) = offset(s.angle, satin_distance(s));
     let mut a = shape.shifted(dx, dy, 0.0);
     let mut b = shape.shifted(-dx, -dy, 0.0);
     // Two box passes of the satin size (fitted: 0.2 % mean error on psd-tools layer_effects).
@@ -1670,7 +1716,7 @@ fn satin_map(shape: &Map, s: &photocraft_doc::effects::Satin) -> Map {
     if s.invert {
         m = m.map(|v| 1.0 - v);
     }
-    let mut m = apply_contour(m, &s.contour);
+    let mut m = apply_lut(m, satin_lut(&s.contour));
     for (v, a) in m.v.iter_mut().zip(&shape.v) {
         *v *= a;
     }
@@ -2340,6 +2386,40 @@ mod tests {
         assert!(at(&maps[0], 20, 15) < 0.05);
     }
 
+    /// Photoshop 27.11, measured across a straight edge (size 10, depth 100 %, light from the top
+    /// at 30°): a chisel facet has the slope `depth × size / (2 (size + 1))`, flat right up to the
+    /// edge pixel for Inner Hard; Inner Soft's edge pixel is half as steep again; Outer Hard
+    /// still shades, partly, the pixel where its ramp reaches zero `size + 1½` px out.
+    #[test]
+    fn chisel_facets_match_photoshop() {
+        let amount = |g: f32| {
+            let (se, ce) = 30f32.to_radians().sin_cos();
+            ((g * ce + se) / (1.0 + g * g).sqrt() - se) / (1.0 - se)
+        };
+        let n = 80;
+        let shape = square(n, 20, 60);
+        let maps = |style, technique| {
+            let mut b = bevel_of(style, technique);
+            b.size = 10.0;
+            bevel_maps(&shape, &b, &GlobalLight::default(), &no_tex(), &PreparedPatterns::new(&[], PREPARED_PATTERN_BYTES)).0
+        };
+        let at = |m: &Map, y: usize| m.v[y * n + 40];
+        let facet = amount(10.0 / 22.0);
+        let hard = maps(BevelStyle::InnerBevel, BevelTechnique::ChiselHard);
+        for y in 20..30 {
+            assert!((at(&hard[0], y) - facet).abs() < 0.01, "inner hard facet at row {y}: {} vs {facet}", at(&hard[0], y));
+        }
+        assert!(at(&hard[0], 30) > 0.05 && at(&hard[0], 30) < facet, "one partial pixel at the end");
+        let soft = maps(BevelStyle::InnerBevel, BevelTechnique::ChiselSoft);
+        assert!((at(&soft[0], 20) - amount(1.5 * 10.0 / 22.0)).abs() < 0.01, "steeper edge pixel: {}", at(&soft[0], 20));
+        assert!((at(&soft[0], 24) - facet).abs() < 0.01, "then Chisel Hard's facet");
+        let outer = maps(BevelStyle::OuterBevel, BevelTechnique::ChiselHard);
+        // Below the shape (rows 60..): shadow facet through 10½ px, partial at 11½.
+        assert!((at(&outer[1], 70) - at(&outer[1], 61)).abs() < 1e-4);
+        assert!(at(&outer[1], 71) > 0.05 && at(&outer[1], 71) < at(&outer[1], 70));
+        assert_eq!(at(&outer[1], 72), 0.0);
+    }
+
     #[test]
     fn emboss_paints_both_sides_and_pillow_flips_the_outside() {
         let shape = square(40, 10, 30);
@@ -2832,7 +2912,11 @@ mod tests {
             photocraft_doc::adjust::CurvePoint { input: 0.5, output: 1.0 },
             photocraft_doc::adjust::CurvePoint { input: 1.0, output: 0.0 },
         ];
-        c.contour = Some(photocraft_doc::BevelContour { contour: Contour::Custom { name: "fold".into(), points: fold }, range: 1.0, anti_alias: false });
+        c.contour = Some(photocraft_doc::BevelContour {
+            contour: Contour::Custom { name: "fold".into(), points: fold, corners: vec![] },
+            range: 1.0,
+            anti_alias: false,
+        });
         let (b, _) = bevel_maps(&shape, &c, &l, &no_tex(), &PreparedPatterns::new(&[], PREPARED_PATTERN_BYTES));
         let diff: f32 = a[1].v.iter().zip(&b[1].v).map(|(x, y)| (x - y).abs()).sum();
         assert!(diff > 5.0, "{diff}");
@@ -2879,6 +2963,51 @@ mod tests {
         assert!(glow_lut(&g).is_none());
     }
 
+    /// Photoshop 27.11, measured on a 128 px square (Normal, black, 100 %, Range 50 %): a precise
+    /// glow's coverage across the edge, and a centre-source inner glow as 1 − the edge glow.
+    #[test]
+    fn glows_match_photoshop() {
+        let glow = |technique, size: f32, spread: f32, source| Glow {
+            common: photocraft_doc::FxCommon::new(BlendMode::Normal, 1.0),
+            paint: FxPaint::Color(photocraft_color::Color::BLACK),
+            technique,
+            spread,
+            size,
+            contour: Contour::Linear,
+            anti_alias: false,
+            range: 0.5,
+            jitter: 0.0,
+            noise: 0.0,
+            source,
+        };
+        let n = 60;
+        let mut shape = Map::new(n, n, 0.0);
+        for y in 20..40 {
+            for x in 20..40 {
+                shape.v[y * n + x] = 1.0;
+            }
+        }
+        let at = |m: &Map, x: usize| m.v[30 * n + x];
+        // Outer, precise, size 10: Photoshop's black glow over white reads 47, 93, 140, 186, 232
+        // at 2, 4, 6, 8 and 10 px out from the edge pixel (alpha 1 − D / 11).
+        let m = glow_map(&shape, &glow(GlowTechnique::Precise, 10.0, 0.0, GlowSource::Edge), false, (0, 0));
+        for (d, ps) in [(2, 47.0f32), (4, 93.0), (6, 140.0), (8, 186.0), (10, 232.0)] {
+            let got = 255.0 * (1.0 - at(&m, 20 - d));
+            assert!((got - ps).abs() <= 1.5, "outer precise at {d} px: {got} vs Photoshop {ps}");
+        }
+        // Spread 40 %: solid for the first 4 px.
+        let m = glow_map(&shape, &glow(GlowTechnique::Precise, 10.0, 0.4, GlowSource::Edge), false, (0, 0));
+        assert!((at(&m, 16) - 1.0).abs() < 1e-6 && at(&m, 14) < 1.0);
+        // Centre source = 1 − edge, for both techniques.
+        for t in [GlowTechnique::Precise, GlowTechnique::Softer] {
+            let e = glow_map(&shape, &glow(t, 6.0, 0.0, GlowSource::Edge), true, (0, 0));
+            let c = glow_map(&shape, &glow(t, 6.0, 0.0, GlowSource::Center), true, (0, 0));
+            for x in 20..40 {
+                assert!((at(&c, x) - (1.0 - at(&e, x))).abs() < 1e-5, "{t:?} at {x}");
+            }
+        }
+    }
+
     #[test]
     fn offsets_follow_light() {
         let (dx, dy) = offset(120.0, 10.0);
@@ -2893,6 +3022,28 @@ mod tests {
             }
         }
         m
+    }
+
+    #[test]
+    fn satin_at_distance_zero_matches_photoshop() {
+        // Photoshop 27.11, Satin black 100 %, angle 90°, Linear contour, distance 0, size 5 over a
+        // #808080 square: the rows from the top edge read 82, 102, 123, 128.
+        let s = photocraft_doc::effects::Satin {
+            common: photocraft_doc::FxCommon::new(BlendMode::Normal, 1.0),
+            color: photocraft_color::Color::BLACK,
+            angle: 90.0,
+            distance: 0.0,
+            size: 5.0,
+            contour: Contour::Linear,
+            anti_alias: false,
+            invert: false,
+        };
+        let m = satin_map(&square_shape(60), &s);
+        for (row, gray) in [(5, 82.0), (7, 102.0), (9, 123.0), (11, 128.0), (30, 128.0)] {
+            let want = 1.0 - gray / 128.0;
+            let got = m.v[row * 60 + 30];
+            assert!((got - want).abs() < 0.02, "row {row}: {got} vs {want}");
+        }
     }
 
     fn shadow(noise: f32, origin: (i32, i32)) -> Map {

@@ -9,6 +9,24 @@
 # Licensed MIT OR Apache-2.0. See LICENSE-translations.txt and ATTRIBUTION.md.
 
 # Menus
+
+# Guide layout dialog
+	Rows	Рядки
+	Number	Кількість
+	Top:	Зверху:
+	Left:	Ліворуч:
+	Bottom:	Знизу:
+	Right:	Праворуч:
+	Target:	Ціль:
+	Selected Artboards	Вибрані монтажні області
+	Center Columns	Центрувати стовпці
+	Clear Existing Guides	Видалити наявні напрямні
+	Invalid guide layout	Неприпустимий макет напрямних
+	Leave empty for automatic size	Залиште порожнім для автоматичного розміру
+	5 Columns, 3 Rows	5 стовпців, 3 рядки
+	8 Columns	8 стовпців
+	12 Columns	12 стовпців
+
 	File	Файл
 	Edit	Редагування
 	Image	Зображення
@@ -247,6 +265,12 @@
 	Inverse	Інвертувати
 	Color Range…	Колірний діапазон…
 	Select and Mask…	Виділити та маскувати…
+# Select and Mask dialog labels
+	Smart Radius	Розумний радіус
+	Shift Edge	Змістити край
+	Decontaminate	Очистити
+	Output	Вивід
+	Refine Edge	Уточнити край
 	Select Subject	Виділити об'єкт
 	Sky	Небо
 	Focus Area…	Область фокуса…
@@ -267,6 +291,7 @@
 	All Layers	Усі шари
 	Current & Below	Поточний і нижчі
 	Current Layer	Поточний шар
+	Refine Strokes	Штрихи уточнення
 
 # Filter
 	Last Filter	Останній фільтр
@@ -494,6 +519,7 @@
 	Magnetic Lasso	Магнітне ласо
 	Mixer Brush	Змішувальний пензель
 	Mixer Brush Tool	Інструмент «Змішувальний пензель»
+	Color Replacement Tool	Інструмент «Заміна кольору»
 	History Brush	Пензель історії
 	Art History Brush	Художній пензель історії
 	Pattern Stamp	Візерунковий штамп
@@ -621,6 +647,7 @@
 	Efficiency: 100%	Ефективність: 100%
 	Dimensions:	Розміри:
 	Width	Ширина
+	Slant	Нахил
 	Height	Висота
 	Width:	Ширина:
 	Height:	Висота:
@@ -1396,6 +1423,9 @@
 	New Workspace…	Новий робочий простір…
 	Delete Workspace…	Видалити робочий простір…
 	Reset Workspace	Скинути робочий простір
+	Reset Tool	Скинути інструмент
+	Reset All Tools	Скинути всі інструменти
+	Reset all tools to their default settings?	Скинути всі інструменти до налаштувань за замовчуванням?
 	Lock Workspace	Заблокувати робочий простір
 	Photography	Фотографія
 	Graphic and web	Графіка та веб
@@ -1474,6 +1504,7 @@
 	Click to add a point · drag off or {key}-click or Delete to remove	Клацніть, щоб додати точку · перетягніть за межі, натисніть {key} і клацніть або натисніть Delete, щоб вилучити
 	Click to apply, {key}-click to clear overrides, double-click for Style Options	Клацніть, щоб застосувати, {key}+клацання, щоб очистити перевизначення, подвійне клацання для параметрів стилю
 	Click: corner · Drag: smooth · Click first point: close · {key} finish · Esc cancel	Клацання: кут · Перетягування: плавна точка · Клацання першої точки: замкнути · {key}: завершити · Esc: скасувати
+	Click: corner · Drag: smooth · {alt}-drag: break handle · Click or drag first point: close · {key} finish · Esc cancel	Клацання: кут · Перетягування: плавна точка · {alt}+перетягування: розбити маркер · Клацання або перетягування першої точки: замкнути · {key}: завершити · Esc: скасувати
 	Commit Perspective Warp ({key})	Підтвердити перспективну деформацію ({key})
 	Commit Puppet Warp ({key})	Підтвердити маріонеткову деформацію ({key})
 	Commit any current edits ({key})	Підтвердити поточні зміни ({key})
@@ -1530,6 +1561,8 @@
 	Gradient Tool	Інструмент «Градієнт»
 	Paint Bucket Tool	Інструмент «Відро з фарбою»
 	Horizontal Type Tool	Інструмент «Горизонтальний текст»
+	Horizontal Type Mask Tool	Інструмент «Горизонтальний текст-маска»
+	Vertical Type Mask Tool	Інструмент «Вертикальний текст-маска»
 	Hand Tool	Інструмент «Рука»
 	Zoom Tool	Інструмент «Масштаб»
 	Spot Healing Brush Tool	Інструмент «Точковий відновлювальний пензель»
@@ -1545,8 +1578,13 @@
 	Quick Selection Tool	Інструмент «Швидке виділення»
 	Object Selection Tool	Інструмент «Виділення об'єкта»
 	Pen Tool	Інструмент «Перо»
+	Convert Point Tool	Інструмент «Перетворення вузла»
 	Path Selection Tool	Інструмент «Виділення контуру»
 	Direct Selection Tool	Інструмент «Пряме виділення»
+	Add Anchor Point Tool	Інструмент «Додати вузол»
+	Delete Anchor Point Tool	Інструмент «Видалити вузол»
+	Click a segment to add an anchor point · {alt}-click an anchor to delete it	Клацніть сегмент, щоб додати вузол · {alt}+клацання по вузлу видаляє його
+	Click an anchor point to delete it · {alt}-click a segment to add one	Клацніть вузол, щоб видалити його · {alt}+клацання по сегменту додає вузол
 	Rectangle Tool	Інструмент «Прямокутник»
 	Ellipse Tool	Інструмент «Еліпс»
 	Triangle Tool	Інструмент «Трикутник»
@@ -1703,6 +1741,8 @@
 	Divide	Ділення
 	Result	Результат
 	New Document	Новий документ
+	New Document With Mask	Новий документ з маскою
+	New Layer With Mask	Новий шар з маскою
 	Preset Name	Назва набору
 	No saved presets yet.	Збережених наборів ще немає.
 	New Channel	Новий канал
@@ -1836,6 +1876,7 @@
 	Lock Layers…	Заблокувати шари…
 	Mean	Середнє значення
 	Merge Down	Об'єднати з нижнім
+	Merge Group	Об'єднати групу
 	Merge Layers	Об'єднати шари
 	Merge Shape Components	Об'єднати компоненти фігури
 	Merge Visible	Об'єднати видимі
@@ -1930,6 +1971,9 @@
 	Baseline	Базова лінія
 	Bicubic	Бікубічна
 	Bicubic (smooth gradients)	Бікубічна (плавні градієнти)
+	Automatic	Автоматично
+	Bicubic Smoother (enlargement)	Бікубічна, гладкіша (збільшення)
+	Bicubic Sharper (reduction)	Бікубічна, чіткіша (зменшення)
 	Bilinear	Білінійна
 	Black, White	Чорний, білий
 	Blue, Red, Yellow	Синій, червоний, жовтий
@@ -2184,6 +2228,7 @@
 	Cache tile size	Розмір плитки кешу
 	Camera Raw Defaults	Типові параметри Camera Raw
 	Canvas border	Межа полотна
+	Show canvas dots	Показувати крапки полотна
 	Canvas color	Колір полотна
 	Canvas custom color	Довільний колір полотна
 	Classic	Класична
@@ -2309,6 +2354,7 @@
 	Show only crosshair while painting	Показувати лише перехрестя під час малювання
 	Show slice numbers	Показувати номери фрагментів
 	Show tooltips	Показувати підказки
+	Enable animations	Увімкнути анімацію
 	Show highlight on rollover	Показувати підсвічування під час наведення
 	Show bounding box when dragging layer	Показувати рамку під час перетягування шару
 	System title bar	Системний рядок заголовка
@@ -2354,8 +2400,11 @@
 	Developing {name}	Обробка {name}
 	Cancelled {label}	Скасовано: {label}
 	Esc to cancel	Esc для скасування
+	Opened {name}	Відкрито: {name}
 	Opening {name}	Відкриття {name}
+	Saved {name}	Збережено: {name}
 	Saving {name}	Збереження {name}
+	Saving {percent}	Збереження {percent}
 	A save to {name} is still running; try again when it finishes	Збереження в {name} ще триває; спробуйте ще раз, коли воно завершиться
 	{label} is writing the file and can no longer be cancelled	{label}: триває запис файлу, скасувати вже не можна
 	Opening {name}…	Відкриття {name}…
@@ -2418,6 +2467,8 @@ cameraRaw	Roughness	Шорсткість
 	Patch Tool	Інструмент «Латка»
 	Patch:	Латка:
 	Lasso around an area, then drag the selection	Обведіть область ласо, потім перетягніть виділення
+	Transform On Drop	Трансформувати після відпускання
+	Scale or rotate the moved area, then press {key}	Змініть масштаб або поверніть переміщену область, потім натисніть {key}
 	Edit Type	Редагувати текст
 
 
@@ -2438,6 +2489,9 @@ cameraRaw	Roughness	Шорсткість
 	Structure:	Структура:
 	Content-Aware Move Tool	Інструмент «Переміщення з урахуванням вмісту»
 	TIFF Options	Параметри TIFF
+	Targa Options	Параметри Targa
+	24 bits/pixel	24 біт/піксель
+	32 bits/pixel	32 біт/піксель
 	Including layers will increase file size.	Додавання шарів збільшить розмір файлу.
 	Discard Layers and Save a Copy	Відкинути шари та зберегти копію
 	Don't show again	Більше не показувати
@@ -2526,6 +2580,19 @@ cameraRaw	Roughness	Шорсткість
 	Domed	Купол
 	Domed (Inverted)	Купол (інвертований)
 	Diagonal (Descending)	Діагональ (спадна)
+	Contour Editor	Редактор контуру
+	Anti-aliased	Згладжування
+	Corner	Кут
+	Gloss Contour	Контур глянцю
+	Contour	Контур
+	Cone - Inverted	Конус - інвертований
+	Cove - Deep	Бухта - глибока
+	Cove - Shallow	Бухта - мілка
+	Half Round	Півколо
+	Ring - Double	Кільце - подвійне
+	Rolling Slope - Descending	Хвилястий схил - низхідний
+	Rounded Steps	Заокруглені сходинки
+	Sawtooth 1	Пилка 1
 	Linear	Лінійний
 
 	Red Eye Tool	Інструмент «Червоні очі»
@@ -3552,15 +3619,146 @@ cameraRaw	Masking	Маскування
 	Quick Selection found nothing there	Швидке виділення нічого тут не знайшло
 	Object Selection found nothing there — try a tighter rectangle	Виділення об'єктів нічого тут не знайшло — спробуйте вужчий прямокутник
 	No subject found — try a rectangle around the object	Об'єкт не знайдено — спробуйте прямокутник навколо об'єкта
+	Click the first point or press {key} to close · {del} removes a point · Esc cancels	Клацніть першу точку або натисніть {key}, щоб замкнути · {del} видаляє точку · Esc скасовує
+	Click, then move along an edge · click to fasten a point · {alt}-click for a straight segment · double-click to close	Клацніть і ведіть уздовж краю · клацання закріплює точку · {alt}-клацання — прямий відрізок · подвійне клацання замикає
+	Follows only edges this close to the pointer ([ and ] change it)	Відстежує лише краї на такій відстані від вказівника ([ і ] змінюють її)
+	Higher values follow only edges that contrast sharply with their surroundings	Що більше значення, то лише краї з різким контрастом до оточення
+	How often fastening points are placed by themselves	Як часто точки прив’язки ставляться автоматично
+	Appearance Settings…	Налаштування вигляду…
+	Add to favorites	Додати до вибраного
+	Remove from favorites	Видалити з вибраного
+# File Info ▸ Camera Data (read-only EXIF fields; "Make" is the camera maker, not the verb).
+cameraData	Make	Виробник
+cameraData	Model	Модель
+cameraData	Date Taken	Дата зйомки
+cameraData	Exposure	Витримка
+cameraData	F-Stop	Діафрагма
+cameraData	ISO Speed	Світлочутливість ISO
+cameraData	Focal Length	Фокусна відстань
+cameraData	Focal Length (35 mm)	Фокусна відстань (35 мм)
+cameraData	Lens	Об'єктив
+# Shared panel docking
+	Activate Panel	Активувати панель
+	Change Panel Group	Змінити групу панелей
+	Change Panel Layout	Змінити розташування панелей
+	Close Panel	Закрити панель
+	Dock Panel	Закріпити панель
+	Float Panel	Зробити панель плаваючою
+	Move Panel	Перемістити панель
+	Group with	Згрупувати з
+	Panel menu	Меню панелі
+	Resize panel window	Змінити розмір вікна панелі
+	Resize panels	Змінити розмір панелей
 	Use Classic Mode	Використовувати класичний режим
 	Auto Center Preview	Автоматично центрувати перегляд
 	Next Document	Наступний документ
 	Previous Document	Попередній документ
 	W x H x Resolution	Ш x В x Роздільна здатність
 	Front Image	Зображення переднього плану
+	Perspective Crop Tool	Інструмент «Перспективне кадрування»
+	Show Grid	Показати сітку
+	Drag a box or click four corners · drag the corners onto the edges of a skewed shape · {commit} commits · Esc cancels	Розтягніть рамку або клацніть чотири кути · перетягніть кути на краї похилої фігури · {commit} застосовує · Esc скасовує
+	Artboard Tool	Інструмент «Монтажна область»
+	Make Portrait	Зробити портретною
+	Make Landscape	Зробити альбомною
+	Add New Artboard	Додати монтажну область
+	Freeform Pen Tool	Інструмент «Довільне перо»
+	Curvature Pen Tool	Інструмент «Перо кривизни»
+	Curve Fit:	Точність кривої:
+	Drag: draw freehand · {alt}-click: straight segment · Release on the start point: close	Перетягування: малювати від руки · {alt}+клацання: прямий сегмент · Відпускання на початковій точці: замкнути
+	Click: smooth point · Double-click: corner · Drag a point: move · Click first point: close · {key} finish	Клацання: плавна точка · Подвійне клацання: кут · Перетягування точки: перемістити · Клацання першої точки: замкнути · {key}: завершити
 	Search settings…	Пошук налаштувань…
 	No matching settings	Немає відповідних налаштувань
 	PhotoCraft — Screen Color Picker	PhotoCraft — Піпетка кольору екрана
+	Loading fonts…	Завантаження шрифтів…
+	Simulate Pressure	Імітувати натиск
+	Stroke Path…	Обвести контур…
+	Background Eraser	Фонова гумка
+	Healing Brush	Відновлювальний пензель
+	Spot Healing Brush	Точковий відновлювальний пензель
+	Smudge	Розмазування
+	Amount:	Величина:
+	Protect:	Захистити:
+	Protect skin tones	Захистити тони шкіри
+	Edit points to modify the curve	Змінювати криву за точками
+	Draw to modify the curve	Малювати криву
+curves	Smooth	Згладити
+	Smooth the curve values	Згладити значення кривої
+	Drag to draw the curve · {key}-click draws a straight line	Перетягніть, щоб намалювати криву · {key}-клацання малює пряму лінію
+	Grid Size:	Розмір сітки:
+	Vanishing Point: click four corners to create a plane	Точка сходження: клацніть чотири кути, щоб створити площину
+	Vanishing Point is not active	Точка сходження не активна
+	Apply Vanishing Point ({key})	Застосувати точку сходження ({key})
+	Fix the red plane first: its corners must form a convex quad	Спершу виправте червону площину: її кути мають утворювати опуклий чотирикутник
+# Select and Mask view modes (#1754)
+	Onion Skin	Калька
+	Marching Ants	Мурашки
+	On Black	На чорному
+	On White	На білому
+	On Layers	На шарах
+	Show Edge	Показати край
+	Show Original	Показати початкове
+	F cycles the views; hold X to see the image	F перемикає види; утримуйте X, щоб побачити зображення
+# Select and Mask Refine Edge Brush (#2972)
+	Refine Edge Brush (R)	Пензель уточнення краю (R)
+	Expand Detection Area	Розширити область виявлення
+	Restore Original Edge	Відновити початковий край
+	Paint over hair or fur on the image; Alt paints the other mode	Малюйте по волоссю чи хутру на зображенні; Alt малює в іншому режимі
+	Clear Brush Strokes	Очистити мазки пензля
+	Show rulers	Показати лінійки
+	Frame Tool	Інструмент «Рамка»
+	Create a new rectangular frame	Створити прямокутну рамку
+	Create a new elliptical frame	Створити еліптичну рамку
+	Include in playback	Включити у відтворення
+	New Crop Preset…	Новий набір параметрів кадрування…
+	Delete Crop Preset…	Видалити набір параметрів кадрування…
+	Select the crop presets to delete:	Виберіть набори параметрів кадрування для видалення:
+	Select the crop presets to delete	Виберіть набори параметрів кадрування для видалення
+	Enter a name for the crop preset	Введіть назву набору параметрів кадрування
+	There is no crop size or ratio to save	Немає розміру чи співвідношення сторін кадрування для збереження
+	Scale:	Масштаб:
+	Snap to Origin	Прив'язати до початку координат
+
+# Color Sampler (added with the i18n coverage repair)
+	Click to place · Alt-click or drag off-canvas to remove	Клацніть, щоб розмістити · Alt-клацання або перетягування за межі полотна для видалення
+	No document open	Документ не відкрито
+	{n} of {max} sample points	{n} з {max} точок вимірювання
+# Print dialog (#2697)
+	Emulsion Down	Емульсією донизу
+	Functions	Функції
+	Print Resolution:	Роздільна здатність друку:
+	Use Previous Layer to Create Clipping Mask	Використати попередній шар для створення відсічної маски
+	Fill with {mode}-neutral color (white)	Залити нейтральним кольором режиму «{mode}» (білий)
+	Fill with {mode}-neutral color (black)	Залити нейтральним кольором режиму «{mode}» (чорний)
+	Fill with {mode}-neutral color (50% gray)	Залити нейтральним кольором режиму «{mode}» (50% сірого)
+	(No neutral color exists for {mode} mode.)	(Для режиму «{mode}» немає нейтрального кольору.)
+	Apply mask to layer before removing?	Застосувати маску до шару перед видаленням?
+	The layer or its mask changed. Drag the mask onto the Trash again.	Шар або його маска змінилися. Перетягніть маску до кошика ще раз.
+	Delete the vector mask?	Видалити векторну маску?
+# Counted status messages and labels (#3454; adapted from PR #3821)
+@plural	Exported {n} swatch to {file}|Exported {n} swatches to {file}	Експортовано {n} зразок кольору до {file}|Експортовано {n} зразки кольорів до {file}|Експортовано {n} зразків кольорів до {file}
+@plural	Imported {n} brush from {group}|Imported {n} brushes from {group}	Імпортовано {n} пензель з {group}|Імпортовано {n} пензлі з {group}|Імпортовано {n} пензлів з {group}
+@plural	Imported {n} swatch from {file}|Imported {n} swatches from {file}	Імпортовано {n} зразок кольору з {file}|Імпортовано {n} зразки кольорів з {file}|Імпортовано {n} зразків кольорів з {file}
+@plural	Played {n} step|Played {n} steps	Відтворено {n} крок|Відтворено {n} кроки|Відтворено {n} кроків
+@plural	Updated {n} linked smart object changed on disk|Updated {n} linked smart objects changed on disk	Оновлено {n} пов'язаний смартоб'єкт, змінений на диску|Оновлено {n} пов'язані смартоб'єкти, змінені на диску|Оновлено {n} пов'язаних смартоб'єктів, змінених на диску
+@plural	Saved for Web: {n} file|Saved for Web: {n} files	Збережено для вебу: {n} файл|Збережено для вебу: {n} файли|Збережено для вебу: {n} файлів
+@plural	{n} layer recorded by this comp was deleted. Update the comp, or clear the warning.|{n} layers recorded by this comp were deleted. Update the comp, or clear the warning.	Видалено {n} шар, записаний у цій композиції. Оновіть композицію або скиньте попередження.|Видалено {n} шари, записані в цій композиції. Оновіть композицію або скиньте попередження.|Видалено {n} шарів, записаних у цій композиції. Оновіть композицію або скиньте попередження.
+@plural	{n} plane|{n} planes	{n} площина|{n} площини|{n} площин
+@plural	{n} preset|{n} presets	{n} набір|{n} набори|{n} наборів
+@plural	{n} sample point removed|{n} sample points removed	Вилучено {n} точку вимірювання|Вилучено {n} точки вимірювання|Вилучено {n} точок вимірювання
+@plural	{n} slice|{n} slices	{n} фрагмент|{n} фрагменти|{n} фрагментів
+@plural	{n} step|{n} steps	{n} крок|{n} кроки|{n} кроків
+@plural	{warning} (+{n} more brush preset warning)|{warning} (+{n} more brush preset warnings)	{warning} (і ще {n} попередження щодо наборів пензлів)|{warning} (і ще {n} попередження щодо наборів пензлів)|{warning} (і ще {n} попереджень щодо наборів пензлів)
+@plural	{what} with {n} warning|{what} with {n} warnings	{what}: {n} попередження|{what}: {n} попередження|{what}: {n} попереджень
+# View › Guides › New Guide… › Color
+	Light Blue	Світло-синій
+	Light Red	Світло-червоний
+	Medium Blue	Середньо-синій
+	Light Gray	Світло-сірий
+	Remove after each stroke	Видаляти після кожного штриха
+	Apply the removal ({key})	Застосувати видалення ({key})
+	Strokes to remove: {n} (Enter applies, Esc cancels)	Штрихів для видалення: {n} (Enter застосовує, Esc скасовує)
+
 
 # Status bar panel controls
 	Only show canvas	Показати лише полотно

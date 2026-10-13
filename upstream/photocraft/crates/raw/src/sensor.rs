@@ -129,7 +129,7 @@ pub struct Sensor {
     /// Data width and height in pixels.
     pub width: usize,
     pub height: usize,
-    /// Samples per pixel: 1 for CFA data, 3 for LinearRaw.
+    /// Samples per pixel: 1 for CFA data, 3 for LinearRaw (1 for monochrome LinearRaw).
     pub samples: usize,
     /// Row-major interleaved samples, `width * height * samples`.
     pub data: Vec<u16>,
@@ -157,7 +157,19 @@ pub struct Sensor {
     /// output]` pairs in linear ProPhoto, applied per channel after the colour conversion and
     /// exposure. Below the first point the curve is a line through 0; empty: no curve.
     pub tone_curve: Vec<[f32; 2]>,
+    /// Camera Raw's adaptive black point, for profiles that copy its default rendering: this
+    /// factor times the 0.1th percentile of the image's linear luminance is subtracted before the
+    /// tone curve (see `tone.rs`). 0: no black point.
+    pub black_point: f32,
     pub warnings: Vec<String>,
+}
+
+impl Sensor {
+    /// `true` for monochrome data (one-sample LinearRaw: monochrome cameras, scanner DNGs), which
+    /// develops to neutral grey with no white balance or colour calibration.
+    pub fn is_monochrome(&self) -> bool {
+        self.samples == 1 && self.cfa.is_none()
+    }
 }
 
 /// Raw samples read from one IFD.
@@ -225,6 +237,11 @@ pub(crate) fn read_plane(t: &Tiff, ifd: &Ifd, limits: &Limits, layout: JpegLayou
         let s = &segments[i];
         let rows = s.h.min(height - s.y);
         let src = t.bytes(s.offset, s.len).ok_or_else(|| RawError::malformed("raw data lies outside the file"))?;
+        // Every branch below sizes at least one buffer from the segment's own geometry, which
+        // the file declares independently of the image: a tile can be far larger than the image
+        // it belongs to, so the image check above does not bound those buffers. Charge the
+        // segment itself before decoding it (#2925).
+        limits.check(s.w as u64, s.h as u64, samples as u64 * 2)?;
         match compression {
             1 => unpack(src, s.w, rows, samples, bits, le),
             8 => {
@@ -280,10 +297,15 @@ pub(crate) fn read_plane(t: &Tiff, ifd: &Ifd, limits: &Limits, layout: JpegLayou
                 // The 8-bit samples widen to the document's 16-bit range (0xFF -> 0xFFFF).
                 Ok(decoded.into_iter().map(|b| u16::from(b) * 257).collect())
             }
+            // Compression 7 (lossless JPEG): the frame the entropy stream declares is capped
+            // by the budget, not only by the segment, and the `Quads` scatter buffer below
+            // comes out of the same budget. `max_alloc` counts bytes, a sample is two.
             _ => {
                 let need = s.w * rows * samples;
-                let max = s.w.saturating_mul(s.h).saturating_mul(samples).saturating_mul(4);
-                let (f, v) = ljpeg::decode(src, max)?;
+                let scatter = if layout == JpegLayout::Quads && samples == 1 { s.w.saturating_mul(s.h).saturating_mul(2) as u64 } else { 0 };
+                let budget = usize::try_from(limits.max_alloc.saturating_sub(scatter) / 2).unwrap_or(usize::MAX);
+                let geom = s.w.saturating_mul(s.h).saturating_mul(samples).saturating_mul(4);
+                let (f, v) = ljpeg::decode(src, geom.min(budget))?;
                 if v.len() < need {
                     return Err(RawError::malformed("lossless JPEG tile is smaller than its tile"));
                 }

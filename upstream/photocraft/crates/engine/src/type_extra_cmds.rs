@@ -436,6 +436,33 @@ pub fn missing_fonts(doc: &Document) -> Vec<String> {
     out
 }
 
+/// Font families used by a type layer that the font database cannot supply.
+pub fn missing_fonts_in_layer(t: &TextLayer) -> Vec<String> {
+    let have = installed_families();
+    let mut out: Vec<String> = Vec::new();
+    for r in t.char_runs() {
+        let f = r.style.font_family;
+        if !f.is_empty() && !have.contains(&f.to_lowercase()) && !out.contains(&f) {
+            out.push(f);
+        }
+    }
+    out
+}
+
+/// Warnings for missing font families in `doc`.
+pub fn missing_font_warnings(doc: &Document) -> Vec<String> {
+    fonts_to_warnings(missing_fonts(doc))
+}
+
+/// Warnings for missing font families in `layer`.
+pub fn missing_font_warnings_for_layer(t: &TextLayer) -> Vec<String> {
+    fonts_to_warnings(missing_fonts_in_layer(t))
+}
+
+fn fonts_to_warnings(fonts: Vec<String>) -> Vec<String> {
+    fonts.into_iter().map(|font| format!("font '{font}' is not installed; text may render using a fallback face")).collect()
+}
+
 /// Replace missing families per `map` (missing → installed; unmapped ones → the default family).
 fn replace_fonts(s: &mut Session, map: &serde_json::Map<String, Value>, all: bool) -> Result<Value> {
     let d = s.active().ok_or(EngineError::NoDocument)?;

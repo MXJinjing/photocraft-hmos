@@ -454,6 +454,7 @@ pub static CATALOG: &[(&[&str], &str, Option<&str>, &str)] = &[
     (&["Type", "Panels"], "Character Styles Panel", None, "type.panels.characterStyles"),
     (&["Type", "Panels"], "Paragraph Styles Panel", None, "type.panels.paragraphStyles"),
     (&["Type"], "---", None, "---"),
+    (&["Type", "Anti-Alias"], "None", None, "type.antiAlias.none"),
     (&["Type", "Anti-Alias"], "Sharp", None, "type.antiAlias.sharp"),
     (&["Type", "Anti-Alias"], "Crisp", None, "type.antiAlias.crisp"),
     (&["Type", "Anti-Alias"], "Strong", None, "type.antiAlias.strong"),

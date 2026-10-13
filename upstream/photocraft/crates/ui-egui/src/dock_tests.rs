@@ -350,6 +350,43 @@ fn a_single_tab_click_expands_a_collapsed_panel() {
     }
 }
 
+/// Auto-Collapse Iconic Panels: a group expanded by clicking a tab on its collapsed strip
+/// closes again when the next click lands outside it; with the preference off it stays open.
+#[test]
+fn auto_collapse_icon_panels_closes_a_peeked_panel_on_an_outside_click() {
+    for auto in [true, false] {
+        let (mut app, _, _) = app_with_layers();
+        app.session.prefs.edit(|p| p.workspace.auto_collapse_icon_panels = auto);
+        app.ui.dock.set_collapsed(Group::Color, true);
+        let mut h = harness(app, vec2(1200.0, 800.0), ThemeKind::ProMedium);
+        let collapsed_height = rect_of(&h, Group::Color).height();
+        let tab = last_strips(&h.ctx).iter().find(|s| s.group == Group::Color).unwrap().tabs[0].1.center();
+        h.event(egui::Event::PointerMoved(tab));
+        h.run_steps(1);
+        h.event(egui::Event::PointerButton { pos: tab, button: PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE });
+        h.step();
+        h.event(egui::Event::PointerButton { pos: tab, button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE });
+        h.run_steps(3);
+        assert!(!h.state().ui.dock.is_collapsed(Group::Color), "auto={auto}: the tab click expands the panel");
+        let rect = rect_of(&h, Group::Color);
+        // A click inside the panel leaves it open; one outside (the canvas) closes it again.
+        for p in [rect.center(), Pos2::new(rect.left() / 2.0, rect.center().y)] {
+            h.event(egui::Event::PointerMoved(p));
+            h.run_steps(1);
+            h.event(egui::Event::PointerButton { pos: p, button: PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE });
+            h.step();
+            h.event(egui::Event::PointerButton { pos: p, button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE });
+            h.run_steps(3);
+        }
+        assert_eq!(h.state().ui.dock.is_collapsed(Group::Color), auto, "auto={auto}: outside closes it when enabled");
+        if auto {
+            assert_eq!(rect_of(&h, Group::Color).height(), collapsed_height);
+        } else {
+            assert!(rect_of(&h, Group::Color).height() > collapsed_height);
+        }
+    }
+}
+
 #[test]
 fn double_clicking_a_tab_collapses_and_dragging_a_strip_reorders() {
     let (app, _, _) = app_with_layers();
@@ -380,6 +417,67 @@ fn double_clicking_a_tab_collapses_and_dragging_a_strip_reorders() {
     let layers = rect_of(&h, Group::Layers);
     drag(&mut h, Pos2::new(layers.right() - 60.0, layers.top() + 13.0), Pos2::new(layers.right() - 60.0, 790.0));
     assert_eq!(h.state().ui.dock.order().first(), Some(&Group::Layers));
+}
+
+#[test]
+fn dragging_a_tab_onto_another_group_moves_only_that_panel() {
+    let (app, _, _) = app_with_layers();
+    let mut h = harness(app, vec2(1200.0, 800.0), ThemeKind::ProMedium);
+    let strips = last_strips(&h.ctx);
+    let source = strips
+        .iter()
+        .find(|strip| strip.group == Group::Color)
+        .and_then(|strip| strip.tabs.iter().find(|(index, _)| *index == 1))
+        .map(|(_, rect)| rect.center())
+        .unwrap();
+    let destination = strips.iter().find(|strip| strip.group == Group::Layers).and_then(|strip| strip.tabs.first()).map(|(_, rect)| rect.center()).unwrap();
+
+    drag(&mut h, source, destination);
+
+    let layout = h.state().ui.docking.as_ref().expect("moving one native tab promotes to the shared layout");
+    fn tabs<'a>(node: &'a craft_ui::docking::Node<String>, panel: &str) -> Option<&'a [String]> {
+        match node {
+            craft_ui::docking::Node::Tabs { panels, .. } if panels.iter().any(|id| id == panel) => Some(panels),
+            craft_ui::docking::Node::Split { first, second, .. } => tabs(first, panel).or_else(|| tabs(second, panel)),
+            _ => None,
+        }
+    }
+    let source_group = tabs(layout.root.as_ref().unwrap(), "swatches").unwrap();
+    assert!(source_group.contains(&"layers".to_owned()), "dropped into the destination tab group");
+    assert!(!source_group.contains(&"color".to_owned()), "the source group remains intact");
+    assert!(crate::panel_docking::valid(layout));
+}
+
+/// The strip shows reordered tabs by position; the drop moves the panel that was dragged, not
+/// the one at that position in the default order.
+#[test]
+fn dragging_a_reordered_tab_onto_another_group_moves_that_panel() {
+    let (mut app, _, _) = app_with_layers();
+    // Gradients (original tab 2) drawn first: Gradients | Color | Swatches | Patterns.
+    app.ui.dock.move_tab(Group::Color, 2, Some(0), true);
+    let mut h = harness(app, vec2(1200.0, 800.0), ThemeKind::ProMedium);
+    let strips = last_strips(&h.ctx);
+    let source = strips
+        .iter()
+        .find(|strip| strip.group == Group::Color)
+        .and_then(|strip| strip.tabs.iter().find(|(index, _)| *index == 2))
+        .map(|(_, rect)| rect.center())
+        .unwrap();
+    let destination = strips.iter().find(|strip| strip.group == Group::Layers).and_then(|strip| strip.tabs.first()).map(|(_, rect)| rect.center()).unwrap();
+
+    drag(&mut h, source, destination);
+
+    let layout = h.state().ui.docking.as_ref().expect("moving one native tab promotes to the shared layout");
+    fn tabs<'a>(node: &'a craft_ui::docking::Node<String>, panel: &str) -> Option<&'a [String]> {
+        match node {
+            craft_ui::docking::Node::Tabs { panels, .. } if panels.iter().any(|id| id == panel) => Some(panels),
+            craft_ui::docking::Node::Split { first, second, .. } => tabs(first, panel).or_else(|| tabs(second, panel)),
+            _ => None,
+        }
+    }
+    let moved = tabs(layout.root.as_ref().unwrap(), "gradients").unwrap();
+    assert!(moved.contains(&"layers".to_owned()), "the dragged Gradients tab joined Layers: {moved:?}");
+    assert!(!moved.contains(&"color".to_owned()), "Color stayed in its group: {moved:?}");
 }
 
 #[test]
@@ -575,6 +673,29 @@ fn panel_tab_context_menu_closes_one_tab_or_its_group() {
 
 fn is_pro(theme: ThemeKind) -> bool {
     theme.is_pro()
+}
+
+#[test]
+fn theme_switch_keeps_the_selected_color_group_panel() {
+    use egui_kittest::kittest::Queryable;
+
+    for theme in ThemeKind::ALL {
+        for (tab, name) in Group::Color.tabs(true).iter().enumerate() {
+            let (mut app, _, _) = app_with_layers();
+            app.ui.dock_tabs.color = tab;
+            let mut h = harness(app, vec2(1200.0, 900.0), ThemeKind::Pro);
+            let ctx = h.ctx.clone();
+            h.state_mut().set_theme(&ctx, theme);
+            h.run_steps(4);
+            assert_eq!(Group::Color.tabs(is_pro(theme)).get(h.state().ui.dock_tabs.color), Some(name), "{theme:?}");
+            if *name == "Color" && !is_pro(theme) {
+                assert!(h.query_by_label("Hue").is_some(), "{theme:?}: Color picker missing");
+            }
+            h.state_mut().set_theme(&ctx, ThemeKind::Pro);
+            h.run_steps(4);
+            assert_eq!(h.state().ui.dock_tabs.color, tab, "{theme:?}: switching back changed the panel");
+        }
+    }
 }
 
 /// Full app at `size` (1× scale) on a document with `n` layers named "Row 00", "Row 01", …
@@ -975,14 +1096,14 @@ fn dragging_a_tab_reorders_the_group_and_the_order_persists() {
     }
 }
 
-/// Dragging a tab off its strip moves the whole group (as dragging the strip does); a locked
-/// workspace keeps both the tab and group order.
+/// Dragging a tab onto another group's body moves the whole group; onto its tab strip moves only
+/// the tab. A locked workspace keeps both the tab and group order.
 #[test]
 fn a_tab_dragged_off_the_strip_moves_the_group_and_locking_stops_reordering() {
     let (app, _, _) = app_with_layers();
     let mut h = harness(app, vec2(1200.0, 800.0), ThemeKind::ProMedium);
     let paths = tab_rect(&h, Group::Layers, 2);
-    let to = rect_of(&h, Group::Color).left_top() + vec2(120.0, 10.0);
+    let to = rect_of(&h, Group::Color).left_top() + vec2(120.0, 40.0);
     drag(&mut h, paths.center(), to);
     assert_eq!(h.state().ui.dock.order().first(), Some(&Group::Layers));
     assert!(h.state().ui.dock.tab_order.is_empty(), "the tabs kept their order");
@@ -997,4 +1118,32 @@ fn a_tab_dragged_off_the_strip_moves_the_group_and_locking_stops_reordering() {
     let paths = tab_rect(&h, Group::Layers, 2);
     drag(&mut h, paths.center(), paths.center() + vec2(0.0, 500.0));
     assert_eq!(h.state().ui.dock.order(), order);
+}
+
+#[test]
+fn brush_settings_window_is_closed_on_restart_but_can_be_reopened() {
+    let mut first = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+    first.ui.panels.brush_settings = true;
+    first.ui.panels.history = true;
+    let saved = snapshot(&first);
+    first.session.prefs.edit(|p| {
+        p.workspace.remember_workspace_changes = true;
+        p.panel_layout = saved.clone();
+    });
+    let persisted = first.session.prefs_to_json();
+
+    let mut session = photocraft_engine::Session::new();
+    session.load_prefs_json(&persisted).unwrap();
+    let mut next = PhotocraftApp::new(session, crate::Services::default());
+    restore(&mut next);
+    assert!(!next.ui.panels.brush_settings, "a floating Brush Settings window should not reopen on startup");
+    assert!(next.ui.panels.history, "remembered dock panel visibility is preserved");
+
+    let ctx = egui::Context::default();
+    crate::menus::invoke(&mut next, &ctx, "window.toggle.brushSettings", json!({})).unwrap();
+    assert!(next.ui.panels.brush_settings, "Window > Brush Settings can still open it");
+
+    let mut workspace = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+    apply(&mut workspace, &saved);
+    assert!(workspace.ui.panels.brush_settings, "switching workspaces still restores their saved layout");
 }

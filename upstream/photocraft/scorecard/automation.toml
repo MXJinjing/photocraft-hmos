@@ -35,9 +35,9 @@ note = "actions.list/get/record/stop/play/delete in actions_cmds.rs; the panel, 
 [[item]]
 id = "AUTO-219-4"
 target = "Replay tests for crop, filters, selections and styled text on a second document"
-status = "missing"
+status = "done"
 issue = 219
-note = "One replay test (actions.rs:171: new layer, rect select, fill)"
+note = "actions_cmds.rs: a_recorded_edit_run_replays_on_a_second_document records a crop, a Gaussian Blur, a selection fill and faux-bold type on one document and replays all of them onto a second (plus the original layer/select/fill replay)"
 
 [[item]]
 id = "AUTO-219-5"

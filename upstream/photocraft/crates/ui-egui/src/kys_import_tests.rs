@@ -127,6 +127,7 @@ fn import_button_fills_the_dialog_and_ok_applies_the_set() {
     let id = crate::menus::invoke(h.state_mut(), &ctx, "edit.keyboardShortcuts", json!({})).unwrap()["dialog"].as_u64().unwrap();
     // A short list keeps the button row on screen.
     h.state_mut().ui.dialog_mut(id).unwrap().fields.insert("filter".into(), json!("gaussian"));
+    h.state_mut().ui.dialog_mut(id).unwrap().fields.insert("messageWarning".into(), json!(true));
     h.run_steps(2);
     h.get_by_label("Import Shortcuts…").click();
     h.run_steps(3);
@@ -144,6 +145,7 @@ fn import_button_fills_the_dialog_and_ok_applies_the_set() {
     let message = field(&h, "message");
     assert_eq!(message, json!("Imported 9 shortcuts from texcuts.kys. Click OK to keep them. 2 commands are not in PhotoCraft."));
     assert_eq!(field(&h, "capture"), json!(false));
+    assert_eq!(field(&h, "messageWarning"), json!(false), "an import clears the earlier shortcut conflict warning");
     // Nothing is applied until OK.
     assert_eq!(crate::shortcuts::effective_shortcut(h.state(), "edit.undo", Some("Cmd+Z")).as_deref(), Some("Cmd+Shift+Z"));
     crate::dialogs::confirm(h.state_mut(), id).unwrap();

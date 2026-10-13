@@ -4,11 +4,11 @@ use std::sync::Arc;
 
 use photocraft_codecs::{self as codecs, ChannelLayout, Format, Image, SampleType as CSample};
 use photocraft_color::{BlendMode, ColorMode, PixelFormat, SampleType};
-use photocraft_doc::{Document, Layer, LayerContent};
+use photocraft_doc::{AlphaChannel, Document, Layer, LayerContent};
 use photocraft_geom::{Rect, Size, TILE_SIZE};
 use photocraft_raster::Surface;
 
-use crate::{ExportOptions, ExportResult, ImportResult, IoError, XmpEmbed};
+use crate::{ExportOptions, ExportResult, ImportResult, IoError, TgaBits, XmpEmbed};
 
 /// Bytes per band when converting or exporting a band of rows at a time.
 const BAND_BYTES: usize = 32 << 20;
@@ -20,7 +20,16 @@ pub fn import_flat(name: &str, bytes: &[u8]) -> Result<ImportResult, IoError> {
         return import_tiff_page(name, bytes, None);
     }
     let img = codecs::decode(bytes)?;
+    // A palette BMP opens in Indexed Color mode with its colour table, as in Photoshop (#3802).
+    let bmp_palette = if codecs::detect(bytes) == Some(Format::Bmp) { codecs::bmp_palette(bytes).ok().flatten() } else { None };
     let mut r = image_to_document(name, &img)?;
+    if let Some(colors) = bmp_palette.filter(|c| !c.is_empty())
+        && r.document.mode == ColorMode::Rgb
+    {
+        r.document.mode = ColorMode::Indexed;
+        r.document.color_table = Some(photocraft_doc::ColorTable { colors, transparent: None });
+    }
+    r.document.file_encoding = file_encoding(bytes);
     if codecs::detect(bytes) == Some(Format::Tga) && img.layout() == ChannelLayout::Rgba {
         tga_alpha_to_channel(&mut r.document)?;
     }
@@ -36,6 +45,57 @@ pub fn import_flat(name: &str, bytes: &[u8]) -> Result<ImportResult, IoError> {
         };
     }
     Ok(r)
+}
+
+/// Every frame of a GIF as a single-layer document, handed to `each` in order with its delay in
+/// milliseconds (a still GIF has one). One frame at a time becomes a document, so the caller
+/// can flatten and drop it. Returns the number of frames; stops at the first error `each` gives.
+pub fn import_gif_frames(name: &str, bytes: &[u8], each: &mut dyn FnMut(Document, u32) -> Result<(), IoError>) -> Result<usize, IoError> {
+    let frames = codecs::decode_gif_frames(bytes, &codecs::DecodeOptions::default())?;
+    let n = frames.len();
+    for f in frames {
+        each(image_to_document(name, &f.image)?.document, f.delay_ms)?;
+    }
+    Ok(n)
+}
+
+/// The lossy settings `bytes` were encoded with, for File › Save to keep: a JPEG's quality
+/// (estimated from its quantisation tables) and a WebP's lossless or lossy encoding with its
+/// quality. A lossy WebP whose quality can't be read gets [`DEFAULT_LOSSY_WEBP_QUALITY`].
+pub fn file_encoding(bytes: &[u8]) -> photocraft_doc::FileEncoding {
+    let mut e = photocraft_doc::FileEncoding::default();
+    match codecs::detect(bytes) {
+        Some(Format::Jpeg) => e.jpeg_quality = codecs::jpeg_quality(bytes),
+        Some(Format::WebP) => match codecs::webp_encoding(bytes) {
+            Some(codecs::WebpEncoding::Lossless) => e.webp_lossless = Some(true),
+            Some(codecs::WebpEncoding::Lossy { quality }) => {
+                e.webp_lossless = Some(false);
+                e.webp_quality = Some(quality.unwrap_or(DEFAULT_LOSSY_WEBP_QUALITY));
+            }
+            None => {}
+        },
+        _ => {}
+    }
+    e
+}
+
+/// The quality a lossy WebP is saved at when its own can't be read.
+pub const DEFAULT_LOSSY_WEBP_QUALITY: u8 = 75;
+
+/// Applies the settings `doc`'s file was encoded with (see [`file_encoding`]) to `opts`: what a
+/// save that chose no quality writes, so a JPEG keeps its quality and a WebP stays lossy or
+/// lossless.
+pub fn apply_file_encoding(doc: &Document, opts: &mut codecs::EncodeOptions) {
+    let e = &doc.file_encoding;
+    if let Some(q) = e.jpeg_quality {
+        opts.jpeg_quality = q.clamp(1, 100);
+    }
+    if let Some(lossless) = e.webp_lossless {
+        opts.webp_lossless = lossless;
+    }
+    if let Some(q) = e.webp_quality {
+        opts.webp_quality = q.min(100);
+    }
 }
 
 /// Photoshop opens a 32-bit Targa as an opaque Background plus an "Alpha 1" channel holding the
@@ -377,14 +437,33 @@ fn opaque_surface(s: &Surface, r: Rect) -> bool {
     })
 }
 
+/// The part of a flat export that rendering the composite takes, the encoder taking the rest.
+/// Measured on a 24 MP RGB/8 document: ~1 s to composite, then TIFF ~2.3 s, JPEG ~0.9 s,
+/// PNG ~0.4 s, WebP ~0.25 s to encode.
+fn composite_share(format: Format) -> f32 {
+    match format {
+        Format::Tiff => 0.3,
+        Format::Jpeg => 0.55,
+        _ => 0.7,
+    }
+}
+
 /// Flattens and encodes as `format`.
 pub fn export_flat(doc: &Document, format: Format, opts: &ExportOptions) -> Result<ExportResult, IoError> {
+    export_flat_with(doc, format, opts, &photocraft_raster::Interrupt::NONE)
+}
+
+/// [`export_flat`] reporting a coarse step through `ctl` once the composite is rendered; the
+/// encoder does the rest (#3389).
+pub(crate) fn export_flat_with(doc: &Document, format: Format, opts: &ExportOptions, ctl: &photocraft_raster::Interrupt) -> Result<ExportResult, IoError> {
     use photocraft_cms::{Builtin, Intent};
     if let Some(r) = export_mode_specific(doc, format, opts)? {
         return Ok(r);
     }
     let mut warnings = Vec::new();
     let mut img = document_to_image(doc, &mut warnings)?;
+    ctl.check().map_err(|_| IoError::Cancelled)?;
+    ctl.progress(composite_share(format));
     if opts.xmp == XmpEmbed::None {
         // Export As's Metadata: None: the packet lists the text of every type layer and one id
         // per placed document (#647).
@@ -418,29 +497,62 @@ pub fn export_flat(doc: &Document, format: Format, opts: &ExportOptions) -> Resu
         }
     }
     if format == Format::Tga {
-        img = tga_alpha_channel(doc, img, &mut warnings)?;
+        img = tga_image(doc, img, opts.tga_bits, &mut warnings)?;
     }
     encode_image(&img, format, opts, warnings)
 }
 
-/// Photoshop's 32-bit Targa takes its alpha from the document's alpha channel, not from layer
-/// transparency: with exactly one alpha channel (spot channels don't count) an RGB file gets
-/// that channel's values as its alpha, and its colours are the composite over white. With two or
-/// more Photoshop writes no channel (an opaque alpha), so the image is left as it is. Grayscale
-/// Targas have no alpha in Photoshop either.
-fn tga_alpha_channel(doc: &Document, img: Image, warnings: &mut Vec<String>) -> Result<Image, IoError> {
+/// What Targa Options offers first, as Photoshop does: 32 bits per pixel when the document has an
+/// alpha channel (spot channels don't count), else 24.
+pub fn tga_default_bits(doc: &Document) -> TgaBits {
+    if doc.channels.iter().any(|c| c.spot.is_none()) { TgaBits::Bits32 } else { TgaBits::Bits24 }
+}
+
+/// The RGB image a Targa of `bits` per pixel holds (`None`: 32 with an alpha channel or
+/// transparency, else 24). 24 bits are the colours alone, composited over white where the layers
+/// are transparent. 32 add an alpha: as in Photoshop, the document's alpha channel when it has
+/// exactly one (spot channels don't count); with none, or several (Photoshop then writes none of
+/// them), the layers' transparency, fully opaque without any. Colours are written as they are,
+/// never premultiplied or cleared under a zero alpha: Targa alphas often hold data such as a
+/// game texture's specular mask. Grayscale Targas have no alpha channel in Photoshop and are left
+/// as they are.
+fn tga_image(doc: &Document, img: Image, bits: Option<TgaBits>, warnings: &mut Vec<String>) -> Result<Image, IoError> {
     if !img.layout().is_rgb() {
+        if let Some(bits) = bits {
+            warnings.push(format!("{}-bit Targa applies to RGB images; the grayscale image is written as it is", bits.bits()));
+        }
         return Ok(img);
     }
-    let mut alphas = doc.channels.iter().filter(|c| c.spot.is_none());
-    let channel = match (alphas.next(), alphas.next()) {
-        (Some(c), None) => c,
-        (Some(_), Some(_)) => {
-            warnings.push("Targa holds one alpha channel; with several, none was written (as in Photoshop)".into());
-            return Ok(img);
+    let alphas: Vec<&AlphaChannel> = doc.channels.iter().filter(|c| c.spot.is_none()).collect();
+    let bits = bits.unwrap_or(if !alphas.is_empty() || img.layout().has_alpha() { TgaBits::Bits32 } else { TgaBits::Bits24 });
+    match (bits, alphas.as_slice()) {
+        (TgaBits::Bits24, alphas) => {
+            if !alphas.is_empty() {
+                let names: Vec<String> = alphas.iter().map(|c| format!("\"{}\"", c.name)).collect();
+                warnings.push(format!("a 24-bit Targa has no alpha; not saved: {}", names.join(", ")));
+            }
+            if !img.layout().has_alpha() {
+                return Ok(img);
+            }
+            warnings.push("transparency composited over white; a 24-bit Targa has no alpha".into());
+            matte_over_white(&img)
         }
-        _ => return Ok(img),
-    };
+        (TgaBits::Bits32, [channel]) => tga_with_alpha_channel(doc, img, channel, warnings),
+        (TgaBits::Bits32, alphas) => {
+            if !alphas.is_empty() {
+                warnings.push("Targa holds one alpha channel; with several, none was written (as in Photoshop)".into());
+            }
+            if img.layout().has_alpha() {
+                return Ok(img);
+            }
+            map_bands(&img, ChannelLayout::Rgba, img.sample_type(), |vals| vals.as_chunks::<3>().0.iter().flat_map(|&[r, g, b]| [r, g, b, 1.0]).collect())
+        }
+    }
+}
+
+/// A 32-bit Targa's image: the colours (composited over white where the layers are transparent)
+/// and `channel`'s values as the alpha.
+fn tga_with_alpha_channel(doc: &Document, img: Image, channel: &AlphaChannel, warnings: &mut Vec<String>) -> Result<Image, IoError> {
     let img = if img.layout().has_alpha() {
         warnings.push("transparency composited over white; the alpha channel is the Targa's alpha".into());
         matte_over_white(&img)?
@@ -631,7 +743,9 @@ fn export_mode_specific(doc: &Document, format: Format, opts: &ExportOptions) ->
                 }));
                 Ok(())
             });
-            let bytes = codecs::encode_png_indexed(doc.size.width, doc.size.height, &idx, &table.colors, table.transparent)?;
+            // Same rule as the ordinary PNG encoder: the resolution goes into `pHYs` with the metadata.
+            let dpi = opts.encode.embed_metadata.then_some((doc.resolution_dpi, doc.resolution_dpi));
+            let bytes = codecs::encode_png_indexed(doc.size.width, doc.size.height, &idx, &table.colors, table.transparent, dpi)?;
             let mut warnings = vec![format!("written as an 8-bit palette PNG ({} colours)", table.colors.len())];
             if opts.encode.embed_metadata && opts.xmp == XmpEmbed::All && !doc.metadata.text.is_empty() {
                 warnings.push("text metadata is not supported by the palette PNG exporter; it will be dropped".into());

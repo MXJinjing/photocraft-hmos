@@ -35,7 +35,7 @@ fn map_exr(e: exr::error::Error) -> CodecError {
 
 /// Read the headers without the `exr` crate's validation (it rejects deep parts outright),
 /// after checking every part's declared size against the limits, before any pixel allocation.
-fn read_meta(bytes: &[u8], limits: &Limits) -> Result<MetaData, CodecError> {
+pub(super) fn read_meta(bytes: &[u8], limits: &Limits) -> Result<MetaData, CodecError> {
     let meta = MetaData::read_from_buffered(Cursor::new(bytes), false).map_err(err)?;
     // Flat decoding reads every part at once, so the parts' sizes are also capped together.
     let mut total: u64 = 0;
@@ -93,12 +93,31 @@ fn pick_part(meta: &MetaData) -> usize {
     best
 }
 
-/// Decode the flat layers via the `exr` crate (it handles every flat compression) and
-/// return the requested part's layer.
-fn read_layer(bytes: &[u8], index: usize) -> Result<Layer<AnyChannels<FlatSamples>>, CodecError> {
-    let image =
-        read().no_deep_data().largest_resolution_level().all_channels().all_layers().all_attributes().from_buffered(Cursor::new(bytes)).map_err(map_exr)?;
-    image.layer_data.into_iter().nth(index).ok_or_else(|| err(format!("part {index} is missing from the file")))
+/// Selects one part for the `exr` crate's first-valid-layer reader: `create_channels_reader`
+/// is asked about the headers in file order and the first `Ok` wins, so every header before
+/// `index` (and, harmlessly, those after it) is declined. Only the chosen part's chunks are
+/// then decompressed and only its planes allocated; the other parts are skipped unread.
+struct OnlyPart<C> {
+    inner: C,
+    index: usize,
+    seen: std::cell::Cell<usize>,
+}
+
+impl<'s, C: ReadChannels<'s>> ReadChannels<'s> for OnlyPart<C> {
+    type Reader = C::Reader;
+
+    fn create_channels_reader(&'s self, header: &exr::meta::header::Header) -> exr::error::Result<Self::Reader> {
+        let position = self.seen.get();
+        self.seen.set(position.saturating_add(1));
+        if position == self.index { self.inner.create_channels_reader(header) } else { Err(exr::error::Error::Invalid("part not requested".into())) }
+    }
+}
+
+/// Decode one part's flat layer via the `exr` crate (it handles every flat compression).
+/// Other parts are not decompressed, so an AOV file costs one part per request, not the file.
+pub(super) fn read_layer(bytes: &[u8], index: usize) -> Result<Layer<AnyChannels<FlatSamples>>, CodecError> {
+    let only = OnlyPart { inner: read().no_deep_data().largest_resolution_level().all_channels(), index, seen: std::cell::Cell::new(0) };
+    only.first_valid_layer().all_attributes().from_buffered(Cursor::new(bytes)).map(|image| image.layer_data).map_err(map_exr)
 }
 
 fn layer_to_image(layer: &Layer<AnyChannels<FlatSamples>>) -> Result<Image, CodecError> {

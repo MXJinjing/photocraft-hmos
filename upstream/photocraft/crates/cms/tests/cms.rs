@@ -450,6 +450,73 @@ fn malformed_profiles_are_rejected_without_panicking() {
     }
 }
 
+// A press's full-K lightness depends on its ink and paper (newsprint can exceed L* 40).
+// Keep the relative paper-white check and require finite endpoints with darker, bounded ink.
+fn cmyk_endpoints_valid(paper: [f64; 3], black: [f64; 3]) -> bool {
+    // Allow only float rounding at the physical L* limits, not a different printing condition.
+    let lightness = -1e-4..=100.0 + 1e-4;
+    paper.iter().chain(&black).all(|v| v.is_finite())
+        && lightness.contains(&paper[0])
+        && lightness.contains(&black[0])
+        && paper[0] > 90.0
+        && black[0] < paper[0]
+}
+
+#[test]
+fn a_light_black_cmyk_lut_has_the_known_relative_ramp() {
+    use photocraft_cms::Curve;
+    use photocraft_cms::pipeline::Stage;
+    use photocraft_cms::profile::{Lut, LutKind};
+
+    let mut p = cmyk().clone();
+    // Independent linear test model: L* = 100 - 52 K, neutral a*/b*. Exercise A2B1 only;
+    // the inherited coated profile's inverse is not an inverse of this generated model.
+    p.a2b = [None, None, None];
+    p.b2a = [None, None, None];
+    p.a2b[1] = Some(Lut {
+        kind: LutKind::Ab,
+        inputs: 4,
+        outputs: 3,
+        stages: vec![
+            Stage::Curves(vec![Curve::Identity; 4]),
+            Stage::Clut(Clut::sample(vec![2; 4], 3, |ink, out| {
+                out.copy_from_slice(&enc([100.0 - 52.0 * f64::from(ink[3]), 0.0, 0.0]));
+            })),
+            Stage::Curves(vec![Curve::Identity; 3]),
+        ],
+    });
+    let p = Profile::parse(&p.with_encoded_bytes().to_bytes()).unwrap();
+    let paper = to_lab(&p, &[0.0; 4], Intent::RelativeColorimetric);
+    let black = to_lab(&p, &[0.0, 0.0, 0.0, 1.0], Intent::RelativeColorimetric);
+    assert!(cmyk_endpoints_valid(paper, black), "{paper:?} {black:?}");
+    // Explicit expected values, not the validation predicate: also catch wrong channels,
+    // intent selection, constant output and incorrect LUT encoding/interpolation.
+    for (k, expected) in [(0.0, 100.0), (0.25, 87.0), (0.5, 74.0), (0.75, 61.0), (1.0, 48.0)] {
+        let actual = to_lab(&p, &[0.0, 0.0, 0.0, k], Intent::RelativeColorimetric);
+        // The writer quantizes the CLUT to 16 bits: at most 0.000763 L* error.
+        assert!((actual[0] - expected).abs() < 0.001 && actual[1].abs() < 1e-4 && actual[2].abs() < 1e-4, "K={k}: {actual:?}");
+    }
+}
+
+#[test]
+fn cmyk_endpoints_reject_invalid_values() {
+    let paper = [100.0, 0.0, 0.0];
+    let black = [48.0, 0.0, 0.0];
+    for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        for channel in 0..3 {
+            let mut p = paper;
+            let mut k = black;
+            p[channel] = bad;
+            k[channel] = bad;
+            assert!(!cmyk_endpoints_valid(p, black));
+            assert!(!cmyk_endpoints_valid(paper, k));
+        }
+    }
+    for (p, k) in [(90.0, 48.0), (100.01, 48.0), (100.0, -0.01), (100.0, 100.01), (100.0, 100.0), (99.0, 100.0)] {
+        assert!(!cmyk_endpoints_valid([p, 0.0, 0.0], [k, 0.0, 0.0]), "L*: paper {p}, black {k}");
+    }
+}
+
 /// Parses every profile the OS ships (macOS ColorSync; read-only, nothing is copied) and
 /// converts through each.
 #[test]
@@ -500,7 +567,7 @@ fn system_profiles() {
                 // Real CMYK profile: paper lighter than 100 % K.
                 let w = to_lab(&p, &[0.0; 4], Intent::RelativeColorimetric);
                 let k = to_lab(&p, &[0.0, 0.0, 0.0, 1.0], Intent::RelativeColorimetric);
-                assert!(w[0] > 90.0 && k[0] < 40.0, "{}: {w:?} {k:?}", path.display());
+                assert!(cmyk_endpoints_valid(w, k), "{}: {w:?} {k:?}", path.display());
                 // And it round-trips through its own BToA.
                 if p.b2a[1].is_some() {
                     let to = Transform::new(lab(), &p, Intent::RelativeColorimetric, false).unwrap();

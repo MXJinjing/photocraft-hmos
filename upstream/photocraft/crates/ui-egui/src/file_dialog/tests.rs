@@ -189,6 +189,30 @@ fn open_starts_in_the_last_used_folder() {
 }
 
 #[test]
+fn ask_folder_uses_the_async_dialog_and_returns_the_selected_path() {
+    let (mut app, open, _) = app();
+    let ctx = egui::Context::default();
+    app.ui.recent_files = vec!["/pics/cat.psd".into()];
+    let selected = Rc::new(RefCell::new(None));
+    let result = selected.clone();
+
+    assert_eq!(
+        app.ask_folder(move |_, path| {
+            *result.borrow_mut() = Some(path);
+            Ok(Value::Null)
+        })
+        .unwrap(),
+        json!({"fileDialog": "folder"})
+    );
+    app.poll_file_dialog(&ctx, None);
+    assert!(matches!(open.borrow().as_slice(), [(FileDialogRequest::Folder { initial_dir: Some(dir) }, _)] if dir == "/pics"));
+
+    answer(&open, Some(FileDialogAnswer::FolderTo("/pics/frames".into())));
+    app.poll_file_dialog(&ctx, None);
+    assert_eq!(selected.borrow().as_deref(), Some("/pics/frames"));
+}
+
+#[test]
 fn filtered_picker_requests_only_the_given_extensions() {
     let (mut app, open, _) = app();
     app.pick_file_bytes_filtered(&["cube", "3dl", "look"], |_, _, _| Ok(Value::Null)).unwrap();
@@ -598,4 +622,120 @@ fn convert_to_linked_asks_where_to_write_the_contents() {
     for id in ids {
         assert_eq!(smart_source(&app, id), photocraft_doc::SmartSource::Linked { path: path.clone() });
     }
+}
+
+#[test]
+fn quick_export_selected_layers_writes_separate_pngs_with_one_prompt() {
+    let (mut app, open, written) = app();
+    app.run("layer.new.layer", json!({"name": "Same/name"})).unwrap();
+    app.run("paint.bucket", json!({"x": 0, "y": 0, "color": "#ff0000"})).unwrap();
+    app.run("layer.new.layer", json!({"name": "Same/name"})).unwrap();
+    app.run("paint.bucket", json!({"x": 0, "y": 0, "color": "#00ff00"})).unwrap();
+    app.run("select.allLayers", json!({})).unwrap();
+    let selected = app.session.active().unwrap().selected_layers();
+    let before = app.session.active().unwrap().doc.clone();
+    let sources = Rc::new(RefCell::new(Vec::new()));
+    let capture = sources.clone();
+    app.services.export = Some(Box::new(move |doc, path, _| {
+        assert_eq!(doc.layers.len(), 1, "each PNG must contain just its source layer");
+        let png = photocraft_io::export(doc, path, &Default::default()).unwrap();
+        assert!(png.bytes.starts_with(b"\x89PNG\r\n\x1a\n"));
+        capture.borrow_mut().push(doc.name.clone());
+        Ok((png.bytes, Vec::new()))
+    }));
+    let ctx = egui::Context::default();
+    assert!(!crate::layer_menu_ui::single_layer_only("layer.quickExportAsPng"));
+    menus::invoke(&mut app, &ctx, "layer.quickExportAsPng", Value::Null).unwrap();
+    app.poll_file_dialog(&ctx, None);
+    assert_eq!(open.borrow().len(), 1, "one destination for the entire selection");
+    // Selection changes while choosing a destination must not change the captured sources.
+    app.run("layer.select", json!({"layer": selected[0].0})).unwrap();
+    answer(&open, Some(FileDialogAnswer::SaveTo("selected.png".into())));
+    app.poll_file_dialog(&ctx, None);
+    assert_eq!(written.borrow().len(), selected.len());
+    assert_eq!(sources.borrow().len(), selected.len());
+    assert_eq!(written.borrow()[0], "selected.png");
+    assert_eq!(written.borrow()[1], "selected-2-Same_name.png");
+    assert_eq!(selected.len(), 2, "Select All Layers leaves the locked Background out");
+    assert_eq!(app.session.active().unwrap().doc, before);
+    assert!(!app.ui.status_error, "{}", app.ui.status);
+}
+
+#[test]
+fn cancelling_multi_layer_quick_export_writes_nothing() {
+    let (mut app, open, written) = app();
+    for color in ["#ff0000", "#00ff00"] {
+        app.run("layer.new.layer", json!({})).unwrap();
+        app.run("paint.bucket", json!({"x": 0, "y": 0, "color": color})).unwrap();
+    }
+    app.run("select.allLayers", json!({})).unwrap();
+    let ctx = egui::Context::default();
+    menus::invoke(&mut app, &ctx, "layer.quickExportAsPng", Value::Null).unwrap();
+    app.poll_file_dialog(&ctx, None);
+    answer(&open, None);
+    app.poll_file_dialog(&ctx, None);
+    assert!(written.borrow().is_empty());
+}
+
+/// #3354: a system with no dialog backend answers `Unavailable`; the message reaches the status
+/// bar as an error, where a cancelled dialog stays silent.
+#[test]
+fn an_unavailable_dialog_is_reported_and_a_cancelled_one_is_not() {
+    let ctx = egui::Context::default();
+    let (mut app, open, _) = app();
+    menus::invoke(&mut app, &ctx, "file.save", json!({})).unwrap();
+    app.poll_file_dialog(&ctx, None);
+    answer(&open, None);
+    app.poll_file_dialog(&ctx, None);
+    assert!(!app.ui.status_error, "Cancel is the user's choice");
+    assert!(!app.file_dialog_open());
+
+    menus::invoke(&mut app, &ctx, "file.save", json!({})).unwrap();
+    app.poll_file_dialog(&ctx, None);
+    answer(&open, Some(FileDialogAnswer::Unavailable("No file dialog can open".into())));
+    app.poll_file_dialog(&ctx, None);
+    assert!(app.ui.status_error);
+    assert_eq!(app.ui.status, "No file dialog can open");
+    assert!(!app.file_dialog_open(), "the pending dialog is over");
+}
+
+/// #3629: Layer › Export As with several artboards selected exports one file per board, at each
+/// board's size and with the dialog's settings, after one destination prompt.
+#[test]
+fn export_as_with_several_artboards_selected_writes_one_file_each() {
+    let (mut app, open, written) = app();
+    let a = app.run("layer.new.artboard", json!({"rect": [0, 0, 40, 30], "name": "Header"})).unwrap()["layer"].as_u64().unwrap();
+    let b = app.run("layer.new.artboard", json!({"rect": [60, 0, 20, 50], "name": "Capsule"})).unwrap()["layer"].as_u64().unwrap();
+    app.run("layer.select", json!({"layer": a})).unwrap();
+    app.run("layer.select", json!({"layer": b, "mode": "add"})).unwrap();
+    assert_eq!(app.session.active().unwrap().selected_layers().len(), 2);
+    let sizes = Rc::new(RefCell::new(Vec::new()));
+    let capture = sizes.clone();
+    app.services.export = Some(Box::new(move |doc: &photocraft_doc::Document, _: &str, _: &crate::ExportSettings| {
+        capture.borrow_mut().push((doc.name.clone(), doc.size.width, doc.size.height));
+        Ok((b"out".to_vec(), Vec::new()))
+    }));
+    assert!(!crate::layer_menu_ui::single_layer_only("layer.exportAs"), "the menu offers it for a selection");
+    let ctx = egui::Context::default();
+    let r = menus::invoke(&mut app, &ctx, "layer.exportAs", Value::Null).unwrap();
+    let id = r["dialog"].as_u64().unwrap();
+    let mut fields = app.ui.dialogs.iter().find(|d| d.id == id).unwrap().fields.clone();
+    assert_eq!(fields["__label"], "Export As: 2 layers");
+    // The dialog's settings apply to every file: JPG at 50 %.
+    fields.insert("format".into(), json!("jpg"));
+    fields.insert("scale".into(), json!(50));
+    crate::export_dialog::confirm(&mut app, &fields).unwrap();
+    app.poll_file_dialog(&ctx, None);
+    assert_eq!(open.borrow().len(), 1, "one destination for every board");
+    answer(&open, Some(FileDialogAnswer::SaveTo("/out/boards.jpg".into())));
+    app.poll_file_dialog(&ctx, None);
+    assert!(!app.ui.status_error, "{}", app.ui.status);
+    assert_eq!(written.borrow().len(), 2);
+    assert_eq!(written.borrow()[0], "/out/boards.jpg");
+    // The sibling path is joined with the platform separator (`/out\boards-2-…` on Windows).
+    let second = written.borrow()[1].replace('\\', "/");
+    assert!(second.starts_with("/out/boards-2-") && second.ends_with(".jpg"), "{:?}", written.borrow());
+    let mut got = sizes.borrow().iter().map(|(_, w, h)| (*w, *h)).collect::<Vec<_>>();
+    got.sort_unstable();
+    assert_eq!(got, [(10, 25), (20, 15)], "each board at its own size, scaled to 50 %");
 }

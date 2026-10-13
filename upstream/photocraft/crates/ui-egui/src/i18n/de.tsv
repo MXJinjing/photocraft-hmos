@@ -15,6 +15,25 @@
 # way. Product and technology names (PhotoCraft, ArtCraft, OpenType, CMYK, Lab ...) stay in Latin
 # letters; the trailing "…" of dialog commands is kept. Plural rule: one|other (n != 1 -> other).
 
+# Guide layout dialog
+	Columns	Spalten
+	Rows	Zeilen
+	Number	Anzahl
+	Margin	Rand
+	Top:	Oben:
+	Left:	Links:
+	Bottom:	Unten:
+	Right:	Rechts:
+	Target:	Ziel:
+	Selected Artboards	Ausgewählte Zeichenflächen
+	Center Columns	Spalten zentrieren
+	Clear Existing Guides	Vorhandene Hilfslinien löschen
+	Invalid guide layout	Ungültiges Hilfslinien-Layout
+	Leave empty for automatic size	Für automatische Größe leer lassen
+	5 Columns, 3 Rows	5 Spalten, 3 Zeilen
+	8 Columns	8 Spalten
+	12 Columns	12 Spalten
+
 	File	Datei
 	Edit	Bearbeiten
 	Image	Bild
@@ -375,6 +394,7 @@
 	Select Linked Layers	Verknüpfte Ebenen auswählen
 	Merge Layers	Ebenen zusammenfügen
 	Merge Down	Nach unten zusammenfügen
+	Merge Group	Gruppe zusammenfügen
 	Merge Visible	Sichtbare zusammenfügen
 	Stamp Visible	Sichtbare Ebenen stempeln
 	Select Layer Above	Ebene darüber auswählen
@@ -484,6 +504,12 @@
 	Color Range…	Farbbereich…
 	Focus Area…	Schärfebereich…
 	Select and Mask…	Auswählen und maskieren…
+# Select and Mask dialog labels
+	Smart Radius	Smartradius
+	Shift Edge	Kante verschieben
+	Decontaminate	Dekontaminieren
+	Output	Ausgabe
+	Refine Edge	Kante verbessern
 	Modify	Modifizieren
 	Border…	Rand…
 	Smooth…	Glätten…
@@ -673,6 +699,9 @@
 	New Workspace…	Neuer Arbeitsbereich…
 	Delete Workspace…	Arbeitsbereich löschen…
 	Reset Workspace	Arbeitsbereich zurücksetzen
+	Reset Tool	Werkzeug zurücksetzen
+	Reset All Tools	Alle Werkzeuge zurücksetzen
+	Reset all tools to their default settings?	Alle Werkzeuge auf ihre Standardeinstellungen zurücksetzen?
 	Lock Workspace	Arbeitsbereich sperren
 	Theme	Design
 	Pro Theme	Pro-Design
@@ -739,6 +768,7 @@
 	Split Warp Horizontally	Verkrümmung horizontal teilen
 	Split Warp Vertically	Verkrümmung vertikal teilen
 	Statistics…	Statistiken…
+	Refine Strokes	Verfeinerungsstriche
 @plural	{n} item|{n} items	{n} Element|{n} Elemente
 	Auto	Automatisch
 	(print to the printer)	(an den Drucker senden)
@@ -811,6 +841,9 @@
 	Bend:	Biegung:
 	Bicubic	Bikubisch
 	Bicubic (smooth gradients)	Bikubisch (sanfte Verläufe)
+	Automatic	Automatisch
+	Bicubic Smoother (enlargement)	Bikubisch glatter (Vergrößerung)
+	Bicubic Sharper (reduction)	Bikubisch schärfer (Verkleinerung)
 	Bilinear	Bilinear
 	Black	Schwarz
 	Black & White	Schwarzweiß
@@ -868,6 +901,7 @@
 	Click to zoom in  ·  {key}-click to zoom out  ·  drag right/left to zoom in/out	Klicken vergrößert  ·  {key}-Klick verkleinert  ·  nach rechts/links ziehen zoomt rein/raus
 	Click with the Note tool to add a note.	Klicke mit dem Notiz-Werkzeug, um eine Notiz hinzuzufügen.
 	Click: corner · Drag: smooth · Click first point: close · {key} finish · Esc cancel	Klick: Ecke · Ziehen: weich · Ersten Punkt klicken: schließen · {key} fertig · Esc abbrechen
+	Click: corner · Drag: smooth · {alt}-drag: break handle · Click or drag first point: close · {key} finish · Esc cancel	Klick: Ecke · Ziehen: weich · {alt}-Ziehen: Griff trennen · Ersten Punkt klicken oder ziehen: schließen · {key} fertig · Esc abbrechen
 	Clip to layer below	Auf darunterliegende Ebene begrenzen
 	Clipped	Beschnitten
 	Close Style Options	Stiloptionen schließen
@@ -1497,6 +1531,7 @@
 	White Balance: As Shot	Weißabgleich: Wie Aufnahme
 	Whites	Weiß
 	Width	Breite
+	Slant	Neigung
 	Width:	Breite:
 	Work Path	Arbeitspfad
 	Yellow	Gelb
@@ -1514,6 +1549,9 @@
 	↑↓ navigate   {key} run   esc close	↑↓ Navigieren   {key} Ausführen   Esc Schließen
 	Version {version}	Version {version}
 	New Document	Neues Dokument
+	New Document With Mask	Neues Dokument mit Maske
+	New Layer With Mask	Neue Ebene mit Maske
+	New Layer	Neue Ebene
 	Save Preset…	Vorgabe speichern…
 	Preset Name	Name der Vorgabe
 	No saved presets yet.	Noch keine gespeicherten Vorgaben.
@@ -1606,6 +1644,8 @@
 	Highlights from:	Lichter von:
 	History Brush Tool	Protokollpinsel-Werkzeug
 	Horizontal Type Tool	Horizontales Text-Werkzeug
+	Horizontal Type Mask Tool	Horizontales Textmaskierungswerkzeug
+	Vertical Type Mask Tool	Vertikales Textmaskierungswerkzeug
 	Image Size:	Bildgröße:
 	Inches	Zoll
 	Indexed	Indiziert
@@ -1660,10 +1700,15 @@
 	Paints from the document's opening state	Malt aus dem Zustand beim Öffnen des Dokuments
 	Path Selection Tool	Pfadauswahl-Werkzeug
 	Direct Selection Tool	Direktauswahl-Werkzeug
+	Add Anchor Point Tool	Ankerpunkt-hinzufügen-Werkzeug
+	Delete Anchor Point Tool	Ankerpunkt-löschen-Werkzeug
+	Click a segment to add an anchor point · {alt}-click an anchor to delete it	Klicke auf ein Segment, um einen Ankerpunkt hinzuzufügen · {alt}-Klick auf einen Ankerpunkt löscht ihn
+	Click an anchor point to delete it · {alt}-click a segment to add one	Klicke auf einen Ankerpunkt, um ihn zu löschen · {alt}-Klick auf ein Segment fügt einen hinzu
 	Pattern Overlay	Musterüberlagerung
 	Pen Pressure	Stiftdruck
 	Pen Tilt	Stiftneigung
 	Pen Tool	Stift-Werkzeug
+	Convert Point Tool	Punkt-umwandeln-Werkzeug
 	Photo	Foto
 	PhotoCraft website	PhotoCraft-Website
 	Picas	Pica
@@ -1791,6 +1836,7 @@
 	Cache tile size	Cache-Kachelgröße
 	Camera Raw Defaults	Camera-Raw-Standardeinstellungen
 	Canvas border	Zeichenflächenrand
+	Show canvas dots	Punkte der Zeichenfläche anzeigen
 	Canvas color	Zeichenflächenfarbe
 	Canvas custom color	Benutzerdefinierte Zeichenflächenfarbe
 	Color picker	Farbwähler
@@ -1907,6 +1953,7 @@
 	Show only crosshair while painting	Beim Malen nur Fadenkreuz zeigen
 	Show slice numbers	Slice-Nummern anzeigen
 	Show tooltips	Tooltips anzeigen
+	Enable animations	Animationen aktivieren
 	Show highlight on rollover	Hervorhebung bei Rollover anzeigen
 	Show bounding box when dragging layer	Begrenzungsrahmen beim Ziehen einer Ebene anzeigen
 	System title bar	System-Titelleiste
@@ -2035,6 +2082,7 @@
 	Apply the pen's tilt and rotation to the tip shape	Neigung und Drehung des Stifts auf die Spitzenform anwenden
 	Mixer Brush	Mischer-Pinsel
 	Mixer Brush Tool	Mischer-Pinsel-Werkzeug
+	Color Replacement Tool	Farbersatz-Werkzeug
 	Wet	Feucht
 	Mix	Mischen
 	Wetness Jitter	Feuchtigkeitsschwankung
@@ -2086,8 +2134,11 @@
 	Developing {name}	{name} wird entwickelt
 	Cancelled {label}	{label} abgebrochen
 	Esc to cancel	Esc zum Abbrechen
+	Opened {name}	Geöffnet: {name}
 	Opening {name}	Öffne {name}
+	Saved {name}	Gespeichert: {name}
 	Saving {name}	Speichere {name}
+	Saving {percent}	Speichern {percent}
 	A save to {name} is still running; try again when it finishes	{name} wird noch gespeichert; versuchen Sie es erneut, wenn der Vorgang abgeschlossen ist
 	{label} is writing the file and can no longer be cancelled	{label} schreibt die Datei und kann nicht mehr abgebrochen werden
 	Opening {name}…	Öffne {name}…
@@ -2202,6 +2253,8 @@
 	Grid:	Raster:
 	Highlight Clipping Warning (O)	Lichter-Abschneidewarnung (O)
 	Lasso around an area, then drag the selection	Lasso um einen Bereich ziehen, dann die Auswahl verschieben
+	Transform On Drop	Beim Ablegen transformieren
+	Scale or rotate the moved area, then press {key}	Verschobenen Bereich skalieren oder drehen, dann {key} drücken
 	Now drag the selection onto another area	Jetzt die Auswahl auf einen anderen Bereich ziehen
 	Patch:	Korrektur:
 	Shadow Clipping Warning (U)	Tiefen-Abschneidewarnung (U)
@@ -2229,6 +2282,9 @@
 	Structure:	Struktur:
 	Content-Aware Move Tool	Inhaltsbasiert-verschieben-Werkzeug
 	TIFF Options	TIFF-Optionen
+	Targa Options	Targa-Optionen
+	24 bits/pixel	24 Bit/Pixel
+	32 bits/pixel	32 Bit/Pixel
 	Including layers will increase file size.	Das Einbeziehen von Ebenen vergrößert die Datei.
 	Discard Layers and Save a Copy	Ebenen verwerfen und Kopie speichern
 	Don't show again	Nicht mehr anzeigen
@@ -2322,6 +2378,21 @@
 	Domed	Gewölbt
 	Domed (Inverted)	Gewölbt (umgekehrt)
 	Diagonal (Descending)	Diagonal (absteigend)
+	Contour Editor	Kontur-Editor
+	Anti-aliased	Glätten
+	Corner	Ecke
+	Gloss Contour	Glanzkontur
+	Contour	Kontur
+	Cone - Inverted	Kegel - umgekehrt
+	Cove - Deep	Bucht - tief
+	Cove - Shallow	Bucht - flach
+	Gaussian	Gauß
+	Half Round	Halbrund
+	Ring	Ring
+	Ring - Double	Ring - doppelt
+	Rolling Slope - Descending	Wellenhang - absteigend
+	Rounded Steps	Abgerundete Stufen
+	Sawtooth 1	Sägezahn 1
 
 	Red Eye Tool	Rote-Augen-Werkzeug
 	Red Eye	Rote Augen
@@ -2486,14 +2557,150 @@ fontWeight	Italic	Kursiv
 	Quick Selection found nothing there	Die Schnellauswahl hat dort nichts gefunden
 	Object Selection found nothing there — try a tighter rectangle	Die Objektauswahl hat dort nichts gefunden — versuchen Sie ein engeres Rechteck
 	No subject found — try a rectangle around the object	Kein Motiv gefunden — versuchen Sie ein Rechteck um das Objekt
+	Click the first point or press {key} to close · {del} removes a point · Esc cancels	Klicke auf den ersten Punkt oder drücke {key} zum Schließen · {del} entfernt einen Punkt · Esc bricht ab
+	Click, then move along an edge · click to fasten a point · {alt}-click for a straight segment · double-click to close	Klicke und bewege dich entlang einer Kante · Klicken setzt einen Ankerpunkt · {alt}-Klick für ein gerades Segment · Doppelklick schließt
+	Follows only edges this close to the pointer ([ and ] change it)	Folgt nur Kanten so nah am Zeiger ([ und ] ändern den Wert)
+	Higher values follow only edges that contrast sharply with their surroundings	Höhere Werte folgen nur Kanten mit starkem Kontrast zur Umgebung
+	How often fastening points are placed by themselves	Wie oft Ankerpunkte automatisch gesetzt werden
+	Appearance Settings…	Erscheinungsbild-Einstellungen…
+	Add to favorites	Zu Favoriten hinzufügen
+	Remove from favorites	Aus Favoriten entfernen
+# File Info ▸ Camera Data (read-only EXIF fields; "Make" is the camera maker, not the verb).
+	Camera Data	Kameradaten
+cameraData	Make	Hersteller
+cameraData	Model	Modell
+cameraData	Date Taken	Aufnahmedatum
+cameraData	Exposure	Belichtungszeit
+cameraData	F-Stop	Blende
+cameraData	ISO Speed	ISO-Empfindlichkeit
+cameraData	Focal Length	Brennweite
+cameraData	Focal Length (35 mm)	Brennweite (35 mm)
+cameraData	Lens	Objektiv
+# Shared panel docking
+	Activate Panel	Bedienfeld aktivieren
+	Change Panel Group	Bedienfeldgruppe ändern
+	Change Panel Layout	Bedienfeldlayout ändern
+	Close Panel	Bedienfeld schließen
+	Dock Panel	Bedienfeld andocken
+	Float Panel	Schwebendes Bedienfeld
+	Move Panel	Bedienfeld verschieben
+	Group with	Gruppieren mit
+	Panel menu	Bedienfeldmenü
+	Resize panel window	Bedienfeldfenstergröße ändern
+	Resize panels	Bedienfeldgröße ändern
 	Use Classic Mode	Classic-Modus verwenden
 	Auto Center Preview	Automatische zentrierte Vorschau
 	Next Document	Nächstes Dokument
 	Previous Document	Vorheriges Dokument
 	W x H x Resolution	B x H x Auflösung
 	Front Image	Vorderes Bild
+	Frame Tool	Rahmenwerkzeug
+	Create a new rectangular frame	Neuen rechteckigen Rahmen erstellen
+	Create a new elliptical frame	Neuen elliptischen Rahmen erstellen
+	Include in playback	In Wiedergabe einbeziehen
+	Perspective Crop Tool	Perspektivisches Freistellungswerkzeug
+	Show Grid	Raster einblenden
+	Drag a box or click four corners · drag the corners onto the edges of a skewed shape · {commit} commits · Esc cancels	Rahmen ziehen oder vier Ecken klicken · Ecken auf die Kanten einer schrägen Form ziehen · {commit} übernimmt · Esc bricht ab
+	Artboard Tool	Zeichenbereich-Werkzeug
+	Make Portrait	Hochformat
+	Make Landscape	Querformat
+	Add New Artboard	Neuen Zeichenbereich hinzufügen
+	Freeform Pen Tool	Freiform-Stift-Werkzeug
+	Curvature Pen Tool	Rundungsstift-Werkzeug
+	Curve Fit:	Kurvenanpassung:
+	Drag: draw freehand · {alt}-click: straight segment · Release on the start point: close	Ziehen: frei zeichnen · {alt}-Klick: gerades Segment · Am Startpunkt loslassen: schließen
+	Click: smooth point · Double-click: corner · Drag a point: move · Click first point: close · {key} finish	Klick: weicher Punkt · Doppelklick: Ecke · Punkt ziehen: verschieben · Ersten Punkt klicken: schließen · {key} fertig
+	New Crop Preset…	Neue Freistellungsvorgabe…
+	Delete Crop Preset…	Freistellungsvorgabe löschen…
+	Select the crop presets to delete:	Wählen Sie die zu löschenden Freistellungsvorgaben:
+	Select the crop presets to delete	Wählen Sie die zu löschenden Freistellungsvorgaben
+	Enter a name for the crop preset	Geben Sie einen Namen für die Freistellungsvorgabe ein
+	There is no crop size or ratio to save	Es gibt keine Freistellungsgröße und kein Seitenverhältnis zum Speichern
+	Scale:	Skalierung:
+	Snap to Origin	An Ursprung ausrichten
 	Search settings…	Einstellungen durchsuchen…
 	No matching settings	Keine passenden Einstellungen
+	Loading fonts…	Schriften werden geladen…
+	Tool	Werkzeug
+	Simulate Pressure	Druck simulieren
+	Stroke Path…	Pfad nachziehen…
+	Background Eraser	Hintergrund-Radiergummi
+	Healing Brush	Korrektur-Pinsel
+	Spot Healing Brush	Punktkorrektur-Pinsel
+	Smudge	Wischfinger
+	Sponge	Schwamm
+	Amount:	Stärke:
+	Protect:	Schützen:
+	Protect skin tones	Hauttöne schützen
+	Edit points to modify the curve	Punkte bearbeiten, um die Kurve zu ändern
+	Draw to modify the curve	Zeichnen, um die Kurve zu ändern
+curves	Smooth	Glätten
+	Smooth the curve values	Kurvenwerte glätten
+	Drag to draw the curve · {key}-click draws a straight line	Ziehen, um die Kurve zu zeichnen · {key}-Klick zeichnet eine gerade Linie
+	Edit Plane	Ebene bearbeiten
+	Create Plane	Ebene erstellen
+	Grid Size:	Rastergröße:
+	Vanishing Point: click four corners to create a plane	Fluchtpunkt: Klicken Sie auf vier Ecken, um eine Ebene zu erstellen
+	Vanishing Point is not active	Fluchtpunkt ist nicht aktiv
+	Apply Vanishing Point ({key})	Fluchtpunkt anwenden ({key})
+	Fix the red plane first: its corners must form a convex quad	Korrigieren Sie zuerst die rote Ebene: Ihre Ecken müssen ein konvexes Viereck bilden
+# Select and Mask view modes (#1754)
+	Onion Skin	Zwiebelschicht
+	Marching Ants	Laufende Ameisen
+	On Black	Auf Schwarz
+	On White	Auf Weiß
+	On Layers	Auf Ebenen
+	Show Edge	Kante anzeigen
+	Show Original	Original anzeigen
+	F cycles the views; hold X to see the image	F wechselt die Ansicht; X gedrückt halten zeigt das Bild
+# Select and Mask Refine Edge Brush (#2972)
+	Refine Edge Brush (R)	Kante-verbessern-Pinsel (R)
+	Expand Detection Area	Erkennungsbereich erweitern
+	Restore Original Edge	Ursprüngliche Kante wiederherstellen
+	Paint over hair or fur on the image; Alt paints the other mode	Über Haare oder Fell im Bild malen; Alt malt im anderen Modus
+	Clear Brush Strokes	Pinselstriche löschen
+	Show rulers	Lineale anzeigen
+
+# Color Sampler (added with the i18n coverage repair)
+	Click to place · Alt-click or drag off-canvas to remove	Klicken zum Platzieren · Alt-Klick oder Ziehen außerhalb der Arbeitsfläche zum Entfernen
+	No document open	Kein Dokument geöffnet
+	{n} of {max} sample points	{n} von {max} Messpunkten
+# Print dialog (#2697)
+	Emulsion Down	Schichtseite unten
+	Functions	Funktionen
+	Print Resolution:	Druckauflösung:
+	Use Previous Layer to Create Clipping Mask	Vorherige Ebene zum Erstellen einer Schnittmaske verwenden
+	Fill with {mode}-neutral color (white)	Mit neutraler Farbe für {mode} füllen (Weiß)
+	Fill with {mode}-neutral color (black)	Mit neutraler Farbe für {mode} füllen (Schwarz)
+	Fill with {mode}-neutral color (50% gray)	Mit neutraler Farbe für {mode} füllen (50 % Grau)
+	(No neutral color exists for {mode} mode.)	(Für den Modus {mode} gibt es keine neutrale Farbe.)
+	Apply mask to layer before removing?	Maske vor dem Entfernen auf die Ebene anwenden?
+	The layer or its mask changed. Drag the mask onto the Trash again.	Die Ebene oder ihre Maske hat sich geändert. Ziehen Sie die Maske erneut in den Papierkorb.
+	Delete the vector mask?	Vektormaske löschen?
+# Counted status messages and labels (#3454; adapted from PR #3821)
+@plural	Exported {n} swatch to {file}|Exported {n} swatches to {file}	{n} Farbfeld nach {file} exportiert|{n} Farbfelder nach {file} exportiert
+@plural	Imported {n} brush from {group}|Imported {n} brushes from {group}	{n} Pinsel aus {group} importiert|{n} Pinsel aus {group} importiert
+@plural	Imported {n} swatch from {file}|Imported {n} swatches from {file}	{n} Farbfeld aus {file} importiert|{n} Farbfelder aus {file} importiert
+@plural	Played {n} step|Played {n} steps	{n} Schritt wiedergegeben|{n} Schritte wiedergegeben
+@plural	Updated {n} linked smart object changed on disk|Updated {n} linked smart objects changed on disk	{n} verknüpftes Smart-Objekt aktualisiert, das auf dem Datenträger geändert wurde|{n} verknüpfte Smart-Objekte aktualisiert, die auf dem Datenträger geändert wurden
+@plural	Saved for Web: {n} file|Saved for Web: {n} files	Für Web gespeichert: {n} Datei|Für Web gespeichert: {n} Dateien
+@plural	{n} layer recorded by this comp was deleted. Update the comp, or clear the warning.|{n} layers recorded by this comp were deleted. Update the comp, or clear the warning.	{n} von dieser Komposition erfasste Ebene wurde gelöscht. Aktualisiere die Komposition oder lösche die Warnung.|{n} von dieser Komposition erfasste Ebenen wurden gelöscht. Aktualisiere die Komposition oder lösche die Warnung.
+@plural	{n} plane|{n} planes	{n} Fläche|{n} Flächen
+@plural	{n} preset|{n} presets	{n} Vorgabe|{n} Vorgaben
+@plural	{n} sample point removed|{n} sample points removed	{n} Messpunkt entfernt|{n} Messpunkte entfernt
+@plural	{n} slice|{n} slices	{n} Slice|{n} Slices
+@plural	{n} step|{n} steps	{n} Schritt|{n} Schritte
+@plural	{warning} (+{n} more brush preset warning)|{warning} (+{n} more brush preset warnings)	{warning} (+{n} weitere Pinselvorgaben-Warnung)|{warning} (+{n} weitere Pinselvorgaben-Warnungen)
+@plural	{what} with {n} warning|{what} with {n} warnings	{what} mit {n} Warnung|{what} mit {n} Warnungen
+# View › Guides › New Guide… › Color
+	Light Blue	Hellblau
+	Light Red	Hellrot
+	Medium Blue	Mittelblau
+	Light Gray	Hellgrau
+	Remove after each stroke	Nach jedem Strich entfernen
+	Apply the removal ({key})	Entfernen anwenden ({key})
+	Strokes to remove: {n} (Enter applies, Esc cancels)	Striche zum Entfernen: {n} (Eingabe wendet an, Esc bricht ab)
+
 
 # Status bar panel controls
 	Only show canvas	Nur Leinwand anzeigen

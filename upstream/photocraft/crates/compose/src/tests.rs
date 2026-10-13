@@ -40,6 +40,147 @@ fn normal_layer_over_background() {
     assert!(close4(px(&d, 5, 1), [1.0; 4]));
 }
 
+// The pre-optimisation Normal formula, independent of the production helper. Its operation
+// order matters: an algebraically equivalent premultiplied mix can round differently.
+fn original_normal_rgb(backdrop: [f32; 4], source: [f32; 4], opacity: f32) -> [f32; 4] {
+    let ab = backdrop[3];
+    let as_ = source[3] * opacity;
+    if as_ <= 0.0 {
+        return backdrop;
+    }
+    let ao = as_ + ab * (1.0 - as_);
+    if ao <= 0.0 {
+        return [0.0; 4];
+    }
+    let kb = ab * (1.0 - as_);
+    let inv = 1.0 / ao;
+    [(kb * backdrop[0] + as_ * source[0]) * inv, (kb * backdrop[1] + as_ * source[1]) * inv, (kb * backdrop[2] + as_ * source[2]) * inv, ao]
+}
+
+#[test]
+fn normal_rgb_kernel_preserves_scalar_bits() {
+    let subnormal = f32::from_bits(1);
+    let backdrops = [[0.0, -0.0, 2.0, 0.0], [0.2, 0.4, 0.6, 0.5], [2.0, -0.25, 4.0, 1.0], [-1.0, 0.01, 1.0, -0.5], [1.0, -0.0, f32::MIN_POSITIVE, subnormal]];
+    let sources = [
+        [0.9, 0.1, 0.3, 1.0],
+        [0.25, 2.0, -1.0, 0.5],
+        [subnormal, 1e-20, 1.0, subnormal],
+        [0.5, 0.2, 0.7, -0.0],
+        [0.5, 0.2, 0.7, -0.5],
+        [f32::NAN, 0.2, 0.7, 0.0],
+    ];
+    for b in backdrops {
+        for s in sources {
+            for opacity in [-1.0, -0.0, 0.0, 0.5, 1.0, 2.0] {
+                let want = original_normal_rgb(b, s, opacity);
+                let got = psblend::composite_normal_rgb(b, s, opacity);
+                assert_eq!(got.map(f32::to_bits), want.map(f32::to_bits), "{b:?} / {s:?} / {opacity}");
+            }
+        }
+    }
+}
+
+fn normal_rgb_test_buffers(fmt: PixelFormat) -> (Buffer, Buffer) {
+    let rect = Rect::new(-3, -2, 5, 0);
+    let mut bottom = Surface::new(fmt);
+    let mut top = Surface::new(fmt);
+    for y in rect.y0..rect.y1 {
+        for x in rect.x0..rect.x1 {
+            let i = ((y - rect.y0) * rect.width() as i32 + x - rect.x0) as usize;
+            let t = i as f32 / 16.0;
+            let b = [2.0 * t, 0.4, -0.25 + t, [0.0, 0.25, 0.75, 1.0][i % 4]];
+            let s = [0.9 - t, 0.1 + t, 0.3, [0.0, -0.0, 0.5, 1.0][i % 4]];
+            bottom.write_pixel(x, y, &photocraft_raster::from_rgba(&fmt, b));
+            top.write_pixel(x, y, &photocraft_raster::from_rgba(&fmt, s));
+        }
+    }
+    (surface_to_buffer(&bottom, rect), surface_to_buffer(&top, rect))
+}
+
+// Keep the old buffer dispatch as an oracle for the specialised loop and all of its fallbacks.
+fn original_blend_into_g(backdrop: &mut Buffer, src: &Buffer, mode: BlendMode, opacity: f32, gamma: f32) {
+    let rect = backdrop.rect;
+    let w = rect.width() as i32;
+    for (i, b) in backdrop.px.iter_mut().enumerate() {
+        let mut s = src.px[i];
+        if s[3] <= 0.0 {
+            continue;
+        }
+        let mut mode = mode;
+        if mode == BlendMode::Dissolve {
+            let x = rect.x0 + (i as i32 % w);
+            let y = rect.y0 + (i as i32 / w);
+            s[3] = if dissolve_noise(x, y) < s[3] * opacity { 1.0 } else { 0.0 };
+            mode = BlendMode::Normal;
+            *b = blend::composite(mode, *b, s, 1.0);
+            continue;
+        }
+        *b = blend::composite_gamma(mode, *b, s, opacity, gamma);
+    }
+}
+
+fn assert_buffer_bits(got: &Buffer, want: &Buffer) {
+    assert_eq!(got.rect, want.rect);
+    assert_eq!(got.px.len(), want.px.len());
+    for (i, (got, want)) in got.px.iter().zip(&want.px).enumerate() {
+        assert_eq!(got.map(f32::to_bits), want.map(f32::to_bits), "pixel {i}: {got:?} vs {want:?}");
+    }
+}
+
+#[test]
+fn normal_rgb_buffer_dispatch_and_fallbacks_preserve_bits() {
+    for fmt in [PixelFormat::RGBA8, PixelFormat::RGBA16, PixelFormat::RGBA32F] {
+        let (bottom, top) = normal_rgb_test_buffers(fmt);
+        for lab in [false, true] {
+            psblend::with_lab_mix(lab, || {
+                psblend::with_hdr(fmt.sample == SampleType::F32, || {
+                    for mode in BlendMode::LAYER_MODES {
+                        for gamma in [1.0, psblend::TEXT_GAMMA] {
+                            for opacity in [0.0, 0.5, 1.0] {
+                                let mut got = bottom.clone();
+                                let mut want = bottom.clone();
+                                original_blend_into_g(&mut want, &top, mode, opacity, gamma);
+                                blend_into_g(&mut got, &top, mode, opacity, gamma);
+                                assert_buffer_bits(&got, &want);
+                            }
+                        }
+                    }
+                });
+            });
+        }
+    }
+}
+
+#[test]
+fn normal_rgb_buffer_preserves_alpha_skip_and_nested_scopes() {
+    let rect = Rect::new(-1, -1, 2, 0);
+    let bottom = Buffer::filled(rect, [-0.0, 0.4, 2.0, 0.75]);
+    let top = Buffer { rect, px: vec![[f32::NAN, 0.3, 0.1, -0.5], [0.2, 0.3, 0.1, -0.0], [0.2, 0.3, 0.1, f32::NAN]] };
+    psblend::with_lab_mix(true, || {
+        psblend::with_hdr(true, || {
+            psblend::with_lab_mix(false, || {
+                psblend::with_hdr(false, || {
+                    let mut got = bottom.clone();
+                    let mut want = bottom.clone();
+                    original_blend_into_g(&mut want, &top, BlendMode::Normal, -1.0, 1.0);
+                    blend_into_g(&mut got, &top, BlendMode::Normal, -1.0, 1.0);
+                    assert_buffer_bits(&got, &want);
+                    assert_eq!(got.px[0].map(f32::to_bits), bottom.px[0].map(f32::to_bits));
+                    assert_eq!(got.px[1].map(f32::to_bits), bottom.px[1].map(f32::to_bits));
+                });
+                assert!(psblend::HDR.with(|h| h.get()));
+            });
+            assert!(psblend::LAB_MIX.with(|l| l.get()));
+            assert!(psblend::HDR.with(|h| h.get()));
+            let mut got = bottom.clone();
+            let mut want = bottom.clone();
+            original_blend_into_g(&mut want, &top, BlendMode::Normal, 0.5, 1.0);
+            blend_into_g(&mut got, &top, BlendMode::Normal, 0.5, 1.0);
+            assert_buffer_bits(&got, &want);
+        });
+    });
+}
+
 #[test]
 fn opacity_and_fill_multiply() {
     let mut d = doc_white(4, 4);
@@ -463,6 +604,34 @@ fn cmyk_document_renders_via_rgb() {
     assert!(p[0] < 0.3 && (p[0] - p[1]).abs() < 0.05 && (p[1] - p[2]).abs() < 0.05 && p[3] == 1.0, "{p:?}");
 }
 
+/// Transparent pixels convert to colour in CMYK (K = 100%) and Lab (a/b = 0.5). A flattened
+/// surface must still treat them as empty, or its content spans the whole canvas.
+#[test]
+fn flatten_to_surface_leaves_transparent_pixels_empty_in_every_mode() {
+    let modes = [
+        (ColorMode::Rgb, [SampleType::U8, SampleType::U16, SampleType::F32].as_slice()),
+        (ColorMode::Grayscale, &[SampleType::U8, SampleType::U16, SampleType::F32]),
+        (ColorMode::Cmyk, &[SampleType::U8, SampleType::U16]),
+        (ColorMode::Lab, &[SampleType::U8, SampleType::U16]),
+    ];
+    for (mode, samples) in modes {
+        for &sample in samples {
+            let mut d = Document::new("t", Size::new(300, 200), mode, sample);
+            let fmt = PixelFormat::new(mode, sample, true);
+            let mut l = Layer::raster("dot", fmt);
+            let opaque: Vec<f32> = photocraft_raster::from_rgba(&fmt, [0.9, 0.4, 0.1, 1.0]);
+            l.surface_mut().unwrap().fill_rect(Rect::new(120, 80, 140, 90), &opaque);
+            d.layers.push(l);
+            let s = flatten_to_surface(&d, fmt, None);
+            assert_eq!(s.content_bounds(), Rect::new(120, 80, 140, 90), "{mode:?} {sample:?}");
+            // Over a background everything is content, as before.
+            let fmt_opaque = PixelFormat::new(mode, sample, false);
+            let s = flatten_to_surface(&d, fmt_opaque, Some([1.0, 1.0, 1.0]));
+            assert_eq!(s.rgba(5, 5)[3], 1.0, "{mode:?} {sample:?}: background stays opaque");
+        }
+    }
+}
+
 #[test]
 fn sixteen_bit_and_float_layers_composite() {
     for fmt in [PixelFormat::RGBA16, PixelFormat::RGBA32F] {
@@ -650,6 +819,22 @@ fn drop_shadow_falls_away_from_light() {
     let d = fx_doc(vec![Effect::DropShadow(shadow(5.0, 0.0))]);
     assert!(close4(px(&d, 8, 20), [0.0, 0.0, 0.0, 1.0]));
     assert!(close4(px(&d, 32, 20), [1.0; 4]));
+}
+
+#[test]
+fn group_effects_reach_past_children_effects() {
+    // A child's outside stroke reaches further than its group's drop shadow: the group's shadow
+    // follows the stroke, not the child's pixels alone (#3274).
+    let mut d = doc_white(48, 48);
+    let mut sq = solid_layer("sq", Rect::new(14, 14, 34, 34), [1.0, 0.0, 0.0, 1.0]);
+    sq.effects.items = vec![stroke(6.0, StrokePosition::Outside)];
+    let mut grp = Layer::group("g", vec![sq]);
+    grp.effects.items = vec![Effect::DropShadow(shadow(2.0, 90.0))];
+    d.layers.push(grp);
+    assert!(close4(px(&d, 9, 24), [0.0, 0.0, 1.0, 1.0]), "stroke left of the pixels: {:?}", px(&d, 9, 24));
+    assert!(close4(px(&d, 24, 38), [0.0, 0.0, 1.0, 1.0]), "stroke below the pixels: {:?}", px(&d, 24, 38));
+    assert!(close4(px(&d, 24, 41), [0.0, 0.0, 0.0, 1.0]), "shadow below the stroke: {:?}", px(&d, 24, 41));
+    assert!(close4(px(&d, 24, 43), [1.0; 4]), "nothing past the shadow: {:?}", px(&d, 24, 43));
 }
 
 #[test]
@@ -1529,9 +1714,11 @@ fn levels_dont_clip_in_32_bit() {
         adjust::apply_depth(&adj, &mut b, adjust::Transfer::Srgb, Some(depth));
         (b.px[0][0] * 255.0).round()
     };
-    for (v, want) in [(0.0, 0.0), (0.0497, 3.0), (0.0976, 32.0), (0.4508, 140.0), (0.9473, 255.0), (1.0, 255.0)] {
+    for (v, want) in [(0.0497, 3.0), (0.0976, 32.0), (0.4508, 140.0), (0.9473, 255.0)] {
         assert_eq!(level(SampleType::F32, v), want, "{v}");
     }
+    assert!(level(SampleType::F32, 0.0) < 0.0);
+    assert!(level(SampleType::F32, 1.0) > 255.0);
     assert_eq!(level(SampleType::U8, 0.0), 10.0);
     assert_eq!(level(SampleType::U8, 1.0), 245.0);
 }
@@ -1561,6 +1748,109 @@ fn exposure_scales_32_bit_samples_as_stored() {
     }
     for mode in [ColorMode::Rgb, ColorMode::Grayscale] {
         assert_eq!(adjust::Transfer::for_document(mode, SampleType::F32), adjust::Transfer::Gamma(1.0));
+    }
+}
+
+#[test]
+fn float_adjustments_preserve_hdr_range() {
+    let identity = vec![photocraft_doc::adjust::CurvePoint { input: 0.0, output: 0.0 }, photocraft_doc::adjust::CurvePoint { input: 1.0, output: 1.0 }];
+    let levels = LevelsChannel { in_black: 0.25, in_white: 0.75, gamma: 2.0, out_black: -0.1, out_white: 1.5 };
+    let adjustments = [
+        (Adjustment::Exposure { exposure: 0.0, offset: 0.0, gamma: 1.0 }, [4.0, 2.0, 0.5]),
+        (Adjustment::Exposure { exposure: 1.0, offset: 0.0, gamma: 1.0 }, [8.0, 4.0, 1.0]),
+        (
+            Adjustment::Levels { master: Default::default(), per_channel: Default::default(), space: Default::default(), black: Default::default() },
+            [4.0, 2.0, 0.5],
+        ),
+        (
+            Adjustment::Levels { master: levels, per_channel: Default::default(), space: Default::default(), black: Default::default() },
+            [4.0, 2.0, 0.5].map(|v| -0.1 + ((v - 0.25_f32) / 0.5).sqrt() * 1.6),
+        ),
+        (
+            Adjustment::Curves {
+                master: identity.clone(),
+                per_channel: std::array::from_fn(|_| identity.clone()),
+                space: Default::default(),
+                black: Vec::new(),
+                pencil: false,
+            },
+            [4.0, 2.0, 0.5],
+        ),
+        (
+            Adjustment::Curves { master: Vec::new(), per_channel: Default::default(), space: Default::default(), black: Vec::new(), pencil: false },
+            [4.0, 2.0, 0.5],
+        ),
+    ];
+    for (adj, want) in adjustments {
+        let mut d = Document::new("HDR", Size::new(1, 1), ColorMode::Rgb, SampleType::F32);
+        let mut l = Layer::raster("pixels", PixelFormat::RGBA32F);
+        l.surface_mut().unwrap().fill_rect(Rect::new(0, 0, 1, 1), &[4.0, 2.0, 0.5, 0.75]);
+        d.layers = vec![l, Layer::new("adjustment", LayerContent::Adjustment(adj.clone()))];
+        let got = px(&d, 0, 0);
+        for (a, b) in got[..3].iter().zip(want) {
+            assert!((a - b).abs() < 1e-5, "{adj:?}: {got:?} vs {want:?}");
+        }
+        assert_eq!(got[3], 0.75);
+    }
+}
+
+#[test]
+fn float_tone_adjustments_preserve_negative_and_untouched_channels() {
+    let identity = vec![photocraft_doc::adjust::CurvePoint { input: 0.0, output: 0.0 }, photocraft_doc::adjust::CurvePoint { input: 1.0, output: 1.0 }];
+    let edited = vec![photocraft_doc::adjust::CurvePoint { input: 0.0, output: 0.0 }, photocraft_doc::adjust::CurvePoint { input: 1.0, output: 0.5 }];
+    for (adj, want) in [
+        (
+            Adjustment::Levels { master: Default::default(), per_channel: Default::default(), space: Default::default(), black: Default::default() },
+            [-0.1, 4.0, 0.5],
+        ),
+        (
+            Adjustment::Curves {
+                master: identity.clone(),
+                per_channel: [identity.clone(), Vec::new(), edited],
+                space: Default::default(),
+                black: Vec::new(),
+                pencil: false,
+            },
+            [-0.1, 4.0, 0.25],
+        ),
+    ] {
+        let mut b = Buffer::filled(Rect::new(0, 0, 1, 1), [-0.1, 4.0, 0.5, 0.75]);
+        adjust::apply_depth(&adj, &mut b, adjust::Transfer::Gamma(1.0), Some(SampleType::F32));
+        for (a, b) in b.px[0][..3].iter().zip(want) {
+            assert!((a - b).abs() < 1e-5, "{adj:?}: {:?} vs {want:?}", b);
+        }
+        assert_eq!(b.px[0][3], 0.75);
+    }
+}
+
+#[test]
+fn float_exposure_stops_round_trip_without_losing_highlights() {
+    let input = [4.0, -2.0, 0.5, 0.75];
+    let mut b = Buffer::filled(Rect::new(0, 0, 1, 1), input);
+    for exposure in [1.0, -1.0] {
+        adjust::apply_depth(&Adjustment::Exposure { exposure, offset: 0.0, gamma: 1.0 }, &mut b, adjust::Transfer::Gamma(1.0), Some(SampleType::F32));
+    }
+    assert_eq!(b.px[0], input);
+}
+
+#[test]
+fn float_exposure_preserves_signed_gamma_and_offset() {
+    let mut b = Buffer::filled(Rect::new(0, 0, 1, 1), [-0.5, 0.0, 4.0, 0.75]);
+    adjust::apply_depth(&Adjustment::Exposure { exposure: 1.0, offset: -0.25, gamma: 2.0 }, &mut b, adjust::Transfer::Gamma(1.0), Some(SampleType::F32));
+    for (got, want) in b.px[0].iter().zip([-1.25_f32.sqrt(), -0.5, 7.75_f32.sqrt(), 0.75]) {
+        assert!((got - want).abs() < 1e-6, "{:?}", b.px[0]);
+    }
+}
+
+#[test]
+fn float_levels_apply_channel_before_master_outside_unit_range() {
+    let channel = LevelsChannel { in_black: 0.5, in_white: 1.5, ..Default::default() };
+    let master = LevelsChannel { out_black: -0.1, out_white: 1.5, ..Default::default() };
+    let adj = Adjustment::Levels { master, per_channel: std::array::from_fn(|_| channel.clone()), space: Default::default(), black: Default::default() };
+    let mut b = Buffer::filled(Rect::new(0, 0, 1, 1), [4.0, 2.0, -0.1, 1.0]);
+    adjust::apply_depth(&adj, &mut b, adjust::Transfer::Gamma(1.0), Some(SampleType::F32));
+    for (got, want) in b.px[0].iter().zip([5.5, 2.3, -1.06, 1.0]) {
+        assert!((got - want).abs() < 1e-6, "{:?}", b.px[0]);
     }
 }
 
@@ -2081,4 +2371,119 @@ fn outer_glow_does_not_paint_through_a_zero_fill_layer() {
         let opaque = px(&d, 48, 48);
         assert!(opaque[0] > 0.9 && opaque[1] > 0.8, "{technique:?}: opaque fill disappeared: {opaque:?}");
     }
+}
+
+// Lab documents: Invert mirrors L, a and b; Threshold splits on L with a neutral result; Gradient
+// Map follows L. Rendered through the document compositor at every depth.
+#[test]
+fn lab_documents_evaluate_invert_threshold_and_gradient_map_on_lab() {
+    use photocraft_color::convert::{lab_to_srgb, srgb_to_lab};
+    let c = lab_to_srgb([30.0, 12.0, -18.0]);
+    for depth in SampleType::ALL {
+        let render = |adj: Adjustment| {
+            let mut d = Document::with_background("t", Size::new(4, 4), ColorMode::Lab, depth, Color::rgb(c[0], c[1], c[2]));
+            d.layers.push(Layer::new("adj", LayerContent::Adjustment(adj)));
+            let p = flatten(&d).px[5];
+            srgb_to_lab([p[0], p[1], p[2]])
+        };
+        let near = |got: [f32; 3], want: [f32; 3], tol: f32| got.iter().zip(want).all(|(g, w)| (g - w).abs() <= tol);
+        let inv = render(Adjustment::Invert);
+        assert!(near(inv, [70.0, -13.0, 17.0], 1.0), "{depth:?}: {inv:?}");
+        let th = render(Adjustment::Threshold { level: 0.25 });
+        assert!(near(th, [100.0, 0.0, 0.0], 0.5), "{depth:?}: L 30 is above level 64: {th:?}");
+        let gm = render(Adjustment::GradientMap { stops: vec![(0.0, [0.0; 3]), (1.0, [1.0; 3])], reverse: false, dither: false });
+        let want = srgb_to_lab([0.3; 3]);
+        assert!(near(gm, want, 1.0), "{depth:?}: L 30 → 30 % of the way: {gm:?} vs {want:?}");
+    }
+}
+
+/// `adj` over a one-colour Lab document (background `rgb`) at `depth`, read back as Lab.
+fn lab_doc_adjusted(rgb: [f32; 3], adj: Adjustment, depth: SampleType) -> [f32; 3] {
+    let mut doc = Document::with_background("lab", Size::new(4, 4), ColorMode::Lab, depth, Color::rgb(rgb[0], rgb[1], rgb[2]));
+    doc.layers.push(Layer::new("adj", LayerContent::Adjustment(adj)));
+    let p = px(&doc, 1, 1);
+    photocraft_color::convert::srgb_to_lab([p[0], p[1], p[2]])
+}
+
+fn near3(got: [f32; 3], want: [f32; 3], tol: f32, what: &str) {
+    assert!(got.iter().zip(want).all(|(g, w)| (g - w).abs() <= tol), "{what}: got {got:?}, want {want:?}");
+}
+
+/// A muted, in-gamut colour (L ≈ 46, a ≈ 10, b ≈ -20) and its Lab coordinates.
+const MUTED: [f32; 3] = [0.40, 0.42, 0.60];
+
+#[test]
+fn lab_documents_invert_and_posterize_l_a_and_b() {
+    let lab = photocraft_color::convert::srgb_to_lab(MUTED);
+    for depth in SampleType::ALL {
+        // Invert: every normalised channel n -> 1 - n, so L -> 100 - L and a, b -> their opposites
+        // (-a - 1 on the 0..255 grid).
+        let inv = lab_doc_adjusted(MUTED, Adjustment::Invert, depth);
+        near3(inv, [100.0 - lab[0], -lab[1] - 1.0, -lab[2] - 1.0], 1.0, &format!("{depth:?} invert"));
+        // An RGB invert would land elsewhere: lightness 100 - L is the Lab rule.
+        let rgb_inv = photocraft_color::convert::srgb_to_lab(MUTED.map(|v| 1.0 - v));
+        assert!((rgb_inv[0] - inv[0]).abs() > 2.0, "{depth:?}: {rgb_inv:?} vs {inv:?}");
+        // Posterize, three levels: the same steps on L, a and b (here all land on the middle
+        // step: L ≈ 50 and a, b ≈ -1, a neutral grey).
+        let post = lab_doc_adjusted(MUTED, Adjustment::Posterize { levels: 3 }, depth);
+        let n = [lab[0] / 100.0, (lab[1] + 128.0) / 255.0, (lab[2] + 128.0) / 255.0].map(|v| adjust::posterize(v, 3));
+        let want = [n[0] * 100.0, n[1] * 255.0 - 128.0, n[2] * 255.0 - 128.0];
+        assert!(want[0] > 45.0 && want[1].abs() < 2.0 && want[2].abs() < 2.0, "{want:?}");
+        near3(post, want, 1.0, &format!("{depth:?} posterize"));
+    }
+}
+
+#[test]
+fn lab_documents_brightness_contrast_moves_lightness_only() {
+    let lab = photocraft_color::convert::srgb_to_lab(MUTED);
+    for depth in SampleType::ALL {
+        for legacy in [true, false] {
+            let got = lab_doc_adjusted(MUTED, Adjustment::BrightnessContrast { brightness: 40.0, contrast: 20.0, legacy }, depth);
+            assert!(got[0] > lab[0] + 5.0, "{depth:?} legacy {legacy}: {got:?}");
+            near3([lab[0], got[1], got[2]], lab, 0.75, &format!("{depth:?} legacy {legacy}: a, b kept"));
+        }
+    }
+}
+
+#[test]
+fn lab_documents_threshold_on_lightness_with_a_neutral_result() {
+    for depth in SampleType::ALL {
+        // A saturated yellow is light (L ≈ 97): white, not a coloured result.
+        let yellow = lab_doc_adjusted([1.0, 1.0, 0.0], Adjustment::Threshold { level: 0.5 }, depth);
+        near3(yellow, [100.0, 0.0, 0.0], 0.5, &format!("{depth:?} yellow"));
+        // Pure blue has L ≈ 30: black.
+        let blue = lab_doc_adjusted([0.0, 0.0, 1.0], Adjustment::Threshold { level: 0.5 }, depth);
+        near3(blue, [0.0, 0.0, 0.0], 0.5, &format!("{depth:?} blue"));
+        // Mid grey L 53.4 against level 128 (n 0.502): Lab L decides, not RGB luminance.
+        let level = 0.52;
+        let grey = lab_doc_adjusted([0.5; 3], Adjustment::Threshold { level }, depth);
+        near3(grey, [100.0, 0.0, 0.0], 0.5, &format!("{depth:?} grey"));
+    }
+}
+
+#[test]
+fn lab_documents_gradient_map_follows_lightness() {
+    let stops = vec![(0.0, [0.0, 0.0, 1.0]), (1.0, [1.0, 1.0, 0.0])];
+    // A grey and a saturated colour of the same L map to the same colour.
+    let red = [0.9, 0.1, 0.1];
+    let l = photocraft_color::convert::srgb_to_lab(red)[0];
+    let grey = photocraft_color::convert::lab_to_srgb([l, 0.0, 0.0]);
+    for depth in SampleType::ALL {
+        for reverse in [false, true] {
+            let adj = Adjustment::GradientMap { stops: stops.clone(), reverse, dither: false };
+            let a = lab_doc_adjusted(red, adj.clone(), depth);
+            let b = lab_doc_adjusted(grey, adj.clone(), depth);
+            near3(a, b, 1.0, &format!("{depth:?} reverse {reverse}"));
+            let t = if reverse { 1.0 - l / 100.0 } else { l / 100.0 };
+            let want = photocraft_color::convert::srgb_to_lab([t, t, 1.0 - t]);
+            near3(a, want, 1.5, &format!("{depth:?} reverse {reverse}"));
+        }
+    }
+    // In RGB documents the map still follows RGB luminance: red and grey differ there.
+    let mut buf = Buffer::filled(Rect::new(0, 0, 1, 1), [red[0], red[1], red[2], 1.0]);
+    let adj = Adjustment::GradientMap { stops, reverse: false, dither: false };
+    adjust::apply_in(&adj, &mut buf, adjust::Transfer::Srgb, None, ColorMode::Rgb);
+    let mut grey_buf = Buffer::filled(Rect::new(0, 0, 1, 1), [grey[0], grey[1], grey[2], 1.0]);
+    adjust::apply_in(&adj, &mut grey_buf, adjust::Transfer::Srgb, None, ColorMode::Rgb);
+    assert!((buf.px[0][0] - grey_buf.px[0][0]).abs() > 0.05, "{:?} {:?}", buf.px[0], grey_buf.px[0]);
 }

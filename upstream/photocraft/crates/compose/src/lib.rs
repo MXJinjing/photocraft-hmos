@@ -24,6 +24,7 @@ pub mod fill_layout;
 pub mod gradient_fill;
 pub mod masks;
 pub mod multichannel;
+pub mod native;
 pub mod pattern;
 pub mod proxy;
 pub mod psblend;
@@ -232,20 +233,48 @@ pub fn band_rows_for(width: u32, requested: i32) -> i32 {
 /// The document's composite as a pixel surface in `fmt` (straight RGBA converted to its model
 /// and depth), optionally flattened over an opaque `background`; rendered and written in bands,
 /// so no full-size float composite is held. Tiles equal to the default pixel are pruned.
+///
+/// Fully transparent pixels are written as the default pixel. Converting transparent black
+/// leaves colour behind in CMYK (K = 100%) and Lab (neutral a/b = 0.5), and those pixels would
+/// otherwise count as content: the result would span the whole canvas.
+///
+/// A CMYK document of plain Normal layers is composited in its ink values instead
+/// ([`native::flatten_cmyk`]), so flattening doesn't round-trip its pixels through RGB (#3778).
 pub fn flatten_to_surface(doc: &Document, fmt: photocraft_color::PixelFormat, background: Option<[f32; 3]>) -> Surface {
+    composite_to_surface(doc, doc.bounds(), fmt, background)
+}
+
+/// [`flatten_to_surface`] over `rect` only (the rest of the surface stays empty).
+pub fn composite_to_surface(doc: &Document, rect: Rect, fmt: photocraft_color::PixelFormat, background: Option<[f32; 3]>) -> Surface {
+    let paper = background.is_some_and(|bg| bg == [1.0; 3]);
+    if (background.is_none() || paper)
+        && let Some(s) = native::flatten_cmyk(doc, rect, fmt, paper)
+    {
+        return s;
+    }
     let mut s = Surface::new(fmt);
     let n = fmt.channels();
+    let empty = s.default_pixel();
     let mut data = Vec::new();
-    let _ = render_bands(doc, doc.bounds(), 0, |band| -> Result<(), ()> {
+    // The composite separates back to CMYK through the document's own profile, the one its
+    // pixels were read through.
+    let cmyk = cmyk_space(doc);
+    let _ = render_bands(doc, rect, 0, |band| -> Result<(), ()> {
         let band = match background {
             Some(bg) => band.over_background(bg),
             None => band,
         };
         data.clear();
         data.resize(band.px.len() * n, 0.0);
-        for (p, out) in band.px.iter().zip(data.chunks_exact_mut(n)) {
-            photocraft_raster::from_rgba_into(&fmt, *p, out);
-        }
+        photocraft_color::convert::with_cmyk_space(cmyk.as_ref(), || {
+            for (p, out) in band.px.iter().zip(data.chunks_exact_mut(n)) {
+                if fmt.alpha && (p[3] <= 0.0 || p[3].is_nan()) && empty.len() == n {
+                    out.copy_from_slice(&empty);
+                } else {
+                    photocraft_raster::from_rgba_into(&fmt, *p, out);
+                }
+            }
+        });
         s.write_region(band.rect, &data);
         Ok(())
     });
@@ -294,13 +323,19 @@ pub fn thumbnail(doc: &Document, max_side: u32) -> Rgba8Image {
     thumbnail_buffer(doc, max_side).to_rgba8()
 }
 
+/// Width and height of [`thumbnail`]`(doc, max_side)`.
+pub fn thumbnail_size(doc: &Document, max_side: u32) -> (u32, u32) {
+    let b = doc.bounds();
+    let longest = b.width().max(b.height()).max(1);
+    let scale = (max_side as f32 / longest as f32).min(1.0);
+    (((b.width() as f32 * scale).round() as u32).max(1), ((b.height() as f32 * scale).round() as u32).max(1))
+}
+
 /// [`thumbnail`] as straight-alpha floats (for callers that colour-convert it first).
 pub fn thumbnail_buffer(doc: &Document, max_side: u32) -> Buffer {
     let b = doc.bounds();
     let longest = b.width().max(b.height()).max(1);
-    let scale = (max_side as f32 / longest as f32).min(1.0);
-    let w = ((b.width() as f32 * scale).round() as u32).max(1);
-    let h = ((b.height() as f32 * scale).round() as u32).max(1);
+    let (w, h) = thumbnail_size(doc, max_side);
     let k = longest / max_side.max(1).saturating_mul(2);
     if k >= 2 && doc.size.area() > PROXY_THUMBNAIL_PIXELS && proxy::proxy_faithful(doc) {
         render_reduced(&proxy::proxy_document(doc, k), w, h)
@@ -628,6 +663,27 @@ pub fn layer_bounds(layer: &Layer, canvas: Rect) -> Rect {
     }
 }
 
+/// Where a layer's effects take their shape from: [`layer_bounds`], except that a group's
+/// children count with their own effects (a child's outside stroke shapes the group's drop
+/// shadow and must not be cut off at the child's pixels, #3274).
+pub fn effect_source_bounds(layer: &Layer, canvas: Rect) -> Rect {
+    match &layer.content {
+        LayerContent::Group(g) if g.artboard.is_none() && !advanced::shapeless(layer) => g.children.iter().filter(|c| c.visible).fold(Rect::EMPTY, |acc, c| {
+            let m = if effects::has_effects(c) { effects::margin(c) } else { 0 };
+            let b = effect_source_bounds(c, canvas);
+            let b = if b.is_empty() { b } else { b.inflate(m) };
+            if b.is_empty() {
+                acc
+            } else if acc.is_empty() {
+                b
+            } else {
+                acc.union(&b)
+            }
+        }),
+        _ => layer_bounds(layer, canvas),
+    }
+}
+
 /// The path a shape layer's effects are shaped by: its fill path. Photoshop builds a filled
 /// shape's layer effects from its vector outline, not from its pixels: a stroke runs along the
 /// whole path even where a gradient fill fades out (psd-tools stroke-effects). `None` for other
@@ -851,9 +907,10 @@ fn render_fill(f: &Fill, rect: Rect, canvas: Rect, patterns: &pattern::PreparedP
 fn empty_in(layer: &Layer, rect: Rect) -> bool {
     if effects::has_effects(layer) {
         // Effects reach at most `margin` beyond the layer's pixels (when it is transparent
-        // outside them): render tiles away from a small text layer skip it entirely.
+        // outside them; a group's from its children with their effects): render tiles away from a
+        // small text layer skip it entirely.
         let canvas = Rect::new(i32::MIN / 4, i32::MIN / 4, i32::MAX / 4, i32::MAX / 4);
-        let bounds = shapeless_stroke_bounds(layer).unwrap_or_else(|| layer_bounds(layer, canvas));
+        let bounds = shapeless_stroke_bounds(layer).unwrap_or_else(|| effect_source_bounds(layer, canvas));
         return transparent_outside(layer) && bounds.inflate(effects::margin(layer)).intersect(&rect).is_empty();
     }
     match &layer.content {
@@ -1226,7 +1283,7 @@ fn composite_layer_plain(layer: &Layer, clipped: &[Layer], backdrop: &mut Buffer
     // Adjustment layers transform the backdrop, then blend the result back in.
     if let LayerContent::Adjustment(adj) = &layer.content {
         let mut adjusted = backdrop.clone();
-        adjust::apply_depth(adj, &mut adjusted, cx.transfer, Some(cx.depth));
+        adjust::apply_in(adj, &mut adjusted, cx.transfer, Some(cx.depth), cx.mode);
         // Clipped layers onto an adjustment are uncommon; they composite atop the adjusted result.
         advanced::composite_clipped(clipped, &mut adjusted, cx);
         let mv = mask_vals(layer, rect, cx);
@@ -1453,7 +1510,7 @@ fn fx_cache() -> &'static std::sync::Mutex<FxCache> {
 /// (or anything else rendering children over a wider area) gets the whole region.
 fn effect_region(layer: &Layer, rect: Rect, cx: &Ctx) -> (Rect, bool) {
     let m = effects::margin(layer);
-    let region = layer_bounds(layer, cx.canvas).inflate(m).intersect(&cx.canvas.inflate(m));
+    let region = effect_source_bounds(layer, cx.canvas).inflate(m).intersect(&cx.canvas.inflate(m));
     let clip = *cx.fx_clip.lock().unwrap_or_else(|e| e.into_inner());
     match clip {
         Some(c) if c.contains_rect(&rect) && advanced::shapeless(layer) && effects::maps_are_local(layer) => {
@@ -1567,7 +1624,7 @@ fn composite_atop_any(layer: &Layer, base: &mut Buffer, cx: &Ctx) {
     let rect = base.rect;
     if let LayerContent::Adjustment(adj) = &layer.content {
         let mut adjusted = base.clone();
-        adjust::apply_depth(adj, &mut adjusted, cx.transfer, Some(cx.depth));
+        adjust::apply_in(adj, &mut adjusted, cx.transfer, Some(cx.depth), cx.mode);
         let mv = mask_vals(layer, rect, cx);
         for (i, p) in base.px.iter_mut().enumerate() {
             let k = layer.opacity * layer.fill_opacity * mask_k(&mv, i);
@@ -1652,6 +1709,18 @@ fn blend_into_fill(backdrop: &mut Buffer, src: &Buffer, mode: BlendMode, opacity
 
 /// [`blend_into`] mixing coverage in a `gamma` space (type layers).
 fn blend_into_g(backdrop: &mut Buffer, src: &Buffer, mode: BlendMode, opacity: f32, gamma: f32) {
+    // The blend space is constant in this loop. Some TLS implementations synchronise even a
+    // boolean read, so select the common Normal kernel once instead of once per pixel.
+    if mode == BlendMode::Normal && gamma == 1.0 && !psblend::LAB_MIX.with(|l| l.get()) {
+        for (i, b) in backdrop.px.iter_mut().enumerate() {
+            let s = src.px[i];
+            if s[3] <= 0.0 {
+                continue;
+            }
+            *b = psblend::composite_normal_rgb(*b, s, opacity);
+        }
+        return;
+    }
     let rect = backdrop.rect;
     let w = rect.width() as i32;
     for (i, b) in backdrop.px.iter_mut().enumerate() {

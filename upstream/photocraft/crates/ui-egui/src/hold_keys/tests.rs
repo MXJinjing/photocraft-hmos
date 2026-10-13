@@ -621,3 +621,150 @@ fn cmd_is_not_the_move_tool_for_selection_hand_zoom_pen_shape_or_type_tools() {
         assert!(cmd_moves(tool), "{tool:?}");
     }
 }
+
+/// The params of the last brush stroke (`paint.stroke`, or the Pencil's `paint.pencil`).
+fn last_stroke(app: &PhotocraftApp) -> serde_json::Value {
+    let journal = &app.session.journal;
+    journal.iter().rev().find(|(id, _)| id == "paint.stroke" || id == "paint.pencil").map(|(_, p)| p.clone()).unwrap_or_default()
+}
+
+/// The `erase` flag of the last brush stroke.
+fn last_stroke_erases(h: &Harness<'static, PhotocraftApp>) -> Option<bool> {
+    last_stroke(h.state())["erase"].as_bool()
+}
+
+/// `~` held with the Brush or the Pencil erases with that tool's own brush (#3439): Photoshop's
+/// Clear mode for that stroke, so History names the tool. The tool stays, and the next stroke
+/// without the key paints again.
+#[test]
+fn tilde_held_with_the_brush_or_pencil_erases_with_its_brush() {
+    for (tool, label) in [(Tool::Brush, "Brush Tool"), (Tool::Pencil, "Pencil")] {
+        let mut h = harness(tool);
+        with_layer(&mut h);
+        key(&mut h, Key::Backtick, true, Modifiers::NONE);
+        drag_with(&mut h, Modifiers::NONE, 110.0, 130.0, 150.0, 130.0);
+        key(&mut h, Key::Backtick, false, Modifiers::NONE);
+        assert_eq!(last_stroke_erases(&h), Some(true), "{tool:?}");
+        assert_eq!(rgba(&h, 130, 130)[3], 0.0, "{tool:?}: erased to transparency");
+        assert_eq!(last_stroke(h.state())["mode"], json!("clear"), "{tool:?}");
+        assert_eq!(h.state().session.active().unwrap().history.undo_label(), Some(label));
+        assert_eq!(h.state().ui.tool, tool, "the tool stays");
+        drag_with(&mut h, Modifiers::NONE, 110.0, 140.0, 150.0, 140.0);
+        assert_eq!(last_stroke_erases(&h), Some(false), "{tool:?}: paints again");
+    }
+}
+
+/// Other tools ignore `~`: the Mixer Brush and the retouching tools have no erasing stroke.
+#[test]
+fn tilde_is_not_an_eraser_for_other_tools() {
+    let mut h = harness(Tool::Eraser);
+    with_layer(&mut h);
+    h.state_mut().ui.tool = Tool::CloneStamp;
+    key(&mut h, Key::Backtick, true, Modifiers::NONE);
+    assert!(!erase_held(h.state(), &h.ctx));
+    key(&mut h, Key::Backtick, false, Modifiers::NONE);
+}
+
+/// The key is a Tools › Temporary binding: rebound, the new key erases and `~` no longer does.
+#[test]
+fn rebound_brush_eraser_uses_the_new_key_only() {
+    let mut h = harness(Tool::Brush);
+    with_layer(&mut h);
+    let items = crate::prefs_ui::shortcut_items(h.state());
+    let item = items.iter().find(|i| i.0 == "tools.temporary.erase").map(|i| (i.2.clone(), i.3.clone()));
+    assert_eq!(item, Some((vec!["Tools".to_string(), "Temporary".to_string()], Some("`".into()))));
+    h.state_mut().run("edit.keyboardShortcuts", json!({"set": {"tools.temporary.erase": "F9"}})).unwrap();
+    key(&mut h, Key::Backtick, true, Modifiers::NONE);
+    drag_with(&mut h, Modifiers::NONE, 110.0, 130.0, 150.0, 130.0);
+    key(&mut h, Key::Backtick, false, Modifiers::NONE);
+    assert_eq!(last_stroke_erases(&h), Some(false), "` is no longer bound");
+    key(&mut h, Key::F9, true, Modifiers::NONE);
+    drag_with(&mut h, Modifiers::NONE, 110.0, 140.0, 150.0, 140.0);
+    key(&mut h, Key::F9, false, Modifiers::NONE);
+    assert_eq!(last_stroke_erases(&h), Some(true), "F9 erases");
+}
+
+/// The Mode dropdown's Clear (#3439): chosen there, every Pencil stroke erases with the Pencil
+/// until another mode is chosen.
+#[test]
+fn clear_in_the_mode_dropdown_erases_until_another_mode_is_chosen() {
+    use crate::canvas::{ToolEvent, tool_event};
+    use egui_kittest::kittest::{NodeT, Queryable};
+    let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+    app.run("file.new", json!({"width": 120, "height": 80})).unwrap();
+    app.ui.tool = Tool::Pencil;
+    let mut h = Harness::builder().with_size(vec2(1600.0, 400.0)).build_ui_state(
+        |ui, app: &mut PhotocraftApp| {
+            if !ui.ctx().fonts(|f| f.families().contains(&egui::FontFamily::Name("medium".into()))) {
+                return;
+            }
+            crate::panels::options_bar(app, ui);
+        },
+        app,
+    );
+    PhotocraftApp::setup_context(&h.ctx, crate::theme::ThemeKind::Studio);
+    h.run_steps(4);
+    let combo = |h: &Harness<'static, PhotocraftApp>, current: &str| {
+        h.get_all_by_role(egui::accesskit::Role::ComboBox).find(|n| n.accesskit_node().value().as_deref() == Some(current)).unwrap().click();
+    };
+    combo(&h, "Normal");
+    h.run_steps(3);
+    h.get_by_label("Clear").click();
+    h.run_steps(3);
+    assert!(crate::paint_mouse::clears(h.state(), Tool::Pencil));
+    let stroke = |h: &mut Harness<'static, PhotocraftApp>| {
+        let (app, m) = (h.state_mut(), Modifiers::NONE);
+        tool_event(app, ToolEvent::Down { x: 10.0, y: 40.0, pressure: 1.0 }, m);
+        tool_event(app, ToolEvent::Move { x: 100.0, y: 40.0, pressure: 1.0 }, m);
+        tool_event(app, ToolEvent::Up { x: 100.0, y: 40.0 }, m);
+    };
+    stroke(&mut h);
+    assert_eq!(last_stroke(h.state())["mode"], json!("clear"));
+    assert_eq!(h.state().session.active().unwrap().history.undo_label(), Some("Pencil"));
+    combo(&h, "Clear");
+    h.run_steps(3);
+    h.get_by_label("Normal").click();
+    h.run_steps(3);
+    assert!(!crate::paint_mouse::clears(h.state(), Tool::Pencil));
+    stroke(&mut h);
+    assert_eq!(last_stroke(h.state())["mode"], serde_json::Value::Null, "paints again");
+    assert_eq!(last_stroke(h.state())["erase"], json!(false));
+}
+
+/// While `~` is held the Brush's Mode shows Clear, as in Photoshop.
+#[test]
+fn the_mode_shows_clear_while_tilde_is_held() {
+    let mut h = harness(Tool::Brush);
+    assert!(!crate::paint_mouse::clears(h.state(), Tool::Brush));
+    key(&mut h, Key::Backtick, true, Modifiers::NONE);
+    assert!(crate::paint_mouse::clears(h.state(), Tool::Brush));
+    key(&mut h, Key::Backtick, false, Modifiers::NONE);
+    h.run_steps(1);
+    assert!(!crate::paint_mouse::clears(h.state(), Tool::Brush));
+}
+
+/// #3368 through the real key handling: holding Space (the temporary Hand) with a pending crop
+/// keeps it pending, while V (another tool) commits it, as in Photoshop.
+#[test]
+fn a_held_key_keeps_a_pending_crop_and_another_tools_key_commits_it() {
+    let mut h = harness(Tool::Crop);
+    {
+        let app = h.state_mut();
+        app.ui.crop_rect = Some([100.0, 50.0, 300.0, 200.0]);
+        app.crop.default_frame = false;
+    }
+    h.run_steps(2);
+    assert!(crate::crop_ui::pending(h.state()));
+    key(&mut h, Key::Space, true, Modifiers::NONE);
+    h.run_steps(2);
+    key(&mut h, Key::Space, false, Modifiers::NONE);
+    h.run_steps(2);
+    assert_eq!(h.state().ui.tool, Tool::Crop);
+    assert_eq!(h.state().session.active().unwrap().doc.size, photocraft_doc::Size::new(400, 300));
+    assert!(crate::crop_ui::pending(h.state()));
+    tap(&mut h, Key::V, Modifiers::NONE);
+    h.run_steps(2);
+    assert_eq!(h.state().ui.tool, Tool::Move);
+    assert_eq!(h.state().session.active().unwrap().doc.size, photocraft_doc::Size::new(200, 150));
+    assert_eq!(h.state().ui.crop_rect, None);
+}

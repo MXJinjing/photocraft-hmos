@@ -267,6 +267,14 @@ pub fn intel_dx12_applied(adapters: &[Candidate], chosen: usize, os: Os) -> bool
         && adapters.iter().any(|a| a.vendor == INTEL && a.backend == wgpu::Backend::Vulkan)
 }
 
+/// wgpu compiles indirect-call validation shaders inside `request_device`; Metal's compiler
+/// crashes on them on old Intel Macs (Iris Pro, GPUFamily 1 on Monterey), so no mode could start
+/// (#3107). Only Intel Macs skip them: PhotoCraft issues no indirect draws or dispatches, but every
+/// other GPU keeps wgpu's default. `WGPU_VALIDATION_INDIRECT_CALL=1` still wins.
+fn skips_indirect_validation(os: Os, intel: bool) -> bool {
+    os == Os::Mac && intel
+}
+
 /// Configure eframe's wgpu setup for `plan`: instance backends, the DX12 shader compiler, adapter
 /// selection (Intel on Windows, software adapters for `cpu`) and the marker update once the
 /// adapter is chosen. `note` receives a remark for System Info (e.g. the Intel default).
@@ -274,6 +282,9 @@ pub fn configure(setup: &mut egui_wgpu::WgpuSetup, plan: &Plan, os: Os, sentinel
     if let egui_wgpu::WgpuSetup::CreateNew(create) = setup {
         if let Some(b) = backends(plan, os) {
             create.instance_descriptor.backends = b;
+        }
+        if skips_indirect_validation(os, cfg!(target_arch = "x86_64")) {
+            create.instance_descriptor.flags = create.instance_descriptor.flags.difference(wgpu::InstanceFlags::VALIDATION_INDIRECT_CALL).with_env();
         }
         if os == Os::Windows {
             let exe = std::env::current_exe().ok();
@@ -795,6 +806,30 @@ mod tests {
                 C::StaticDxc | C::Auto => false,
             };
             assert!(safe, "{:?}", create.instance_descriptor.backend_options.dx12.shader_compiler);
+        }
+    }
+
+    #[test]
+    fn intel_macs_skip_the_indirect_validation_shaders() {
+        // Metal's compiler crashed on them on Intel Iris Pro, losing the device in every mode (#3107).
+        assert!(skips_indirect_validation(Os::Mac, true));
+        // Apple silicon, Windows and Linux keep wgpu's validation.
+        for (os, intel) in [(Os::Mac, false), (Os::Windows, true), (Os::Other, true), (Os::Other, false)] {
+            assert!(!skips_indirect_validation(os, intel), "{os:?} intel={intel}");
+        }
+        for (os, safe_gpu) in [(Os::Windows, false), (Os::Other, true), (Os::Other, false)] {
+            let mut setup = egui_wgpu::WgpuSetup::without_display_handle();
+            let egui_wgpu::WgpuSetup::CreateNew(before) = &setup else { panic!("a new instance") };
+            let before = before.instance_descriptor.flags;
+            configure(&mut setup, &plan(Auto, None, None, safe_gpu, os), os, Arc::new(Mutex::new(None)), Arc::default());
+            let egui_wgpu::WgpuSetup::CreateNew(create) = &setup else { panic!("a new instance") };
+            assert_eq!(create.instance_descriptor.flags, before, "{os:?}: flags untouched");
+        }
+        if cfg!(target_arch = "x86_64") && std::env::var_os("WGPU_VALIDATION_INDIRECT_CALL").is_none() {
+            let mut setup = egui_wgpu::WgpuSetup::without_display_handle();
+            configure(&mut setup, &plan(Auto, None, None, false, Os::Mac), Os::Mac, Arc::new(Mutex::new(None)), Arc::default());
+            let egui_wgpu::WgpuSetup::CreateNew(create) = &setup else { panic!("a new instance") };
+            assert!(!create.instance_descriptor.flags.contains(wgpu::InstanceFlags::VALIDATION_INDIRECT_CALL));
         }
     }
 }

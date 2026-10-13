@@ -276,10 +276,16 @@ fn resolve_set(s: &Session, p: &Value, cmd: &str) -> Result<(DataSet, usize)> {
 /// variable, else text. The first column may be a data-set name (header empty or `DataSet`).
 fn import_data_sets(s: &mut Session, p: &Value) -> Result<Value> {
     let path = p.get("path").and_then(Value::as_str).ok_or_else(|| bad("file.import.variableDataSets", "need `path`"))?;
-    let delim = p.get("delimiter").and_then(Value::as_str).and_then(|d| d.bytes().next()).unwrap_or(b',');
     let text = std::fs::read_to_string(path).map_err(|e| EngineError::Other(format!("read `{path}`: {e}")))?;
+    import_data_sets_text(s, &text, p)
+}
+
+/// The body of `file.import.variableDataSets` over CSV text already read: automation reads the
+/// file beneath its read root and hands the text over (#3216).
+pub fn import_data_sets_text(s: &mut Session, text: &str, p: &Value) -> Result<Value> {
+    let delim = p.get("delimiter").and_then(Value::as_str).and_then(|d| d.bytes().next()).unwrap_or(b',');
     let vars = s.active().ok_or(EngineError::NoDocument)?.doc.variables.clone();
-    let mut records = csv_records(&text).filter(|r| !r.trim().is_empty());
+    let mut records = csv_records(text).filter(|r| !r.trim().is_empty());
     let header: Vec<String> = records.next().map(|h| split_csv(h, delim)).unwrap_or_default();
     if header.is_empty() {
         return Err(bad("file.import.variableDataSets", "empty CSV"));
@@ -366,9 +372,30 @@ fn split_csv(line: &str, delim: u8) -> Vec<String> {
 }
 
 /// Apply each data set in turn and export the flattened document, restoring the original after.
-/// `{dir, format?("png"), dataSets?[names]}` → `{files:[…]}`.
+/// `{dir, format?("png"), dataSets?[names]}` → `{files:[…],count}`.
 fn export_as_files(s: &mut Session, p: &Value) -> Result<Value> {
-    let dir = p.get("dir").and_then(Value::as_str).ok_or_else(|| bad("file.export.dataSetsAsFiles", "need `dir`"))?;
+    let dir = p.get("dir").and_then(Value::as_str).ok_or_else(|| bad("file.export.dataSetsAsFiles", "need `dir`"))?.to_string();
+    // The directory appears only once the batch has been planned, as it always did, so a batch
+    // rejected for colliding names still leaves no directory behind.
+    let mut made_dir = false;
+    let names = export_data_sets_with(s, p, |name, bytes| {
+        if !made_dir {
+            std::fs::create_dir_all(&dir).map_err(|e| EngineError::Other(format!("mkdir `{dir}`: {e}")))?;
+            made_dir = true;
+        }
+        crate::file_cmds::write_file(&format!("{dir}/{name}"), bytes)
+    })?;
+    let files: Vec<String> = names.iter().map(|name| format!("{dir}/{name}")).collect();
+    let count = files.len();
+    Ok(json!({"files": files, "count": count}))
+}
+
+/// The bodies of `file.export.dataSetsAsFiles`, streamed to `write` as a single-component
+/// filename plus its bytes: one flattened file per data set. The whole batch is planned first,
+/// so colliding names are rejected before any file is written, and automation writes exactly
+/// these bytes beneath its write root (#3216) — the two paths cannot drift. Returns the
+/// filenames written, in order.
+pub fn export_data_sets_with(s: &Session, p: &Value, mut write: impl FnMut(&str, &[u8]) -> Result<()>) -> Result<Vec<String>> {
     let format = p.get("format").and_then(Value::as_str).unwrap_or("png");
     let st = s.active().ok_or(EngineError::NoDocument)?;
     let original = st.doc.clone();
@@ -384,28 +411,29 @@ fn export_as_files(s: &mut Session, p: &Value) -> Result<Value> {
     // Plan the whole batch before writing: sanitised names or a constant template may collide.
     // Match the case-insensitive comparison used by the other batch exporters.
     let mut claimed = std::collections::HashMap::new();
-    let mut files = Vec::new();
+    let mut names = Vec::new();
     for (n, set) in sets.iter().enumerate() {
         let safe: String = set.name.chars().map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' }).collect();
         let stem = template.replace("{name}", &safe).replace("{index}", &format!("{:03}", n + 1)).replace("{document}", &doc_stem);
-        let path = format!("{dir}/{stem}.{format}");
-        if let Some(first) = claimed.insert(path.to_lowercase(), &set.name) {
+        let name = format!("{stem}.{format}");
+        if let Some(first) = claimed.insert(name.to_lowercase(), &set.name) {
             return Err(bad(
                 "file.export.dataSetsAsFiles",
-                format!("data sets `{first}` and `{}` resolve to the same output `{path}`; include {{index}} in `naming` to use distinct filenames", set.name),
+                format!("data sets `{first}` and `{}` resolve to the same output `{name}`; include {{index}} in `naming` to use distinct filenames", set.name),
             ));
         }
-        files.push(path);
+        names.push(name);
     }
-    std::fs::create_dir_all(dir).map_err(|e| EngineError::Other(format!("mkdir `{dir}`: {e}")))?;
-    for (set, path) in sets.iter().zip(&files) {
+    let mut written = Vec::new();
+    for (set, name) in sets.iter().zip(&names) {
         let mut doc = (*original).clone();
         apply_to_doc(&mut doc, &vars, set)?;
         let opts = photocraft_io::ExportOptions::default();
         let bytes = photocraft_io::export(&doc, format, &opts).map(|r| r.bytes).map_err(|e| EngineError::Other(format!("export `{}`: {e}", set.name)))?;
-        crate::file_cmds::write_file(path, &bytes)?;
+        write(name, &bytes)?;
+        written.push(name.clone());
     }
-    Ok(json!({"files": files, "count": files.len()}))
+    Ok(written)
 }
 
 fn list(s: &mut Session) -> Result<Value> {

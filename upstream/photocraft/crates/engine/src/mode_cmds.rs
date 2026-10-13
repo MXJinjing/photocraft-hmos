@@ -68,6 +68,15 @@ pub(crate) fn rotate_arbitrary(s: &mut Session, p: &Value) -> Result<Value> {
         return Ok(json!({"width": s.active().map(|d| d.doc.size.width), "height": s.active().map(|d| d.doc.size.height)}));
     }
     let bg = s.tools.background;
+    // Color Sampler points turn with the canvas (the same map the edit applies to the geometry).
+    {
+        let old = s.active().ok_or(EngineError::NoDocument)?.doc.size;
+        let new = rotated_size(old, deg);
+        let (sn, cs) = deg.to_radians().sin_cos();
+        let (cx, cy) = (f64::from(old.width) / 2.0, f64::from(old.height) / 2.0);
+        let (nx, ny) = (f64::from(new.width) / 2.0, f64::from(new.height) / 2.0);
+        s.set_sampler_map(Affine { m: [cs, sn, -sn, cs, nx - (cs * cx - sn * cy), ny - (sn * cx + cs * cy)] });
+    }
     let size = s.edit("Rotate Canvas", |doc, _| {
         let old = doc.size;
         let new = rotated_size(old, deg);
@@ -82,8 +91,9 @@ pub(crate) fn rotate_arbitrary(s: &mut Session, p: &Value) -> Result<Value> {
         let canvas = doc.bounds();
         let fmt = doc.pixel_format();
         let dpi = doc.resolution_dpi;
+        let background_id = doc.background().map(|l| l.id);
         for l in doc.layers.iter_mut() {
-            let background = l.name == "Background" && l.locks.position && matches!(l.content, LayerContent::Raster(_));
+            let background = Some(l.id) == background_id;
             if background && let Some(surf) = l.surface_mut() {
                 // The Background stays a Background: rotated pixels over the background colour.
                 let src = surf.content_bounds();
@@ -98,12 +108,8 @@ pub(crate) fn rotate_arbitrary(s: &mut Session, p: &Value) -> Result<Value> {
                     m.surface = crate::transform_cmds::warp_gray(&m.surface, &h, interp)?;
                 }
             } else {
-                // Rotating the whole image moves locked layers too.
-                let locks = l.locks;
-                l.locks.position = false;
-                l.locks.all = false;
-                crate::transform_cmds::transform_layer(None, photocraft_doc::Locks::default(), l, &h, Some(a), interp)?;
-                l.locks = locks;
+                // Rotating the whole image moves locked layers too, including inside groups.
+                with_released_movement_locks(l, |l| crate::transform_cmds::transform_layer(None, photocraft_doc::Locks::default(), l, &h, Some(a), interp))?;
             }
             // What Free Transform leaves alone: unlinked vector masks, gradient angles, artboards…
             crate::canvas_geom::transform_layer_geometry(l, &a, false, dpi);
@@ -121,6 +127,25 @@ pub(crate) fn rotate_arbitrary(s: &mut Session, p: &Value) -> Result<Value> {
         Ok(new)
     })?;
     Ok(json!({"width": size.width, "height": size.height}))
+}
+
+/// Runs `f` with movement locks (`position` and `all`) temporarily released on `l` and all its
+/// descendants, so canvas-wide rotation moves every layer, then restores each lock.
+fn with_released_movement_locks<R>(l: &mut Layer, f: impl FnOnce(&mut Layer) -> Result<R>) -> Result<R> {
+    let mut saved = Vec::new();
+    crate::image_cmds::for_each_layer(std::slice::from_mut(l), &mut |x| {
+        saved.push(x.locks);
+        x.locks.position = false;
+        x.locks.all = false;
+    });
+    let r = f(l);
+    let mut saved = saved.into_iter();
+    crate::image_cmds::for_each_layer(std::slice::from_mut(l), &mut |x| {
+        if let Some(locks) = saved.next() {
+            x.locks = locks;
+        }
+    });
+    r
 }
 
 // ---------- flatten helpers ----------
@@ -316,11 +341,23 @@ fn color_table(s: &mut Session, p: &Value) -> Result<Value> {
             let mut data = surf.read_region(r);
             for q in data.chunks_exact_mut(n) {
                 let c = photocraft_raster::to_rgba(&fmt, q);
-                if c[3] <= 0.0 {
-                    continue;
-                }
-                let i = old.nearest([c[0], c[1], c[2]]);
-                let alpha = if table.transparent == Some(i as u8) { 0.0 } else { c[3] };
+                let rgb = [c[0], c[1], c[2]];
+                let i = if c[3] <= 0.0 {
+                    let Some(i) = old.transparent.map(usize::from) else { continue };
+                    if i >= old.colors.len() || old.rgb(i) != rgb {
+                        continue;
+                    }
+                    i
+                } else {
+                    old.nearest(rgb)
+                };
+                let alpha = if table.transparent == Some(i as u8) {
+                    0.0
+                } else if c[3] <= 0.0 {
+                    1.0
+                } else {
+                    c[3]
+                };
                 let nc = if i < table.colors.len() { table.rgb(i) } else { table.rgb(table.nearest([c[0], c[1], c[2]])) };
                 let mut enc = [0.0f32; 8];
                 let m = photocraft_raster::from_rgba_into(&fmt, [nc[0], nc[1], nc[2], alpha], &mut enc);

@@ -22,8 +22,16 @@
 //! completions and can take seconds on large selections, so the command runs as a background job
 //! (#210): with progress, cancellable, and the document unchanged until it applies. The Patch
 //! Tool's Content-Aware mode lands its content the same way ([`land`]).
+//!
+//! **Transform On Drop** (the options-bar checkbox): after the drop a transform box lets the user
+//! scale and rotate the content before the blend is computed. `scaleX` / `scaleY` (%) and
+//! `rotate` (degrees, clockwise) scale and turn the content about the centre of the selection's
+//! bounds before `offset` moves it, as `select.transformSelection` does; the selection is
+//! transformed with it. A transformed patch may reach past the canvas edge (Photoshop lets the
+//! box go there): what lands outside is dropped.
 
 use photocraft_algo::content_aware::{FillOptions, color_amount, color_level, fill_with, level_transform};
+use photocraft_algo::transform::{Homography, Interp};
 
 use super::patch::{coverage, offset, selection_area, target_layer};
 use super::*;
@@ -80,9 +88,109 @@ struct Plan {
     /// The selected area (where the content comes from).
     area: Rect,
     offset: (i32, i32),
+    /// Transform On Drop: where a source point lands (scale and rotation about the area's centre,
+    /// then the offset); `None` for a plain move by `offset`.
+    map: Option<Homography>,
+    /// Where the content lands (the moved area, or the transformed one's bounds), on the canvas.
+    dest: Rect,
     mode: Mode,
     structure: u8,
     color: u8,
+}
+
+/// Transform On Drop's `scaleX` / `scaleY` (%) and `rotate` (degrees): the map from a source point
+/// to where it lands, about the centre of `area` and then moved by `offset`. `None` when the params
+/// leave the content as it is (a plain move).
+fn placement(p: &Value, area: Rect, (dx, dy): (i32, i32)) -> Result<Option<Homography>> {
+    let num = |k: &str, default: f64| -> Result<f64> {
+        match p.get(k) {
+            None | Some(Value::Null) => Ok(default),
+            Some(v) => v.as_f64().filter(|x| x.is_finite()).ok_or_else(|| bad(CMD, format!("`{k}` must be a finite number"))),
+        }
+    };
+    let scale = |k: &str| -> Result<f64> {
+        let v = num(k, 100.0)?;
+        // 1% to 10000% either way (a negative scale flips): beyond that the content collapses to
+        // nothing or outgrows any selection the move can take.
+        if (1.0..=10_000.0).contains(&v.abs()) { Ok(v / 100.0) } else { Err(bad(CMD, format!("`{k}` must be 1..10000 % (or -10000..-1 to flip)"))) }
+    };
+    let (sx, sy) = (scale("scaleX")?, scale("scaleY")?);
+    let deg = num("rotate", 0.0)?;
+    if deg.abs() > 36_000.0 {
+        return Err(bad(CMD, "`rotate` must be -36000..36000 degrees"));
+    }
+    let deg = deg.rem_euclid(360.0);
+    if sx == 1.0 && sy == 1.0 && deg == 0.0 {
+        return Ok(None);
+    }
+    let (cx, cy) = (f64::from(area.x0 + area.x1) / 2.0, f64::from(area.y0 + area.y1) / 2.0);
+    let t = |x: f64, y: f64| Homography([1.0, 0.0, x, 0.0, 1.0, y, 0.0, 0.0, 1.0]);
+    let (sa, ca) = deg.to_radians().sin_cos();
+    let rot = Homography([ca, -sa, 0.0, sa, ca, 0.0, 0.0, 0.0, 1.0]);
+    let scale = Homography([sx, 0.0, 0.0, 0.0, sy, 0.0, 0.0, 0.0, 1.0]);
+    Ok(Some(t(cx + f64::from(dx), cy + f64::from(dy)).mul(&rot).mul(&scale).mul(&t(-cx, -cy))))
+}
+
+/// The pixel bounds of `r` mapped by `h`.
+fn mapped_bounds(h: &Homography, r: Rect) -> Rect {
+    let corners = [(r.x0, r.y0), (r.x1, r.y0), (r.x1, r.y1), (r.x0, r.y1)].map(|(x, y)| h.apply(f64::from(x), f64::from(y)));
+    let (mut x0, mut y0, mut x1, mut y1) = (f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY);
+    for (x, y) in corners {
+        (x0, y0, x1, y1) = (x0.min(x), y0.min(y), x1.max(x), y1.max(y));
+    }
+    if !(x0.is_finite() && y0.is_finite() && x1.is_finite() && y1.is_finite()) {
+        return Rect::EMPTY;
+    }
+    // Rounded inwards by a hair so an exact scale doesn't grow the bounds by a pixel.
+    let clamp = |v: f64| v.clamp(-1e8, 1e8) as i32;
+    Rect::new(clamp((x0 + 1e-6).floor()), clamp((y0 + 1e-6).floor()), clamp((x1 - 1e-6).ceil()), clamp((y1 - 1e-6).ceil()))
+}
+
+/// `src` resampled (bilinear, edges clamped) through `inv` (destination → source) over `rect`:
+/// the content as it lands. Works on float samples, so at any depth.
+fn resample(src: &Region, inv: &Homography, rect: Rect) -> Region {
+    let (sw, sh, n) = (src.rect.width() as usize, src.rect.height() as usize, src.ch);
+    let mut out = Region { rect, ch: n, data: vec![0.0; rect.width() as usize * rect.height() as usize * n] };
+    if sw == 0 || sh == 0 {
+        return out;
+    }
+    let px = |x: usize, y: usize, c: usize| src.data.get((y * sw + x) * n + c).copied().unwrap_or(0.0);
+    for (i, dst) in out.data.chunks_exact_mut(n).enumerate() {
+        let (qx, qy) = (rect.x0 + (i % rect.width() as usize) as i32, rect.y0 + (i / rect.width() as usize) as i32);
+        let (sx, sy) = inv.apply(f64::from(qx) + 0.5, f64::from(qy) + 0.5);
+        let fx = (sx - 0.5 - f64::from(src.rect.x0)).clamp(0.0, (sw - 1) as f64);
+        let fy = (sy - 0.5 - f64::from(src.rect.y0)).clamp(0.0, (sh - 1) as f64);
+        if !(fx.is_finite() && fy.is_finite()) {
+            continue;
+        }
+        let (x0, y0) = (fx.floor() as usize, fy.floor() as usize);
+        let (x1, y1) = ((x0 + 1).min(sw - 1), (y0 + 1).min(sh - 1));
+        let (tx, ty) = ((fx - x0 as f64) as f32, (fy - y0 as f64) as f32);
+        for (c, d) in dst.iter_mut().enumerate() {
+            let top = px(x0, y0, c) * (1.0 - tx) + px(x1, y0, c) * tx;
+            let bottom = px(x0, y1, c) * (1.0 - tx) + px(x1, y1, c) * tx;
+            *d = top * (1.0 - ty) + bottom * ty;
+        }
+    }
+    out
+}
+
+/// The selection's shape as it lands over `rect`: `cov` (coverage over `area`) sampled through
+/// `inv` (destination → source), nearest, set wherever it is above zero (as [`mask`]).
+fn landed_mask(cov: &[f32], area: Rect, inv: &Homography, rect: Rect) -> Vec<bool> {
+    let w = rect.width() as usize;
+    (0..w * rect.height() as usize)
+        .map(|i| {
+            let (qx, qy) = (rect.x0 + (i % w) as i32, rect.y0 + (i / w) as i32);
+            let (sx, sy) = inv.apply(f64::from(qx) + 0.5, f64::from(qy) + 0.5);
+            let (x, y) = (sx.floor(), sy.floor());
+            if !(f64::from(area.x0)..f64::from(area.x1)).contains(&x) || !(f64::from(area.y0)..f64::from(area.y1)).contains(&y) {
+                return false;
+            }
+            let j = (y as i32 - area.y0) as usize * area.width() as usize + (x as i32 - area.x0) as usize;
+            cov.get(j).is_some_and(|c| *c > 0.0)
+        })
+        .collect()
 }
 
 fn plan(s: &Session, p: &Value) -> Result<Plan> {
@@ -106,15 +214,35 @@ fn plan(s: &Session, p: &Value) -> Result<Plan> {
     if pixels > MAX_PIXELS {
         return Err(bad(CMD, format!("the selection is too large to move ({pixels} pixels, at most {MAX_PIXELS})")));
     }
-    if (dx, dy) == (0, 0) {
-        return Err(bad(CMD, "drag the selection to where the content should go"));
-    }
-    // Content dropped beyond the edge would be lost: keep it on the canvas, as the Patch Tool does.
-    if !canvas.contains_rect(&area.translate(dx, dy)) {
-        return Err(bad(CMD, "the moved selection must stay inside the canvas"));
-    }
+    let map = placement(p, area, (dx, dy))?;
+    let dest = match &map {
+        None => {
+            if (dx, dy) == (0, 0) {
+                return Err(bad(CMD, "drag the selection to where the content should go"));
+            }
+            // Content dropped beyond the edge would be lost: keep it on the canvas, as the Patch
+            // Tool does.
+            let dest = area.translate(dx, dy);
+            if !canvas.contains_rect(&dest) {
+                return Err(bad(CMD, "the moved selection must stay inside the canvas"));
+            }
+            dest
+        }
+        Some(h) => {
+            let landed = mapped_bounds(h, area);
+            let pixels = u64::from(landed.width()) * u64::from(landed.height());
+            if pixels > MAX_PIXELS {
+                return Err(bad(CMD, format!("the transformed selection is too large to move ({pixels} pixels, at most {MAX_PIXELS})")));
+            }
+            let dest = landed.intersect(&canvas);
+            if dest.is_empty() {
+                return Err(bad(CMD, "the transformed selection must land on the canvas"));
+            }
+            dest
+        }
+    };
     let all_layers = flag(p, "sampleAllLayers", false) && targets_pixels(p);
-    Ok(Plan { target: Target { id, all_layers }, canvas, area, offset: (dx, dy), mode, structure, color })
+    Ok(Plan { target: Target { id, all_layers }, canvas, area, offset: (dx, dy), map, dest, mode, structure, color })
 }
 
 /// Width in pixels of the edge band re-synthesised at the new place, for Structure 1..7 and content
@@ -288,20 +416,38 @@ pub(super) fn land(
     replace(doc, t, p, &buf, selected)
 }
 
-/// The new target surface and the rectangle it changed: the content pasted at the offset, then
-/// (`move`) its old place filled. Works on `doc`, a copy of the document.
-fn run_move(doc: &mut Document, sel: &Surface, plan: &Plan, p: &Value, ctx: &crate::jobs::JobCtx, label: &str) -> Result<(Surface, Rect)> {
+/// The new target surface, the rectangle it changed and (Transform On Drop) the transformed
+/// selection: the content pasted at the offset, then (`move`) its old place filled. Works on `doc`,
+/// a copy of the document.
+fn run_move(doc: &mut Document, sel: &Surface, plan: &Plan, p: &Value, ctx: &crate::jobs::JobCtx, label: &str) -> Result<(Surface, Rect, Option<Surface>)> {
     let (dx, dy) = plan.offset;
     let opts = fill_options();
     let split = if plan.mode == Mode::Move { 0.4 } else { 1.0 };
     let cancelled = |_| EngineError::Cancelled;
+    let inv = match &plan.map {
+        Some(h) => Some(h.inverse().ok_or_else(|| bad(CMD, "the transform collapses the selection"))?),
+        None => None,
+    };
+    // The selection's coverage over the area, which the transformed shape is sampled from.
+    let cov = if inv.is_some() { coverage(sel, plan.area) } else { Vec::new() };
 
     // 1. The content at its new place: the content with its original surroundings laid over the
     // window there; never sampling the content's old place.
-    let win = window(plan.area.translate(dx, dy), plan.canvas);
-    let mut content = read(doc, plan.target, p, win.translate(-dx, -dy))?;
-    content.rect = win;
-    let moved = mask(sel, win.translate(-dx, -dy));
+    let win = window(plan.dest, plan.canvas);
+    let (content, moved) = match &inv {
+        None => {
+            let mut content = read(doc, plan.target, p, win.translate(-dx, -dy))?;
+            content.rect = win;
+            (content, mask(sel, win.translate(-dx, -dy)))
+        }
+        Some(inv) => {
+            // Only the content and a ring around it (the colour fit's reference) matter: read
+            // the source behind that, a few pixels past the area, and resample it.
+            let src = mapped_bounds(inv, plan.dest.inflate(8)).intersect(&plan.area.inflate(MAX_MARGIN)).intersect(&plan.canvas);
+            let src = if src.is_empty() { plan.area } else { src };
+            (resample(&read(doc, plan.target, p, src)?, inv, win), landed_mask(&cov, plan.area, inv, win))
+        }
+    };
     let old_place = mask(sel, win);
     let mut damage = land(doc, plan.target, p, win, &moved, &content, &old_place, plan.structure, plan.color, (0.0, split), ctx, label)?;
 
@@ -311,7 +457,10 @@ fn run_move(doc: &mut Document, sel: &Surface, plan: &Plan, p: &Value, ctx: &cra
         let win = window(plan.area, plan.canvas);
         let (w, h) = (win.width() as usize, win.height() as usize);
         let img = read(doc, plan.target, p, win)?;
-        let landed = mask(sel, win.translate(-dx, -dy));
+        let landed = match &inv {
+            None => mask(sel, win.translate(-dx, -dy)),
+            Some(inv) => landed_mask(&cov, plan.area, inv, win),
+        };
         let hole: Vec<bool> = mask(sel, win).iter().zip(&landed).map(|(s, l)| *s && !*l).collect();
         if hole.iter().any(|h| *h) {
             let allowed: Vec<bool> = landed.iter().map(|l| !*l).collect();
@@ -320,7 +469,12 @@ fn run_move(doc: &mut Document, sel: &Surface, plan: &Plan, p: &Value, ctx: &cra
         }
     }
     let surf = crate::channel_cmds::target_surface(doc, plan.target.id, p)?.0.clone();
-    Ok((surf, damage))
+    // The selection follows the transformed content, as Select › Transform Selection moves it.
+    let moved_sel = match &plan.map {
+        Some(h) => Some(crate::transform_cmds::warp_gray(sel, h, Interp::Bilinear)?),
+        None => None,
+    };
+    Ok((surf, damage, moved_sel))
 }
 
 pub(super) fn content_aware_move(s: &mut Session, p: &Value) -> Result<Value> {
@@ -342,12 +496,14 @@ pub(super) fn content_aware_move(s: &mut Session, p: &Value) -> Result<Value> {
                 run_move(&mut work, sel, &plan, &p, ctx, label)
             }
         },
-        move |s, (surf, damage)| {
+        move |s, (surf, damage, moved_sel)| {
             let (dx, dy) = plan.offset;
             s.edit(label, |doc, _| {
                 *crate::channel_cmds::target_surface(doc, plan.target.id, &p)?.0 = surf;
                 // The selection follows the content, ready for another drag.
-                if let Some(sel) = doc.selection.as_ref() {
+                if let Some(moved) = moved_sel {
+                    doc.selection = Some(moved).filter(|s| !s.content_bounds().is_empty());
+                } else if let Some(sel) = doc.selection.as_ref() {
                     doc.selection = Some(crate::layer_multi_cmds::shift_surface(sel, dx, dy));
                 }
                 Ok(())
@@ -356,7 +512,11 @@ pub(super) fn content_aware_move(s: &mut Session, p: &Value) -> Result<Value> {
                 st.last_damage = Some(damage);
             }
             let mode = if plan.mode == Mode::Move { "move" } else { "extend" };
-            Ok(json!({ "damage": damage_json(damage), "offset": [dx, dy], "mode": mode }))
+            let mut out = json!({ "damage": damage_json(damage), "offset": [dx, dy], "mode": mode });
+            if plan.map.is_some() {
+                out["transformed"] = json!(true);
+            }
+            Ok(out)
         },
     )
 }

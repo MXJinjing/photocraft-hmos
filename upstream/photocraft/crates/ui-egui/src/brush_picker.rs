@@ -76,6 +76,16 @@ impl Pick {
     }
 }
 
+pub(crate) fn picker_id() -> egui::Id {
+    egui::Id::new("canvas-brush-picker")
+}
+
+/// All opening paths protect the same frame, including the control channel and options bar.
+pub(crate) fn open(ui: &mut crate::state::UiState, ctx: &egui::Context, at: [f32; 2]) {
+    ui.brush_picker = Some(at);
+    crate::canvas_popup::mark_open(ctx, picker_id());
+}
+
 /// The options-bar brush chip that shows and hides the picker. A press on it isn't an outside
 /// press that closes the picker: the chip's click toggles it.
 pub fn chip_id() -> egui::Id {
@@ -180,7 +190,8 @@ pub fn open_settings(app: &mut PhotocraftApp, ctx: &egui::Context) {
 /// (Photoshop's "Toggle the Brush Settings panel"). It runs Window › Brush Settings (F5).
 pub fn settings_toggle(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let on = app.ui.panels.brush_settings;
-    if named(icons::button(ui, "sliders-horizontal", 24.0, on, "Toggle the Brush Settings panel  (F5)"), "Toggle the Brush Settings panel").clicked()
+    let tooltip = "Toggle the Brush Settings panel  (F5)";
+    if named(icons::button(ui, "sliders-horizontal", 24.0, on, tl!(tooltip)), "Toggle the Brush Settings panel").clicked()
         && let Err(e) = crate::menus::invoke(app, ui.ctx(), "window.panel.brushSettings", json!({}))
     {
         app.ui.status = e;
@@ -189,7 +200,7 @@ pub fn settings_toggle(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
 
 /// An icon button's accessible name (icon buttons have only a tooltip).
 pub(crate) fn named(resp: egui::Response, label: &str) -> egui::Response {
-    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label));
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tl!(label)));
     resp
 }
 
@@ -253,19 +264,15 @@ pub fn body(
     ui.horizontal(|ui| {
         icons::paint(ui, egui::Rect::from_min_size(ui.cursor().min + vec2(0.0, 3.0), vec2(16.0, 16.0)), "search", 14.0, t.text_faint);
         ui.add_space(20.0);
-        ui.add(
-            egui::TextEdit::singleline(&mut st.filter)
-                .hint_text(tl!("Search Brushes"))
-                .desired_width((size.x - 118.0).max(60.0))
-                .id_salt("brush-picker-search"),
-        );
+        widgets::text_field(ui, ui.id().with("brush-picker-search"), &mut st.filter, tl!("Search Brushes"), (size.x - 118.0).max(60.0), false);
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             gear_menu(ui, current, presets, st, &mut picks);
-            if named(icons::button(ui, "square-plus", 24.0, false, "Create new brush preset from the current settings"), "New Brush Preset").clicked() {
+            let new_tip = "Create new brush preset from the current settings";
+            let settings_tip = "Brush Settings…  (F5): every option of this brush";
+            if named(icons::button(ui, "square-plus", 24.0, false, tl!(new_tip)), "New Brush Preset").clicked() {
                 picks.push(Pick::NewPreset);
             }
-            if named(icons::button(ui, "sliders-horizontal", 24.0, false, "Brush Settings…  (F5): every option of this brush"), "Brush Settings…").clicked()
-            {
+            if named(icons::button(ui, "sliders-horizontal", 24.0, false, tl!(settings_tip)), "Brush Settings…").clicked() {
                 picks.push(Pick::OpenSettings);
             }
         });

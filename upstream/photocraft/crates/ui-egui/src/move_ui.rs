@@ -114,6 +114,7 @@ pub(crate) fn display_doc(app: &mut PhotocraftApp, idx: usize) -> Option<(Arc<Do
         app.move_preview = None;
         return None;
     };
+    let mask_target = app.layer_mask_targeted();
     let st = app.session.documents().get(idx)?;
     let (doc_id, revision, doc) = (st.doc.id, st.revision, st.doc.clone());
     let fresh = app.move_preview.as_ref().is_some_and(|p| p.doc == doc_id && p.revision == revision);
@@ -134,7 +135,7 @@ pub(crate) fn display_doc(app: &mut PhotocraftApp, idx: usize) -> Option<(Arc<Do
     }
     if p.offsets.last() != Some(&offset) {
         let t0 = crate::gpu_canvas::now_ms();
-        match photocraft_engine::layer_multi_cmds::moved(&doc, &p.ids, offset.0, offset.1) {
+        match photocraft_engine::layer_multi_cmds::moved_target(&doc, &p.ids, offset.0, offset.1, mask_target) {
             Ok(d) => {
                 // Duotone documents display through their inks.
                 let d = photocraft_engine::mode_cmds::display_document(&d).unwrap_or(d);
@@ -296,6 +297,38 @@ mod tests {
         // From +10 to +20 the strip x 0..10 shows pixels that were off the canvas a frame ago.
         let r = super::damage(&app, st.doc.id, st.revision, keys[0], keys[1]).unwrap();
         assert_eq!(r, Rect::new(0, 0, 64, 64));
+    }
+
+    /// Dragging with an unlinked mask targeted moves the mask alone, shown live and committed;
+    /// with the mask linked (or the pixels targeted) the layer moves.
+    #[test]
+    fn dragging_with_an_unlinked_mask_targeted_moves_the_mask_alone() {
+        for (linked, mask_target) in [(false, true), (false, false), (true, true)] {
+            let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+            app.session.execute("file.new", json!({"width": 64, "height": 64, "background": "transparent"})).unwrap();
+            app.sync_views();
+            app.session.execute("layer.new.layer", json!({})).unwrap();
+            app.session.execute("select.rect", json!({"x": 8, "y": 8, "width": 16, "height": 16})).unwrap();
+            app.session.execute("edit.fill", json!({"color": "#ff0000"})).unwrap();
+            app.session.execute("select.deselect", json!({})).unwrap();
+            app.session.execute("layer.layerMask.revealAll", json!({})).unwrap();
+            app.session.execute("layer.layerMask.linked", json!({"linked": linked})).unwrap();
+            app.ui.mask_target = mask_target;
+            app.ui.tool = Tool::Move;
+            app.ui.extras.snap = false;
+            app.ui.view.show.smart_guides = false;
+            let m = egui::Modifiers::NONE;
+            crate::canvas::tool_event(&mut app, ToolEvent::Down { x: 16.0, y: 16.0, pressure: 1.0 }, m);
+            crate::canvas::tool_event(&mut app, ToolEvent::Move { x: 36.0, y: 16.0, pressure: 1.0 }, m);
+            let shown = super::display_doc(&mut app, 0).unwrap().0;
+            let id = app.session.active().unwrap().active_layer.unwrap();
+            let layer_moved = |d: &photocraft_doc::Document| d.layer(id).and_then(|l| l.surface()).is_some_and(|s| s.pixel(28, 16)[3] > 0.5);
+            let alone = !linked && mask_target;
+            assert_eq!(layer_moved(&shown), !alone, "preview, linked {linked} mask target {mask_target}");
+            crate::canvas::tool_event(&mut app, ToolEvent::Up { x: 36.0, y: 16.0 }, m);
+            let d = &app.session.active().unwrap().doc;
+            assert_eq!(layer_moved(d), !alone, "commit, linked {linked} mask target {mask_target}");
+        }
     }
 
     /// Mid-drag on a painted layer: is the layer shown at the pointer?

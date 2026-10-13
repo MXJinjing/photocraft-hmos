@@ -153,7 +153,7 @@ fn tiled_filters_match_scalar_at_all_depths_with_soft_selection() {
                             FilterParams::ColorHalftone { max_radius, angles } => reference::halftone(&image, bounds, &ctx, max_radius, angles),
                             _ => Vec::new(),
                         };
-                        crate::mix_selection(&mut expected_data, bounds, &selection, &image);
+                        crate::mix_selection(&mut expected_data, bounds, &selection, &image, ctx.alpha);
                         let mut expected = surface.clone();
                         expected.write_region(bounds, &expected_data);
                         for tile in [1, 7, 17, 256] {
