@@ -1,7 +1,7 @@
 // HarmonyOS implements the shared contract; SDK names never enter the canvas action layer.
 import { BusinessError } from '@kit.BasicServicesKit';
 import { inputDevice } from '@kit.InputKit';
-import { connection, hid } from '@kit.ConnectivityKit';
+import { ble, connection, hid } from '@kit.ConnectivityKit';
 import { stylusInteraction } from '@kit.Penkit';
 import { StylusAction, StylusAdapter, StylusPacket } from './StylusProtocol';
 
@@ -15,6 +15,8 @@ export class HarmonyStylusAdapter implements StylusAdapter {
   private deviceName: string | undefined = undefined;
   private batteryPercent: number | undefined = undefined;
   private scan: number = 0;
+  private deviceRevision: number = 0;
+  private infoPending: boolean = false;
   private accessRequested: boolean = false;
   private accessGranted: boolean = false;
   private requestInfoAccess: (() => Promise<boolean>) | undefined;
@@ -51,6 +53,7 @@ export class HarmonyStylusAdapter implements StylusAdapter {
     this.connectedKnown = false;
     this.accessRequested = false;
     this.accessGranted = false;
+    this.infoPending = false;
     this.deviceId = -1;
     this.deviceName = undefined;
     this.batteryPercent = undefined;
@@ -144,10 +147,11 @@ export class HarmonyStylusAdapter implements StylusAdapter {
         return;
       }
       let id: number = -1;
+      let penCount: number = 0;
       for (let i = 0; i < ids.length; i++) {
         if (this.isStylusDevice(ids[i])) {
-          id = ids[i];
-          break;
+          if (id < 0) { id = ids[i]; }
+          penCount++;
         }
       }
       let info: inputDevice.InputDeviceData | undefined = undefined;
@@ -157,6 +161,7 @@ export class HarmonyStylusAdapter implements StylusAdapter {
       let name: string | undefined = info?.name.trim() || undefined;
       if (id !== this.deviceId) {
         this.deviceId = id;
+        this.deviceRevision++;
         this.publish(id >= 0, name, undefined);
       } else if (!this.accessGranted) {
         this.publish(id >= 0, name, undefined);
@@ -171,8 +176,8 @@ export class HarmonyStylusAdapter implements StylusAdapter {
           this.accessGranted = granted;
           if (granted) { this.refreshConnection(); }
         }).catch((error: BusinessError) => this.reportError('Bluetooth permission', error));
-      } else if (this.accessGranted && info !== undefined) {
-        this.refreshDeviceInfo(info, generation, scan);
+      } else if (this.accessGranted && info !== undefined && !this.infoPending) {
+        this.refreshDeviceInfo(info, generation, this.deviceRevision, penCount);
       }
     }).catch((error: BusinessError) => this.reportError('device list', error));
   }
@@ -187,32 +192,48 @@ export class HarmonyStylusAdapter implements StylusAdapter {
     }
   }
 
-  private async refreshDeviceInfo(info: inputDevice.InputDeviceData, generation: number, scan: number): Promise<void> {
+  private async refreshDeviceInfo(info: inputDevice.InputDeviceData, generation: number, revision: number, penCount: number): Promise<void> {
+    this.infoPending = true;
     let name: string | undefined = info.name.trim() || undefined;
     let battery: number | undefined = undefined;
+    let ids: Array<string> = [];
+    // HID and BLE are independent: a missing HID profile must not disable BLE pens.
+    try { ids = hid.createHidHostProfile().getConnectedDevices(); } catch (error) { /* HID unsupported or off. */ }
     try {
-      // Only connected HID devices are candidates: paired, disconnected pens must not supply stale data.
-      let ids = hid.createHidHostProfile().getConnectedDevices();
-      let matches: Array<string> = [];
-      for (let id of ids) {
-        let remoteName = connection.getRemoteDeviceName(id);
-        if (id.toLowerCase() === info.uniq?.toLowerCase() || id.toLowerCase() === info.phys?.toLowerCase() ||
-          (name !== undefined && remoteName.toLowerCase() === name.toLowerCase())) {
-          matches.push(id);
-        }
+      for (let id of ble.getConnectedBLEDevices()) {
+        if (!ids.some((existing: string): boolean => existing.toLowerCase() === id.toLowerCase())) { ids.push(id); }
       }
-      // Ambiguous matches never guess which pen owns the battery.
-      if (matches.length === 1) {
-        let id = matches[0];
-        name = connection.getRemoteDeviceName(id).trim() || name;
+    } catch (error) { /* BLE unsupported or off. */ }
+    let addressMatches: Array<string> = [];
+    let nameMatches: Array<string> = [];
+    let penMatches: Array<string> = [];
+    for (let id of ids) {
+      if (id.toLowerCase() === info.uniq?.trim().toLowerCase() || id.toLowerCase() === info.phys?.trim().toLowerCase()) {
+        addressMatches.push(id);
+      }
+      try {
+        let remoteName = connection.getRemoteDeviceName(id).trim().toLowerCase();
+        if (name !== undefined && remoteName === name.toLowerCase()) { nameMatches.push(id); }
+        if (remoteName.includes('pencil') || remoteName.includes('stylus') || remoteName.includes('handwriting') ||
+          remoteName.includes('wacom') || remoteName.includes('手写笔')) { penMatches.push(id); }
+      } catch (error) { /* One device without a name must not hide other pens. */ }
+    }
+    // Prefer device identity. InputKit often supplies a driver name rather than the Bluetooth name.
+    // The fallback requires exactly one input pen and one connected, recognisable remote pen.
+    let matches = addressMatches.length > 0 ? addressMatches : nameMatches.length > 0 ? nameMatches :
+      penCount === 1 ? penMatches : [];
+    if (matches.length === 1) {
+      let id = matches[0];
+      try { name = connection.getRemoteDeviceName(id).trim() || name; } catch (error) { /* Keep InputKit name. */ }
+      try {
         let value = (await connection.getRemoteDeviceBatteryInfo(id)).batteryLevel;
         if (Number.isInteger(value) && value >= 0 && value <= 100) { battery = value; }
-      }
-    } catch (error) {
-      // Bluetooth off, denied or unsupported: keep InputKit's name and show unavailable battery.
+      } catch (error) { this.reportError('battery read', error as BusinessError); }
     }
-    if (this.active && generation === this.generation && scan === this.scan) {
-      this.publish(true, name, battery);
+    if (this.active && generation === this.generation) {
+      this.infoPending = false;
+      // A one-second poll must not discard a slower battery read. Only device/lifetime changes invalidate it.
+      if (revision === this.deviceRevision) { this.publish(true, name, battery); }
     }
   }
 

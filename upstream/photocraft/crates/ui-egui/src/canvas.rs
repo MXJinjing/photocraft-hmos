@@ -14,7 +14,7 @@ use crate::state::{Tool, View};
 
 /// Largest texture side we upload; bigger documents display downsampled until the GPU path lands.
 pub const MAX_TEXTURE: u32 = 4096;
-const PEN_HOVER_TIP_OPACITY: f32 = 0.5;
+const PEN_HOVER_TIP_OPACITY: f32 = 0.3;
 
 pub(crate) struct ClonePreviewCache {
     key: String,
@@ -2872,9 +2872,23 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
     // The wheel also scrolls over the scrollbars drawn on top of the canvas (last frame's hover).
     let bars_id = egui::Id::new(("pc-canvas-bars-hover", idx));
     let over_bars = ctx.data(|d| d.get_temp::<bool>(bars_id)).unwrap_or(false);
+    // Pen pressure/tilt for this frame's tool events (mouse = 1.0), unless Preferences › Tools ›
+    // Use Tablet Pressure is off; the pen's eraser end selects the Eraser.
+    app.stylus.use_pressure = app.session.prefs().tools.use_tablet_pressure;
+    let curve = app.session.prefs().tools.pressure_curve.clone();
+    app.stylus.set_pressure_curve(&curve);
+    app.stylus.update_for_frame(ui.ctx().cumulative_frame_nr(), &ui.input(|i| i.events.clone()));
+    crate::stylus::Stylus::sync_eraser_tool(app);
     let touch_eligible = crate::touch_nav::eligible(&ctx, &response, under_dialog);
-    let pinching = touch_eligible && crate::touch_nav::touch_count(&ctx) >= 2;
-    let wheel_over_canvas = !menu_input && (!ctx.input(|i| i.any_touches()) || touch_eligible) && (response.hovered() || free_hover || over_bars || pinching);
+    // Decide contact ownership before applying touch-derived zoom/rotation. A later finger
+    // cannot transform the view after the first finger has begun using its tool.
+    let touch_nav = crate::touch_nav::update(app, &ctx, touch_eligible);
+    let touch_tools_suppressed = crate::touch_nav::tools_suppressed(&ctx);
+    let deferred_touch_press = crate::touch_nav::take_deferred_press(&ctx);
+    let pinching = touch_nav && crate::touch_nav::touch_count(&ctx) >= 2;
+    let wheel_over_canvas = !menu_input
+        && (!ctx.input(|i| i.any_touches()) || (touch_eligible && !crate::touch_nav::tool_owned(&ctx)))
+        && (response.hovered() || free_hover || over_bars || pinching);
     if wheel_over_canvas {
         let pointer = ui.input(|i| i.multi_touch().map(|m| m.center_pos).or_else(|| i.pointer.hover_pos())).or(response.interact_pointer_pos());
         match (wheel, pointer) {
@@ -2890,7 +2904,9 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
             }
             (Some(crate::wheel_nav::Wheel::Zoom(f)), None) if pinching => {
                 let nz = crate::zoom_levels::clamp(view.zoom * f, view.doc_size);
-                zoom_about(&mut view, &xf, rect.center(), nz, false, ppp);
+                if nz != view.zoom {
+                    zoom_about(&mut view, &xf, rect.center(), nz, false, ppp);
+                }
             }
             (Some(crate::wheel_nav::Wheel::Pan(scroll)), _) => {
                 let d = xf.unmap_vec(scroll) / (view.zoom / ppp);
@@ -2907,21 +2923,14 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
             }
         }
     }
-    // Touchscreen pinch still shares navigation with its centroid pan below. Mouse wheel and
-    // trackpad events own the pointer instead, so their compatibility drags cannot paint.
+    // Touchscreen pinch still shares navigation with its centroid pan below. Wheel/trackpad
+    // navigation suppresses new compatibility presses while existing tools keep their input.
     let wheel_navigation = wheel_over_canvas
         && wheel.is_some()
         && ctx.input(|i| !i.any_touches() || i.events.iter().any(|e| matches!(e, egui::Event::MouseWheel { .. } | egui::Event::Zoom(_))));
     let wheel_input = primary && crate::wheel_nav::blocks_tool_input(&ctx, wheel_navigation);
     let navigation_input = menu_input || wheel_input;
 
-    // Pen pressure/tilt for this frame's tool events (mouse = 1.0), unless Preferences › Tools ›
-    // Use Tablet Pressure is off; the pen's eraser end selects the Eraser.
-    app.stylus.use_pressure = app.session.prefs().tools.use_tablet_pressure;
-    let curve = app.session.prefs().tools.pressure_curve.clone();
-    app.stylus.set_pressure_curve(&curve);
-    app.stylus.update_for_frame(ui.ctx().cumulative_frame_nr(), &ui.input(|i| i.events.clone()));
-    crate::stylus::Stylus::sync_eraser_tool(app);
     // A Magnetic Lasso border left behind by a tool or document switch is dropped.
     crate::magnetic_lasso_ui::frame(app);
     // A Properties Levels/Curves eyedropper left behind by a tool or layer switch is dropped.
@@ -2961,18 +2970,7 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
         Some(crate::hold_keys::Temporary::ZoomIn) => false,
         _ => alt || sticky_alt,
     };
-    // Two-or-more fingers: only pan/pinch-zoom the canvas; never start or commit a tool.
-    let touch_nav = if navigation_input {
-        app.touch_nav = false;
-        crate::touch_nav::abort_tools(app, &ctx);
-        false
-    } else {
-        crate::touch_nav::update(app, &ctx, touch_eligible)
-    };
-    let touch_tools_suppressed = crate::touch_nav::tools_suppressed(&ctx);
-    let deferred_touch_press = crate::touch_nav::take_deferred_press(&ctx);
-
-    if under_dialog && !navigation_input {
+    if under_dialog && !navigation_input && !touch_nav && !touch_tools_suppressed {
         // With a colour dialog picker armed the image is its eyedropper, whatever the tool; Space
         // and the middle button still pan. Curves uses the same merged-composite sampler as the
         // Color Picker, never the reduced adjustment preview.
@@ -3049,13 +3047,21 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
         }
     }
     if touch_nav {
-        ctx.set_cursor_icon(egui::CursorIcon::Grabbing);
-        let d = crate::touch_nav::pan_delta(&ctx).unwrap_or_else(|| if response.dragged() { response.drag_delta() } else { Vec2::ZERO });
-        let d = xf.unmap_vec(d) / (view.zoom / ppp);
-        view.center[0] -= d.x;
-        view.center[1] -= d.y;
+        ctx.set_cursor_icon(egui::CursorIcon::None);
+        let delta = crate::touch_nav::pan_delta(&ctx).unwrap_or_else(|| {
+            if app.session.prefs().tools.block_finger_input && app.stylus.is_finger() && crate::touch_nav::touch_count(&ctx) == 1 {
+                ui.input(|i| i.pointer.delta())
+            } else {
+                Vec2::ZERO
+            }
+        });
+        let d = xf.unmap_vec(delta) / (view.zoom / ppp);
+        if d.is_finite() {
+            view.center[0] -= d.x;
+            view.center[1] -= d.y;
+        }
     } else if touch_tools_suppressed {
-        // Pinch grace: hold off tool presses so a staggered second finger cannot flash ink.
+        // Cancelled touch releases cannot activate tools.
     } else if !navigation_input && hand_pan && response.dragged() && !stroke_dismissal {
         let d = xf.unmap_vec(response.drag_delta()) / (view.zoom / ppp);
         view.center[0] -= d.x;
@@ -3634,7 +3640,7 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
                 }
                 Tool::Move => egui::CursorIcon::Move,
                 // Dragging is handled with the pan itself, above.
-                Tool::Hand => crate::tool_cursor::hand(ui.ctx(), false),
+                Tool::Hand => crate::tool_cursor::hand(ui.ctx(), !navigation_input && hand_pan && response.dragged()),
                 Tool::RotateView => crate::rotate_view::cursor(response.dragged()),
                 Tool::Zoom => {
                     if zoom_out(alt) {
@@ -5247,6 +5253,24 @@ pub(crate) fn finish_gesture(app: &mut PhotocraftApp, d: Drag) {
         }
         _ => {}
     }
+}
+
+/// Finish a live painting gesture when a second touch promotes it to navigation.
+///
+/// The touch state machine owns the transition, so there is no PointerButton release to drive the
+/// normal canvas path. Commit the points already received, then let touch navigation clear the
+/// gesture and consume all subsequent contacts.
+pub(crate) fn finish_touch_stroke(app: &mut PhotocraftApp) -> bool {
+    let Some(tool) = app.drag.as_ref().map(|d| d.tool) else { return false };
+    if !strokes_live(tool) {
+        return false;
+    }
+    let Some(mut d) = app.drag.take() else { return false };
+    d.track(d.live);
+    finish_gesture(app, d);
+    crate::move_mods::finish(app);
+    app.press_stroke = false;
+    true
 }
 
 /// Extra OS windows showing documents (multi-window / multi-monitor).

@@ -36,6 +36,6 @@ for target in $TARGETS; do
       "PHOTOCRAFT_HAP_VERSION=$HAP_VERSION" \
       cargo build --locked --manifest-path "$ROOT/native/rust/Cargo.toml" --target "$target" "${ARGS[@]}"
 done
-# Cargo is finished: clear its host debug cache, retaining ARM64 build outputs.
-# This also covers dev.sh, offline packaging and CI, which use this script.
-python3 "$ROOT/scripts/clean_rust_debug.py" || echo 'Warning: host debug cache cleanup failed' >&2
+# Cargo is finished: clear native and upstream Rust intermediates, retaining the
+# ARM64 libraries required by CMake/HAP. dev.sh, offline packaging and CI share this step.
+python3 "$ROOT/scripts/clean_rust_debug.py" || echo 'Warning: Rust cache cleanup failed' >&2

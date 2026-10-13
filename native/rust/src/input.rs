@@ -7,12 +7,6 @@ use std::time::{Duration, Instant};
 /// After multi-touch ends, ignore Primary from a leftover finger re-reported across an
 /// empty platform snapshot. Short enough that a rapid second pinch is not swallowed.
 const LEFTOVER_GUARD: Duration = Duration::from_millis(100);
-/// Wait this long (or a small move) before a lone finger becomes Primary, so a
-/// staggered two-finger pinch never deposits ink at the first press position.
-const PRIMARY_DEFER: Duration = Duration::from_millis(50);
-/// Logical points of movement that promote a deferred finger to Primary immediately.
-const PRIMARY_MOVE_SLACK_SQ: f32 = 36.0; // 6px
-
 #[derive(Deserialize, Default)]
 pub struct Contact {
     pub id: u64,
@@ -100,20 +94,11 @@ impl PreviewResume {
     }
 }
 
-/// Lone finger waiting to become Primary (or be cancelled by a second finger).
-struct PendingTouch {
-    id: u64,
-    origin: Pos2,
-    at: Instant,
-}
-
 #[derive(Default)]
 pub struct State {
     pressed: Option<PointerButton>,
     touches: BTreeMap<u64, Pos2>,
     touch_pointer: Option<u64>,
-    /// First finger down; Primary is deferred until move/timeout or cleared by multi-touch.
-    pending_touch: Option<PendingTouch>,
     pen_down: bool,
     hover_origin: Option<Pos2>,
     last_hover: Option<Pos2>,
@@ -136,19 +121,14 @@ impl State {
     fn finger_owns_pointer(&self) -> bool {
         !self.touches.is_empty()
             || self.touch_nav_active
-            || self.pending_touch.is_some()
             || self.ignore_fingers
             || self
                 .leftover_guard_until
                 .is_some_and(|until| Instant::now() < until)
     }
 
-
-    /// Promote, defer, or suppress Primary for a lone finger.
-    ///
-    /// Multi-touch / leftover-guard / active nav never synthesize Primary. A fresh lone
-    /// finger is deferred briefly so a staggered second finger can start pinch/pan without
-    /// inking at the first press position; a move or timeout then promotes it.
+    /// Synthesize the first contact immediately. The shared canvas state machine owns
+    /// provisional strokes and the transition to multi-touch navigation.
     fn drive_single_finger_primary(
         &mut self,
         next: &BTreeMap<u64, Pos2>,
@@ -156,49 +136,18 @@ impl State {
         leftover_guard: bool,
         events: &mut Vec<Event>,
     ) {
-        if self.touch_pointer.is_some() || self.pressed.is_some() {
-            self.pending_touch = None;
+        if !first
+            || self.touch_pointer.is_some()
+            || self.pressed.is_some()
+            || self.touch_nav_active
+            || leftover_guard
+            || next.len() != 1
+        {
             return;
         }
-        // Remnant / nav: Touch events only — never Primary, and do not re-latch nav from
-        // leftover_guard alone (that previously extended the guard and swallowed re-pinches).
-        if self.touch_nav_active || leftover_guard {
-            self.pending_touch = None;
-            return;
-        }
-        if next.len() != 1 {
-            self.pending_touch = None;
-            return;
-        }
-        let (&id, &pos) = next.iter().next().unwrap();
-        if first {
-            self.pending_touch = Some(PendingTouch {
-                id,
-                origin: pos,
-                at: Instant::now(),
-            });
-            events.push(Event::PointerMoved(pos));
-            return;
-        }
-        let Some(pending) = self.pending_touch.as_ref() else {
+        let Some((&id, &pos)) = next.iter().next() else {
             return;
         };
-        if pending.id != id {
-            self.pending_touch = Some(PendingTouch {
-                id,
-                origin: pos,
-                at: Instant::now(),
-            });
-            events.push(Event::PointerMoved(pos));
-            return;
-        }
-        let moved = pending.origin.distance_sq(pos) > PRIMARY_MOVE_SLACK_SQ;
-        let settled = Instant::now() >= pending.at + PRIMARY_DEFER;
-        if !moved && !settled {
-            events.push(Event::PointerMoved(pos));
-            return;
-        }
-        self.pending_touch = None;
         self.touch_pointer = Some(id);
         self.pressed = Some(PointerButton::Primary);
         events.push(Event::PointerMoved(pos));
@@ -251,7 +200,6 @@ impl State {
             });
         }
         self.touch_pointer = None;
-        self.pending_touch = None;
     }
 
     /// Last finger-owned pointer position, if any.
@@ -294,7 +242,6 @@ impl State {
         self.ignore_fingers = false;
         self.touch_nav_active = false;
         self.leftover_guard_until = None;
-        self.pending_touch = None;
         self.axis_zoom = None;
         if let Some(button) = self.pressed.take() {
             events.push(Event::PointerButton {
@@ -395,7 +342,6 @@ impl State {
                 if multi {
                     self.touch_nav_active = true;
                     self.leftover_guard_until = None;
-                    self.pending_touch = None;
                 }
                 if multi && (self.touch_pointer.is_some() || self.pressed.is_some()) {
                     let anchor = self
@@ -443,27 +389,6 @@ impl State {
                     self.drive_single_finger_primary(&next, first, leftover_guard, events);
                 }
                 if next.is_empty() {
-                    // A deferred finger that lifts before promotion is a tap: synthesize a
-                    // press+release so UI clicks still work without waiting for the defer window.
-                    if let Some(pending) = self.pending_touch.take() {
-                        if self.touch_pointer.is_none() && self.pressed.is_none() {
-                            let pos = pending.origin;
-                            events.push(Event::PointerMoved(pos));
-                            events.push(Event::PointerButton {
-                                pos,
-                                button: PointerButton::Primary,
-                                pressed: true,
-                                modifiers: self.modifiers,
-                            });
-                            events.push(Event::PointerButton {
-                                pos,
-                                button: PointerButton::Primary,
-                                pressed: false,
-                                modifiers: self.modifiers,
-                            });
-                            events.push(Event::PointerGone);
-                        }
-                    }
                     if self.touch_nav_active {
                         // Catch a leftover finger re-reported right after the platform
                         // inserts an empty snapshot between multi-touch and the remnant.
