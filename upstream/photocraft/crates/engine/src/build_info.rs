@@ -13,6 +13,19 @@
 /// The workspace version, such as `0.1.0` or `0.2.0-rc.1`.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// The HarmonyOS package version embedded by the native HAP build.
+pub fn hap_version() -> Option<&'static str> {
+    option_env!("PHOTOCRAFT_HAP_VERSION").map(str::trim).filter(|s| !s.is_empty())
+}
+
+/// User-facing version lines for native package builds.
+pub fn version_lines() -> [String; 2] {
+    [
+        format!("Upstream PhotoCraft: {}", long_version()),
+        format!("HarmonyOS HAP: {}", hap_version().unwrap_or("unknown (not embedded)")),
+    ]
+}
+
 /// The full git commit this build was made from, when the build environment recorded it.
 pub fn git_sha() -> Option<&'static str> {
     option_env!("PHOTOCRAFT_BUILD_SHA").map(str::trim).filter(|s| !s.is_empty())

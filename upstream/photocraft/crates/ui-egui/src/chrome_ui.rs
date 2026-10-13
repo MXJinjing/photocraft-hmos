@@ -163,11 +163,12 @@ pub fn status_bar_pro(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     );
     let mut pct = app.ui.views[i].zoom * 100.0;
     let control_h = crate::panels::status_bar_heights(&t).1;
-    if widgets::compact_value_field(ui, &mut pct, crate::zoom_levels::percent_range(&app.ui.views[i]), "%", 64.0, control_h).changed() {
+let (zoom_response, zoom_rect) = widgets::compact_value_field_with_rect(ui, &mut pct, crate::zoom_levels::percent_range(&app.ui.views[i]), "%", 64.0, control_h);
+if zoom_response.changed() {
         app.ui.views[i].zoom = crate::zoom_levels::clamp(pct / 100.0, app.ui.views[i].doc_size);
         app.ui.views[i].fit_pending = false;
     }
-    crate::status_panel_controls::fit_button(app, ui);
+    crate::status_panel_controls::fit_button(app, ui, zoom_rect);
     ui.add_space(12.0);
     ui.label(RichText::new(tl!(&text)).color(t.text_dim).size(12.0));
     let (r, resp) = ui.allocate_exact_size(vec2(18.0, 18.0), Sense::click());
@@ -743,7 +744,6 @@ mod tests {
     #[test]
     fn pen_body_gestures_follow_the_stylus_menu_settings() {
         use crate::state::Tool;
-        let ctx = egui::Context::default();
         let mut app = crate::PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
         app.ui.tool = Tool::Brush;
         app.session.edit_prefs(|p| p.tools.stylus_long_press = StylusLongPress::ContextMenu);
@@ -753,16 +753,16 @@ mod tests {
         assert!(app.ui.brush_picker.is_none());
 
         app.session.edit_prefs(|p| p.tools.stylus_long_press = StylusLongPress::Off);
-        super::apply_pen_gesture(&mut app, &ctx, crate::stylus::PenGesture::LongPress, [8.0, 8.0]);
+        super::apply_pen_gesture(&mut app, &egui::Context::default(), crate::stylus::PenGesture::LongPress, [8.0, 8.0]);
         assert!(app.ui.brush_picker.is_none());
 
         app.session.edit_prefs(|p| p.tools.stylus_double_tap = StylusDoubleTap::Off);
-        super::apply_pen_gesture(&mut app, &ctx, crate::stylus::PenGesture::DoubleTap, [8.0, 8.0]);
+        super::apply_pen_gesture(&mut app, &egui::Context::default(), crate::stylus::PenGesture::DoubleTap, [8.0, 8.0]);
         assert_eq!(app.ui.tool, Tool::Brush);
         app.session.edit_prefs(|p| p.tools.stylus_double_tap = StylusDoubleTap::Eraser);
-        super::apply_pen_gesture(&mut app, &ctx, crate::stylus::PenGesture::DoubleTap, [8.0, 8.0]);
+        super::apply_pen_gesture(&mut app, &egui::Context::default(), crate::stylus::PenGesture::DoubleTap, [8.0, 8.0]);
         assert_eq!(app.ui.tool, Tool::Eraser);
-        super::apply_pen_gesture(&mut app, &ctx, crate::stylus::PenGesture::DoubleTap, [8.0, 8.0]);
+        super::apply_pen_gesture(&mut app, &egui::Context::default(), crate::stylus::PenGesture::DoubleTap, [8.0, 8.0]);
         assert_eq!(app.ui.tool, Tool::Brush);
     }
 

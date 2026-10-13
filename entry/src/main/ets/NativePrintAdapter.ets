@@ -3,7 +3,7 @@ import { print } from '@kit.BasicServicesKit';
 import { fileIo, fileUri } from '@kit.CoreFileKit';
 
 class PrintMetadata {
-  name: string = 'PhotoCraft';
+  name: string = 'PhotoCraft For HarmonyOS';
   copies: number = 1;
   printer: string = '';
 }
@@ -35,7 +35,7 @@ export class NativePrintAdapter {
     if (header[0] !== 37 || header[1] !== 80 || header[2] !== 68 || header[3] !== 70 || header[4] !== 45) {
       throw new Error('打印文件不是 PDF');
     }
-    let name = job.name.replace(/[\\/:*?"<>|]/g, '_').substring(0, 80) || 'PhotoCraft';
+    let name = job.name.replace(/[\\/:*?"<>|]/g, '_').substring(0, 80) || 'PhotoCraft For HarmonyOS';
     let path = `${this.context.cacheDir}/${name}-${Date.now()}-${this.sequence++}.pdf`;
     try {
       let file = await fileIo.open(path, fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.CREATE | fileIo.OpenMode.TRUNC);

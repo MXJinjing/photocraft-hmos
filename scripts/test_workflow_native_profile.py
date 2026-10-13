@@ -43,6 +43,8 @@ class NativeProfileTests(unittest.TestCase):
             with self.subTest(mode=mode, failed=failed), tempfile.TemporaryDirectory() as directory:
                 path = Path(directory)
                 (path / 'scripts').mkdir()
+                (path / 'AppScope').mkdir()
+                shutil.copyfile(ROOT / 'AppScope/app.json5', path / 'AppScope/app.json5')
                 shutil.copyfile(ROOT / 'scripts/build_native.sh', path / 'scripts/build_native.sh')
                 shutil.copyfile(ROOT / 'scripts/clean_rust_debug.py', path / 'scripts/clean_rust_debug.py')
                 debug = path / 'native/rust/target/debug'
@@ -68,7 +70,7 @@ class NativeProfileTests(unittest.TestCase):
                     (path / 'sysroot/lib/rustlib' / target).mkdir(parents=True)
                 for name, body in {
                     'rustc': '#!/bin/sh\nprintf "%s\\n" "$TEST_SYSROOT"\n',
-                    'cargo': '#!/bin/sh\n[ "$TEST_BUILD_FAIL" != 1 ] || exit 2\n[ -f "$TEST_DEBUG_ARTIFACT" ] || exit 1\nprintf "%s\\n" "$*" >> "$TEST_CARGO_LOG"\nprintf library > "$TEST_ARM64_LIBRARY"\n',
+                    'cargo': '#!/bin/sh\n[ "$PHOTOCRAFT_HAP_VERSION" = "$TEST_HAP_VERSION" ] || exit 3\n[ "$TEST_BUILD_FAIL" != 1 ] || exit 2\n[ -f "$TEST_DEBUG_ARTIFACT" ] || exit 1\nprintf "%s\\n" "$*" >> "$TEST_CARGO_LOG"\nprintf library > "$TEST_ARM64_LIBRARY"\n',
                 }.items():
                     (bin_dir / name).write_text(body)
                     (bin_dir / name).chmod(0o755)
@@ -76,6 +78,7 @@ class NativeProfileTests(unittest.TestCase):
                 env = dict(os.environ, PATH=str(bin_dir) + os.pathsep + os.environ['PATH'],
                            PHOTOCRAFT_NATIVE_SDK=str(sdk), PHOTOCRAFT_RUST_PROFILE=mode,
                            TEST_SYSROOT=str(path / 'sysroot'), TEST_CARGO_LOG=str(log),
+                           TEST_HAP_VERSION=json.loads((path / 'AppScope/app.json5').read_text())['app']['versionName'],
                            TEST_DEBUG_ARTIFACT=str(debug / 'deps/stale.rlib'),
                            TEST_ARM64_LIBRARY=str(library), TEST_BUILD_FAIL='1' if failed else '0')
                 env.pop('PHOTOCRAFT_NATIVE_TARGETS', None)
