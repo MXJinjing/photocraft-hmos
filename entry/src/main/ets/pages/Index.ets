@@ -87,7 +87,14 @@ struct Index {
         let path = file.uri.length > 0 ? new fileUri.FileUri(file.uri).path : '';
         if (this.documents?.owns(path)) name = path;
       } catch (error) { console.info('Open source path unavailable'); }
-      native.open(name, file.bytes);
+      try {
+        native.openFile(name, file.file.fd);
+      } catch (error) {
+        this.failure = (error as Error).message;
+      } finally {
+        try { fileIo.closeSync(file.file); }
+        catch (error) { console.error(`Open close failed: ${(error as Error).message}`); }
+      }
     }
   }
   aboutToAppear(): void {
@@ -214,21 +221,13 @@ struct Index {
         native.reply(id, false, 'cancelled', new ArrayBuffer(0)); return;
       }
       let file = await fileIo.open(uris[0], fileIo.OpenMode.READ_ONLY);
-      let bytes: ArrayBuffer;
       try {
-        let size = (await fileIo.stat(file.fd)).size;
-        if (size <= 0 || size > 256 * 1024 * 1024) throw new Error('File is empty or exceeds 256 MiB');
-        bytes = new ArrayBuffer(size);
-        let view = new Uint8Array(bytes); let offset = 0;
-        while (offset < size) {
-          let chunk = new ArrayBuffer(Math.min(1024 * 1024, size - offset));
-          let read = await fileIo.read(file.fd, chunk);
-          if (read <= 0) throw new Error('Incomplete file read');
-          view.set(new Uint8Array(chunk, 0, read), offset); offset += read;
+        if (!this.alive || generation !== this.generation) {
+          native.reply(id, false, 'cancelled', new ArrayBuffer(0)); return;
         }
+        let opened = new fileUri.FileUri(uris[0]);
+        native.replyFile(id, this.documents?.owns(opened.path) ? opened.path : opened.name, file.fd);
       } finally { await fileIo.close(file); }
-      let opened = new fileUri.FileUri(uris[0]);
-      native.reply(id, true, this.documents?.owns(opened.path) ? opened.path : opened.name, bytes);
     } catch (error) {
       let failure = error as Error;
       native.reply(id, false, failure.message, new ArrayBuffer(0));

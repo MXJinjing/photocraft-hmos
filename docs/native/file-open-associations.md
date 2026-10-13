@@ -34,3 +34,6 @@ Evidence: [system picker](file-open-picker.jpeg),
 [running editor receives another file](file-open-warm.jpeg).
 
 Reference: [OpenHarmony file-processing application integration](https://github.com/openharmony/docs/blob/master/zh-cn/application-dev/application-models/file-processing-apps-startup.md).
+
+Large files use an authorized descriptor retained by the native background reader,
+with no fixed 256 MiB host limit. See [large-file opening and verification](large-file-opening.md).
