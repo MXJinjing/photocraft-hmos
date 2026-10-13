@@ -68,10 +68,11 @@ pub fn system_info(app: &PhotocraftApp) -> Vec<String> {
 
 /// Help › System Info's on-screen text: version, platform and the graphics state.
 pub fn system_info_ui(app: &PhotocraftApp) -> Vec<String> {
-    let mut v = vec![format!("PhotoCraft {}", photocraft_engine::build_info::long_version()), {
+    let mut v = photocraft_engine::build_info::version_lines().into_iter().collect::<Vec<_>>();
+    v.push({
         let template = "Platform: {os} {arch}";
         crate::i18n::fmt(tl!(template), &[("os", PLATFORM_OS), ("arch", std::env::consts::ARCH)])
-    }];
+    });
     v.extend(app.perf.gpu_info.lines());
     v.extend(crate::monitor_status::summary_lines(app));
     v
@@ -81,6 +82,8 @@ pub fn system_info_ui(app: &PhotocraftApp) -> Vec<String> {
 pub fn system_info_json(app: &PhotocraftApp) -> serde_json::Value {
     json!({
         "version": photocraft_engine::build_info::long_version(),
+        "upstreamVersion": photocraft_engine::build_info::long_version(),
+        "hapVersion": photocraft_engine::build_info::hap_version(),
         "os": PLATFORM_OS,
         "arch": std::env::consts::ARCH,
         "gpu": app.perf.gpu_info,
