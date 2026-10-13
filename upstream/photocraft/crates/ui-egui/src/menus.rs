@@ -868,7 +868,12 @@ fn translated_menu_label(lang: crate::i18n::Lang, item: &MenuItem) -> String {
     {
         return crate::i18n::tr_id(lang, &item.id, "Quick Export as PNG").replace("PNG", fmt);
     }
-    crate::i18n::tr_id(lang, &item.id, &item.label).to_string()
+    let label = crate::i18n::tr_id(lang, &item.id, &item.label);
+    if cfg!(feature = "harmonyos-ui") {
+        label.replace("PhotoCraft", crate::brand::APP_NAME)
+    } else {
+        label.to_string()
+    }
 }
 
 /// Menu tree entry for rendering and for `ui.inspect`.
@@ -1933,7 +1938,7 @@ mod tests {
                 }
                 h.run_steps(3);
             };
-            let open = |h: &Harness<'_, PhotocraftApp>| h.query_by_label_contains("About PhotoCraft").is_some();
+            let open = |h: &Harness<'_, PhotocraftApp>| h.query_by_label_contains(&format!("About {}", crate::brand::APP_NAME)).is_some();
             let field_id = egui::Id::new("help-menu-search").with("field");
             let help = h.get_by_label("Help").rect().center();
             click(&mut h, help);
