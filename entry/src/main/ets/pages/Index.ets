@@ -15,6 +15,7 @@ import { HarmonyStylusAdapter } from '../stylus/HarmonyStylusAdapter';
 import { StylusPacket } from '../stylus/StylusProtocol';
 import { NativeImeAdapter, NativeImeState } from '../input/NativeImeAdapter';
 import { NativeCursorAdapter } from '../input/NativeCursorAdapter';
+import { IMAGE_DROP_TYPES, NativeDropAdapter } from '../input/NativeDropAdapter';
 import { isFiniteHoverPoint, penHoverLeaveMessage, penHoverMoveMessage } from '../input/PenHoverPreview';
 import { moveWindow, toggleWindowMaximize } from '../WindowChrome';
 import { window } from '@kit.ArkUI';
@@ -77,6 +78,8 @@ struct Index {
     return result.authResults.length > 0 && result.authResults[0] === 0;
   });
   private cursor: NativeCursorAdapter = new NativeCursorAdapter(this.getUIContext());
+  private dropping: NativeDropAdapter = new NativeDropAdapter(this.context.cacheDir,
+    (key: string): void => { this.getUIContext().getDragController().cancelDataLoading(key); });
   private ime: NativeImeAdapter = new NativeImeAdapter((message: string): void => native.input(message));
   private printing: NativePrintAdapter = new NativePrintAdapter(this.context,
     (message: string): void => { if (this.alive) { this.failure = message; } });
@@ -131,6 +134,7 @@ struct Index {
   aboutToDisappear(): void {
     this.alive = false;
     this.printing.stop();
+    this.dropping.stop();
     this.generation++;
     this.initialized = false;
     this.saveTargets.clear();
@@ -283,6 +287,22 @@ struct Index {
       native.reply(id, false, failure.message, new ArrayBuffer(0));
     }
   }
+  private async dropImages(event: DragEvent): Promise<void> {
+    const generation = this.generation;
+    const isCurrent = (): boolean => this.alive && this.initialized && generation === this.generation;
+    try {
+      const images = await this.dropping.receive(event, isCurrent);
+      if (!isCurrent()) { return; }
+      for (const image of images) {
+        native.open(image.name, image.bytes);
+        console.info('PhotoCraft drop queued: ' + image.name);
+      }
+    } catch (error) {
+      if (isCurrent()) { this.failure = (error as Error).message; }
+    } finally {
+      if (isCurrent()) { this.restoreEditorFocus(); }
+    }
+  }
   private sendPenHoverMove(event: HoverEvent): void {
     if (!this.alive || !this.initialized) { return; }
     let x = Number(event.x);
@@ -308,6 +328,12 @@ struct Index {
           this.ime.setOrigin(this.getUIContext().vp2px(Number(area.globalPosition.x)),
             this.getUIContext().vp2px(Number(area.globalPosition.y)));
         })
+        .allowDrop(IMAGE_DROP_TYPES)
+        .onDragMove((event: DragEvent): void => {
+          event.dragBehavior = DragBehavior.COPY;
+          event.setResult(DragResult.DROP_ENABLED);
+        })
+        .onDrop((event: DragEvent): void => { this.dropImages(event); })
         .onHoverMove((event: HoverEvent): void => { this.sendPenHoverMove(event); })
         .onHover((isHover: boolean): void => { this.sendPenHoverLeave(isHover); })
         .id('photocraft-editor').focusable(true).defaultFocus(true).focusOnTouch(true)
