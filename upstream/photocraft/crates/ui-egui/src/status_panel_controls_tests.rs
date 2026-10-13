@@ -65,7 +65,8 @@ fn fit_sits_beside_zoom_and_works_in_every_theme() {
         let bar = egui::containers::panel::PanelState::load(&h.ctx, egui::Id::new("status_bar")).unwrap().outer_rect;
         assert!(fit.left() > zoom.right() && fit.left() - zoom.right() <= 32.0, "{theme:?}: Fit is immediately right of zoom");
         assert!(bar.contains_rect(fit), "{theme:?}: Fit is visible within the original bar height");
-        assert_eq!(fit.height(), bar.height(), "{theme:?}: Fit keeps the original full bar height");
+        assert_eq!(fit.height(), 24.0, "{theme:?}: Fit matches the zoom field height");
+        assert_eq!(fit.center().y, bar.center().y, "{theme:?}: Fit is vertically centred in the status bar");
         let label_width = h.ctx.fonts_mut(|fonts| fonts.layout_no_wrap("Fit".into(), crate::theme::medium(13.0), egui::Color32::WHITE).size().x);
         assert!((fit.width() - (label_width + 28.0)).abs() < 1.0, "{theme:?}: Fit keeps the original label size and horizontal padding");
         assert_eq!(h.query_all_by_label("Fit").count(), 1, "{theme:?}: one Fit button");

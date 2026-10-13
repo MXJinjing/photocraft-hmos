@@ -33,24 +33,28 @@ pub(crate) fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui, size: f32) -> Rec
     Rect::from_min_max(rect.min, pos2((left - gap).max(rect.left()), rect.bottom()))
 }
 
-/// Keep the original Fit button in Studio themes; match its text and width in the shorter Pro bar.
-pub(crate) fn fit_button(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
+/// Match the adjacent zoom field's height while retaining Fit's text and horizontal padding.
+pub(crate) fn fit_button(app: &mut PhotocraftApp, ui: &mut egui::Ui, zoom_rect: Rect) {
+    let height = zoom_rect.height();
     let t = crate::theme::Tokens::get(ui.ctx());
-    let response = if !t.pro {
-        crate::widgets::secondary_button(ui, tl!("Fit"), 0.0)
-    } else {
-        ui.scope(|ui| {
-            ui.spacing_mut().button_padding = egui::vec2(14.0, 1.0);
-            ui.spacing_mut().interact_size.y = 24.0;
-            ui.add(
-                egui::Button::new(egui::RichText::new(tl!("Fit")).font(crate::theme::medium(13.0)).color(t.text))
+    let response = ui
+        .scope(|ui| {
+            ui.spacing_mut().button_padding = egui::vec2(14.0, 0.0);
+            ui.spacing_mut().interact_size.y = height;
+            let label = egui::RichText::new(tl!("Fit")).font(crate::theme::medium(13.0)).color(t.text);
+            let width = ui.fonts_mut(|fonts| fonts.layout_no_wrap(tl!("Fit").into(), crate::theme::medium(13.0), t.text).size().x) + 28.0;
+            let (rect, _) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::hover());
+            let rect = rect.translate(egui::vec2(0.0, zoom_rect.center().y - rect.center().y));
+            ui.place(
+                rect,
+                egui::Button::new(label)
+                    .min_size(egui::vec2(0.0, height))
                     .fill(t.field)
                     .stroke(egui::Stroke::new(1.0, t.field_border))
                     .corner_radius(t.radius_sm),
             )
         })
-        .inner
-    };
+        .inner;
     if response.clicked()
         && let Some(view) = app.session.active_index().and_then(|i| app.ui.views.get_mut(i))
     {
