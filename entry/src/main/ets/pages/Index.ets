@@ -36,6 +36,7 @@ class NativeConfig {
   }
 }
 class NativeMessage { kind: string = ''; text: string = ''; }
+class NativeOpenProgress { name: string = ''; read: number = 0; total: number = 0; }
 class NativeStylusInput {
   kind: string = 'stylus';
   packet: StylusPacket;
@@ -60,6 +61,8 @@ class NativeInput {
 struct Index {
   @StorageLink('photocraftChrome') @Watch('onChromeChanged') private chrome: string = LOADING_CHROME;
   @State private failure: string = '';
+  @State private loadingProgress: number = -1;
+  @State private loadingName: string = '';
   @State private initialized: boolean = false;
   @StorageLink('photocraftTitleRight') @Watch('onTitlebarChanged') private titleRight: number = 0;
   @StorageLink('photocraftTitleHeight') @Watch('onTitlebarChanged') private titleHeight: number = 0;
@@ -80,10 +83,14 @@ struct Index {
   private cursor: NativeCursorAdapter = new NativeCursorAdapter(this.getUIContext());
   private dropping: NativeDropAdapter = new NativeDropAdapter(this.context.cacheDir,
     (key: string): void => { this.getUIContext().getDragController().cancelDataLoading(key); },
-    (name: string, fd: number): void => { native.openFile(name, fd); });
+    (name: string, fd: number): void => { this.beginFileLoading(name); native.openFile(name, fd); });
   private ime: NativeImeAdapter = new NativeImeAdapter((message: string): void => native.input(message));
   private printing: NativePrintAdapter = new NativePrintAdapter(this.context,
     (message: string): void => { if (this.alive) { this.failure = message; } });
+  private beginFileLoading(name: string): void {
+    this.loadingName = name;
+    this.loadingProgress = 0;
+  }
   private drainOpens(): void {
     for (let file of takeOpens()) {
       let name = file.name;
@@ -92,8 +99,11 @@ struct Index {
         if (this.documents?.owns(path)) name = path;
       } catch (error) { console.info('Open source path unavailable'); }
       try {
+        this.beginFileLoading(name);
         native.openFile(name, file.file.fd);
       } catch (error) {
+        this.loadingProgress = -1;
+        this.loadingName = '';
         this.failure = (error as Error).message;
       } finally {
         try { fileIo.closeSync(file.file); }
@@ -145,6 +155,8 @@ struct Index {
     this.dropping.stop();
     this.generation++;
     this.initialized = false;
+    this.loadingProgress = -1;
+    this.loadingName = '';
     this.saveTargets.clear();
     this.stylus.stop();
     this.ime.stop();
@@ -173,9 +185,24 @@ struct Index {
   private receive(id: number, message: string, data: ArrayBuffer): void {
     // id > 0 是需要 reply 的平台服务请求；id = 0 是无需应答的状态通知。
     let request = JSON.parse(message) as NativeMessage;
-    if (request.kind !== 'ime') { console.info(`PhotoCraft native ${request.kind}: ${request.text}`); }
+    if (request.kind !== 'ime' && request.kind !== 'open_progress') {
+      console.info(`PhotoCraft native ${request.kind}: ${request.text}`);
+    }
     if (!this.alive) { if (id > 0) native.reply(id, false, 'cancelled', new ArrayBuffer(0)); return; }
-    if (request.kind === 'error') { this.failure = request.text; }
+    if (request.kind === 'error') {
+      this.loadingProgress = -1;
+      this.loadingName = '';
+      this.failure = request.text;
+    }
+    else if (request.kind === 'open_progress') {
+      try {
+        let progress = JSON.parse(request.text) as NativeOpenProgress;
+        if (progress.total > 0) {
+          this.loadingName = progress.name;
+          this.loadingProgress = progress.read >= progress.total ? -1 : Math.max(0, Math.min(100, progress.read * 100 / progress.total));
+        }
+      } catch (error) { console.info('Invalid native open progress'); }
+    }
     else if (request.kind === 'ready') { this.failure = ''; this.onTitlebarChanged(); }
     else if (request.kind === 'window_move' || request.kind === 'window_maximize') {
       window.getLastWindow(this.context).then((win: window.Window) => {
@@ -231,6 +258,7 @@ struct Index {
           native.reply(id, false, 'cancelled', new ArrayBuffer(0)); return;
         }
         let opened = new fileUri.FileUri(uris[0]);
+        this.beginFileLoading(this.documents?.owns(opened.path) ? opened.path : opened.name);
         native.replyFile(id, this.documents?.owns(opened.path) ? opened.path : opened.name, file.fd);
       } finally { await fileIo.close(file); }
     } catch (error) {
@@ -341,6 +369,20 @@ struct Index {
         .onBlur(() => { this.cursor.reset(); let input = new NativeInput(); input.kind = 'blur'; native.input(JSON.stringify(input)); })
       } else {
         Text('正在准备文档目录…').fontSize(18).fontColor('#FFFFFF')
+      }
+      if (this.loadingProgress >= 0) {
+        Column() {
+          Text('正在读取文件').fontSize(18).fontColor('#FFFFFF')
+          Text(this.loadingName).fontSize(13).fontColor('#D9FFFFFF').maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).margin({ top: 8 })
+          Progress({ value: this.loadingProgress, total: 100, type: ProgressType.Linear })
+            .width('100%').height(8).margin({ top: 18 })
+          Text(`${Math.round(this.loadingProgress)}%`).fontSize(12).fontColor('#D9FFFFFF').margin({ top: 8 })
+        }
+        .padding(24)
+        .width('72%')
+        .backgroundColor('#E62B2B2B')
+        .borderRadius(10)
+        .alignItems(HorizontalAlign.Start)
       }
       if (this.failure.length > 0) {
         Column() {

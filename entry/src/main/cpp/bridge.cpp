@@ -78,7 +78,8 @@ void NotifyRust(uint64_t id,const uint8_t* json,size_t n,const uint8_t* data,siz
     // Rust worker 不直接调用 JS，通过线程安全队列将平台请求交给 ArkTS 主线程。
     auto* r=new Request{id,std::string(reinterpret_cast<const char*>(json),n),{}};
     // IME snapshots contain user text and can arrive on every cursor movement.
-    if(r->json.find("\"kind\":\"ime\"")==std::string::npos)
+    if(r->json.find("\"kind\":\"ime\"")==std::string::npos &&
+       r->json.find("\"kind\":\"open_progress\"")==std::string::npos)
         OH_LOG_Print(LOG_APP, LOG_INFO, 0xD001, "PhotoCraft", "Rust notification %{public}s", r->json.c_str());
     if(size) r->data.assign(data,data+size);
     std::lock_guard<std::mutex> lock(notifyMutex);

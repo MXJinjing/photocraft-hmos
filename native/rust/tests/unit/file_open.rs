@@ -42,6 +42,22 @@ fn short_reads_and_interrupted_reads_preserve_every_byte() {
 }
 
 #[test]
+fn progress_reports_start_mib_boundaries_and_completion() {
+    let size = 2 * 1024 * 1024 + 17;
+    let data = vec![7u8; size];
+    let mut progress = Vec::new();
+    let bytes = read_sized_with_progress(Cursor::new(data), size as u64, &mut |read, total| {
+        progress.push((read, total));
+    })
+    .unwrap();
+    assert_eq!(bytes.len(), size);
+    assert_eq!(progress.first(), Some(&(0, size as u64)));
+    assert_eq!(progress.last(), Some(&(size as u64, size as u64)));
+    assert!(progress.iter().any(|(read, _)| *read >= 1024 * 1024));
+    assert!(progress.iter().all(|(_, total)| *total == size as u64));
+}
+
+#[test]
 fn io_errors_are_reported_without_partial_success() {
     struct BrokenReader;
     impl Read for BrokenReader {

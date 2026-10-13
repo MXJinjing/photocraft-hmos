@@ -189,21 +189,50 @@ fn finish_file(id: Option<u64>, result: bridge::Reply) {
     }
 }
 
+fn report_file_progress(name: &str, read: u64, total: u64) {
+    let text = serde_json::json!({
+        "name": name,
+        "read": read,
+        "total": total,
+    })
+    .to_string();
+    bridge::notify(0, "open_progress", &text, &[]);
+}
+
+fn report_file_error(id: Option<u64>, error: &str) {
+    if id.is_some() {
+        bridge::notify(0, "error", error, &[]);
+    }
+}
+
 // SAFETY: The platform holds the original file open until the synchronous duplicate returns.
 unsafe fn open_file(id: Option<u64>, name: String, fd: i32) {
     let file = match unsafe { file_open::duplicate(fd) } {
         Ok(file) => file,
         Err(error) => {
+            report_file_error(id, &error);
             finish_file(id, Err(error));
             return;
         }
     };
     // Do not read on the render worker: it can be waiting for this picker reply.
+    let progress_name = name.clone();
     if let Err(error) = std::thread::Builder::new()
         .name("photocraft-file-open".into())
-        .spawn(move || finish_file(id, file_open::read(file).map(|data| (name, data))))
+        .spawn(move || {
+            let result = file_open::read_with_progress(file, |read, total| {
+                report_file_progress(&progress_name, read, total);
+            })
+            .map(|data| (name, data));
+            if let Err(error) = &result {
+                report_file_error(id, error);
+            }
+            finish_file(id, result);
+        })
     {
-        finish_file(id, Err(format!("Cannot start file reader: {error}")));
+        let message = format!("Cannot start file reader: {error}");
+        report_file_error(id, &message);
+        finish_file(id, Err(message));
     }
 }
 

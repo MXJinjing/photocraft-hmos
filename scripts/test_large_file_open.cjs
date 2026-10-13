@@ -64,6 +64,8 @@ const drain = page.slice(page.indexOf('  private drainOpens()'), page.indexOf(' 
 const open = page.slice(page.indexOf('  private async openFile('), page.indexOf('  private async selectSave('));
 const { Harness } = compile(`export class Harness {
   alive = true; generation = 1; context = {}; failure = ''; focused = 0;
+  loadingProgress = -1; loadingName = '';
+  beginFileLoading(name: string) { this.loadingName = name; this.loadingProgress = 0; }
   documents = { owns: (path: string) => path.startsWith('/Download/owned/') };
   restoreEditorFocus() { this.focused++; }
   ${drain} ${open}
