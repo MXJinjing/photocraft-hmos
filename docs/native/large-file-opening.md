@@ -1,16 +1,18 @@
 # Large file opening
 
 The HarmonyOS host no longer imposes a 256 MiB input-file limit. Both the
-system file picker and external viewData/stream Wants pass an authorized file
-descriptor to the native adapter instead of allocating a whole-file ArkTS
-ArrayBuffer.
+system file picker, external viewData/stream Wants and drag-and-drop file
+records pass an authorized file descriptor to the native adapter instead of
+allocating a whole-file ArkTS ArrayBuffer.
 
 Rust duplicates the descriptor before NAPI returns. ArkTS closes its own File
 after handoff; the external inbox retains only authorized handles while waiting
 for cold-start initialization. A background Rust reader reads the duplicate
 into one input Vec, then either completes the waiting picker request or queues
 the document for import. Reading cannot run on the render worker because that
-worker may be waiting for the picker reply.
+worker may be waiting for the picker reply. Native PhotoCraft jobs are enabled
+on HarmonyOS, so decoding then continues on an open-job worker with a progress
+tab while the editor keeps presenting frames.
 
 The reader uses fallible allocation, handles short/interrupted reads, rejects
 empty/truncated files, and reports read/allocation failures. Legacy byte-buffer

@@ -395,6 +395,9 @@ fn worker(config: Config, rx: mpsc::Receiver<Message>) {
         photocraft_engine::Session::new(),
         services(&config.files, documents.clone(), &appearance),
     );
+    // Native file opens and drag imports must decode off the render worker so the
+    // editor keeps drawing the opening tab and its progress indicator.
+    app.background_jobs = true;
     app.session.print_service = Some(|pdf, metadata| {
         bridge::request("print", &metadata.to_string(), pdf).map(|(message, _)| message)
     });
