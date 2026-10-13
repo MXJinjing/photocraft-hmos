@@ -967,7 +967,7 @@ fn wheel_zoom_over_the_image_still_anchors_on_the_pointer() {
 /// HarmonyOS paints its tip on the canvas, rather than uploading a Windows cursor bitmap.
 #[test]
 #[cfg(not(target_os = "windows"))]
-fn pen_hover_brush_tip_is_half_as_opaque_and_contact_restores_it() {
+fn pen_hover_brush_tip_is_thirty_percent_opaque_and_contact_restores_it() {
     use crate::stylus::{PenSample, PointerSource};
     let mut h = harness();
     h.state_mut().ui.tool = crate::state::Tool::Brush;
@@ -998,7 +998,7 @@ fn pen_hover_brush_tip_is_half_as_opaque_and_contact_restores_it() {
     h.state_mut().stylus.feed.report(PointerSource::Pen, Some(PenSample { pressure: 0.0, ..Default::default() }));
     h.run_steps(3);
     assert!(h.state().drag.is_none());
-    assert_eq!(strokes(&h, p), [(3.0, 80), (1.0, 118)]);
+    assert_eq!(strokes(&h, p), [(3.0, 48), (1.0, 71)]);
     capture_menu_frame(&mut h, "brush-tip-pen-hover");
 
     h.state_mut().stylus.feed.report(PointerSource::Pen, Some(PenSample { pressure: 0.8, ..Default::default() }));
@@ -1011,7 +1011,7 @@ fn pen_hover_brush_tip_is_half_as_opaque_and_contact_restores_it() {
     assert_eq!(strokes(&h, contact), mouse);
     h.event(pointer_button(contact, false));
     h.run_steps(2);
-    assert_eq!(strokes(&h, contact), [(3.0, 80), (1.0, 118)]);
+    assert_eq!(strokes(&h, contact), [(3.0, 48), (1.0, 71)]);
 }
 
 fn touch_harness() -> Harness<'static, PhotocraftApp> {

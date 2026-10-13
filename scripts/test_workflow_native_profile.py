@@ -39,8 +39,8 @@ class NativeProfileTests(unittest.TestCase):
                 self.assertEqual(config['buildOption']['externalNativeOptions']['abiFilters'], ['arm64-v8a'])
 
     def test_native_script_selects_cargo_profile_for_arm64(self):
-        for mode in ('debug', 'release'):
-            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
+        for mode, failed in (('debug', False), ('release', False), ('release', True)):
+            with self.subTest(mode=mode, failed=failed), tempfile.TemporaryDirectory() as directory:
                 path = Path(directory)
                 (path / 'scripts').mkdir()
                 shutil.copyfile(ROOT / 'scripts/build_native.sh', path / 'scripts/build_native.sh')
@@ -53,6 +53,11 @@ class NativeProfileTests(unittest.TestCase):
                 arm64 = path / f'native/rust/target/aarch64-unknown-linux-ohos/{mode}'
                 arm64.mkdir(parents=True)
                 library = arm64 / 'libphotocraft_hmos.a'
+                (arm64 / 'deps').mkdir()
+                (arm64 / 'deps/stale.rlib').write_bytes(b'x' * 8192)
+                upstream = path / 'upstream/photocraft/target/debug'
+                (upstream / 'deps').mkdir(parents=True)
+                (upstream / 'deps/stale.rlib').write_bytes(b'x' * 8192)
                 bin_dir = path / 'bin'
                 bin_dir.mkdir()
                 sdk = path / 'sdk'
@@ -63,7 +68,7 @@ class NativeProfileTests(unittest.TestCase):
                     (path / 'sysroot/lib/rustlib' / target).mkdir(parents=True)
                 for name, body in {
                     'rustc': '#!/bin/sh\nprintf "%s\\n" "$TEST_SYSROOT"\n',
-                    'cargo': '#!/bin/sh\n[ -f "$TEST_DEBUG_ARTIFACT" ] || exit 1\nprintf "%s\\n" "$*" >> "$TEST_CARGO_LOG"\nprintf library > "$TEST_ARM64_LIBRARY"\n',
+                    'cargo': '#!/bin/sh\n[ "$TEST_BUILD_FAIL" != 1 ] || exit 2\n[ -f "$TEST_DEBUG_ARTIFACT" ] || exit 1\nprintf "%s\\n" "$*" >> "$TEST_CARGO_LOG"\nprintf library > "$TEST_ARM64_LIBRARY"\n',
                 }.items():
                     (bin_dir / name).write_text(body)
                     (bin_dir / name).chmod(0o755)
@@ -72,12 +77,20 @@ class NativeProfileTests(unittest.TestCase):
                            PHOTOCRAFT_NATIVE_SDK=str(sdk), PHOTOCRAFT_RUST_PROFILE=mode,
                            TEST_SYSROOT=str(path / 'sysroot'), TEST_CARGO_LOG=str(log),
                            TEST_DEBUG_ARTIFACT=str(debug / 'deps/stale.rlib'),
-                           TEST_ARM64_LIBRARY=str(library))
+                           TEST_ARM64_LIBRARY=str(library), TEST_BUILD_FAIL='1' if failed else '0')
                 env.pop('PHOTOCRAFT_NATIVE_TARGETS', None)
                 result = subprocess.run(['bash', str(path / 'scripts/build_native.sh')], env=env, capture_output=True, text=True)
+                if failed:
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertTrue((debug / 'deps/stale.rlib').exists())
+                    self.assertTrue((arm64 / 'deps/stale.rlib').exists())
+                    self.assertTrue((upstream / 'deps/stale.rlib').exists())
+                    continue
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(list(debug.iterdir()), [debug / '.cargo-lock'])
                 self.assertEqual(library.read_text(), 'library')
+                self.assertEqual(set(arm64.iterdir()), {library, arm64 / '.cargo-lock'})
+                self.assertEqual(list(upstream.iterdir()), [upstream / '.cargo-lock'])
                 calls = log.read_text().splitlines()
                 self.assertEqual(len(calls), 1)
                 for call, target in zip(calls, ('aarch64-unknown-linux-ohos',)):
