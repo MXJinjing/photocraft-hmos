@@ -4,6 +4,20 @@ fn frame(ctx: &egui::Context, raw: egui::RawInput, ui: impl FnMut(&mut egui::Ui)
     output.textures_delta.clear();
 }
 
+// Desktop roots use OS cursor bitmaps; OHOS paints the outline into the canvas.
+// Check both outputs without weakening the hidden-cursor assertions.
+fn brush_outline(ctx: &egui::Context, output: &egui::FullOutput, pos: egui::Pos2) -> bool {
+    if cfg!(target_env = "ohos") {
+        assert!(output.platform_output.cursor_image.is_none());
+    }
+    let painted = output.shapes.iter().any(|s| matches!(&s.shape,
+        egui::epaint::Shape::Circle(c) if c.center == pos && c.stroke.width > 0.));
+    let bitmap = ctx.input(|i| i.pointer.hover_pos() == Some(pos))
+        && output.platform_output.cursor_image.as_ref().is_some_and(|image|
+            image.rgba.chunks_exact(4).any(|pixel| pixel[3] > 0));
+    painted || bitmap
+}
+
 #[test]
 fn fingers_hide_the_rendered_brush_outline_but_pen_and_mouse_keep_it() {
     use photocraft_ui_egui::{PhotocraftApp, Services, state::Tool};
@@ -38,7 +52,7 @@ fn fingers_hide_the_rendered_brush_outline_but_pen_and_mouse_keep_it() {
     ] {
         app.stylus.feed.report(source, None);
         let output = render(&mut app, vec![egui::Event::PointerMoved(p)]);
-        let outline = output.shapes.iter().any(|s| matches!(&s.shape, egui::epaint::Shape::Circle(c) if c.center == p && c.stroke.width > 0.));
+        let outline = brush_outline(&ctx, &output, p);
         assert_eq!(outline, expected, "source {source:?}");
     }
 }
@@ -1212,7 +1226,7 @@ fn rendered_brush_outline_hides_on_lift_or_leave_and_returns_on_next_hover_or_mo
         output
     };
     let outline = |output: &egui::FullOutput, pos: egui::Pos2| {
-        output.shapes.iter().any(|s| matches!(&s.shape, egui::epaint::Shape::Circle(c) if c.center == pos && c.stroke.width > 0.))
+        brush_outline(&ctx, output, pos)
     };
     for _ in 0..4 {
         render(&mut app, vec![]);
