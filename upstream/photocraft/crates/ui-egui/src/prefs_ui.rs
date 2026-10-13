@@ -1597,10 +1597,15 @@ fn stylus_fields(ui: &mut egui::Ui, obj: &mut Map<String, Value>) {
     let t = Tokens::get(ui.ctx());
     ui.add_space(10.0);
     ui.label(RichText::new(tl!("Stylus")).font(crate::theme::semibold(12.5)).color(t.text));
-    let mut blocked = obj.get("blockFingerInput").and_then(Value::as_bool).unwrap_or(false);
-    crate::widgets::checkbox(ui, &mut blocked, tl!("Block finger input"));
-    obj.insert("blockFingerInput".into(), json!(blocked));
     egui::Grid::new("prefs-stylus").num_columns(2).spacing([14.0, 7.0]).show(ui, |ui| {
+        let label = ui.add(egui::Label::new(RichText::new(tl!("Block finger input")).color(t.text_dim)).sense(egui::Sense::click()));
+        let mut blocked = obj.get("blockFingerInput").and_then(Value::as_bool).unwrap_or(false);
+        crate::widgets::checkbox(ui, &mut blocked, "").labelled_by(label.id);
+        if label.clicked() {
+            blocked = !blocked;
+        }
+        obj.insert("blockFingerInput".into(), json!(blocked));
+        ui.end_row();
         ui.label(tl!("Double-tap pen body"));
         let mut double = obj.get("stylusDoubleTap").and_then(Value::as_str).unwrap_or("eraser").to_string();
         let options: Vec<_> = crate::chrome_ui::STYLUS_DOUBLE_TAP_OPTIONS.iter().map(|(mode, label)| (mode.name().to_string(), tl!(label))).collect();
@@ -2884,6 +2889,10 @@ mod tests {
         assert_eq!(draft["stylusLongPress"], "off");
         assert!(h.query_by_label("Double-tap pen body").is_some());
         assert!(h.query_by_label("Long-press pen body").is_some());
+        let checkbox_x = h.get_by_label("Block finger input").rect().left();
+        let dropdown_x =
+            h.query_all_by_role(egui::accesskit::Role::ComboBox).find(|node| node.value().as_deref() == Some("Previous tool")).unwrap().rect().left();
+        assert!((checkbox_x - dropdown_x).abs() < 1.0, "checkbox x={checkbox_x}, dropdown x={dropdown_x}");
         if let Some(dir) = std::env::var_os("PHOTOCRAFT_SETTINGS_SCREENSHOT_DIR") {
             let dir = std::path::PathBuf::from(dir);
             std::fs::create_dir_all(&dir).unwrap();
