@@ -1396,12 +1396,18 @@ fn ensure_gpu(app: &mut PhotocraftApp, idx: usize, visible: DRect) -> bool {
         if let Some(r) = crate::adjust_preview::uncovered(app, id, raw_key, visible) {
             let r = gpu.refresh(id.0, &doc, Some(r), display.as_deref());
             app.perf.record(r.kind, r.px, r.composite_ms, r.upload_ms);
+            if !r.kind.starts_with("gpu")
+                && let Some(reason) = r.fallback
+            {
+                app.perf.gpu_fallback = Some(reason);
+            }
         }
         return true;
     }
     // Display textures for a canvas this large would not fit the GPU: the reduced CPU canvas
     // draws it (checked before the memory budget, which walks the history, every frame).
     if !gpu.fits_canvas(&doc) {
+        app.perf.gpu_fallback = Some(crate::gpu_canvas::OVER_CANVAS_BUDGET.into());
         return false;
     }
     let partial = present && damage.is_some();
@@ -1410,6 +1416,7 @@ fn ensure_gpu(app: &mut PhotocraftApp, idx: usize, visible: DRect) -> bool {
     if r.kind == "lost" || r.kind == crate::gpu_canvas::REFRESH_OVER_BUDGET {
         // The device is gone (`gpu_status` then drops the GPU canvas) or the canvas is over the
         // texture budget: draw this frame on the CPU path.
+        app.perf.gpu_fallback = r.fallback;
         return false;
     }
     if let Some(e) = &r.fallback

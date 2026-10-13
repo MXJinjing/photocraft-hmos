@@ -409,6 +409,15 @@ fn worker(config: Config, rx: mpsc::Receiver<Message>) {
                                 render::Render::new(render::Window(ptr), w, h, config.display_p3)?;
                             r.color.install(&mut app.session.color);
                             app.perf.gpu_info.set_adapter(&r.adapter.get_info());
+                            app.perf.gpu_info.selected = "gl".into();
+                            if r.adapter.get_info().device_type == wgpu::DeviceType::Cpu {
+                                let reason: String =
+                                    "No hardware graphics adapter; using CPU composition".into();
+                                app.perf.gpu_info.fallback = Some(reason.clone());
+                                app.perf.gpu_fallback = Some(reason);
+                            } else {
+                                app.set_wgpu(r.egui_render_state());
+                            }
                             render = Some(r);
                         }
                         visible = w > 0 && h > 0;

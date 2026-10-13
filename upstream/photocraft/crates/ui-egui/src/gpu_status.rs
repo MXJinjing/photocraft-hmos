@@ -72,7 +72,7 @@ pub fn system_info_ui(app: &PhotocraftApp) -> Vec<String> {
         let template = "Platform: {os} {arch}";
         crate::i18n::fmt(tl!(template), &[("os", PLATFORM_OS), ("arch", std::env::consts::ARCH)])
     }];
-    v.extend(app.perf.gpu_info.lines());
+    v.extend(app.perf.gpu_info_lines());
     v.extend(crate::monitor_status::summary_lines(app));
     v
 }

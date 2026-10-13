@@ -884,6 +884,7 @@ impl PhotocraftApp {
                     .unwrap_or_else(|| "GPU canvas initialization failed".into());
                 self.perf.gpu_info.canvas = "cpu".into();
                 self.perf.gpu_info.fallback = Some(detail.clone());
+                self.perf.gpu_fallback = Some(detail.clone());
                 gpu_status::queue_fallback_notice(self, detail);
                 return;
             }

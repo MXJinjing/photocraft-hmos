@@ -743,6 +743,7 @@ mod tests {
     #[test]
     fn pen_body_gestures_follow_the_stylus_menu_settings() {
         use crate::state::Tool;
+        let ctx = egui::Context::default();
         let mut app = crate::PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
         app.ui.tool = Tool::Brush;
         app.session.edit_prefs(|p| p.tools.stylus_long_press = StylusLongPress::ContextMenu);
@@ -752,16 +753,16 @@ mod tests {
         assert!(app.ui.brush_picker.is_none());
 
         app.session.edit_prefs(|p| p.tools.stylus_long_press = StylusLongPress::Off);
-        super::apply_pen_gesture(&mut app, crate::stylus::PenGesture::LongPress, [8.0, 8.0]);
+        super::apply_pen_gesture(&mut app, &ctx, crate::stylus::PenGesture::LongPress, [8.0, 8.0]);
         assert!(app.ui.brush_picker.is_none());
 
         app.session.edit_prefs(|p| p.tools.stylus_double_tap = StylusDoubleTap::Off);
-        super::apply_pen_gesture(&mut app, crate::stylus::PenGesture::DoubleTap, [8.0, 8.0]);
+        super::apply_pen_gesture(&mut app, &ctx, crate::stylus::PenGesture::DoubleTap, [8.0, 8.0]);
         assert_eq!(app.ui.tool, Tool::Brush);
         app.session.edit_prefs(|p| p.tools.stylus_double_tap = StylusDoubleTap::Eraser);
-        super::apply_pen_gesture(&mut app, crate::stylus::PenGesture::DoubleTap, [8.0, 8.0]);
+        super::apply_pen_gesture(&mut app, &ctx, crate::stylus::PenGesture::DoubleTap, [8.0, 8.0]);
         assert_eq!(app.ui.tool, Tool::Eraser);
-        super::apply_pen_gesture(&mut app, crate::stylus::PenGesture::DoubleTap, [8.0, 8.0]);
+        super::apply_pen_gesture(&mut app, &ctx, crate::stylus::PenGesture::DoubleTap, [8.0, 8.0]);
         assert_eq!(app.ui.tool, Tool::Brush);
     }
 

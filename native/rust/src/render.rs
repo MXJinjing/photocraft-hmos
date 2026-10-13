@@ -2,7 +2,7 @@
 use raw_window_handle::{
     DisplayHandle, HasDisplayHandle, HasWindowHandle, OhosNdkWindowHandle, WindowHandle,
 };
-use std::{ffi::c_void, ptr::NonNull};
+use std::{ffi::c_void, ptr::NonNull, sync::Arc};
 
 unsafe extern "C" {
     fn OH_NativeWindow_NativeObjectUnreference(object: *mut c_void) -> i32;
@@ -36,7 +36,7 @@ pub struct Render {
     pub surface: Option<wgpu::Surface<'static>>,
     pub device: wgpu::Device,
     pub queue: wgpu::Queue,
-    pub renderer: egui_wgpu::Renderer,
+    pub renderer: Arc<egui::mutex::RwLock<egui_wgpu::Renderer>>,
     pending_free: Vec<egui::TextureId>,
     pub config: wgpu::SurfaceConfiguration,
     pub adapter: wgpu::Adapter,
@@ -101,7 +101,11 @@ impl Render {
             },
             &[],
         );
-        let renderer = egui_wgpu::Renderer::new(&device, config.format, Default::default());
+        let renderer = Arc::new(egui::mutex::RwLock::new(egui_wgpu::Renderer::new(
+            &device,
+            config.format,
+            Default::default(),
+        )));
         Ok(Self {
             surface: Some(surface),
             device,
@@ -114,6 +118,21 @@ impl Render {
             window: Some(window),
             color,
         })
+    }
+    pub fn egui_render_state(&self) -> egui_wgpu::RenderState {
+        egui_wgpu::RenderState {
+            adapter: self.adapter.clone(),
+            available_adapters: vec![self.adapter.clone()],
+            instance: self.instance.clone(),
+            device: self.device.clone(),
+            queue: self.queue.clone(),
+            target_format: self.config.format,
+            renderer: self.renderer.clone(),
+            surface_config: egui_wgpu::SurfaceConfig {
+                present_mode: self.config.present_mode,
+                desired_maximum_frame_latency: Some(self.config.desired_maximum_frame_latency),
+            },
+        }
     }
     pub fn resize(&mut self, w: u32, h: u32) -> Result<(), String> {
         if w == 0 || h == 0 {
@@ -164,11 +183,14 @@ impl Render {
         ctx: &egui::Context,
         mut output: egui::FullOutput,
     ) -> Result<bool, String> {
+        // Keep the shared renderer alive independently of `self`: a lost surface can be
+        // rebound while this guard owns the callback resources.
+        let shared_renderer = self.renderer.clone();
+        let mut renderer = shared_renderer.write();
         for (id, deltas) in &mut output.textures_delta.set {
             for delta in deltas {
                 self.color.texture(ctx, *id, &mut delta.image);
-                self.renderer
-                    .update_texture(&self.device, &self.queue, *id, delta);
+                renderer.update_texture(&self.device, &self.queue, *id, delta);
             }
         }
         self.pending_free.extend(output.textures_delta.free.drain());
@@ -217,8 +239,7 @@ impl Render {
         };
         let mut encoder = self.device.create_command_encoder(&Default::default());
         let mut commands =
-            self.renderer
-                .update_buffers(&self.device, &self.queue, &mut encoder, &jobs, &screen);
+            renderer.update_buffers(&self.device, &self.queue, &mut encoder, &jobs, &screen);
         let view = frame.texture.create_view(&Default::default());
         {
             let attachments = [Some(wgpu::RenderPassColorAttachment {
@@ -240,14 +261,13 @@ impl Render {
                 color_attachments: &attachments,
                 ..Default::default()
             });
-            self.renderer
-                .render(&mut pass.forget_lifetime(), &jobs, &screen);
+            renderer.render(&mut pass.forget_lifetime(), &jobs, &screen);
         }
         commands.push(encoder.finish());
         self.queue.submit(commands);
         self.queue.present(frame);
         for id in self.pending_free.drain(..) {
-            self.renderer.free_texture(&id);
+            renderer.free_texture(&id);
         }
         Ok(true)
     }

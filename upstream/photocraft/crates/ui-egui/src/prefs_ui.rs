@@ -1012,7 +1012,7 @@ pub fn open_mismatch(app: &mut PhotocraftApp, report: &Value) -> u64 {
 pub fn body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Value>) {
     match f.get("__prefsui").and_then(Value::as_str).unwrap_or("") {
         "prefs" => {
-            f.insert("__gpuInfo".into(), json!(app.perf.gpu_info.lines()));
+            f.insert("__gpuInfo".into(), json!(app.perf.gpu_info_lines()));
             let system = system_theme(app, ui.ctx());
             prefs_body(ui, f, system);
         }

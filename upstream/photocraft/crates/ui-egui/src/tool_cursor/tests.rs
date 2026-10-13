@@ -38,8 +38,8 @@ fn bitmap_has_a_transparent_hotspot_and_the_correct_radius_at_each_dpi() {
 
 #[test]
 fn brush_tip_opacity_is_applied_after_rasterization() {
-    let full = rasterize(Shape::Circle { radius: 20.0, centre: false }, 1.0).unwrap();
-    let faded = rasterize_with_opacity(Shape::Circle { radius: 20.0, centre: false }, 1.0, 0.5).unwrap();
+    let full = rasterize(&Shape::Circle { radius: 20.0, centre: false }, 1.0).unwrap();
+    let faded = rasterize_with_opacity(&Shape::Circle { radius: 20.0, centre: false }, 1.0, 0.5).unwrap();
     let edge = full.hotspot[0] + 20;
     assert_eq!(alpha(&full, edge, full.hotspot[1]), 248);
     assert_eq!(alpha(&faded, edge, faded.hotspot[1]), 124);
@@ -51,13 +51,13 @@ fn brush_tip_opacity_is_applied_after_rasterization() {
 fn opacity_is_part_of_the_native_cursor_cache_key() {
     let ctx = egui::Context::default();
     let shape = Shape::Circle { radius: 20.0, centre: false };
-    let full = cached_image_with_opacity(&ctx, shape, 1.0, 1.0).unwrap();
-    let full_again = cached_image_with_opacity(&ctx, shape, 1.0, 1.0).unwrap();
+    let full = cached_image_with_opacity(&ctx, &shape, 1.0, 1.0).unwrap();
+    let full_again = cached_image_with_opacity(&ctx, &shape, 1.0, 1.0).unwrap();
     assert!(Arc::ptr_eq(&full.rgba, &full_again.rgba));
-    let faded = cached_image_with_opacity(&ctx, shape, 1.0, 0.5).unwrap();
+    let faded = cached_image_with_opacity(&ctx, &shape, 1.0, 0.5).unwrap();
     assert!(!Arc::ptr_eq(&full.rgba, &faded.rgba));
     assert_eq!(alpha(&faded, faded.hotspot[0] + 20, faded.hotspot[1]), 124);
-    let faded_again = cached_image_with_opacity(&ctx, shape, 1.0, 0.5).unwrap();
+    let faded_again = cached_image_with_opacity(&ctx, &shape, 1.0, 0.5).unwrap();
     assert!(Arc::ptr_eq(&faded.rgba, &faded_again.rgba));
 }
 

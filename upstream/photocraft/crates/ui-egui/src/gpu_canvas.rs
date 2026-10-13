@@ -913,7 +913,7 @@ pub struct GpuInfo {
     /// Why startup didn't use the preference as is (previous start crashed, `--safe-gpu`,
     /// `WGPU_BACKEND`, Intel on Windows).
     pub fallback: Option<String>,
-    /// "gpu" (wgpu canvas and compositor) or "cpu" (CPU compositor, egui textures).
+    /// "gpu" when the shared wgpu canvas is initialized, or "cpu" otherwise.
     pub canvas: String,
     /// Why the GPU canvas was dropped during this session (device lost or a GPU error).
     pub lost: Option<String>,
@@ -961,7 +961,12 @@ impl GpuInfo {
             },
             {
                 let template = "Image compositor: {processor}";
-                crate::i18n::fmt(tl!(template), &[("processor", if self.canvas == "gpu" { "GPU" } else { "CPU" })])
+                let processor = match self.canvas.as_str() {
+                    "gpu" => "GPU",
+                    "pending" => tl!("unknown"),
+                    _ => "CPU",
+                };
+                crate::i18n::fmt(tl!(template), &[("processor", processor)])
             },
             {
                 let template = "Window renderer: {renderer}";
@@ -1004,6 +1009,22 @@ pub fn backend_name(b: wgpu::Backend) -> &'static str {
 }
 
 impl Perf {
+    /// Keep canvas availability separate from the processor used for document composition.
+    /// Both diagnostics views use the existing refresh/fallback state; the public JSON stays
+    /// unchanged and startup backend selection is not overwritten by a document fallback.
+    pub(crate) fn gpu_info_lines(&self) -> Vec<String> {
+        let mut info = self.gpu_info.clone();
+        if let Some(reason) = &self.gpu_fallback {
+            info.canvas = "cpu".into();
+            info.fallback = Some(reason.clone());
+        } else if !self.last_refresh.is_empty() {
+            info.canvas = if self.last_refresh.starts_with("gpu") { "gpu" } else { "cpu" }.into();
+        } else if info.canvas == "gpu" {
+            info.canvas = "pending".into();
+        }
+        info.lines()
+    }
+
     pub fn record(&mut self, kind: &'static str, px: u64, composite_ms: f64, upload_ms: f64) {
         self.last_refresh = kind;
         self.last_refresh_px = px;
@@ -2189,6 +2210,39 @@ mod mip_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn perf_reports_the_processor_used_by_the_latest_refresh() {
+        let mut perf = Perf::default();
+        perf.gpu_info.canvas = "gpu".into();
+        assert!(perf.gpu_info_lines().iter().any(|line| line == "Image compositor: unknown"));
+        perf.record("full", 100, 1.0, 0.5);
+        assert_eq!(perf.gpu_info.canvas, "gpu");
+        assert!(perf.gpu_info_lines().iter().any(|line| line == "Image compositor: CPU"));
+
+        perf.gpu_fallback = Some("unsupported layer feature".into());
+        assert!(perf.gpu_info_lines().iter().any(|line| line == "Fallback: unsupported layer feature"));
+        perf.record("gpu-rect", 10, 0.2, 0.0);
+        assert!(perf.gpu_info_lines().iter().any(|line| line == "Image compositor: GPU"));
+        assert!(perf.gpu_fallback.is_none());
+    }
+
+    #[test]
+    fn compositor_fallback_does_not_overwrite_canvas_or_backend_startup_state() {
+        let mut perf = Perf::default();
+        perf.gpu_info.canvas = "gpu".into();
+        perf.gpu_info.fallback = Some("selected a different backend".into());
+        perf.record("gpu-full", 100, 1.0, 0.0);
+        // A budget rejection can happen before the next CPU canvas refresh.
+        perf.gpu_fallback = Some(OVER_CANVAS_BUDGET.into());
+        let before = serde_json::to_value(&perf.gpu_info).unwrap();
+        let lines = perf.gpu_info_lines();
+        assert!(lines.iter().any(|line| line == "Image compositor: CPU"));
+        assert!(lines.iter().any(|line| line == &format!("Fallback: {OVER_CANVAS_BUDGET}")));
+        assert_eq!(serde_json::to_value(&perf.gpu_info).unwrap(), before);
+        perf.record("gpu-rect", 10, 0.2, 0.0);
+        assert!(perf.gpu_info_lines().iter().any(|line| line == "Fallback: selected a different backend"));
+    }
 
     #[test]
     fn gpu_budget_follows_memory_usage_and_ram() {
