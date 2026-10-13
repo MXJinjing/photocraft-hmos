@@ -153,7 +153,8 @@ mod tests {
             h.state_mut().ui.open_dialog(crate::state::DialogKind::About, serde_json::from_value(json!({"tab": tab})).unwrap());
             h.run_steps(3);
             assert!(h.query_by_label(&format!("About {}", crate::brand::APP_NAME)).is_some());
-            assert!(h.query_by_label_contains("Version ").is_some());
+            assert!(h.query_by_label_contains("Upstream PhotoCraft: ").is_some());
+            assert!(h.query_by_label_contains("HarmonyOS HAP: ").is_some());
             for label in ["Contributors", "Models", "Join us on Discord", "PhotoCraft website", "GitHub", "ArtCraft"] {
                 assert!(h.query_by_label(label).is_none(), "about {tab}: {label}");
             }

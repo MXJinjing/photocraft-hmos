@@ -167,6 +167,7 @@ fn canvas_type_session_opens_ime_and_accepts_composition_and_unicode_deletion() 
         anchor: 0,
         session: "test-type".into(),
         created: false,
+        mask: false,
         dragging: false,
         resize: None,
         preedit: None,

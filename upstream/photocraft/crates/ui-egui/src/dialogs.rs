@@ -461,7 +461,8 @@ fn display_title(d: &Dialog) -> String {
             shown.trim_end_matches('…').to_string()
         }
         _ => {
-            let shown = tl!(&title(d));
+            let source = title(d);
+            let shown = tl!(&source);
             if cfg!(feature = "harmonyos-ui") {
                 shown.replace("PhotoCraft", crate::brand::APP_NAME)
             } else {
