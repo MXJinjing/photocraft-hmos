@@ -121,11 +121,24 @@ pub fn disabled(app: &crate::PhotocraftApp, id: &str) -> bool {
     if transform && crate::vector_ui::free_transform_path(app).is_some() {
         return false;
     }
+    // So does a targeted alpha channel or the Quick Mask: it transforms instead of the layer (#2835).
+    let target = crate::canvas::paint_target(app);
+    if transform && (target.is_object() || target == "quickMask") {
+        return false;
+    }
     // Editable type can be scaled, rotated and skewed but not distorted (#2630): Photoshop greys
-    // Distort and Perspective until the type is rasterized. A targeted unlinked mask or channel of
-    // the type layer is pixels, and can be.
-    if matches!(id, "edit.transform.distort" | "edit.transform.perspective")
-        && active.is_some_and(|l| matches!(l.content, LayerContent::Text(_)))
+    // Distort and Perspective until the type is rasterized, and the split warps (Warp on type
+    // offers only the warp styles, #3004). A targeted unlinked mask or channel of the type layer
+    // is pixels, and can be.
+    if matches!(
+        id,
+        "edit.transform.distort"
+            | "edit.transform.perspective"
+            | "edit.transform.splitWarpCrosswise"
+            | "edit.transform.splitWarpHorizontally"
+            | "edit.transform.splitWarpVertically"
+            | "edit.transform.removeWarpSplit"
+    ) && active.is_some_and(|l| matches!(l.content, LayerContent::Text(_)))
         && photocraft_engine::transform_cmds::lone_target(&st.doc, st.active_layer, &serde_json::json!({ "target": crate::canvas::paint_target(app) }))
             .is_ok_and(|t| t.is_none())
     {
@@ -177,6 +190,12 @@ mod tests {
         // A selection makes Free Transform available on the Background.
         s.execute("select.all", json!({})).unwrap();
         assert!(!off(&s, "edit.freeTransform"));
+        // So does a targeted alpha channel, which transforms instead of the Background (#2835).
+        s.execute("select.deselect", json!({})).unwrap();
+        s.execute("channel.new", json!({})).unwrap();
+        s.execute("channel.target", json!({"channel": 0})).unwrap();
+        let app = crate::PhotocraftApp::new(s, crate::Services::default());
+        assert!(!disabled(&app, "edit.freeTransform") && !disabled(&app, "edit.transform.flipHorizontal"));
     }
 
     /// With several layers selected, Rasterize is judged by the whole selection, not by the layer

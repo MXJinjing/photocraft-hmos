@@ -115,10 +115,12 @@ fn assert_document_size_is_physical(gpu: bool) {
 
 #[test]
 fn ui_scale_keeps_the_document_pixel_size_on_the_gpu_canvas() {
+    let _gpu = photocraft_testkit::gpu_lock();
     assert_document_size_is_physical(true);
 }
 
 #[test]
 fn ui_scale_keeps_the_document_pixel_size_on_the_cpu_canvas() {
+    let _gpu = photocraft_testkit::gpu_lock();
     assert_document_size_is_physical(false);
 }

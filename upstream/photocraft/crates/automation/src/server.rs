@@ -54,6 +54,79 @@ pub struct OpenParams {
 
 #[derive(Debug, Default, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+pub struct PlaceParams {
+    /// Path beneath the configured automation read root: relative (forward slashes) or absolute.
+    pub path: String,
+    /// Document index from `session_list` (default: the active document).
+    #[serde(default)]
+    pub index: Option<usize>,
+    /// Scale as a percentage; defaults to fitting a file larger than the canvas.
+    #[serde(default)]
+    pub scale: Option<f64>,
+    /// Place at a centred size instead of a scaled one.
+    #[serde(default)]
+    pub fit: Option<bool>,
+    /// Centre of the placed layer, in document pixels.
+    #[serde(default)]
+    pub center: Option<[f64; 2]>,
+}
+
+#[derive(Debug, Default, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ExportLayersParams {
+    /// Directory beneath the configured automation write root: relative (forward slashes) or absolute.
+    pub dir: String,
+    /// Document index from `session_list` (default: the active document).
+    #[serde(default)]
+    pub index: Option<usize>,
+    /// Export format (default png).
+    #[serde(default)]
+    pub format: Option<String>,
+    /// Filename prefix (default: the document name).
+    #[serde(default)]
+    pub prefix: Option<String>,
+    /// Export only the layers that are visible (default true).
+    #[serde(default, rename = "visible_only")]
+    pub visible_only: Option<bool>,
+    /// Encoder quality, 0..12, for the formats that take one.
+    #[serde(default)]
+    pub quality: Option<f64>,
+}
+
+#[derive(Debug, Default, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ExportDataSetsParams {
+    /// Directory beneath the configured automation write root: relative (forward slashes) or absolute.
+    pub dir: String,
+    /// Document index from `session_list` (default: the active document).
+    #[serde(default)]
+    pub index: Option<usize>,
+    /// Export format (default png).
+    #[serde(default)]
+    pub format: Option<String>,
+    /// Only these data sets, by name; default every one of them.
+    #[serde(default, rename = "data_sets")]
+    pub data_sets: Option<Vec<String>>,
+    /// Filename template with `{name}`, `{index}` and `{document}` (default `{name}`).
+    #[serde(default)]
+    pub naming: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ImportDataSetsParams {
+    /// Path beneath the configured automation read root: relative (forward slashes) or absolute.
+    pub path: String,
+    /// Document index from `session_list` (default: the active document).
+    #[serde(default)]
+    pub index: Option<usize>,
+    /// Field delimiter (default `,`).
+    #[serde(default)]
+    pub delimiter: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct NewParams {
     #[serde(default)]
     pub width: Option<u32>,
@@ -90,6 +163,10 @@ pub struct SaveParams {
     /// TIFF: keep the layers (Photoshop layer data). Off by default: a flat TIFF.
     #[serde(default, rename = "tiffLayers")]
     pub tiff_layers: bool,
+    /// TGA: 24 or 32 bits per pixel. 32 writes the alpha channel (or else the transparency) as the
+    /// alpha, 24 none. Unset: 32 with an alpha channel or transparency, else 24.
+    #[serde(default, rename = "tgaBits")]
+    pub tga_bits: Option<u8>,
     #[serde(default)]
     pub index: Option<usize>,
 }
@@ -242,7 +319,8 @@ pub struct UiSetParams {
     /// color ("matchCanvas" or "custom"), custom_color ([r, g, b]), opacity (0..100),
     /// auto_adjust, classic_mode and auto_center_preview), shapeStroke (an object patching width, align, cap, join, miterLimit,
     /// dashes, dashOffset and opacity; null disables the stroke). Shape stroke fields use
-    /// `shape.edit` names and units; colour comes from `tools.setColors`. Other fields are an error.
+    /// `shape.edit` names and units; colour comes from `tools.setColors`. camTransformOnDrop (bool,
+    /// the Content-Aware Move tool's Transform On Drop). Other fields are an error.
     pub fields: Value,
 }
 
@@ -432,7 +510,7 @@ impl PhotocraftMcp {
         if max_side.is_some_and(|side| side > MAX_PREVIEW_SIDE) {
             return Ok(fail(format!("automation preview side exceeds {MAX_PREVIEW_SIDE} pixels")));
         }
-        let response = match b.call("ui.screenshot", json!({})).await {
+        let response = match b.call_read("ui.screenshot", json!({})).await {
             Ok(response) => response,
             Err(error) => return Ok(fail(error)),
         };
@@ -500,7 +578,7 @@ impl PhotocraftMcp {
         let Some(b) = self.bridge_client() else {
             return Ok(no_backend());
         };
-        to_result(b.call("ui.inspect", json!({})).await)
+        to_result(b.call_read("ui.inspect", json!({})).await)
     }
 
     #[tool(description = "Open an image or document file and make it active. Returns index, size and import warnings.")]
@@ -513,6 +591,107 @@ impl PhotocraftMcp {
             return Ok(no_backend());
         };
         to_result(b.call("app.open", json!({"path": p.path})).await)
+    }
+
+    #[tool(
+        description = "Place a file into the document as a Smart Object layer (Place Embedded), reading `path` beneath the read root. `scale` (percent), `fit` and `center` are the command's own."
+    )]
+    async fn doc_place(&self, Parameters(p): Parameters<PlaceParams>) -> Result<CallToolResult, McpError> {
+        let mut opts = serde_json::Map::new();
+        if let Some(v) = p.scale {
+            opts.insert("scale".into(), json!(v));
+        }
+        if let Some(v) = p.fit {
+            opts.insert("fit".into(), json!(v));
+        }
+        if let Some(v) = p.center {
+            opts.insert("center".into(), json!(v));
+        }
+        let opts = Value::Object(opts);
+        // Bridge mode runs the app on this machine, which reads the path itself like any command.
+        let mut bridge_params = opts.clone();
+        if let Some(o) = bridge_params.as_object_mut() {
+            o.insert("path".into(), Value::String(p.path.clone()));
+        }
+        let (path, index) = (p.path, p.index);
+        if let Some(r) = self.headless_op(move |h| h.place(index, &path, &opts)).await {
+            return to_result(r);
+        }
+        self.run_command("file.placeEmbedded".into(), bridge_params, true).await
+    }
+
+    #[tool(
+        description = "Export each exported layer of the document as its own file beneath the write root (the capability-scoped Layers to Files). A file that already exists is an error, not an overwrite."
+    )]
+    async fn doc_export_layers(&self, Parameters(p): Parameters<ExportLayersParams>) -> Result<CallToolResult, McpError> {
+        let mut opts = serde_json::Map::new();
+        if let Some(v) = p.format {
+            opts.insert("format".into(), json!(v));
+        }
+        if let Some(v) = p.prefix {
+            opts.insert("prefix".into(), json!(v));
+        }
+        if let Some(v) = p.visible_only {
+            opts.insert("visibleOnly".into(), json!(v));
+        }
+        if let Some(v) = p.quality {
+            opts.insert("quality".into(), json!(v));
+        }
+        let opts = Value::Object(opts);
+        // Bridge mode runs the app on this machine, which writes its own paths like any command.
+        let mut bridge_params = opts.clone();
+        if let Some(o) = bridge_params.as_object_mut() {
+            o.insert("dir".into(), Value::String(p.dir.clone()));
+        }
+        let (dir, index) = (p.dir, p.index);
+        if let Some(r) = self.headless_op(move |h| h.export_layers(index, &dir, &opts)).await {
+            return to_result(r);
+        }
+        self.run_command("file.export.layersToFiles".into(), bridge_params, true).await
+    }
+
+    #[tool(
+        description = "Export every data set of the document as its own flattened file beneath the write root (the capability-scoped Export Data Sets). The batch is planned first, so colliding filenames are refused before any file is written."
+    )]
+    async fn doc_export_data_sets(&self, Parameters(p): Parameters<ExportDataSetsParams>) -> Result<CallToolResult, McpError> {
+        let mut opts = serde_json::Map::new();
+        if let Some(v) = p.format {
+            opts.insert("format".into(), json!(v));
+        }
+        if let Some(v) = p.data_sets {
+            opts.insert("dataSets".into(), json!(v));
+        }
+        if let Some(v) = p.naming {
+            opts.insert("naming".into(), json!(v));
+        }
+        let opts = Value::Object(opts);
+        let mut bridge_params = opts.clone();
+        if let Some(o) = bridge_params.as_object_mut() {
+            o.insert("dir".into(), Value::String(p.dir.clone()));
+        }
+        let (dir, index) = (p.dir, p.index);
+        if let Some(r) = self.headless_op(move |h| h.export_data_sets(index, &dir, &opts)).await {
+            return to_result(r);
+        }
+        self.run_command("file.export.dataSetsAsFiles".into(), bridge_params, true).await
+    }
+
+    #[tool(description = "Import a data set CSV from the read root into the document (the capability-scoped Import Variable Data Sets).")]
+    async fn doc_import_data_sets(&self, Parameters(p): Parameters<ImportDataSetsParams>) -> Result<CallToolResult, McpError> {
+        let mut opts = serde_json::Map::new();
+        if let Some(v) = p.delimiter {
+            opts.insert("delimiter".into(), json!(v));
+        }
+        let opts = Value::Object(opts);
+        let mut bridge_params = opts.clone();
+        if let Some(o) = bridge_params.as_object_mut() {
+            o.insert("path".into(), Value::String(p.path.clone()));
+        }
+        let (path, index) = (p.path, p.index);
+        if let Some(r) = self.headless_op(move |h| h.import_data_sets(index, &path, &opts)).await {
+            return to_result(r);
+        }
+        self.run_command("file.import.variableDataSets".into(), bridge_params, true).await
     }
 
     #[tool(description = "Create a new document (defaults: 1920x1080 RGB 8-bit white).")]
@@ -571,7 +750,7 @@ impl PhotocraftMcp {
             return Ok(no_backend());
         };
         let params = p.index.map(|index| json!({"document": index})).unwrap_or_else(|| json!({}));
-        to_result(b.call("engine.execute", json!({"command": "document.inspect", "params": params})).await)
+        to_result(b.call_read("engine.execute", json!({"command": "document.inspect", "params": params})).await)
     }
 
     #[tool(description = "Render the flattened document and return it as a PNG image (bridge mode: window screenshot).")]
@@ -613,7 +792,9 @@ impl PhotocraftMcp {
         }
     }
 
-    #[tool(description = "List engine commands: id, label, menu path, shortcut, parameter doc, enabled now.")]
+    #[tool(description = "List engine commands: id, label, menu path, shortcut, parameter doc, enabled now. \
+        `disabledReason` says why a command is off (null when enabled); `needsDocument` is true when it is off because no \
+        document is open: create or open one first (doc_new, doc_open).")]
     async fn command_list(&self, Parameters(p): Parameters<ListParams>) -> Result<CallToolResult, McpError> {
         let all = if let Some(r) = self.headless_op(|h| Ok(h.command_list())).await {
             r
@@ -621,7 +802,7 @@ impl PhotocraftMcp {
             let Some(b) = self.bridge_client() else {
                 return Ok(no_backend());
             };
-            b.call("engine.commands", json!({})).await
+            b.call_read("engine.commands", json!({})).await
         };
         let all = match all {
             Ok(v) => v,
@@ -653,17 +834,18 @@ impl PhotocraftMcp {
     #[tool(description = "List background jobs: running ones with progress (0-1), message and elapsed time, then the last few \
         that ended (state done|failed|cancelled with their result or error). Finished jobs are applied first.")]
     async fn jobs_list(&self) -> Result<CallToolResult, McpError> {
-        self.jobs_call("jobs.list", json!({})).await
+        self.jobs_call("jobs.list", json!({}), true).await
     }
 
     #[tool(description = "Cancel a background job by id (or every running job when `job` is omitted). The document is left \
         unchanged.")]
     async fn jobs_cancel(&self, Parameters(p): Parameters<JobCancelParams>) -> Result<CallToolResult, McpError> {
-        self.jobs_call("jobs.cancel", p.job.map_or_else(|| json!({}), |j| json!({"job": j}))).await
+        self.jobs_call("jobs.cancel", p.job.map_or_else(|| json!({}), |j| json!({"job": j})), false).await
     }
 
-    #[tool(description = "Run several engine commands in one call (fewer round trips). Returns {completed, failed, \
-        results:[{ok, result|error}]}; stops at the first error unless stop_on_error is false.")]
+    #[tool(description = "Run several engine commands in one call, in order (fewer round trips). Returns {completed, failed, \
+        results:[{ok, result|error}]}; stops at the first error unless stop_on_error is false. \
+        Not an atomic transaction: earlier successful steps stay applied (no rollback).")]
     async fn command_batch(&self, Parameters(p): Parameters<BatchParams>) -> Result<CallToolResult, McpError> {
         if p.steps.len() > MAX_BATCH_STEPS {
             return Ok(fail(format!("batch contains {} steps; maximum is {MAX_BATCH_STEPS}", p.steps.len())));
@@ -712,7 +894,7 @@ impl PhotocraftMcp {
     )]
     async fn ui_inspect(&self) -> Result<CallToolResult, McpError> {
         match self.bridge_client() {
-            Some(b) => to_result(b.call("ui.inspect", json!({})).await),
+            Some(b) => to_result(b.call_read("ui.inspect", json!({})).await),
             None => bridge_only("ui_inspect"),
         }
     }
@@ -787,8 +969,8 @@ impl PhotocraftMcp {
         to_result(b.call("engine.execute", json!({"command": id, "params": params, "wait": wait})).await)
     }
 
-    /// `jobs.list` / `jobs.cancel` in either backend.
-    async fn jobs_call(&self, method: &'static str, params: Value) -> Result<CallToolResult, McpError> {
+    /// `jobs.list` / `jobs.cancel` in either backend; `read` picks the bridge's retry rule.
+    async fn jobs_call(&self, method: &'static str, params: Value, read: bool) -> Result<CallToolResult, McpError> {
         let p2 = params.clone();
         if let Some(r) = self.headless_op(move |h| h.command_start(method, p2, true)).await {
             return to_result(r);
@@ -796,15 +978,20 @@ impl PhotocraftMcp {
         let Some(b) = self.bridge_client() else {
             return Ok(no_backend());
         };
-        to_result(b.call(method, params).await)
+        if read { to_result(b.call_read(method, params).await) } else { to_result(b.call(method, params).await) }
     }
 
     async fn save_impl(&self, p: SaveParams) -> Result<CallToolResult, McpError> {
+        let tga_bits = match p.tga_bits.map(|b| (b, photocraft_io::TgaBits::from_bits(u64::from(b)))) {
+            None => None,
+            Some((_, Some(bits))) => Some(bits),
+            Some((b, None)) => return Ok(fail(format!("`tgaBits` must be 24 or 32, got {b}"))),
+        };
         if let Some(b) = self.bridge_client() {
             // The bridge forwards to the running app's `app.save`, which takes only an optional
             // path (without one it writes back to the document's own layered file, as headless
-            // does), so the extra options are headless-only. Saying so beats saving with defaults
-            // while the caller believes their quality or format was applied.
+            // does) and the Targa bits, so the other options are headless-only. Saying so beats
+            // saving with defaults while the caller believes their quality or format was applied.
             let unsupported: Vec<&str> = [
                 p.format.is_some().then_some("format"),
                 p.quality.is_some().then_some("quality"),
@@ -817,15 +1004,18 @@ impl PhotocraftMcp {
             if !unsupported.is_empty() {
                 return Ok(fail(format!("bridge mode saves with the app's current settings; `{}` need headless mode", unsupported.join("`, `"))));
             }
-            let params = match p.path {
-                Some(path) => json!({"path": path}),
-                None => json!({}),
-            };
+            let mut params = json!({});
+            if let Some(path) = p.path {
+                params["path"] = json!(path);
+            }
+            if let Some(bits) = tga_bits {
+                params["tgaBits"] = json!(bits.bits());
+            }
             return to_result(b.call("app.save", params).await);
         }
         let Some(r) = self
             .headless_op(move |h| {
-                let mut opts = photocraft_io::ExportOptions { tiff_layers: p.tiff_layers, ..Default::default() };
+                let mut opts = photocraft_io::ExportOptions { tiff_layers: p.tiff_layers, tga_bits, ..Default::default() };
                 if let Some(q) = p.quality {
                     opts.encode.jpeg_quality = q.clamp(1, 100);
                     opts.encode.webp_quality = q.clamp(1, 100);

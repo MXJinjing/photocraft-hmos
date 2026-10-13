@@ -512,6 +512,8 @@ impl Image {
                 out.extend_from_slice(&one);
             }
             out
+        } else if let Some(fast) = self.convert_int_direct(layout, sample) {
+            fast
         } else if layout == self.layout {
             quantize(&self.to_normalized(), sample)
         } else {
@@ -529,6 +531,55 @@ impl Image {
             meta: self.meta.clone(),
             warnings: self.warnings.clone(),
         }
+    }
+
+    /// Integer fast path of [`Image::convert`] for U8/U16 sources and targets whose result is
+    /// a pure channel copy: same colour model (alpha added as opaque, or dropped) or gray to
+    /// RGB. Bit-identical to the generic f32 route (see the equivalence tests) but without
+    /// the two intermediate f32 buffers. Returns `None` for everything else.
+    fn convert_int_direct(&self, layout: ChannelLayout, sample: SampleType) -> Option<Vec<u8>> {
+        let int = |s: SampleType| matches!(s, SampleType::U8 | SampleType::U16);
+        if !int(self.sample) || !int(sample) {
+            return None;
+        }
+        let gray_to_rgb = self.layout.is_gray() && layout.is_rgb();
+        if !gray_to_rgb && !layout.same_model(self.layout) {
+            return None;
+        }
+        let one: &[u8] = match sample {
+            SampleType::U8 => &[u8::MAX],
+            _ => &u16::MAX.to_ne_bytes(),
+        };
+        let (fc, tc) = (self.layout.channels(), layout.channels());
+        let (sb, db) = (self.sample.bytes(), sample.bytes());
+        let (src_color, dst_color) = (self.layout.color_channels(), layout.color_channels());
+        let n = self.data.len() / (fc * sb);
+        let mut out = Vec::with_capacity(n.checked_mul(tc)?.checked_mul(db)?);
+        macro_rules! run {
+            ($conv:expr) => {{
+                let conv = $conv;
+                for px in self.data.chunks_exact(fc * sb) {
+                    for j in 0..dst_color {
+                        let c = if src_color == 1 { 0 } else { j };
+                        conv(&px[c * sb..(c + 1) * sb], &mut out);
+                    }
+                    if layout.has_alpha() {
+                        if self.layout.has_alpha() {
+                            conv(&px[src_color * sb..(src_color + 1) * sb], &mut out);
+                        } else {
+                            out.extend_from_slice(one);
+                        }
+                    }
+                }
+            }};
+        }
+        match (self.sample, sample) {
+            (SampleType::U8, SampleType::U8) => run!(|s: &[u8], o: &mut Vec<u8>| o.push(s[0])),
+            (SampleType::U16, SampleType::U16) => run!(|s: &[u8], o: &mut Vec<u8>| o.extend_from_slice(s)),
+            (SampleType::U8, SampleType::U16) => run!(|s: &[u8], o: &mut Vec<u8>| o.extend_from_slice(&(u16::from(s[0]) * 257).to_ne_bytes())),
+            _ => run!(|s: &[u8], o: &mut Vec<u8>| o.push(((u32::from(u16::from_ne_bytes([s[0], s[1]])) + 128) / 257) as u8)),
+        }
+        Some(out)
     }
 
     /// [`Image::convert`], borrowing `self` when it already has that layout and sample type
@@ -660,6 +711,66 @@ mod tests {
     }
 
     use super::*;
+
+    /// The generic f32 route `convert` used before the integer fast paths (the reference).
+    fn convert_via_f32(img: &Image, layout: ChannelLayout, sample: SampleType) -> Vec<u8> {
+        quantize(&convert_layout(&img.to_normalized(), img.layout, layout), sample)
+    }
+
+    #[test]
+    fn int_fast_path_matches_f32_route_for_every_value() {
+        // Every U8 and every U16 value through every depth pair (alpha goes through the same per-sample conversion; covered by the layout test).
+        let all8: Vec<u8> = (0..=255).collect();
+        let all16: Vec<u16> = (0..=65535).collect();
+        for (src, to) in
+            [(SampleType::U8, SampleType::U8), (SampleType::U8, SampleType::U16), (SampleType::U16, SampleType::U8), (SampleType::U16, SampleType::U16)]
+        {
+            let img = if src == SampleType::U8 {
+                Image::from_u8(256, 1, ChannelLayout::Gray, all8.clone()).unwrap()
+            } else {
+                Image::from_u16(65536, 1, ChannelLayout::Gray, &all16).unwrap()
+            };
+            for layout in [ChannelLayout::Gray, ChannelLayout::Rgb] {
+                assert_eq!(img.convert(layout, to).data(), &convert_via_f32(&img, layout, to)[..], "{src:?}->{to:?} {layout:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn int_fast_path_matches_f32_route_for_every_layout() {
+        let mut seed = 0x9e3779b97f4a7c15u64;
+        let mut next = || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed
+        };
+        for from_s in [SampleType::U8, SampleType::U16] {
+            for from_l in ChannelLayout::ALL {
+                let n = 64 * from_l.channels();
+                let mut vals = Vec::new();
+                for i in 0..n {
+                    // Edge values (0, 1, max-1, max, mid) mixed with random ones.
+                    let r = next();
+                    let v = match i % 7 {
+                        0 => 0.0,
+                        1 => 1.0,
+                        2 => 1.0 / 255.0,
+                        3 => 254.0 / 255.0,
+                        _ => (r % 65536) as f32 / 65535.0,
+                    };
+                    vals.push(v);
+                }
+                let img = Image::from_normalized(64, 1, from_l, from_s, &vals).unwrap();
+                for to_l in ChannelLayout::ALL {
+                    for to_s in SampleType::ALL {
+                        let got = img.convert(to_l, to_s);
+                        assert_eq!(got.data(), &convert_via_f32(&img, to_l, to_s)[..], "{from_l:?}/{from_s:?} -> {to_l:?}/{to_s:?}");
+                    }
+                }
+            }
+        }
+    }
 
     #[test]
     fn u8_u16_roundtrip_exact() {

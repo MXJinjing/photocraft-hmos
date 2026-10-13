@@ -437,3 +437,26 @@ fn a_knockout_background_does_not_recurse() {
     let got = render(&d, Rect::from_xywh(0, 0, 1, 1)).px[0];
     assert!(got[3] <= 1.0);
 }
+
+/// The Background is found by its structure, not its English name: a file from a German or
+/// Japanese Photoshop calls it "Hintergrund" or "背景", and a deep knockout still reveals it. A
+/// bottom layer merely called "Background", without the Background's locks, is not one.
+#[test]
+fn deep_knockout_reveals_a_localized_background() {
+    for depth in DEPTHS {
+        for name in ["Hintergrund", "背景", "Arrière-plan"] {
+            let mut d = doc(depth, true);
+            d.layers[0].name = name.into();
+            let green = solid(&d, "green", full(&d), GREEN);
+            d.layers.push(green);
+            d.layers.push(knocker(&d, Knockout::Deep));
+            check(&d, 2, 2, WHITE, name);
+        }
+        let mut d = doc(depth, true);
+        d.layers[0].locks = Default::default();
+        let green = solid(&d, "green", full(&d), GREEN);
+        d.layers.push(green);
+        d.layers.push(knocker(&d, Knockout::Deep));
+        check(&d, 2, 2, [0.0; 4], "an unlocked layer named Background");
+    }
+}

@@ -103,6 +103,7 @@ fn tinted(p: [u8; 3], c: usize) -> bool {
 
 #[test]
 fn editing_a_crop_frame_shows_the_pixels_past_the_canvas() {
+    let _gpu = photocraft_testkit::gpu_lock();
     let Some(mut h) = harness() else { return };
     h.run_steps(4);
     {

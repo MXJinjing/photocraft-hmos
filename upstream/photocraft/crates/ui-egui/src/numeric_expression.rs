@@ -1,12 +1,47 @@
 //! Bounded arithmetic parser shared by every editable numeric widget.
 //! No scripting, allocations derived from results, or non-finite values.
 
+use photocraft_engine::prefs::Unit;
+
 pub(crate) fn parse(text: &str) -> Option<f64> {
+    parse_with_units(text, None)
+}
+
+/// What a unit typed after a number means in a field (Photoshop: `1in` in a px field is the
+/// pixels of an inch at the document resolution).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Units<'s> {
+    /// The field's own unit, `None` for a field that isn't a length or a percentage.
+    pub unit: Option<Unit>,
+    /// The suffix the field shows; typed after a number it means the field's unit (`45°`).
+    pub suffix: &'s str,
+    /// Document resolution, pixels per inch.
+    pub dpi: f64,
+    /// Points per inch (72 PostScript, 72.27 traditional).
+    pub ppi: f64,
+}
+
+/// Unit names a number may carry, longest first so `pica` wins over `pc`.
+const UNIT_NAMES: [(&str, Unit); 8] = [
+    ("pica", Unit::Picas),
+    ("px", Unit::Pixels),
+    ("pt", Unit::Points),
+    ("pc", Unit::Picas),
+    ("in", Unit::Inches),
+    ("cm", Unit::Centimeters),
+    ("mm", Unit::Millimeters),
+    ("%", Unit::Percent),
+];
+
+/// [`parse`] where a number may carry a unit (`2in`, `5 mm`, `50%`), converted into the field's
+/// unit. A unit that can't convert (a length in a percent field, any unit in a unitless one) makes
+/// the whole text invalid; without `units`, unit names are invalid as before.
+pub(crate) fn parse_with_units(text: &str, units: Option<Units>) -> Option<f64> {
     if text.len() > 1024 {
         return None;
     }
     let normalized = text.replace('−', "-");
-    let mut parser = Parser { rest: &normalized };
+    let mut parser = Parser { rest: &normalized, units };
     let value = parser.expression(0, 0)?;
     parser.space();
     (parser.rest.is_empty() && value.is_finite()).then_some(value)
@@ -14,6 +49,7 @@ pub(crate) fn parse(text: &str) -> Option<f64> {
 
 struct Parser<'a> {
     rest: &'a str,
+    units: Option<Units<'a>>,
 }
 impl Parser<'_> {
     fn space(&mut self) {
@@ -103,7 +139,37 @@ impl Parser<'_> {
         }
         let value = self.rest.get(..length)?.parse::<f64>().ok()?;
         self.rest = self.rest.get(length..)?;
+        let value = match self.units {
+            Some(units) => self.unit(value, units)?,
+            None => value,
+        };
         value.is_finite().then_some(value)
+    }
+    /// The unit after a number, if any, converting `value` into the field's unit.
+    fn unit(&mut self, value: f64, units: Units) -> Option<f64> {
+        let rest = self.rest.trim_start();
+        let typed = UNIT_NAMES.iter().find(|(name, _)| rest.starts_with(name)).filter(|(name, _)| {
+            // `%` followed by an operand is the remainder operator (`10%3`), not percent.
+            *name != "%" || rest.get(1..).map(str::trim_start).and_then(|r| r.chars().next()).is_none_or(|c| matches!(c, ')' | '+' | '-' | '*' | '/' | '^'))
+        });
+        let Some(&(name, typed)) = typed else {
+            // The field's own suffix (`45°`), when it is no operator or number of its own.
+            let own = units.suffix;
+            let operand = |c: char| c.is_ascii_digit() || matches!(c, '.' | '(' | ')' | '+' | '-' | '*' | '/' | '%' | '^');
+            if !own.is_empty() && !own.starts_with(operand) && rest.starts_with(own) {
+                self.rest = rest.get(own.len()..)?;
+            }
+            return Some(value);
+        };
+        self.rest = rest.get(name.len()..)?;
+        let dpi = if units.dpi.is_finite() && units.dpi > 0.0 { units.dpi } else { 72.0 };
+        let ppi = if units.ppi.is_finite() && units.ppi > 0.0 { units.ppi } else { 72.0 };
+        match units.unit {
+            Some(field) if field == typed => Some(value),
+            // Lengths convert through pixels; a percentage has no length to convert against.
+            Some(field) if field != Unit::Percent && typed != Unit::Percent => Some(field.from_px(typed.to_px(value, dpi, 1.0, ppi), dpi, 1.0, ppi)),
+            _ => None,
+        }
     }
 }
 
@@ -136,6 +202,58 @@ mod tests {
         }
         assert_eq!(parse(&"(".repeat(1000)), None);
         assert_eq!(parse(&"1".repeat(1025)), None);
+    }
+    #[test]
+    fn units_convert_into_the_field_unit_and_bad_input_is_rejected() {
+        use super::{Unit, Units, parse_with_units};
+        let px = Units { unit: Some(Unit::Pixels), suffix: "px", dpi: 300.0, ppi: 72.0 };
+        let pt = Units { unit: Some(Unit::Points), suffix: "pt", dpi: 144.0, ppi: 72.0 };
+        let pct = Units { unit: Some(Unit::Percent), suffix: "%", dpi: 72.0, ppi: 72.0 };
+        let deg = Units { unit: None, suffix: "°", dpi: 72.0, ppi: 72.0 };
+        for (text, units, want) in [
+            ("1in", px, 300.0),
+            ("2.54cm", px, 300.0),
+            ("1in+10", px, 310.0),
+            ("1 in * 2", px, 600.0),
+            ("-25.4mm", px, -300.0),
+            ("72pt", px, 300.0),
+            ("1pica", px, 50.0),
+            ("1pc", px, 50.0),
+            ("100px", px, 100.0),
+            ("(1in)/3", px, 100.0),
+            ("144px", pt, 72.0),
+            ("12", pt, 12.0),
+            ("50%", pct, 50.0),
+            ("50 % + 10", pct, 60.0),
+            ("10%3", pct, 1.0),
+            ("45°", deg, 45.0),
+            ("45°*2", deg, 90.0),
+        ] {
+            let got = parse_with_units(text, Some(units));
+            assert!(got.is_some_and(|v| (v - want).abs() < 1e-9), "{text}: {got:?}, want {want}");
+        }
+        let nan_dpi = Units { dpi: f64::NAN, ppi: 0.0, ..px };
+        assert_eq!(parse_with_units("1in", Some(nan_dpi)), Some(72.0), "a bad resolution falls back to 72");
+        for (text, units) in [
+            ("", px),
+            ("1/0", px),
+            ("1e400", px),
+            ("((((", px),
+            ("你好", px),
+            ("1in/0", px),
+            ("50%", px),
+            ("2in", pct),
+            ("2in", deg),
+            ("2 inches", px),
+            ("2px3", px),
+            ("in", px),
+            ("1e308in", px),
+            ("°", deg),
+            ("2°", px),
+        ] {
+            assert_eq!(parse_with_units(text, Some(units)), None, "{text}");
+        }
+        assert_eq!(parse("1in"), None, "without a field unit, unit names stay invalid");
     }
 }
 

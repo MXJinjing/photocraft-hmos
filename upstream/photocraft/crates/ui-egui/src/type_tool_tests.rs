@@ -19,7 +19,17 @@ fn harness(ppp: f32, app: PhotocraftApp) -> Harness<'static, PhotocraftApp> {
 }
 
 fn make_harness(ppp: f32, app: PhotocraftApp, render: bool) -> Harness<'static, PhotocraftApp> {
-    let builder = Harness::builder().with_size(vec2(1200.0, 800.0)).with_pixels_per_point(ppp);
+    make_harness_with(Harness::builder(), ppp, app, render)
+}
+
+/// 60 frames a second: every queued event is a frame, and the default quarter-second step puts
+/// the second click of a double-click past egui's double-click delay.
+fn fast_harness(app: PhotocraftApp) -> Harness<'static, PhotocraftApp> {
+    make_harness_with(Harness::builder().with_step_dt(1.0 / 60.0), 1.0, app, false)
+}
+
+fn make_harness_with(builder: egui_kittest::HarnessBuilder<PhotocraftApp>, ppp: f32, app: PhotocraftApp, render: bool) -> Harness<'static, PhotocraftApp> {
+    let builder = builder.with_size(vec2(1200.0, 800.0)).with_pixels_per_point(ppp);
     let builder = if render { builder.wgpu() } else { builder };
     let mut h = builder.build_ui_state(
         |ui, app: &mut PhotocraftApp| {
@@ -87,6 +97,16 @@ fn click(h: &mut Harness<'static, PhotocraftApp>, p: Pos2) {
     press(h, p, true);
     press(h, p, false);
     h.run_steps(1);
+}
+
+/// Two clicks within egui's double-click delay (use [`fast_harness`]).
+fn double_click(h: &mut Harness<'static, PhotocraftApp>, p: Pos2) {
+    h.hover_at(p);
+    h.run_steps(1);
+    for pressed in [true, false, true, false] {
+        h.event(egui::Event::PointerButton { pos: p, button: PointerButton::Primary, pressed, modifiers: Modifiers::NONE });
+    }
+    h.run_steps(2);
 }
 
 fn drag(h: &mut Harness<'static, PhotocraftApp>, a: Pos2, b: Pos2) {
@@ -282,6 +302,7 @@ fn size_applies_at_layer_and_selection_scope() {
             anchor: 6,
             session: "s".into(),
             created: false,
+            mask: false,
             dragging: false,
             resize: None,
             preedit: None,
@@ -428,6 +449,7 @@ fn foreground_colour_recolours_only_selected_type() {
         anchor,
         session: "s".into(),
         created: false,
+        mask: false,
         dragging: false,
         resize: None,
         preedit: None,
@@ -516,6 +538,7 @@ fn text_color_dialog_edits_only_the_selected_range_and_cancel_is_inert() {
         anchor: 6,
         session: "text-color-dialog-test".into(),
         created: false,
+        mask: false,
         dragging: false,
         resize: None,
         preedit: None,
@@ -566,8 +589,17 @@ fn text_color_dialog_without_a_selection_edits_the_whole_layer() {
 fn empty_ime_events_never_delete_the_selection() {
     let mut app = new_app();
     let id = LayerId(app.run("type.create", json!({"text": "Hello", "size": 40, "x": 300, "y": 420})).unwrap()["layer"].as_u64().unwrap());
-    app.ui.text_edit =
-        Some(crate::state::TextEdit { layer: id.0, caret: 5, anchor: 0, session: "s".into(), created: false, dragging: false, resize: None, preedit: None });
+    app.ui.text_edit = Some(crate::state::TextEdit {
+        layer: id.0,
+        caret: 5,
+        anchor: 0,
+        session: "s".into(),
+        created: false,
+        mask: false,
+        dragging: false,
+        resize: None,
+        preedit: None,
+    });
     let mut h = harness(1.0, app);
     let ime = |h: &mut Harness<'static, PhotocraftApp>, e: egui::ImeEvent| {
         h.event(egui::Event::Ime(e));
@@ -1210,6 +1242,33 @@ fn variable_faces_list_the_weights_of_their_axis() {
     assert_eq!(super::style_names(&[face(700.0, false, Vec::new())]), ["Bold"]);
 }
 
+/// A variable font's axes become sliders (optical size excepted: it follows the type size), and
+/// each shows the style's value for it, or what the layout draws without one (#2985).
+#[test]
+fn variable_font_axes_become_sliders_with_the_drawn_value() {
+    use photocraft_doc::text::{CharStyle, FontVariation};
+    let face = |italic: bool, axes: Vec<super::Axis>| photocraft_text::FaceInfo {
+        family: "Roboto Flex".into(),
+        style: "Regular".into(),
+        postscript_name: None,
+        weight: 400.0,
+        italic,
+        axes,
+    };
+    let ax = |tag: &str, min: f32, def: f32, max: f32| (tag.to_string(), min, def, max);
+    let faces = [
+        face(false, vec![ax("opsz", 8.0, 14.0, 144.0), ax("wght", 100.0, 400.0, 1000.0), ax("wdth", 25.0, 100.0, 151.0)]),
+        face(true, vec![ax("slnt", -10.0, 0.0, 0.0)]),
+    ];
+    let tags = |v: Vec<super::Axis>| v.into_iter().map(|a| a.0).collect::<Vec<_>>();
+    assert_eq!(tags(super::slider_axes(&faces, false)), ["wght", "wdth"]);
+    assert_eq!(tags(super::slider_axes(&faces, true)), ["slnt"]);
+    let c = CharStyle { weight: 700, variations: vec![FontVariation { axis: "wdth".into(), value: 300.0 }], ..Default::default() };
+    assert_eq!(super::axis_value(&c, &ax("wght", 100.0, 400.0, 1000.0)), 700.0, "the style's weight");
+    assert_eq!(super::axis_value(&c, &ax("wdth", 25.0, 100.0, 151.0)), 151.0, "its own value, within the range");
+    assert_eq!(super::axis_value(&c, &ax("GRAD", -200.0, 0.0, 150.0)), 0.0, "the axis default");
+}
+
 /// Families the host serves are in the font menu before they are fetched.
 #[test]
 fn the_font_menu_lists_served_families() {
@@ -1290,6 +1349,7 @@ mod multi_layer_formatting {
             anchor: 1,
             session: "batch-type-edit".into(),
             created: false,
+            mask: false,
             dragging: false,
             resize: None,
             preedit: None,
@@ -1311,7 +1371,16 @@ mod multi_layer_formatting {
         for i in 0..2 {
             let mut expected = before[i].clone();
             expected.font_family = "JetBrains Mono".into();
-            expected.postscript_name = None;
+            // #3556: the new family's installed face at the peer's weight and italic is named (no
+            // name without such a face), so a PSD names a real font.
+            expected.postscript_name = photocraft_text::shared()
+                .lock()
+                .unwrap()
+                .fonts
+                .faces("JetBrains Mono")
+                .into_iter()
+                .find(|f| f.italic == expected.italic && f.weight.round() as u16 == expected.weight)
+                .and_then(|f| f.postscript_name);
             assert_eq!(style(h.state(), ids[i], 0), expected, "family changes preserve each peer's face and metrics");
         }
         assert_eq!(style(h.state(), ids[2], 0), before[2]);
@@ -1319,8 +1388,7 @@ mod multi_layer_formatting {
         h.run();
         h.get_by_label("Sharp").click();
         h.run();
-        // The options bar's leading orientation icon has a tooltip but no accessibility label.
-        h.get_all_by_role(Role::Unknown).next().expect("orientation icon").click();
+        h.get_by_role_and_label(Role::Button, "Toggle text orientation").click();
         h.run();
         for id in &ids[..2] {
             let t = text(h.state(), *id);
@@ -1394,6 +1462,78 @@ mod multi_layer_formatting {
         assert_eq!(text(&app, ids[1]).antialias, AntiAlias::Crisp);
         assert_eq!(text(&app, ids[2]).orientation, Orientation::Vertical);
         assert_eq!(text(&app, ids[0]).antialias, AntiAlias::Sharp);
+    }
+
+    /// The Character panel's OpenType buttons (TYPE-218-5, #3752): Photoshop's eight, in its
+    /// order; each shows pressed while its feature is on and toggles it on the selected type
+    /// layers, or on the selected characters while typing.
+    #[test]
+    fn character_panel_opentype_buttons_toggle_and_show_the_feature() {
+        use egui::accesskit::Toggled;
+        use egui_kittest::kittest::NodeT;
+        use photocraft_engine::type_extra_cmds::feature_on;
+        let (app, ids) = fixture();
+        let untouched = style(&app, ids[2], 0);
+        let mut h = controls(app, true);
+        let shown = |h: &Harness<'static, PhotocraftApp>, label: &str| h.get_by_label(label).accesskit_node().toggled();
+        let order: Vec<String> = h
+            .get_all_by_role(Role::Button)
+            .filter_map(|n| n.accesskit_node().label())
+            .filter(|l| super::super::OPENTYPE_BUTTONS.iter().any(|(_, _, tip)| tip == l))
+            .collect();
+        let expected: Vec<&str> = super::super::OPENTYPE_BUTTONS.iter().map(|(_, _, tip)| *tip).collect();
+        assert_eq!(order, expected, "every OpenType button, in Photoshop's order");
+        assert_eq!(shown(&h, "Standard Ligatures"), Some(Toggled::True), "ligatures are on by default");
+        assert_eq!(shown(&h, "Fractions"), Some(Toggled::False));
+        h.get_by_label("Fractions").click();
+        h.run();
+        for id in &ids[..2] {
+            assert!(feature_on(&style(h.state(), *id, 0), "frac"), "selected layers get the feature");
+        }
+        assert_eq!(style(h.state(), ids[2], 0), untouched, "an unselected layer is untouched");
+        h.run();
+        assert_eq!(shown(&h, "Fractions"), Some(Toggled::True), "the button shows the feature on");
+        h.get_by_label("Standard Ligatures").click();
+        h.run();
+        h.run();
+        assert!(!style(h.state(), ids[0], 0).ligatures && !style(h.state(), ids[1], 0).ligatures);
+        assert_eq!(shown(&h, "Standard Ligatures"), Some(Toggled::False));
+        // While typing, only the selected characters (1..3) change.
+        editing(h.state_mut(), ids[0]);
+        h.run();
+        h.get_by_label("Swash").click();
+        h.run();
+        let swash = |h: &Harness<'static, PhotocraftApp>, ci| feature_on(&style(h.state(), ids[0], ci), "swsh");
+        assert!(!swash(&h, 0) && swash(&h, 1) && swash(&h, 2) && !swash(&h, 3));
+        h.run();
+        assert_eq!(shown(&h, "Swash"), Some(Toggled::True), "shown at the selection start");
+    }
+
+    /// Type › Anti-Alias and Type › Orientation check the edited (else selected) layer's value.
+    #[test]
+    fn type_menu_checks_the_current_anti_alias_and_orientation() {
+        let (mut app, ids) = fixture();
+        app.run("type.antiAlias.none", json!({"layer": ids[0].0})).unwrap();
+        app.run("type.orientation.vertical", json!({"layer": ids[0].0})).unwrap();
+        app.run("type.antiAlias.crisp", json!({"layer": ids[1].0})).unwrap();
+        app.run("type.orientation.horizontal", json!({"layer": ids[1].0})).unwrap();
+        let checks = |app: &PhotocraftApp| -> Vec<String> {
+            let items = crate::menus::menu_items(app);
+            for id in ["type.antiAlias.none", "type.antiAlias.crisp", "type.orientation.horizontal", "type.orientation.vertical"] {
+                let it = items.iter().find(|i| i.id == id).unwrap();
+                assert!(it.checked.is_some(), "{id} is a check item");
+            }
+            items
+                .iter()
+                .filter(|i| (i.id.starts_with("type.antiAlias.") || i.id.starts_with("type.orientation.")) && i.checked == Some(true))
+                .map(|i| i.id.clone())
+                .collect()
+        };
+        editing(&mut app, ids[0]);
+        assert_eq!(checks(&app), ["type.antiAlias.none", "type.orientation.vertical"]);
+        app.ui.text_edit = None;
+        app.session.active_mut().unwrap().active_layer = Some(ids[1]);
+        assert_eq!(checks(&app), ["type.antiAlias.crisp", "type.orientation.horizontal"]);
     }
 
     #[test]
@@ -1481,4 +1621,319 @@ mod multi_layer_formatting {
             assert_eq!(style(h.state(), id, 0), expected);
         }
     }
+}
+
+/// #1132: with the Move tool, double-clicking type on the canvas edits it (Photoshop CC 2019+):
+/// the Type tool takes over with the caret on the glyph under the pointer, on whichever type
+/// layer was double-clicked, even when another layer is active. Elsewhere it does nothing.
+#[test]
+fn move_tool_double_click_on_type_edits_it() {
+    let mut app = new_app();
+    let id = LayerId(app.run("type.create", json!({"text": "HOHOHO", "size": 120, "x": 300, "y": 420})).unwrap()["layer"].as_u64().unwrap());
+    app.run("layer.new.layer", json!({})).unwrap();
+    app.ui.tool = crate::state::Tool::Move;
+    let mut h = fast_harness(app);
+    let p = glyph(&mut h, id, 2, 0.2);
+    let steps = h.state().session.active().unwrap().history.entries().len();
+    double_click(&mut h, p);
+    assert_eq!(h.state().ui.tool, crate::state::Tool::Type, "the Type tool takes over");
+    assert_eq!(h.state().ui.text_edit.as_ref().map(|e| e.layer), Some(id.0));
+    assert_eq!(selection(&h), (2, 2), "the caret sits on the double-clicked glyph");
+    assert_eq!(h.state().session.active().unwrap().active_layer, Some(id));
+    assert_eq!(h.state().session.active().unwrap().history.entries().len(), steps, "nothing moved");
+    super::insert(h.state_mut(), "x");
+    assert_eq!(text(h.state(), id).text, "HOxHOHO");
+    // Off the text, a double-click stays with the Move tool.
+    super::commit(h.state_mut());
+    h.state_mut().ui.tool = crate::state::Tool::Move;
+    h.run_steps(2);
+    let empty = screen(&mut h, id, -400.0, -300.0);
+    double_click(&mut h, empty);
+    assert_eq!(h.state().ui.tool, crate::state::Tool::Move);
+    assert!(h.state().ui.text_edit.is_none());
+}
+
+fn selection_bounds(app: &PhotocraftApp) -> Option<photocraft_geom::Rect> {
+    app.session.active().unwrap().doc.selection.as_ref().map(|m| m.content_bounds())
+}
+
+/// Click with `tool` at (200, 300), type `text` and commit.
+fn type_with(app: &mut PhotocraftApp, tool: crate::state::Tool, text: &str) {
+    use crate::canvas::{ToolEvent, tool_event};
+    app.ui.tool = tool;
+    tool_event(app, ToolEvent::Down { x: 200.0, y: 300.0, pressure: 1.0 }, Modifiers::NONE);
+    tool_event(app, ToolEvent::Up { x: 200.0, y: 300.0 }, Modifiers::NONE);
+    super::insert(app, text); // replaces the Type tool's selected placeholder
+    super::commit(app);
+}
+
+/// #1055: the Type Mask tools type a selection in the shape of the glyphs, the same pixels the
+/// Type tool's layer covers, as one history step that adds no layer. Vertical runs down a column.
+#[test]
+fn type_mask_commits_the_glyphs_as_the_selection_in_one_step() {
+    use crate::state::Tool;
+    let mut app = new_app();
+    type_with(&mut app, Tool::Type, "I");
+    let glyphs = app.session.active().unwrap().doc.layers.last().unwrap().surface().unwrap().content_bounds();
+
+    let mut app = new_app();
+    let layers = app.session.active().unwrap().doc.layers.len();
+    let steps = app.session.active().unwrap().history.entries().len();
+    type_with(&mut app, Tool::HorizontalTypeMask, "I");
+    assert!(app.ui.text_edit.is_none());
+    assert_eq!(selection_bounds(&app), Some(glyphs));
+    let st = app.session.active().unwrap();
+    assert_eq!(st.doc.layers.len(), layers, "no layer is left behind");
+    assert_eq!(st.history.entries().len(), steps + 1);
+    assert_eq!(st.history.entries().last().map(String::as_str), Some("Type Mask"));
+    app.run("edit.undo", json!({})).unwrap();
+    assert_eq!(selection_bounds(&app), None, "one undo restores the selection");
+    assert_eq!(app.session.active().unwrap().doc.layers.len(), layers);
+
+    let mut app = new_app();
+    type_with(&mut app, Tool::VerticalTypeMask, "HELLO");
+    let v = selection_bounds(&app).unwrap();
+    assert!(v.height() > 2 * v.width(), "{v:?}");
+}
+
+/// #1055: Escape cancels a Type Mask session whatever "Use Escape to Commit" says: the selection
+/// and the layers stay as they were.
+#[test]
+fn type_mask_escape_leaves_the_selection_unchanged() {
+    let mut app = new_app();
+    app.run("select.all", json!({})).unwrap();
+    let (before, layers) = (selection_bounds(&app), app.session.active().unwrap().doc.layers.len());
+    app.ui.tool = crate::state::Tool::HorizontalTypeMask;
+    let mut h = harness(1.0, app);
+    let p = xf(h.state()).to_screen(200.0, 300.0);
+    click(&mut h, p);
+    assert!(h.state().ui.text_edit.as_ref().is_some_and(|ed| ed.mask), "typing a mask");
+    super::insert(h.state_mut(), "I");
+    h.key_press(egui::Key::Escape);
+    h.run_steps(2);
+    assert!(h.state().ui.text_edit.is_none());
+    assert_eq!(selection_bounds(h.state()), before);
+    assert_eq!(h.state().session.active().unwrap().doc.layers.len(), layers);
+}
+
+/// A harness with short frames, so a run of clicks stays inside egui's double-click delay.
+fn quick_harness(app: PhotocraftApp) -> Harness<'static, PhotocraftApp> {
+    let mut h = Harness::builder().with_size(vec2(1200.0, 800.0)).with_step_dt(0.02).build_ui_state(
+        |ui, app: &mut PhotocraftApp| {
+            let ctx = ui.ctx().clone();
+            if !ctx.fonts(|f| f.families().contains(&egui::FontFamily::Name("medium".into()))) {
+                return;
+            }
+            crate::shortcuts::handle(app, &ctx);
+            egui::CentralPanel::default().show(ui, |ui| crate::canvas::document_area(app, ui));
+        },
+        app,
+    );
+    PhotocraftApp::setup_context(&h.ctx, crate::theme::ThemeKind::ALL[0]);
+    h.run_steps(4);
+    h
+}
+
+/// `n` quick clicks at `p`, then a pause long enough that the next click starts a new run.
+fn clicks(h: &mut Harness<'static, PhotocraftApp>, p: Pos2, n: usize) -> (usize, usize) {
+    h.hover_at(p);
+    h.run_steps(1);
+    for _ in 0..n {
+        press(h, p, true);
+        press(h, p, false);
+    }
+    let sel = selection(h);
+    h.run_steps(40);
+    sel
+}
+
+/// Centre the view on layer `id` at 50 % zoom.
+fn centre_on(h: &mut Harness<'static, PhotocraftApp>, id: LayerId) {
+    let (l, aff, _) = layout(h.state_mut(), id).unwrap();
+    let b = l.bounds().unwrap();
+    let m = aff.apply(Point::new(f64::from(b[0] + b[2]) / 2.0, f64::from(b[1] + b[3]) / 2.0));
+    let v = &mut h.state_mut().ui.views[0];
+    (v.zoom, v.center, v.fit_pending) = (0.5, [m.x as f32, m.y as f32], false);
+    h.run_steps(2);
+}
+
+/// Laid-out line (character range) holding character `i`.
+fn line_chars(h: &mut Harness<'static, PhotocraftApp>, id: LayerId, i: usize) -> (usize, usize) {
+    let (l, _, text) = layout(h.state_mut(), id).unwrap();
+    let b = text.char_indices().nth(i).unwrap().0;
+    let c = l.clusters.iter().find(|c| c.range.start == b).unwrap();
+    let ln = &l.lines[c.line];
+    (photocraft_text::char_index(&text, ln.range.start), photocraft_text::char_index(&text, ln.range.end))
+}
+
+/// #3493: like Photoshop, two clicks select the word, three the line, four the paragraph (up
+/// to the hard return) and five all text; the sixth starts over with a caret.
+#[test]
+fn multi_click_selects_word_line_paragraph_and_all_in_point_text() {
+    let mut app = new_app();
+    app.ui.extras.snap = false;
+    let s = "alpha beta\ngamma delta\nepsilon";
+    let id = LayerId(app.run("type.create", json!({"text": s, "size": 60, "x": 300, "y": 200})).unwrap()["layer"].as_u64().unwrap());
+    let mut h = quick_harness(app);
+    centre_on(&mut h, id);
+    // Glyph 19 is the 'l' of "delta" (characters 17..22), on the line "gamma delta" (11..22).
+    let p = glyph(&mut h, id, 19, 0.2);
+    assert_eq!(clicks(&mut h, p, 1), (19, 19), "one click: caret");
+    assert_eq!(clicks(&mut h, p, 2), (17, 22), "two clicks: word");
+    assert_eq!(clicks(&mut h, p, 3), (11, 22), "three clicks: line");
+    assert_eq!(clicks(&mut h, p, 4), (11, 22), "four clicks: paragraph without its return");
+    assert_eq!(clicks(&mut h, p, 5), (0, s.chars().count()), "five clicks: all text");
+    assert_eq!(clicks(&mut h, p, 6), (19, 19), "a sixth click starts over with a caret");
+    assert_eq!(clicks(&mut h, p, 7), (17, 22), "and a seventh selects the word again");
+    // After a pause the run restarts: a single click places the caret.
+    assert_eq!(clicks(&mut h, p, 1), (19, 19), "a click after a pause is a caret");
+    // Paste replaces the selected word; ⌘A then selects all of the edited text.
+    assert_eq!(clicks(&mut h, p, 2), (17, 22));
+    h.event(egui::Event::Paste("omega\nzeta".into()));
+    h.run_steps(2);
+    let edited = "alpha beta\ngamma omega\nzeta\nepsilon";
+    assert_eq!(text(h.state(), id).text, edited, "paste replaces the selection");
+    assert_eq!(selection(&h), (27, 27), "caret after the pasted text");
+    h.key_press_modifiers(Modifiers::COMMAND, egui::Key::A);
+    h.run_steps(2);
+    assert_eq!(selection(&h), (0, edited.chars().count()), "⌘A selects all text");
+}
+
+/// Paragraph text: three clicks select only the visual (soft-wrapped) line, four the whole
+/// paragraph; vertical type selects the column the same way.
+#[test]
+fn multi_click_separates_wrapped_lines_from_paragraphs() {
+    let mut app = new_app();
+    app.ui.extras.snap = false;
+    let text = "one two three four five six\nseven";
+    let id = LayerId(app.run("type.create", json!({"text": text, "size": 40, "box": [200, 150, 260, 600]})).unwrap()["layer"].as_u64().unwrap());
+    let mut h = quick_harness(app);
+    centre_on(&mut h, id);
+    // Glyph 9 is inside "three"; the first paragraph wraps, so its line is only part of it.
+    let line = line_chars(&mut h, id, 9);
+    assert!(line.0 > 0 || line.1 < 27, "the paragraph wraps: line {line:?}");
+    let p = glyph(&mut h, id, 9, 0.5);
+    assert_eq!(clicks(&mut h, p, 2), (8, 13), "two clicks: the word \"three\"");
+    assert_eq!(clicks(&mut h, p, 3), line, "three clicks: the visual line");
+    assert_eq!(clicks(&mut h, p, 4), (0, 27), "four clicks: the wrapped paragraph");
+    let p = glyph(&mut h, id, 30, 0.5);
+    assert_eq!(clicks(&mut h, p, 4), (28, 33), "four clicks in the last paragraph");
+
+    let mut app = new_app();
+    app.ui.extras.snap = false;
+    let id = LayerId(app.run("type.create", json!({"text": "HOHOHO\nHOHO", "size": 60, "x": 800, "y": 120})).unwrap()["layer"].as_u64().unwrap());
+    app.run("type.orientation.vertical", json!({"layer": id.0})).unwrap();
+    let mut h = quick_harness(app);
+    centre_on(&mut h, id);
+    let p = vglyph(&mut h, id, 9, 0.5);
+    assert_eq!(clicks(&mut h, p, 3), (7, 11), "three clicks in vertical type: the column");
+    assert_eq!(clicks(&mut h, p, 5), (0, 11), "five clicks: all text");
+}
+
+#[test]
+fn click_counts_cycle_and_restart() {
+    use super::next_click_count as next;
+    // egui counts 1, 2, 3, 3, 3, ... for a quick run; ours goes on to 5 and then starts over.
+    let mut n = 0;
+    let mut seen = vec![];
+    for egui in [1, 2, 3, 3, 3, 3, 3] {
+        n = next(n, egui);
+        seen.push(n);
+    }
+    assert_eq!(seen, [1, 2, 3, 4, 5, 1, 2]);
+    // A slow or distant click (egui: 1) restarts at a caret, whatever came before.
+    assert_eq!(next(4, 1), 1);
+    assert_eq!(next(4, 0), 1);
+    // No previous count (another layer, a fresh session): egui's count stands, capped.
+    assert_eq!(next(0, 2), 2);
+    assert_eq!(next(0, 3), 3);
+    assert_eq!(next(0, u32::MAX), 5);
+    assert_eq!(next(u32::MAX, 2), 1, "a corrupt count wraps without overflow");
+}
+
+#[test]
+fn click_selection_without_layout_and_on_hostile_input() {
+    use super::click_selection as sel;
+    let text = "ab cd\nef gh\r\nij";
+    // Without a layout a line falls back to its paragraph.
+    assert_eq!(sel(None, text, 7, None, 2), (6, 8));
+    assert_eq!(sel(None, text, 7, None, 3), (6, 11));
+    assert_eq!(sel(None, text, 7, None, 4), (6, 11), "the CR LF is not selected");
+    assert_eq!(sel(None, text, 13, None, 4), (13, 15));
+    assert_eq!(sel(None, text, 7, None, 5), (0, 15));
+    // Empty layer, caret past the end, absurd counts and line indices: no panic, clamped.
+    for count in [0, 1, 2, 3, 4, 5, 6, u32::MAX] {
+        assert_eq!(sel(None, "", 99, Some(usize::MAX), count), (0, 0), "empty text, count {count}");
+        let (a, b) = sel(None, text, usize::MAX, Some(usize::MAX), count);
+        assert!(a <= b && b <= 15, "caret past the end, count {count}: {a}..{b}");
+        let empty = photocraft_text::TextLayout::default();
+        let (a, b) = sel(Some(&empty), text, usize::MAX, Some(usize::MAX), count);
+        assert!(a <= b && b <= 15, "empty layout, count {count}: {a}..{b}");
+    }
+    // A trailing return ends in an empty paragraph: four clicks there select nothing.
+    assert_eq!(sel(None, "ab\n", 3, None, 4), (3, 3));
+    // Multi-byte text keeps character offsets.
+    assert_eq!(sel(None, "é ü\nñø", 4, None, 2), (4, 6));
+    assert_eq!(sel(None, "é ü\nñø", 1, None, 4), (0, 3));
+}
+
+/// Clicks with no edit session, or one on a layer that is gone, never panic or select.
+#[test]
+fn multi_click_without_a_session_does_nothing() {
+    let mut app = new_app();
+    super::multi_click(&mut app, 3, 10.0, 10.0);
+    assert!(app.ui.text_edit.is_none() && app.type_clicks.is_none());
+    app.ui.text_edit = Some(crate::state::TextEdit {
+        layer: 999_999,
+        caret: 5,
+        anchor: 5,
+        session: "stale".into(),
+        created: false,
+        mask: false,
+        dragging: false,
+        resize: None,
+        preedit: None,
+    });
+    for egui in [1, 2, 3, 3, 3, 3] {
+        super::multi_click(&mut app, egui, f64::NAN, f64::INFINITY);
+    }
+    let ed = app.ui.text_edit.as_ref().unwrap();
+    assert_eq!((ed.anchor, ed.caret), (5, 5));
+}
+
+/// #3036: ⇧ on the click that commits a Type Mask adds the glyphs to the selection and ⌥
+/// subtracts them, as in Photoshop; while typing, the working text has no Layers panel row.
+#[test]
+fn type_mask_shift_adds_and_alt_subtracts_without_a_layer_row() {
+    use crate::canvas::{ToolEvent, tool_event};
+    use crate::state::Tool;
+    use photocraft_geom::Rect;
+    let mut app = new_app();
+    type_with(&mut app, Tool::HorizontalTypeMask, "I");
+    let glyphs = selection_bounds(&app).unwrap();
+    let mut app = new_app();
+    app.ui.extras.snap = false; // the second text would snap to the first one's selected edge
+    let rect = Rect::new(1000, 100, 1100, 200);
+    app.run("select.rect", json!({"x": 1000, "y": 100, "width": 100, "height": 100})).unwrap();
+    // Type, then commit with a click outside the text holding `m`.
+    let type_and_commit = |app: &mut PhotocraftApp, m: Modifiers| {
+        app.ui.tool = Tool::HorizontalTypeMask;
+        tool_event(app, ToolEvent::Down { x: 200.0, y: 300.0, pressure: 1.0 }, Modifiers::NONE);
+        tool_event(app, ToolEvent::Up { x: 200.0, y: 300.0 }, Modifiers::NONE);
+        super::insert(app, "I");
+        let doc = app.session.active().unwrap().doc.clone();
+        let rows = crate::layer_tree_ui::panel_rows(app, &doc);
+        assert_eq!(rows.len(), doc.layers.len() - 1, "the working text is not listed");
+        tool_event(app, ToolEvent::Down { x: 1500.0, y: 800.0, pressure: 1.0 }, m);
+        tool_event(app, ToolEvent::Up { x: 1500.0, y: 800.0 }, m);
+        assert!(app.ui.text_edit.is_none());
+    };
+    let at = |app: &PhotocraftApp, x: i32, y: i32| app.session.active().unwrap().doc.selection.as_ref().map_or(0.0, |s| s.sample_channel(x, y, 0));
+    let stem = ((glyphs.x0 + glyphs.x1) / 2, (glyphs.y0 + glyphs.y1) / 2);
+    type_and_commit(&mut app, Modifiers::SHIFT);
+    assert_eq!(selection_bounds(&app), Some(rect.union(&glyphs)), "⇧ adds");
+    assert!(at(&app, stem.0, stem.1) > 0.99 && at(&app, 1050, 150) > 0.99);
+    type_and_commit(&mut app, Modifiers::ALT);
+    assert!(at(&app, stem.0, stem.1) < 0.01, "⌥ subtracts the glyphs");
+    assert!(at(&app, 1050, 150) > 0.99, "and keeps the rest");
 }

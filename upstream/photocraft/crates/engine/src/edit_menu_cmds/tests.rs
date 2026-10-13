@@ -299,6 +299,34 @@ fn content_aware_scale_params() {
 }
 
 #[test]
+fn content_aware_scale_places_the_result_and_previews_it_reduced() {
+    // The transform box (#3096) moves the result with `x`/`y` and previews it on a reduced copy.
+    for depth in [8, 16, 32] {
+        let mut s = session(depth);
+        s.execute("layer.new.layer", json!({})).unwrap();
+        s.edit("paint", |doc, active| {
+            doc.layer_mut(active.unwrap()).unwrap().surface_mut().unwrap().fill_rect(Rect::new(4, 4, 36, 28), &[0.2, 0.4, 0.6, 1.0]);
+            Ok(())
+        })
+        .unwrap();
+        let p = json!({"width": 16, "height": 40, "x": 10, "y": 2});
+        let preview = super::ContentAwareScalePreview::new(&s, &p, 10).unwrap();
+        assert_eq!(preview.region(), Rect::new(4, 4, 36, 28));
+        let small = preview.run(&crate::jobs::JobCtx::new()).unwrap();
+        assert_eq!(small.content_bounds(), Rect::new(0, 0, 4, 10), "depth {depth}: the longest side, 40 px, previews at 10");
+        let past = s.active().unwrap().history.past_len();
+        let r = s.execute("edit.contentAwareScale", p).unwrap();
+        assert_eq!(r["bounds"], json!([10, 2, 16, 40]));
+        assert_eq!(active(&s).surface().unwrap().content_bounds(), Rect::from_xywh(10, 2, 16, 40), "depth {depth}");
+        assert_eq!(s.active().unwrap().history.past_len(), past + 1, "depth {depth}: one step");
+        for bad in [json!({"x": "left"}), json!({"y": 1e9})] {
+            assert!(s.execute("edit.contentAwareScale", bad.clone()).is_err(), "{bad}");
+            assert!(super::ContentAwareScalePreview::new(&s, &bad, 64).is_err(), "{bad}");
+        }
+    }
+}
+
+#[test]
 fn content_aware_scale_enlarges_a_one_pixel_line() {
     // A 1 px wide (or tall) layer has no seam to spare, so enlarging it used to return the line
     // unchanged and crash or write a short buffer. The line's single column (row) is repeated.

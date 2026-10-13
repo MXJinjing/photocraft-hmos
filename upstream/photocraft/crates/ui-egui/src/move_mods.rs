@@ -175,7 +175,7 @@ pub fn arrow_keys(app: &mut PhotocraftApp, ctx: &egui::Context) -> bool {
     use egui::{Key, Modifiers};
     let cmd = ctx.input(|i| i.modifiers.command) && crate::hold_keys::cmd_nudges(app);
     if app.ui.tool != Tool::Move && app.ui.transform.is_none() && !cmd {
-        return selection_arrow_keys(app, ctx);
+        return selection_arrow_keys(app, ctx) || brush_arrow_keys(app, ctx);
     }
     // `consume_key` never ignores an extra ⌘, so it is part of every pattern while it moves.
     let base = if cmd { Modifiers::COMMAND } else { Modifiers::NONE };
@@ -186,6 +186,30 @@ pub fn arrow_keys(app: &mut PhotocraftApp, ctx: &egui::Context) -> bool {
             if ctx.input_mut(|i| i.consume_key(base | mods, key)) {
                 let k = if mods.shift { 10.0 } else { 1.0 };
                 nudge(app, ux * k, uy * k, mods.alt);
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// ← / → with a painting tool: turn the brush tip 1° (⇧ 15°), as Photoshop does; → turns it
+/// clockwise. Returns true when a key was used.
+fn brush_arrow_keys(app: &mut PhotocraftApp, ctx: &egui::Context) -> bool {
+    use egui::{Key, Modifiers};
+    // Only plain or ⇧ arrows (`consume_key` ignores an extra ⌥, which kerns type), and never
+    // while type is being edited.
+    let m = ctx.input(|i| i.modifiers);
+    if !app.ui.tool.is_brushlike() || app.ui.text_edit.is_some() || m.alt || m.command || m.ctrl {
+        return false;
+    }
+    for (key, sign) in [(Key::ArrowLeft, 1.0), (Key::ArrowRight, -1.0)] {
+        // ⇧ first: `consume_key` ignores an extra ⇧.
+        for (mods, step) in [(Modifiers::SHIFT, 15.0), (Modifiers::NONE, 1.0)] {
+            if ctx.input_mut(|i| i.consume_key(mods, key)) {
+                if let Err(e) = app.run("tools.rotateBrush", json!({"degrees": sign * step})) {
+                    app.ui.status = e;
+                }
                 return true;
             }
         }
@@ -404,6 +428,27 @@ mod tests {
         arrow_keys(app, &ctx)
     }
 
+    /// Photoshop's ← / → with a painting tool turn the brush tip 1°, ⇧ 15°; → is clockwise. Other
+    /// tools keep their arrows (the Hand has none, the marquee nudges the selection).
+    #[test]
+    fn arrows_turn_the_brush_tip_for_painting_tools_only() {
+        let mut app = app_with_layer();
+        for tool in [Tool::Brush, Tool::Eraser, Tool::CloneStamp] {
+            app.ui.tool = tool;
+            app.run("tools.setBrush", json!({"brush": {"angle": 0}})).unwrap();
+            assert!(press(&mut app, egui::Key::ArrowLeft, egui::Modifiers::NONE), "{tool:?}");
+            assert_eq!(app.session.tools.brush.angle, 1.0, "{tool:?}: ← anticlockwise");
+            assert!(press(&mut app, egui::Key::ArrowRight, egui::Modifiers::SHIFT));
+            assert_eq!(app.session.tools.brush.angle, -14.0, "{tool:?}: ⇧→ 15° clockwise");
+        }
+        app.run("tools.setBrush", json!({"brush": {"angle": 0}})).unwrap();
+        // ⌥-arrows are not the brush's (they kern type, and ⌘ moves).
+        assert!(!press(&mut app, egui::Key::ArrowLeft, egui::Modifiers::ALT));
+        app.ui.tool = Tool::Hand;
+        assert!(!press(&mut app, egui::Key::ArrowLeft, egui::Modifiers::NONE));
+        assert_eq!(app.session.tools.brush.angle, 0.0);
+    }
+
     /// Real key events: ⇧ nudges 10 px and ⌥ duplicates first (egui ignores extra ⇧ / ⌥ when
     /// matching, so the plain arrow must not be tried first).
     #[test]
@@ -433,8 +478,11 @@ mod tests {
         app.ui.tool = Tool::Brush;
         let id = app.session.active().unwrap().active_layer.unwrap();
         let n0 = app.session.active().unwrap().doc.layers.len();
-        assert!(!press(&mut app, egui::Key::ArrowRight, egui::Modifiers::NONE), "a plain arrow is not the Brush's");
+        // A plain arrow turns the Brush's tip (below), never the layer.
+        assert!(press(&mut app, egui::Key::ArrowRight, egui::Modifiers::NONE));
         assert_eq!(bounds(&app, id), photocraft_geom::Rect::new(8, 8, 24, 24));
+        assert_eq!(app.session.tools.brush.angle, -1.0);
+        app.run("tools.setBrush", json!({"brush": {"angle": 0}})).unwrap();
         for cmd in [CTRL, MAC_CMD] {
             assert!(press(&mut app, egui::Key::ArrowRight, cmd));
         }

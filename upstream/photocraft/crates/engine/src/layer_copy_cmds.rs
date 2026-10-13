@@ -8,7 +8,7 @@
 //! document. Pixels are converted to the destination's colour profile (Color Settings' intent and
 //! black point compensation) and bit depth, as Photoshop converts dragged layers.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use photocraft_color::ColorMode;
 use photocraft_doc::{Document, LayerContent, LayerId, SmartContentsId};
@@ -65,6 +65,29 @@ fn center(r: Rect) -> [f64; 2] {
 /// including another opening of the same file), and the pixels convert to `dest`'s profile and
 /// bit depth.
 pub(crate) fn adapt_copies(s: &Session, copies: &mut Document, dest: &Document) -> Result<()> {
+    // Link-group IDs are scoped to a document. Two independently linked pairs can both
+    // use group 1; copying one must not link it to the other's existing layers (#3045).
+    // Remap each imported group once so links within the copied batch stay intact.
+    let mut used: HashSet<u64> = dest.walk().into_iter().filter_map(|(_, _, l)| l.link_group).collect();
+    let mut next_group = dest.unused_link_group().ok_or_else(|| EngineError::Other("no free linked-layer group id".into()))?;
+    let groups: Vec<_> = copies.walk().into_iter().filter_map(|(_, _, l)| l.link_group.map(|group| (l.id, group))).collect();
+    let mut remapped = HashMap::new();
+    for (_, group) in &groups {
+        if remapped.contains_key(group) {
+            continue;
+        }
+        while used.contains(&next_group) {
+            next_group = next_group.checked_add(1).unwrap_or(1);
+        }
+        remapped.insert(*group, next_group);
+        used.insert(next_group);
+        next_group = next_group.checked_add(1).unwrap_or(1);
+    }
+    for (id, group) in groups {
+        if let Some(layer) = copies.layer_mut(id) {
+            layer.link_group = remapped.get(&group).copied();
+        }
+    }
     let mut contents = HashMap::new();
     let smart_ids: Vec<_> = copies.walk().into_iter().filter_map(|(_, _, l)| matches!(l.content, LayerContent::Smart(_)).then_some(l.id)).collect();
     for id in smart_ids {
@@ -140,11 +163,14 @@ fn copy_to_document(s: &mut Session, p: &Value) -> Result<Value> {
         let src_layer = sdoc.layer(*id).ok_or(EngineError::NoLayer(*id))?;
         let mut l = src_layer.duplicate();
         // A dragged Background arrives as an ordinary layer (the destination keeps its own).
-        if crate::extra_cmds::is_background(src_layer) && sdoc.layers.first().is_some_and(|b| b.id == *id) {
+        if sdoc.is_background(*id) {
             l.name = ddoc.next_layer_name("Layer");
             l.locks = Default::default();
         }
         copies.layers.push(l);
+    }
+    if let (Some(name), [l]) = (p.get("name").and_then(Value::as_str).filter(|n| !n.is_empty()), copies.layers.as_mut_slice()) {
+        l.name = name.to_string();
     }
     adapt_copies(s, &mut copies, &ddoc)?;
     // Placement: centred on the destination's canvas, centred on a point, or offset from where
@@ -193,7 +219,7 @@ pub fn specs() -> Vec<CommandSpec> {
         label: "Copy Layers to Document",
         menu: &[],
         shortcut: None,
-        params: r##"{"document":index (destination),"layers":[id,…]?=the source's selected layers,"source":index?=active,"center":bool=false (centre on the destination's canvas),"at":[x,y]? (centre the copies on this point),"offset":[dx,dy]?=[0,0] (from their place in the source)}"##,
+        params: r##"{"document":index (destination),"layers":[id,…]?=the source's selected layers,"source":index?=active,"center":bool=false (centre on the destination's canvas),"at":[x,y]? (centre the copies on this point),"offset":[dx,dy]?=[0,0] (from their place in the source),"name":str? (one layer: the copy's name)}"##,
         enabled,
         run: copy_to_document,
         journal: true,

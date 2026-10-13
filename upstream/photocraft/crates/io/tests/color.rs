@@ -179,3 +179,103 @@ fn rgb_fill_colours_separate_through_the_document_cmyk_profile() {
         }
     }
 }
+
+/// A two-stop version 1 `grdm` block whose stops are the PSD colour structures `a` and `b`.
+fn grdm_block(a: (u16, [u16; 4]), b: (u16, [u16; 4])) -> Vec<u8> {
+    let mut v = vec![0, 1, 0, 0];
+    v.extend_from_slice(&1u32.to_be_bytes()); // name: just the terminator
+    v.extend_from_slice(&[0, 0]);
+    v.extend_from_slice(&2u16.to_be_bytes());
+    for (t, (space, c)) in [(0u32, a), (4096, b)] {
+        v.extend_from_slice(&t.to_be_bytes());
+        v.extend_from_slice(&50u32.to_be_bytes());
+        v.extend_from_slice(&space.to_be_bytes());
+        for x in c {
+            v.extend_from_slice(&x.to_be_bytes());
+        }
+        v.extend_from_slice(&[0, 0]);
+    }
+    v.extend_from_slice(&2u16.to_be_bytes());
+    for t in [0u32, 4096] {
+        v.extend_from_slice(&t.to_be_bytes());
+        v.extend_from_slice(&50u32.to_be_bytes());
+        v.extend_from_slice(&255u16.to_be_bytes());
+    }
+    v.extend_from_slice(&2u16.to_be_bytes()); // expansion count
+    v.extend_from_slice(&0u16.to_be_bytes()); // smoothness
+    v
+}
+
+fn saved_grdm(bytes: &[u8]) -> Vec<u8> {
+    let f = photocraft_psd::PsdFile::from_bytes(bytes).unwrap();
+    f.layers().iter().find_map(|l| l.block(b"grdm")).map(|b| b.data.clone()).expect("grdm block")
+}
+
+#[test]
+fn gradient_maps_with_cmyk_lab_gray_stops_import_and_keep_their_space() {
+    use photocraft_cms::{Intent, Transform, synth};
+    use photocraft_doc::{Adjustment, Document, Layer, LayerContent};
+    let profile = synth::cmyk_profile(&synth::CmykParams { tvi: [0.26, 0.26, 0.26, 0.3], grid_a2b: 5, grid_b2a: 9, ..Default::default() });
+    let profile = Profile::parse(&profile.to_bytes()).unwrap();
+    let to_srgb = Transform::new(&profile, Builtin::Srgb.profile(), Intent::RelativeColorimetric, true).unwrap();
+    // First stop 60 % cyan + 40 % black (stored inverted), second paper white.
+    let cmyk_stop = (2u16, [65535 - 39321, 65535, 65535, 65535 - 26214]);
+    let paper = (2u16, [65535; 4]);
+    let lab_dark = (7u16, [2000, 0, 0, 0]);
+    let lab_red = (7u16, [5000, 6000u16, 2000, 0]);
+    let gray_black = (8u16, [10000, 0, 0, 0]);
+    let gray_white = (8u16, [0, 0, 0, 0]);
+    for depth in SampleType::ALL {
+        for (mode, stops) in [(ColorMode::Cmyk, (cmyk_stop, paper)), (ColorMode::Lab, (lab_dark, lab_red)), (ColorMode::Grayscale, (gray_white, gray_black))] {
+            let block = grdm_block(stops.0, stops.1);
+            let mut doc = Document::new("map", photocraft_geom::Size::new(4, 2), mode, depth);
+            if mode == ColorMode::Cmyk {
+                doc.icc_profile = Some(profile.to_bytes());
+            }
+            let fmt = doc.pixel_format();
+            doc.layers.push(raster("Background", fmt, doc.bounds(), 3, false));
+            doc.layers.push(Layer::new("Map", LayerContent::Adjustment(Adjustment::Unsupported { psd_key: "grdm".into(), raw: block.clone() })));
+            let bytes = export(&doc, "x.psd", &ExportOptions::default()).unwrap().bytes;
+            let mut back = import("x.psd", &bytes).unwrap().document;
+            let LayerContent::Adjustment(Adjustment::GradientMap { stops: got, .. }) = &back.layers[1].content else {
+                panic!("{mode:?} {depth:?}: {:?}", back.layers[1].content);
+            };
+            let (first, last) = (got[0].1, got[got.len() - 1].1);
+            match mode {
+                ColorMode::Cmyk => {
+                    // Through the document's own profile, not the built-in coated CMYK.
+                    let mut expected = [0.0f32; 3];
+                    to_srgb.eval_fast(&[0.6, 0.0, 0.0, 0.4], &mut expected);
+                    assert!(first.iter().zip(expected).all(|(a, b)| (a - b).abs() < 1e-4), "{depth:?}: {first:?} vs {expected:?}");
+                    let builtin = photocraft_color::convert::cmyk_to_rgb([0.6, 0.0, 0.0, 0.4]);
+                    assert!(first.iter().zip(builtin).any(|(a, b)| (a - b).abs() > 1e-3), "the document profile is used");
+                }
+                ColorMode::Lab => {
+                    assert!(first.iter().all(|v| (v - first[0]).abs() < 1e-3) && first[0] < 0.3, "{first:?}");
+                    assert!(last[0] > last[1] + 0.2, "a = +60 is reddish: {last:?}");
+                }
+                // An inverting map, white to black.
+                _ => assert_eq!((first, last), ([1.0; 3], [0.0; 3])),
+            }
+            // The layer now renders: the composite differs from the background alone.
+            let with_map = photocraft_compose::flatten(&back).px;
+            let mut hidden = back.clone();
+            hidden.layers[1].visible = false;
+            assert!(max_diff(&with_map, &photocraft_compose::flatten(&hidden).px) > 0.01, "{mode:?} {depth:?}");
+            // Saving again keeps the block (and so the stops' colour space) byte for byte...
+            let again = export(&back, "x.psd", &ExportOptions::default()).unwrap().bytes;
+            assert_eq!(saved_grdm(&again), block, "{mode:?} {depth:?}");
+            // ...and so does toggling Reverse and Dither, which only flip their flags.
+            if let LayerContent::Adjustment(Adjustment::GradientMap { reverse, dither, .. }) = &mut back.layers[1].content {
+                *reverse = true;
+                *dither = true;
+            }
+            let flipped_file = export(&back, "x.psd", &ExportOptions::default()).unwrap().bytes;
+            let flipped = saved_grdm(&flipped_file);
+            assert_eq!(&flipped[2..4], &[1, 1]);
+            assert_eq!(flipped[4..], block[4..], "{mode:?} {depth:?}: stops keep their colour space");
+            let reopened = import("x.psd", &flipped_file).unwrap().document;
+            assert_eq!(reopened.layers[1].content, back.layers[1].content);
+        }
+    }
+}

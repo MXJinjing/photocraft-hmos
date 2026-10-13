@@ -38,7 +38,7 @@ fn field(ui: &mut egui::Ui, id: &str, label: &str, current: f32, width: f32, u: 
     let t = Tokens::get(ui.ctx());
     let (r, _) = ui.allocate_exact_size(vec2(LABEL_W, 22.0), Sense::hover());
     ui.painter().text(pos2(r.right() - 2.0, r.center().y), egui::Align2::RIGHT_CENTER, tl!(label), egui::FontId::proportional(12.0), t.text_dim);
-    let key = egui::Id::new(("layer-props-field", id));
+    let key = ui.make_persistent_id(("layer-props-field", id));
     let mut v = ui.data(|d| d.get_temp::<f32>(key)).unwrap_or_else(|| u.shown(f64::from(current), extent));
     let resp = widgets::value_field(ui, &mut v, -300_000.0..=300_000.0, u.unit.suffix(), width);
     if resp.dragged() || resp.has_focus() {
@@ -163,10 +163,11 @@ pub fn properties(app: &mut PhotocraftApp, ui: &mut egui::Ui, layer: &Layer) {
         }
     }
     // Gradient fills: their gradient first, as in Photoshop's Properties panel.
-    if matches!(layer.content, LayerContent::Fill(photocraft_doc::Fill::Gradient { .. })) {
+    let gradient = matches!(layer.content, LayerContent::Fill(photocraft_doc::Fill::Gradient { .. }));
+    if gradient {
         crate::gradient_ui::properties(app, ui, layer);
     }
-    if section(ui, "align", tl!("Align and Distribute")) {
+    if !gradient && section(ui, "align", tl!("Align and Distribute")) {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 2.0;
             for (i, kind) in ["leftEdges", "horizontalCenters", "rightEdges", "topEdges", "verticalCenters", "bottomEdges"].into_iter().enumerate() {
@@ -224,6 +225,37 @@ pub fn properties(app: &mut PhotocraftApp, ui: &mut egui::Ui, layer: &Layer) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn switching_between_gradient_and_raster_keeps_alignment_on_raster_only() {
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        app.run("file.new", json!({"width": 200, "height": 120})).unwrap();
+        let mut h = egui_kittest::Harness::builder().with_size(vec2(280.0, 900.0)).build_ui_state(
+            |ui, app: &mut PhotocraftApp| {
+                if ui.ctx().cumulative_pass_nr() == 0 {
+                    PhotocraftApp::setup_context(ui.ctx(), crate::theme::ThemeKind::ProMedium);
+                    return;
+                }
+                let state = app.session.active().unwrap();
+                let layer = state.doc.layer(state.active_layer.unwrap()).unwrap().clone();
+                properties(app, ui, &layer);
+            },
+            app,
+        );
+        for gradient in [false, true, false] {
+            if gradient {
+                h.state_mut().run("gradient.fill.create", json!({"from": [20, 60], "to": [180, 60]})).unwrap();
+            } else {
+                h.state_mut().run("layer.new.layer", json!({})).unwrap();
+            }
+            h.run_steps(3);
+            let sections = crate::props_layout::sections_drawn(&h.ctx);
+            assert_eq!(sections.iter().any(|(title, _)| title == "Align and Distribute"), !gradient);
+            assert_eq!(sections.iter().any(|(title, _)| title == "Gradient"), gradient);
+            assert_eq!(sections.iter().any(|(title, _)| title == "Gradient Options"), gradient);
+            assert!(!sections.iter().any(|(title, _)| title == "Color stops" || title == "Opacity stops"));
+        }
+    }
 
     #[test]
     fn transform_fields_show_and_take_the_ruler_unit() {

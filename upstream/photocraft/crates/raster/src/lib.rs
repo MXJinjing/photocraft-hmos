@@ -524,12 +524,31 @@ impl Surface {
         for tc in r.tiles() {
             let tr = tc.rect().intersect(&r);
             let t = self.tile_mut(tc);
+            // Convert contiguous channel samples a row at a time. Dispatching on depth here
+            // removes the per-pixel channel loop and lets the compiler vectorise conversion.
+            let span = tr.width() as usize * n;
             for y in tr.y0..tr.y1 {
-                for x in tr.x0..tr.x1 {
-                    let o = (((y - r.y0) as usize) * w + (x - r.x0) as usize) * n;
-                    let base = (((y - tc.ty * TILE_SIZE) as usize) * TILE_SIZE as usize + (x - tc.tx * TILE_SIZE) as usize) * n;
-                    for i in 0..n {
-                        write_sample(&mut t.data, sample, base + i, data[o + i]);
+                let o = (((y - r.y0) as usize) * w + (tr.x0 - r.x0) as usize) * n;
+                let base = (((y - tc.ty * TILE_SIZE) as usize) * TILE_SIZE as usize + (tr.x0 - tc.tx * TILE_SIZE) as usize) * n;
+                let src = &data[o..o + span];
+                let bytes = sample.bytes();
+                let dst = &mut t.data[base * bytes..(base + span) * bytes];
+                match sample {
+                    SampleType::U8 => {
+                        for (d, v) in dst.iter_mut().zip(src) {
+                            *d = (v.clamp(0.0, 1.0) * 255.0 + 0.5) as u8;
+                        }
+                    }
+                    SampleType::U16 => {
+                        for (d, v) in dst.as_chunks_mut::<2>().0.iter_mut().zip(src) {
+                            let q = (v.clamp(0.0, 1.0) * 65535.0 + 0.5) as u16;
+                            d.copy_from_slice(&q.to_ne_bytes());
+                        }
+                    }
+                    SampleType::F32 => {
+                        for (d, v) in dst.as_chunks_mut::<4>().0.iter_mut().zip(src) {
+                            d.copy_from_slice(&v.to_ne_bytes());
+                        }
                     }
                 }
             }
@@ -573,6 +592,11 @@ impl Surface {
         for (c, t) in tiles {
             self.tiles.insert(c, t);
         }
+    }
+
+    /// A tile filled with the default pixel (what a missing tile reads as), allocated fallibly.
+    pub fn try_default_tile(&self) -> Result<Tile, AllocationError> {
+        Tile::try_filled(&self.format, &self.default_pixel)
     }
 
     /// A tile of this surface's format filled with `px` (normalised channel values). Sharing one
@@ -706,6 +730,31 @@ impl Surface {
             out.tiles.insert(dc, Arc::new(tile));
         }
         out
+    }
+
+    /// Applies `f` to every colour sample (not alpha), including the default pixel: a tone-curve
+    /// change such as linearising when a document becomes 32-bit.
+    pub fn map_color(&mut self, f: impl Fn(f32) -> f32) {
+        let format = self.format;
+        let color = format.mode.color_channels();
+        let n = format.channels();
+        let mut dp = decode_pixel(&format, &self.default_pixel);
+        for v in dp.iter_mut().take(color) {
+            *v = f(*v);
+        }
+        encode_pixel(&format, &dp, &mut self.default_pixel);
+        let coords: Vec<TileCoord> = self.tiles.keys().copied().collect();
+        let px_count = (TILE_SIZE * TILE_SIZE) as usize;
+        for c in coords {
+            let tile = self.tile_mut(c);
+            for i in 0..px_count {
+                for k in 0..color {
+                    let at = i * n + k;
+                    let v = read_sample(&tile.data, format.sample, at);
+                    write_sample(&mut tile.data, format.sample, at, f(v));
+                }
+            }
+        }
     }
 
     /// Convert to another pixel format (depth and/or model; colour models via [`convert_pixel`]).
@@ -870,6 +919,89 @@ mod tests {
     use super::*;
     use photocraft_color::PixelFormat;
     use proptest::prelude::*;
+
+    fn write_region_reference(surface: &mut Surface, r: Rect, data: &[f32]) {
+        let n = surface.channels();
+        let w = r.width() as usize;
+        assert_eq!(data.len(), w * r.height() as usize * n, "region data length mismatch");
+        let sample = surface.format.sample;
+        for tc in r.tiles() {
+            let tr = tc.rect().intersect(&r);
+            let t = surface.tile_mut(tc);
+            for y in tr.y0..tr.y1 {
+                for x in tr.x0..tr.x1 {
+                    let o = (((y - r.y0) as usize) * w + (x - r.x0) as usize) * n;
+                    let base = (((y - tc.ty * TILE_SIZE) as usize) * TILE_SIZE as usize + (x - tc.tx * TILE_SIZE) as usize) * n;
+                    for i in 0..n {
+                        write_sample(&mut t.data, sample, base + i, data[o + i]);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn region_writes_match_scalar_bytes_for_every_format() {
+        let special = [
+            0.0,
+            -0.0,
+            1.0,
+            -1.0,
+            2.0,
+            f32::INFINITY,
+            f32::NEG_INFINITY,
+            f32::NAN,
+            f32::from_bits(0x7fc12345),
+            f32::from_bits(0xffc12345),
+            f32::MIN_POSITIVE,
+            f32::from_bits(1),
+            0.5 / 255.0,
+            0.5 / 65535.0,
+        ];
+        for mode in [
+            ColorMode::Bitmap,
+            ColorMode::Grayscale,
+            ColorMode::Indexed,
+            ColorMode::Rgb,
+            ColorMode::Cmyk,
+            ColorMode::Lab,
+            ColorMode::Multichannel,
+            ColorMode::Duotone,
+        ] {
+            for sample in SampleType::ALL {
+                for alpha in [false, true] {
+                    let fmt = PixelFormat::new(mode, sample, alpha);
+                    let mut actual = Surface::with_default(fmt, &vec![0.25; fmt.channels()]);
+                    actual.write_pixel(900, 900, &vec![0.75; fmt.channels()]);
+                    let mut expected = actual.clone();
+                    for rect in
+                        [Rect::EMPTY, Rect::new(-270, -2, 270, 3), Rect::new(256, 256, 512, 257), Rect::new(-64, -64, 0, 0), Rect::new(255, 250, 258, 270)]
+                    {
+                        let data: Vec<_> = (0..rect.width() as usize * rect.height() as usize * fmt.channels())
+                            .map(|i| {
+                                if i % 3 == 0 {
+                                    special[i / 3 % special.len()]
+                                } else {
+                                    // Integer rounding boundaries and deterministic arbitrary f32 bit patterns.
+                                    let bits = (i as u32).wrapping_mul(2654435761);
+                                    if i % 3 == 1 { ((bits % 65536) as f32 + 0.5) / 65535.0 } else { f32::from_bits(bits) }
+                                }
+                            })
+                            .collect();
+                        let snapshot = actual.clone();
+                        let snapshot_bytes = snapshot.to_interleaved(rect.inflate(1));
+                        actual.write_region(rect, &data);
+                        write_region_reference(&mut expected, rect, &data);
+                        assert_eq!(actual, expected, "{fmt:?}, {rect:?}");
+                        assert_eq!(snapshot.to_interleaved(rect.inflate(1)), snapshot_bytes, "COW snapshot changed");
+                        // Repeat against already materialised, unshared tiles too.
+                        actual.write_region(rect, &data);
+                        assert_eq!(actual, expected);
+                    }
+                }
+            }
+        }
+    }
 
     #[test]
     fn from_rgba_into_matches_from_rgba() {

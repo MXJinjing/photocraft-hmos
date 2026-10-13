@@ -1,6 +1,6 @@
 //! Capability-based filesystem policy for untrusted automation paths.
 
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
@@ -51,8 +51,22 @@ impl AuthorizedWorkspace {
         if !metadata.is_file() {
             return Err(AutomationError::BadRequest(format!("automation read path is not a regular file: `{path}`")));
         }
-        // Bounded reads, and a clear error for a file larger than memory (#375).
-        photocraft_format::read::read_all(&mut file, metadata.len()).map_err(|e| file_error("read", path, e))
+        read_to_observed_length(&mut file, metadata.len())
+    }
+
+    /// Load one `.pcraft` document in directory form — the native on-disk layout — below the
+    /// read root. `read` serves regular files only (the zip form), so a regular file at the
+    /// path is reported as `Ok(None)` for the caller to fall back to.
+    pub fn open_pcraft(&self, path: &str) -> Result<Option<photocraft_doc::Document>, AutomationError> {
+        let relative = request_path(path, self.read.as_ref())?;
+        let root = self.read.as_ref().ok_or_else(|| AutomationError::BadRequest(format!("{DENIED}: read authority is absent")))?;
+        let dir = match root.dir.open_dir(&relative) {
+            Ok(dir) => dir,
+            Err(e) if e.kind() == std::io::ErrorKind::NotADirectory => return Ok(None),
+            Err(e) => return Err(file_error("read", path, e)),
+        };
+        let source = DirHandle { dir };
+        Ok(Some(photocraft_format::load_bytes_source(&source, &photocraft_format::LoadOptions::default())?))
     }
 
     /// Create or replace one file below the configured write root, crash-safely: the bytes go to
@@ -90,6 +104,34 @@ impl AuthorizedWorkspace {
             }
         }
         Ok(())
+    }
+}
+
+fn read_to_observed_length(reader: &mut impl Read, observed_length: u64) -> Result<Vec<u8>, AutomationError> {
+    // Do not reserve from a potentially stale or attacker-controlled metadata length. Read in
+    // chunks, and reject growth beyond the length observed on the opened file before appending.
+    let mut bytes = Vec::new();
+    let mut chunk = [0u8; 64 << 10];
+    loop {
+        let remaining = observed_length.saturating_sub(bytes.len() as u64);
+        let ask = chunk.len().min(usize::try_from(remaining.saturating_add(1)).unwrap_or(chunk.len()));
+        let n = match reader.read(&mut chunk[..ask]) {
+            Ok(n) => n,
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(e) => return Err(AutomationError::Io(format!("automation read failed: {e}"))),
+        };
+        if n == 0 {
+            return Ok(bytes);
+        }
+        if n as u64 > remaining {
+            return Err(AutomationError::BadRequest(format!("automation file grew beyond its observed length of {observed_length} bytes")));
+        }
+        let needed = bytes.len().checked_add(n).ok_or_else(|| AutomationError::BadRequest("automation file is too large to read".into()))?;
+        if needed > bytes.capacity() {
+            let target = bytes.capacity().saturating_add(bytes.capacity() / 2).max(needed).min(usize::try_from(observed_length).unwrap_or(usize::MAX));
+            bytes.try_reserve_exact(target - bytes.len()).map_err(|e| AutomationError::Io(format!("automation read allocation failed: {e}")))?;
+        }
+        bytes.extend_from_slice(&chunk[..n]);
     }
 }
 
@@ -171,6 +213,24 @@ fn is_windows_device_name(component: &str) -> bool {
 
 fn path_error(path: &str, reason: &str) -> AutomationError {
     AutomationError::BadRequest(format!("automation path rejected: {reason}: `{path}`"))
+}
+
+/// A `.pcraft` directory behind the read-root capability: bounded reads, no ambient paths.
+struct DirHandle {
+    dir: Dir,
+}
+
+impl photocraft_format::ByteSource for DirHandle {
+    fn get(&self, path: &str, max: usize) -> photocraft_format::Result<Vec<u8>> {
+        let missing = || photocraft_format::FormatError::Corrupt(format!("missing `{path}`"));
+        let mut file = self.dir.open(path).map_err(|_| missing())?;
+        let metadata = file.metadata().map_err(|_| missing())?;
+        if !metadata.is_file() {
+            // A FIFO or device would block the open and stream without end.
+            return Err(photocraft_format::FormatError::Corrupt(format!("`{path}` is not a regular file")));
+        }
+        photocraft_format::read_entry(&mut file, metadata.len(), max, path)
+    }
 }
 
 fn file_error(operation: &str, path: &str, error: std::io::Error) -> AutomationError {
@@ -274,7 +334,8 @@ fn params_contain_ambient_path(id: &str, params: &Value) -> bool {
 }
 
 fn profile_command_may_read_ambient(id: &str, params: &Value) -> bool {
-    if matches!(id, "color.profileMismatch" | "edit.colorSettings" | "view.proofSetup") {
+    // Installed profiles scan OS and user directories even without a request path.
+    if matches!(id, "color.profileMismatch" | "edit.colorSettings" | "edit.installedProfiles" | "view.proofSetup") {
         return true;
     }
     matches!(id, "edit.assignProfile" | "edit.convertToProfile" | "edit.profileInfo")
@@ -429,6 +490,62 @@ mod tests {
         assert_eq!(workspace.read("read.txt").unwrap(), b"canary");
         workspace.write("new-output.txt", b"created").unwrap();
         assert_eq!(std::fs::read(inside.join("new-output.txt")).unwrap(), b"created");
+    }
+
+    #[test]
+    fn large_observed_length_does_not_trigger_a_fixed_limit_or_upfront_reservation() {
+        let mut shortened = std::io::Cursor::new(b"psb");
+        assert_eq!(read_to_observed_length(&mut shortened, (1 << 30) + 1).unwrap(), b"psb");
+    }
+
+    #[test]
+    fn read_growth_is_rejected_at_the_observed_length() {
+        let mut growing = std::io::repeat(b'x').take(65);
+        let error = read_to_observed_length(&mut growing, 64).unwrap_err().to_string();
+        assert!(error.contains("grew beyond its observed length of 64 bytes"), "{error}");
+        let mut allowed = std::io::repeat(b'x').take(64);
+        assert_eq!(read_to_observed_length(&mut allowed, 64).unwrap().len(), 64);
+        let mut empty = std::io::Cursor::new(b"x");
+        assert!(read_to_observed_length(&mut empty, 0).is_err());
+    }
+
+    #[test]
+    fn open_pcraft_loads_a_directory_below_the_read_root() {
+        let (inside, _, workspace) = roots("pcraft-dir");
+        let doc = photocraft_doc::Document::new("Native", photocraft_doc::Size::new(16, 12), photocraft_doc::ColorMode::Rgb, photocraft_doc::SampleType::U8);
+        photocraft_format::PcraftWriter::new().save_dir(&doc, &inside.join("native.pcraft"), &photocraft_format::SaveOptions::default()).unwrap();
+        let loaded = workspace.open_pcraft("native.pcraft").unwrap().expect("the directory form loads");
+        assert_eq!(loaded.name, doc.name);
+        assert_eq!((loaded.size.width, loaded.size.height), (16, 12));
+    }
+
+    #[test]
+    fn open_pcraft_reports_zip_files_and_missing_paths_clearly() {
+        let (inside, _, workspace) = roots("pcraft-errors");
+        let doc = photocraft_doc::Document::new("Zipped", photocraft_doc::Size::new(4, 4), photocraft_doc::ColorMode::Rgb, photocraft_doc::SampleType::U8);
+        let zip = inside.join("zipped.pcraft");
+        photocraft_format::PcraftWriter::new().save_path(&doc, &zip, &photocraft_format::SaveOptions::default()).unwrap();
+        assert!(zip.is_file());
+        assert!(workspace.open_pcraft("zipped.pcraft").unwrap().is_none(), "the zip form falls back to the bytes path");
+        let error = workspace.open_pcraft("missing.pcraft").unwrap_err().to_string();
+        assert!(error.contains("failed"), "a missing path propagates its io error: {error}");
+        assert!(AuthorizedWorkspace::default().open_pcraft("x.pcraft").is_err(), "no read authority fails closed");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn open_pcraft_rejects_non_regular_entries_and_escaping_symlinks() {
+        let (inside, _, workspace) = roots("pcraft-nonregular");
+        let bundle = inside.join("native.pcraft");
+        std::fs::create_dir_all(bundle.join("manifest.json")).unwrap();
+        let error = workspace.open_pcraft("native.pcraft").unwrap_err().to_string();
+        assert!(error.contains("not a regular file"), "a directory entry is refused, not streamed: {error}");
+
+        let (inside2, _, workspace2) = roots("pcraft-symlink");
+        let bundle2 = inside2.join("native.pcraft");
+        std::fs::create_dir(&bundle2).unwrap();
+        std::os::unix::fs::symlink("/dev/zero", bundle2.join("manifest.json")).unwrap();
+        assert!(workspace2.open_pcraft("native.pcraft").is_err(), "an escaping symlink entry is refused");
     }
 
     fn temp_files(dir: &Path) -> Vec<String> {
@@ -729,8 +846,11 @@ mod tests {
                 | "path.moveHandle"
                 | "path.bendSegment"
                 | "path.convertPoint"
+                | "path.addAnchor"
+                | "path.deleteAnchor"
                 | "path.clippingPath.set"
                 | "path.rename"
+                | "path.stroke"
                 | "select.toWorkPath"
                 | "layer.vectorMask.add"
                 | "layer.vectorMask.edit"

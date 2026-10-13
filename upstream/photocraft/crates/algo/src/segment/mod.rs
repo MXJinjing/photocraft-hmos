@@ -242,14 +242,38 @@ pub fn grid_cut_with(img: &RgbImage, cost_fg: &[f32], cost_bg: &[f32], fixed: &[
     grid_cut_weighted::<true>(img, cost_fg, cost_bg, fixed, weight)
 }
 
+/// [`grid_cut_with`] that stops when `cancel` returns true (asked every few thousand max-flow
+/// steps): `None` then. Not cancelled, the same cut.
+pub fn grid_cut_cancellable(
+    img: &RgbImage,
+    cost_fg: &[f32],
+    cost_bg: &[f32],
+    fixed: &[u8],
+    weight: impl Fn(f32) -> f32,
+    cancel: &dyn Fn() -> bool,
+) -> Option<Vec<bool>> {
+    grid_cut_impl::<true>(img, cost_fg, cost_bg, fixed, weight, cancel)
+}
+
 mod edge_starts;
 
 // The const parameter also runs the previous full scan in before/after workflow tests.
 fn grid_cut_weighted<const OPTIMIZED: bool>(img: &RgbImage, cost_fg: &[f32], cost_bg: &[f32], fixed: &[u8], weight: impl Fn(f32) -> f32) -> Vec<bool> {
+    grid_cut_impl::<OPTIMIZED>(img, cost_fg, cost_bg, fixed, weight, &|| false).unwrap_or_default()
+}
+
+fn grid_cut_impl<const OPTIMIZED: bool>(
+    img: &RgbImage,
+    cost_fg: &[f32],
+    cost_bg: &[f32],
+    fixed: &[u8],
+    weight: impl Fn(f32) -> f32,
+    cancel: &dyn Fn() -> bool,
+) -> Option<Vec<bool>> {
     let (w, h) = (img.w as i32, img.h as i32);
-    let Some(n) = img.w.checked_mul(img.h).filter(|&n| n < u32::MAX as usize - 2) else { return Vec::new() };
+    let Some(n) = img.w.checked_mul(img.h).filter(|&n| n < u32::MAX as usize - 2) else { return Some(Vec::new()) };
     if img.w > i32::MAX as usize || img.h > i32::MAX as usize || [img.px.len(), cost_fg.len(), cost_bg.len(), fixed.len()].iter().any(|&len| len < n) {
-        return Vec::new();
+        return Some(Vec::new());
     }
     let mut free = Vec::new();
     let mut idx = vec![u32::MAX; n];
@@ -262,7 +286,7 @@ fn grid_cut_weighted<const OPTIMIZED: bool>(img: &RgbImage, cost_fg: &[f32], cos
     }
     let mut out: Vec<bool> = fixed.iter().map(|f| *f == HARD_FG).collect();
     if count == 0 {
-        return out;
+        return Some(out);
     }
     let mut g = Graph::with_capacity(count as usize, count as usize * 4);
     for i in 0..n {
@@ -307,7 +331,7 @@ fn grid_cut_weighted<const OPTIMIZED: bool>(img: &RgbImage, cost_fg: &[f32], cos
         }
     }
     if OPTIMIZED {
-        g.maxflow();
+        g.maxflow_with(cancel)?;
     } else {
         g.maxflow_bk();
     }
@@ -316,7 +340,7 @@ fn grid_cut_weighted<const OPTIMIZED: bool>(img: &RgbImage, cost_fg: &[f32], cos
             out[i] = g.in_source(idx[i] as usize);
         }
     }
-    out
+    Some(out)
 }
 
 fn add_fixed_link(g: &mut Graph, node: usize, fixed: u8, wt: f32) {
