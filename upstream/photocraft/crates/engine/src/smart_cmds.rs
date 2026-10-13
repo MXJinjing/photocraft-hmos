@@ -666,7 +666,7 @@ fn any_layer(l: &Layer, f: &dyn Fn(&Layer) -> bool) -> bool {
 /// blend mode, clipping and label stay on the smart layer. The cache is the exact composite, so
 /// the document looks the same before and after.
 pub fn layer_to_smart(doc: &Document, l: &Layer) -> Result<Layer> {
-    let background = l.name == "Background" && l.locks.position;
+    let background = doc.is_background(l.id);
     let mut inner = l.clone();
     inner.visible = true;
     inner.opacity = 1.0;
@@ -1057,24 +1057,6 @@ fn move_filter(s: &mut Session, p: &Value) -> Result<Value> {
 
 // ---------- enablement ----------
 
-/// Whether smart-filter or contents command `spec` can run with `p`: its precondition is checked on an
-/// explicit `"layer"` of the active document (the layer it then edits) rather than on the
-/// active layer, which stays active (#466). `None` for other commands or without that target.
-pub(crate) fn target_enabled(s: &mut Session, spec: &CommandSpec, p: &Value) -> Option<std::result::Result<(), String>> {
-    if !spec.id.starts_with("layer.smartFilter.") && !matches!(spec.id, "layer.smartObjects.editContents" | "layer.smartObjects.convertToLayers") {
-        return None;
-    }
-    let target = LayerId(p.get("layer")?.as_u64()?);
-    let d = s.active_mut()?;
-    d.doc.layer(target)?;
-    let active = d.active_layer.replace(target);
-    let r = (spec.enabled)(s);
-    if let Some(d) = s.active_mut() {
-        d.active_layer = active;
-    }
-    Some(r)
-}
-
 fn active_smart(s: &Session) -> std::result::Result<&SmartObject, String> {
     let d = s.active().ok_or("no document open")?;
     let id = d.active_layer.ok_or("no active layer")?;
@@ -1160,6 +1142,14 @@ pub fn specs() -> Vec<CommandSpec> {
             s.edit("Update Modified Content", |doc, _| refresh_or_fail(doc, id))?;
             Ok(json!({"layer": id.0}))
         }),
+        spec!(
+            "layer.smartObjects.updateChanged",
+            "Update Changed Linked Content",
+            &[],
+            "{} — re-render the active document's linked smart objects whose files changed on disk since they were last seen (size or modification time); the desktop app does this by itself every two seconds, as Photoshop does while a document is open. Files seen for the first time are only remembered. One Update Modified Content undo step per file → {updated: [layer ids]}",
+            |s| s.active().map(|_| ()).ok_or_else(|| "no document open".into()),
+            crate::link_watch::update_changed
+        ),
         spec!(
             "layer.smartObjects.updateAllModifiedContent",
             "Update All Modified Content",

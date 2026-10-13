@@ -21,8 +21,8 @@ type CloseRequest = Arc<AtomicBool>;
 /// Photoshop brushes (.abr), gradients (.grd) and swatches (.aco, .ase), which go to the preset libraries.
 const OPEN_EXTS: &[&str] = &[
     "pcraft", "pdn", "ora", "psd", "psb", "psdt", "png", "jpg", "jpeg", "tif", "tiff", "webp", "gif", "bmp", "tga", "ico", "qoi", "exr", "hdr", "pbm", "pgm",
-    "ppm", "pam", "pfm", "heic", "heif", "hif", "dng", "cr2", "cr3", "nef", "nrw", "arw", "pef", "orf", "rw2", "raf", "abr", "grd", "svg", "svgz", "aco",
-    "ase", "af", "afdesign", "afphoto", "afpub",
+    "ppm", "pam", "pfm", "fits", "fit", "fts", "heic", "heif", "hif", "dng", "cr2", "cr3", "nef", "nrw", "arw", "pef", "orf", "rw2", "raf", "abr", "grd",
+    "svg", "svgz", "aco", "ase", "af", "afdesign", "afphoto", "afpub",
 ];
 const SVG_EXTS: &[&str] = &["svg", "svgz"];
 const CANVAS_ID: &str = "photocraft_canvas";
@@ -409,27 +409,22 @@ impl eframe::App for WebShell {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
-        let error = self.presets.error();
-        if error.is_some() || self.presets.unsaved() {
+        if let Some(error) = self.presets.error() {
             egui::Panel::top("browser_preset_storage").show(ui, |ui| {
-                if let Some(error) = error {
-                    let tokens = photocraft_ui_egui::theme::Tokens::for_kind(self.app.ui.theme);
-                    // Put retry first so floating brush windows cannot cover the control.
-                    ui.horizontal_wrapped(|ui| {
-                        if self.database.is_some() && ui.button(i18n::t("Retry saving presets")).clicked() {
-                            self.presets.retry();
-                            ui.ctx().request_repaint();
-                        }
-                        ui.colored_label(tokens.warning, i18n::fmt(i18n::t("Brush preset changes are not saved: {error}"), &[("error", &error)]));
-                    });
-                    ui.label(if self.database.is_some() {
-                        i18n::t("Keep this tab open to retain your brushes.")
-                    } else {
-                        i18n::t("Browser storage is unavailable; brushes are session-only. Keep this tab open to retain them.")
-                    });
+                let tokens = photocraft_ui_egui::theme::Tokens::for_kind(self.app.ui.theme);
+                // Put retry first so floating brush windows cannot cover the control.
+                ui.horizontal_wrapped(|ui| {
+                    if self.database.is_some() && ui.button(i18n::t("Retry saving presets")).clicked() {
+                        self.presets.retry();
+                        ui.ctx().request_repaint();
+                    }
+                    ui.colored_label(tokens.warning, i18n::fmt(i18n::t("Brush preset changes are not saved: {error}"), &[("error", &error)]));
+                });
+                ui.label(if self.database.is_some() {
+                    i18n::t("Keep this tab open to retain your brushes.")
                 } else {
-                    ui.label(i18n::t("Saving brush presets… Keep this tab open until saving finishes."));
-                }
+                    i18n::t("Browser storage is unavailable; brushes are session-only. Keep this tab open to retain them.")
+                });
             });
         }
         self.app.ui(ui, frame);
@@ -474,6 +469,8 @@ fn services(inbox: Inbox, ctx: egui::Context) -> Services {
             }
             opts.tiff_layers = settings.tiff_layers;
             opts.xmp = if settings.xmp_all { photocraft_io::XmpEmbed::All } else { photocraft_io::XmpEmbed::None };
+            opts.tga_bits = settings.tga_bits;
+            opts.image_previews = settings.image_previews;
             photocraft_io::export(doc, path, &opts).map(|r| (r.bytes, r.warnings)).map_err(|e| e.to_string())
         })),
         file_dialog: Some(Box::new(|request, _parent, reply| match request {
@@ -504,6 +501,8 @@ fn services(inbox: Inbox, ctx: egui::Context) -> Services {
                 };
                 reply.send(answer);
             }),
+            // Browser folder handles cannot be represented as filesystem paths for engine commands.
+            FileDialogRequest::Folder { .. } => reply.send(None),
             // No save dialog on the web: the suggested name becomes the download name.
             FileDialogRequest::Save { suggested } => {
                 let name = std::path::Path::new(&suggested).file_name().map_or_else(|| suggested.clone(), |n| n.to_string_lossy().to_string());

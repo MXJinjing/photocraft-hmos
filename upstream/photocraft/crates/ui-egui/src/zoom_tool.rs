@@ -75,7 +75,8 @@ pub fn drag(app: &PhotocraftApp, ctx: &egui::Context, view: &mut View, xf: &View
     if b.stopped {
         ctx.data_mut(|d| d.remove::<ZoomDrag>(id()));
         if let Some(to) = z.rect_to {
-            zoom_to_rect(view, xf, Rect::from_two_pos(z.anchor, to), z.anchor, ctx.input(|i| i.modifiers.alt), app.ppp);
+            let out = crate::workspace_ui::sticky_mods(app, ctx.input(|i| i.modifiers)).alt;
+            zoom_to_rect(view, xf, Rect::from_two_pos(z.anchor, to), z.anchor, out, app.ppp);
         }
     }
     true

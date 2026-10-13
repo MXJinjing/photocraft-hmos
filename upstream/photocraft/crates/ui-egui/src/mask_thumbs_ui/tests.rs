@@ -175,7 +175,8 @@ fn dragging_a_layer_row_to_trash_still_deletes_the_layer_with_a_mask_targeted() 
     let mut h = harness(s, 0, 1.0, 290.0);
     let mask = recorded(&h.ctx, masked).unwrap().0.into_iter().find(|(k, _)| *k == MaskKind::Pixel).unwrap().1;
     click_with(&mut h, mask.center(), Modifiers::NONE);
-    let from = crate::layer_row_ui::recorded(&h.ctx).into_iter().find(|r| r.layer == masked).unwrap().row.center();
+    // Grab the row by its name: its thumbnails drag their masks (#3113, #3119).
+    let from = crate::layer_row_ui::recorded(&h.ctx).into_iter().find(|r| r.layer == masked).unwrap().name.unwrap().center();
     let to = h.get_by_label("Delete Layer Mask").rect().center();
     h.hover_at(from);
     h.run_steps(1);
@@ -188,6 +189,101 @@ fn dragging_a_layer_row_to_trash_still_deletes_the_layer_with_a_mask_targeted() 
     h.event(egui::Event::PointerButton { pos: to, button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE });
     h.run_steps(3);
     assert!(h.state().session.active().unwrap().doc.layer(photocraft_doc::LayerId(masked)).is_none());
+}
+
+/// #3113: dragging the layer mask's thumbnail onto the Trash asks "Apply mask to layer before
+/// removing?" and keeps the layer; Apply applies the mask, Delete deletes it.
+#[test]
+fn dragging_the_mask_thumbnail_to_trash_asks_to_apply_or_delete_it() {
+    let (mut s, masked, _) = session();
+    // A mask that hides the left half, so applying it changes the pixels.
+    s.execute("layer.layerMask.delete", json!({"layer": masked})).unwrap();
+    s.execute("select.rect", json!({"x": 100, "y": 0, "width": 100, "height": 100})).unwrap();
+    s.execute("layer.layerMask.revealSelection", json!({"layer": masked})).unwrap();
+    s.execute("select.deselect", json!({})).unwrap();
+    let mut h = harness(s, 0, 1.0, 290.0);
+    let drag_mask = |h: &mut Harness<'_, PhotocraftApp>| {
+        let from = recorded(&h.ctx, masked).unwrap().0.into_iter().find(|(k, _)| *k == MaskKind::Pixel).unwrap().1.center();
+        click_with(h, from, Modifiers::NONE);
+        let to = h.get_by_label("Delete Layer Mask").rect().center();
+        h.hover_at(from);
+        h.run_steps(1);
+        h.event(egui::Event::PointerButton { pos: from, button: PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE });
+        h.run_steps(1);
+        for k in 1..=8 {
+            h.event(egui::Event::PointerMoved(from + (to - from) * (k as f32 / 8.0)));
+            h.run_steps(1);
+        }
+        h.event(egui::Event::PointerButton { pos: to, button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE });
+        h.run_steps(3);
+        let d = h.state().ui.dialogs.iter().find(|d| crate::mask_trash_prompt::owns(&d.fields)).expect("the prompt is open");
+        assert_eq!(d.fields["message"], "Apply mask to layer before removing?");
+        assert!(layer(h, masked).mask.is_some(), "nothing changes before the answer");
+        d.id
+    };
+    let pixels = |h: &Harness<'_, PhotocraftApp>| layer(h, masked).content;
+    let before = pixels(&h);
+    let past = h.state().session.active().unwrap().history.past_len();
+    // Cancel keeps the mask.
+    let dialog = drag_mask(&mut h);
+    crate::dialogs::cancel(h.state_mut(), dialog).unwrap();
+    assert!(layer(&h, masked).mask.is_some());
+    // Apply: one step, the mask is gone and the layer's pixels are masked.
+    let dialog = drag_mask(&mut h);
+    crate::dialogs::confirm(h.state_mut(), dialog).unwrap();
+    assert!(layer(&h, masked).mask.is_none());
+    assert_ne!(pixels(&h), before, "applied, not deleted");
+    assert_eq!(h.state().session.active().unwrap().history.past_len(), past + 1);
+    h.state_mut().session.undo();
+    h.run_steps(2);
+    // Delete: the mask is gone and the pixels are as they were.
+    let dialog = drag_mask(&mut h);
+    h.state_mut().ui.dialog_mut(dialog).unwrap().fields.insert("choice".into(), json!("delete"));
+    crate::dialogs::confirm(h.state_mut(), dialog).unwrap();
+    assert!(layer(&h, masked).mask.is_none());
+    assert_eq!(pixels(&h), before);
+}
+
+/// #3119: dragging the vector mask's thumbnail onto the Trash asks "Delete the vector mask?" and
+/// keeps the layer; Cancel keeps the mask, OK deletes only the vector mask in one step.
+#[test]
+fn dragging_the_vector_mask_thumbnail_to_trash_asks_to_delete_just_the_mask() {
+    let (s, masked, _) = session();
+    let mut h = harness(s, 0, 1.0, 290.0);
+    let drag_vector_mask = |h: &mut Harness<'_, PhotocraftApp>| {
+        let from = recorded(&h.ctx, masked).unwrap().0.into_iter().find(|(k, _)| *k == MaskKind::Vector).unwrap().1.center();
+        click_with(h, from, Modifiers::NONE);
+        let to = h.get_by_label("Delete Vector Mask").rect().center();
+        h.hover_at(from);
+        h.run_steps(1);
+        h.event(egui::Event::PointerButton { pos: from, button: PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE });
+        h.run_steps(1);
+        for k in 1..=8 {
+            h.event(egui::Event::PointerMoved(from + (to - from) * (k as f32 / 8.0)));
+            h.run_steps(1);
+        }
+        h.event(egui::Event::PointerButton { pos: to, button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE });
+        h.run_steps(3);
+        let st = h.state().session.active().unwrap();
+        assert!(st.doc.layer(photocraft_doc::LayerId(masked)).is_some(), "the layer is not deleted");
+        let d = h.state().ui.dialogs.iter().find(|d| crate::mask_trash_prompt::owns(&d.fields)).expect("the prompt is open");
+        assert_eq!(d.fields["message"], "Delete the vector mask?");
+        assert!(layer(h, masked).vector_mask.is_some(), "nothing changes before the answer");
+        d.id
+    };
+    let past = h.state().session.active().unwrap().history.past_len();
+    // Cancel keeps the vector mask.
+    let dialog = drag_vector_mask(&mut h);
+    crate::dialogs::cancel(h.state_mut(), dialog).unwrap();
+    assert!(layer(&h, masked).vector_mask.is_some());
+    assert_eq!(h.state().session.active().unwrap().history.past_len(), past);
+    // OK: one step, only the vector mask is gone.
+    let dialog = drag_vector_mask(&mut h);
+    crate::dialogs::confirm(h.state_mut(), dialog).unwrap();
+    let after = layer(&h, masked);
+    assert!(after.vector_mask.is_none());
+    assert!(after.mask.is_some(), "the layer mask stays");
+    assert_eq!(h.state().session.active().unwrap().history.past_len(), past + 1);
 }
 
 #[test]
@@ -333,7 +429,7 @@ fn mask_view(h: &Harness<'_, PhotocraftApp>) -> serde_json::Value {
 
 fn canvas_px(h: &Harness<'_, PhotocraftApp>) -> Option<Vec<egui::Color32>> {
     let st = h.state().session.active().unwrap();
-    crate::channel_view::render(&st.doc, &st.channel_view, photocraft_geom::Rect::new(0, 0, 200, 100), 1, false)
+    crate::channel_view::render(&st.doc, &st.channel_view, photocraft_geom::Rect::new(0, 0, 200, 100), 1, false, st.active_layer)
 }
 
 fn near(a: Rect, b: Rect) -> bool {
@@ -440,12 +536,7 @@ fn clicking_the_vector_mask_targets_it_for_the_path_tools() {
     let k = layer(&h, masked).vector_mask.unwrap().path.subpaths[0].knots[0].anchor;
     assert_eq!((k.x, k.y), (25.0, 12.0));
     // The Pen adds a subpath to it.
-    h.state_mut().ui.pen = Some(crate::vector_ui::PenPath {
-        knots: vec![[[150.0, 10.0]; 3], [[190.0, 10.0]; 3], [[190.0, 40.0]; 3]],
-        unlinked: Vec::new(),
-        dragging: false,
-        adjusting_last: false,
-    });
+    h.state_mut().ui.pen = Some(crate::vector_ui::PenPath { knots: vec![[[150.0, 10.0]; 3], [[190.0, 10.0]; 3], [[190.0, 40.0]; 3]], ..Default::default() });
     crate::vector_ui::pen_commit(h.state_mut(), true);
     assert_eq!(layer(&h, masked).vector_mask.unwrap().path.subpaths.len(), 2);
     assert!(h.state().session.active().unwrap().doc.work_path.is_none(), "not a work path");
@@ -607,4 +698,42 @@ fn selecting_mask_thumbnail_toggles_swatches_to_mask_colors_and_back() {
     h.state_mut().run("layer.newAdjustmentLayer.curves", json!({})).unwrap();
     assert!(h.state().ui.mask_target, "new adjustment layer targets its mask");
     assert_eq!(h.state().session.tools.foreground, grey);
+}
+
+// #3369: a new adjustment or fill layer targets its mask, but Properties shows its settings
+// until the mask thumbnail is clicked, as in Photoshop.
+#[test]
+fn a_new_adjustment_or_fill_layer_shows_its_settings_until_the_mask_thumbnail_is_clicked() {
+    for (command, settings) in [("layer.newAdjustmentLayer.curves", Some("Reset to defaults")), ("layer.newFillLayer.solidColor", None)] {
+        let mut s = photocraft_engine::Session::new();
+        s.execute("file.new", json!({"width": 200, "height": 100})).unwrap();
+        s.execute("layer.new.layer", json!({})).unwrap();
+        let mut h = harness(s, 0, 1.0, 290.0);
+        let ctx = h.ctx.clone();
+        let (req, _rx) = crate::control::ControlRequest::new("ui.set", json!({"dock": {"collapsed": ["color", "history", "navigator"]}}));
+        crate::control::handle(h.state_mut(), &ctx, &req);
+        h.state_mut().run(command, json!({})).unwrap();
+        h.run_steps(6);
+        let id = h.state().session.active().unwrap().active_layer.unwrap().0;
+        assert!(h.state().ui.mask_target, "{command}: the new mask is targeted");
+        assert_eq!(crate::canvas::paint_target(h.state()), json!("mask"), "{command}: painting edits the mask");
+        assert!(h.query_all_by_label("Density").next().is_none(), "{command}: Properties shows the layer, not its mask");
+        if let Some(label) = settings {
+            assert!(h.query_all_by_label(label).next().is_some(), "{command}: its settings show");
+        }
+        // Clicking the row (not a thumbnail) keeps the settings.
+        let row = h.get_by_label(&layer(&h, id).name).rect().center();
+        click_with(&mut h, row, Modifiers::NONE);
+        assert!(h.state().ui.mask_target);
+        assert!(h.query_all_by_label("Density").next().is_none(), "{command}: a row click keeps the settings");
+        // The mask thumbnail switches Properties to the mask.
+        let r = mask_rect(&h, id, MaskKind::Pixel);
+        click_with(&mut h, r.center(), Modifiers::NONE);
+        h.run_steps(2);
+        assert!(h.state().ui.mask_target);
+        assert!(h.query_all_by_label("Density").next().is_some(), "{command}: the mask thumbnail shows the mask controls");
+        if let Some(label) = settings {
+            assert!(h.query_all_by_label(label).next().is_none());
+        }
+    }
 }

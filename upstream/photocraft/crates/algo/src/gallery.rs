@@ -8,6 +8,8 @@
 
 use photocraft_geom::Rect;
 
+mod spin_plan;
+
 use crate::fxutil::{MAXC, add_sample_premul, gauss_blur_n, gauss_box_radii, premul_window, smoothstep, unpremul_px, xy};
 use crate::image::{Image, premultiply};
 use crate::{BlurPath, Ctx, FieldPin, IrisPin, SpinPin};
@@ -15,6 +17,10 @@ use crate::{BlurPath, Ctx, FieldPin, IrisPin, SpinPin};
 #[cfg(test)]
 #[path = "tests_iris.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests_tilt_shift.rs"]
+mod tilt_shift_tests;
 
 /// Gaussian σ for a gallery blur amount in px.
 fn sigma_of(blur: f32) -> f32 {
@@ -86,7 +92,7 @@ fn variable_blur(src: &Image, out: Rect, ctx: &Ctx, smax: f32, trim_levels: bool
         let (level, lw): (&[f32], usize) = if k == 0 {
             (&p, ww)
         } else {
-            // Only Iris opts in. Each level needs its own box-cascade reach,
+            // Iris and Tilt-Shift opt in. Each level needs its own box-cascade reach,
             // not the maximum blur's trailing halo. Keep the original top/left:
             // moving the running sums' start changes floating-point cancellation.
             let trim = trim_levels && win.intersect(&out) == out;
@@ -146,9 +152,10 @@ pub(crate) fn tilt_shift(src: &Image, out: Rect, ctx: &Ctx, blur: f32, centre: (
     // Band normal (the band runs along `angle`).
     let (s, c) = angle.to_radians().sin_cos();
     let (nx, ny) = (s, c);
-    let smax = sigma_of(blur);
+    // A NaN amount must not become the upper bound of f32::clamp below.
+    let smax = sigma_of(blur).max(0.0);
     let (f0, f1) = (focus.max(0.0), focus.max(0.0) + transition.max(1e-3));
-    variable_blur(src, out, ctx, smax, false, |x, y| {
+    variable_blur(src, out, ctx, smax, true, |x, y| {
         let d = ((x - cx) * nx + (y - cy) * ny).abs() / ss;
         smax * smoothstep(f0, f1, d)
     })
@@ -264,7 +271,18 @@ pub(crate) fn field(src: &Image, out: Rect, ctx: &Ctx, pins: &[FieldPin]) -> Vec
 /// Spin Blur: content inside each ellipse is blurred along arcs about its
 /// centre (`blur_angle` degrees of rotation), feathered at the rim.
 pub(crate) fn spin(src: &Image, out: Rect, ctx: &Ctx, pins: &[SpinPin]) -> Vec<f32> {
-    let n = src.ch;
+    match src.ch {
+        1 => spin_impl::<1>(src, out, ctx, pins, true),
+        2 => spin_impl::<2>(src, out, ctx, pins, true),
+        3 => spin_impl::<3>(src, out, ctx, pins, true),
+        4 => spin_impl::<4>(src, out, ctx, pins, true),
+        5 => spin_impl::<5>(src, out, ctx, pins, true),
+        _ => spin_impl::<0>(src, out, ctx, pins, true),
+    }
+}
+
+fn spin_impl<const N: usize>(src: &Image, out: Rect, ctx: &Ctx, pins: &[SpinPin], prepare: bool) -> Vec<f32> {
+    let n = if N == 0 { src.ch } else { N };
     let b = ctx.bounds;
     let ss = short_side(b);
     let mut res = src.crop(out);
@@ -272,11 +290,12 @@ pub(crate) fn spin(src: &Image, out: Rect, ctx: &Ctx, pins: &[SpinPin]) -> Vec<f
     if clip.is_empty() {
         return res;
     }
+    let plans = prepare.then(|| spin_plan::prepare(pins)).flatten();
     let mut acc = [0.0f32; MAXC];
     for (i, px) in res.chunks_exact_mut(n).enumerate() {
         let (x, y) = xy(out, i);
         let (fx, fy) = (x as f32 + 0.5, y as f32 + 0.5);
-        for p in pins {
+        for (pi, p) in pins.iter().enumerate() {
             let (e, u, v) = pin_distance(fx, fy, b, p.x, p.y, p.radius_x, p.radius_y, p.angle, 2.0);
             if !e.is_finite() || e >= 1.0 {
                 continue;
@@ -288,15 +307,20 @@ pub(crate) fn spin(src: &Image, out: Rect, ctx: &Ctx, pins: &[SpinPin]) -> Vec<f
             let (cx, cy) = (b.x0 as f32 + p.x * b.width() as f32, b.y0 as f32 + p.y * b.height() as f32);
             let angle_deg = if p.angle.is_finite() { p.angle } else { 0.0 };
             let (sa, ca) = angle_deg.to_radians().sin_cos();
+            let rotations = plans.as_ref().and_then(|plans| plans.get(pi)).and_then(|plan| plan.rotations(m));
             acc[..n].fill(0.0);
             for j in 0..m {
                 let phi = theta * (j as f32 / (m - 1) as f32 - 0.5);
-                let (sp, cp) = phi.sin_cos();
+                let (sp, cp) = rotations.and_then(|table| table.get(j)).copied().unwrap_or_else(|| phi.sin_cos());
                 // Rotate in the ellipse's normalized space, then map back.
                 let (ru, rv) = (u * cp - v * sp, u * sp + v * cp);
                 let (lu, lv) = (ru * p.radius_x * ss, rv * p.radius_y * ss);
                 let (sx, sy) = (cx + lu * ca - lv * sa, cy + lu * sa + lv * ca);
-                add_sample_premul(src, sx, sy, clip, ctx.alpha, &mut acc[..n]);
+                if N == 0 {
+                    add_sample_premul(src, sx, sy, clip, ctx.alpha, &mut acc[..n]);
+                } else {
+                    spin_plan::sample::<N>(src, sx, sy, clip, ctx.alpha, &mut acc);
+                }
             }
             for v in acc.iter_mut().take(n) {
                 *v /= m as f32;
@@ -376,3 +400,6 @@ pub(crate) fn path(src: &Image, out: Rect, ctx: &Ctx, paths: &[BlurPath]) -> Vec
     }
     res
 }
+
+#[cfg(test)]
+mod prepared_spin_tests;

@@ -10,14 +10,13 @@ use photocraft_doc::{Document, Layer, LayerContent, LayerId};
 use serde_json::{Value, json};
 
 use crate::commands::CommandSpec;
-use crate::extra_cmds::is_background;
 use crate::{EngineError, Result, Session};
 
 const CMD: &str = "layer.new.backgroundFromLayer";
 
 /// The document's Background layer, if it has one (always the bottom layer).
 pub(crate) fn background_id(doc: &Document) -> Option<LayerId> {
-    doc.layers.first().filter(|l| is_background(l)).map(|l| l.id)
+    doc.background().map(|l| l.id)
 }
 
 /// Refuses an edit that moved the Background `bg` (taken before the edit) off the bottom of the
@@ -155,7 +154,7 @@ mod tests {
             assert_eq!(s.execute(CMD, json!({})).unwrap()["layer"], a.0);
             assert_eq!(order(&s), [a, l0, b], "{depth}: drops to the bottom");
             let l = &doc(&s).layers[0];
-            assert!(is_background(l) && l.name == "Background", "{depth}");
+            assert!(doc(&s).is_background(l.id) && l.name == "Background", "{depth}");
             assert_eq!(s.active().unwrap().active_layer, Some(a));
             // Its pixels stay; transparency takes the background colour (blue).
             let red = pixel(&s, 3, 3);
@@ -170,10 +169,10 @@ mod tests {
             assert!(s.undo());
             assert_eq!(order(&s), [l0, a, b], "{depth}");
             let l = doc(&s).layer(a).unwrap();
-            assert!(!is_background(l) && l.name == "A");
+            assert!(!doc(&s).is_background(l.id) && l.name == "A");
             assert!(s.redo());
             assert_eq!(order(&s), [a, l0, b], "{depth}");
-            assert!(is_background(&doc(&s).layers[0]));
+            assert!(doc(&s).is_background(doc(&s).layers[0].id));
         }
     }
 
@@ -191,7 +190,7 @@ mod tests {
         assert_eq!(d.layers[1].id, l0);
         assert_eq!(d.layers[2].id, a);
         let bg = &d.layers[0];
-        assert!(is_background(bg) && !bg.visible, "visibility is kept");
+        assert!(d.is_background(bg.id) && !bg.visible, "visibility is kept");
         assert_eq!(bg.opacity, 1.0);
     }
 
@@ -211,7 +210,7 @@ mod tests {
         for p in [json!({"layer": "A"}), json!({"layer": -1}), json!({"layer": 1.5}), json!({"layer": 99999}), json!({"layer": [a.0]})] {
             assert!(s.execute(CMD, p.clone()).is_err(), "{p}");
         }
-        assert!(!doc(&s).layers.iter().any(is_background));
+        assert!(doc(&s).background().is_none());
         // A group or an adjustment layer can't become the Background.
         s.execute("layer.select", json!({"layer": a.0})).unwrap();
         s.execute("layer.groupLayers", json!({})).unwrap();
@@ -220,7 +219,7 @@ mod tests {
         s.execute("layer.newAdjustmentLayer.invert", json!({})).unwrap();
         assert!(!s.is_enabled(CMD));
         assert!(s.execute(CMD, json!({})).is_err());
-        assert!(!doc(&s).layers.iter().any(is_background));
+        assert!(doc(&s).background().is_none());
     }
 
     #[test]

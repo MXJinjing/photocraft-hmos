@@ -219,6 +219,7 @@ pub fn rich_doc(mode: ColorMode, depth: SampleType) -> Document {
     d.channels.push(alpha);
     d.channels.push(AlphaChannel { spot: Some((Color::rgb(1.0, 0.0, 0.5), 0.7)), ..AlphaChannel::new("Spot", ch.clone()) });
     d.quick_mask = Some(AlphaChannel::new("Quick Mask", ch));
+    d.quick_mask_unselected = true;
     let mut pat = Surface::new(PixelFormat::new(photocraft_color::ColorMode::Rgb, photocraft_color::SampleType::U16, true));
     scribble(&mut pat, 21, false);
     d.patterns.push(photocraft_doc::Pattern::new("$$$/Patterns/Test=Scribble", pat, 32, 24));
@@ -227,7 +228,8 @@ pub fn rich_doc(mode: ColorMode, depth: SampleType) -> Document {
         inks: vec![photocraft_doc::DuotoneInk::new("Black", [0.0; 3]), photocraft_doc::DuotoneInk::new("PANTONE 151 C", [1.0, 0.5, 0.0])],
         psd_raw: Some(vec![1, 2, 3]),
     });
-    d.guides = Guides { horizontal: vec![10.0, 20.5], vertical: vec![100.25] };
+    d.guides =
+        Guides { horizontal: vec![10.0, 20.5], vertical: vec![100.25], colors: vec![GuideColor { vertical: true, position: 100.25, rgb: [0x33, 0x66, 0xff] }] };
     let mut sel = Surface::new(PixelFormat::GRAY8);
     scribble(&mut sel, 14, false);
     d.selection = Some(sel);

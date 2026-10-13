@@ -147,6 +147,48 @@ fn shift_during_the_drag_draws_a_square_and_the_readout_follows() {
     assert!(h.query_by_label("W:").is_none() && h.query_by_label_contains(" px").is_none(), "the readout goes away with the drag");
 }
 
+/// #204: Preferences › Tools › Show Transformation Values off hides the readout, not the marquee.
+#[test]
+fn show_transformation_values_off_hides_the_readout() {
+    for shown in [false, true] {
+        let mut h = harness(Tool::RectMarquee);
+        h.state_mut().run("prefs.set", json!({"path": "tools.showTransformationValues", "value": shown})).unwrap();
+        press_at(&mut h, 50.0, 50.0, Modifiers::NONE);
+        move_to(&mut h, 150.0, 90.0);
+        assert_eq!(readout(&h, 100, 40), shown, "shown: {shown}");
+        if !shown {
+            assert!(h.query_by_label("W:").is_none() && h.query_by_label_contains(" px").is_none());
+        }
+        release_at(&mut h, 150.0, 90.0, Modifiers::NONE);
+        assert_eq!(selection(&h), Rect::new(50, 50, 150, 90), "the marquee still selects");
+    }
+}
+
+/// #204: the Free Transform readout (#1767) follows Show Transformation Values too.
+#[test]
+fn show_transformation_values_off_hides_the_free_transform_readout() {
+    use crate::canvas::{ToolEvent, tool_event};
+    for shown in [false, true] {
+        let mut h = harness(Tool::Move);
+        let app = h.state_mut();
+        app.run("prefs.set", json!({"path": "tools.showTransformationValues", "value": shown})).unwrap();
+        app.run("layer.new.layer", json!({})).unwrap();
+        app.run("select.all", json!({})).unwrap();
+        app.run("edit.fill", json!({"color": "#3366cc"})).unwrap();
+        app.run("select.deselect", json!({})).unwrap();
+        app.ui.extras.snap = false;
+        crate::menus::invoke(app, &egui::Context::default(), "edit.freeTransform", json!({})).unwrap();
+        // Move the box by dragging inside it (away from the centre pivot), then hover there.
+        tool_event(app, ToolEvent::Down { x: 100.0, y: 100.0, pressure: 1.0 }, Modifiers::NONE);
+        tool_event(app, ToolEvent::Move { x: 130.0, y: 120.0, pressure: 1.0 }, Modifiers::NONE);
+        assert!(crate::transform_tool::live_readout(h.state()).is_some(), "a live readout to show");
+        let at = screen(&h, 130.0, 120.0);
+        h.event(egui::Event::PointerMoved(at));
+        h.run_steps(2);
+        assert_eq!(h.query_by_label("ΔX:").is_some(), shown, "shown: {shown}");
+    }
+}
+
 #[test]
 fn alt_draws_from_the_centre_and_shift_alt_a_centred_circle() {
     let mut h = harness(Tool::RectMarquee);
@@ -339,6 +381,32 @@ fn modifiers_held_before_the_drag_pick_the_mode_not_the_shape() {
     let st = h.state().session.active().unwrap();
     let sel = st.doc.selection.as_ref().unwrap();
     assert!(sel.sample_channel(120, 110, 0) < 0.01 && sel.sample_channel(90, 110, 0) > 0.99, "subtracted, not centred");
+}
+
+/// #208: `⇧⌥` held at the press intersects, the third selection mode after add (`⇧`) and subtract
+/// (`⌥`). Like those, the modifier at the press picks the mode; here the keys are released once the
+/// press has fixed the mode, so the drag stays a plain rectangle and only the overlap of the
+/// existing selection and the dragged rectangle survives. The three sample points below are each in
+/// exactly one of {overlap, first-only, drag-only}, so they pass only for intersect, not for
+/// replace, add or subtract.
+#[test]
+fn shift_alt_before_the_drag_intersects_the_selection() {
+    let mut h = harness(Tool::RectMarquee);
+    // A: the existing selection, 50..200 on both axes.
+    h.state_mut().run("select.rect", json!({"x": 50, "y": 50, "width": 150, "height": 150})).unwrap();
+    let both = Modifiers::SHIFT | Modifiers::ALT;
+    mods(&mut h, both);
+    press_at(&mut h, 120.0, 120.0, both);
+    // Mode is fixed at the press; releasing the keys keeps intersect mode but leaves the drag a
+    // plain rectangle (no square/centre constraint), so B is roughly 120..300 on both axes.
+    mods(&mut h, Modifiers::NONE);
+    move_to(&mut h, 300.0, 300.0);
+    release_at(&mut h, 300.0, 300.0, Modifiers::NONE);
+    let st = h.state().session.active().unwrap();
+    let sel = st.doc.selection.as_ref().expect("a selection survives the intersect");
+    assert!(sel.sample_channel(160, 160, 0) > 0.99, "the overlap of the two rectangles stays selected");
+    assert!(sel.sample_channel(60, 60, 0) < 0.01, "a point only in the existing selection is dropped (not add)");
+    assert!(sel.sample_channel(260, 260, 0) < 0.01, "a point only in the dragged rectangle is dropped (not replace)");
 }
 
 /// `cargo test --release -p photocraft-ui-egui marquee_drag_bench -- --ignored --nocapture`
@@ -702,9 +770,12 @@ fn single_row_and_column_marquee_select_one_pixel_lines() {
     click_with(&mut app, Tool::SingleRowMarquee, 15.0, 60.2, Modifiers::SHIFT);
     assert_eq!(bounds(&app), Rect::new(0, 37, 200, 61));
     assert!(at(&app, 5, 37) > 0.99 && at(&app, 199, 60) > 0.99 && at(&app, 100, 50) < 0.01, "two rows, nothing between");
+    let step = |app: &PhotocraftApp| app.session.active().unwrap().history.undo_label().map(str::to_string);
+    assert_eq!(step(&app).as_deref(), Some("Single Row Marquee"), "History names the step after the tool (#3031)");
 
     click_with(&mut app, Tool::SingleColumnMarquee, 42.9, 80.0, Modifiers::NONE);
     assert_eq!(bounds(&app), Rect::new(42, 0, 43, 100));
+    assert_eq!(step(&app).as_deref(), Some("Single Column Marquee"));
     click_with(&mut app, Tool::SingleColumnMarquee, 150.5, 3.0, Modifiers::SHIFT);
     assert_eq!(bounds(&app), Rect::new(42, 0, 151, 100));
     click_with(&mut app, Tool::SingleColumnMarquee, 42.0, 10.0, Modifiers::ALT);
@@ -721,7 +792,7 @@ fn m_cycles_only_the_rectangular_and_elliptical_marquee() {
     let mut seen = Vec::new();
     for _ in 0..4 {
         let raw = egui::RawInput {
-            events: vec![egui::Event::Key { key: egui::Key::M, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::NONE }],
+            events: vec![egui::Event::Key { key: egui::Key::M, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::SHIFT }],
             ..Default::default()
         };
         ctx.begin_pass(raw);

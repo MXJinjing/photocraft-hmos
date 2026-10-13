@@ -119,7 +119,14 @@ pub fn paint(
         }
         let (verb, what, name) = (if linked { "Unlink" } else { "Link" }, kind.label(), l.name.clone());
         let resp = resp.on_hover_text(if linked { tl!("Unlink the mask from the layer") } else { tl!("Link the mask to the layer") });
-        resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, format!("{verb} {what} {name}")));
+        let template = "{verb} {mask} {layer}";
+        resp.widget_info(|| {
+            egui::WidgetInfo::labeled(
+                egui::WidgetType::Button,
+                true,
+                crate::i18n::fmt(tl!(template), &[("verb", tl!(verb)), ("mask", tl!(what)), ("layer", &name)]),
+            )
+        });
         if resp.clicked() {
             out.clicked = true;
             actions.push((format!("{}.linked", kind.command()), json!({"layer": l.id.0, "linked": !linked})));

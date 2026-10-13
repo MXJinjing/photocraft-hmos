@@ -12,7 +12,7 @@ use crate::state::Tool;
 
 /// A 400 × 300 document with a 100 × 60 red rectangle on its own layer at (100, 100), the Move
 /// tool active, at 100 %.
-fn harness() -> Harness<'static, PhotocraftApp> {
+pub(crate) fn harness() -> Harness<'static, PhotocraftApp> {
     harness_tool(Tool::Move)
 }
 
@@ -63,7 +63,7 @@ fn screen(h: &Harness<'static, PhotocraftApp>, p: [f64; 2]) -> Pos2 {
 }
 
 /// Press at document point `from`, drag to `to` in a few steps and release.
-fn drag(h: &mut Harness<'static, PhotocraftApp>, from: [f64; 2], to: [f64; 2]) {
+pub(crate) fn drag(h: &mut Harness<'static, PhotocraftApp>, from: [f64; 2], to: [f64; 2]) {
     let (a, b) = (screen(h, from), screen(h, to));
     h.event(egui::Event::PointerMoved(a));
     h.run_steps(1);
@@ -77,7 +77,7 @@ fn drag(h: &mut Harness<'static, PhotocraftApp>, from: [f64; 2], to: [f64; 2]) {
     h.run_steps(3);
 }
 
-fn begin(h: &mut Harness<'static, PhotocraftApp>) {
+pub(crate) fn begin(h: &mut Harness<'static, PhotocraftApp>) {
     let ctx = h.ctx.clone();
     crate::menus::invoke(h.state_mut(), &ctx, "edit.freeTransform", json!({})).unwrap();
     h.run_steps(2);
@@ -98,6 +98,19 @@ fn key(h: &mut Harness<'static, PhotocraftApp>, m: Modifiers, k: Key) {
 
 fn close(a: [[f64; 2]; 4], b: [[f64; 2]; 4]) -> bool {
     a.iter().flatten().zip(b.iter().flatten()).all(|(x, y)| (x - y).abs() < 1e-6)
+}
+
+#[test]
+fn free_transform_starts_where_the_selected_pixels_were_moved() {
+    let mut h = harness();
+    h.state_mut().run("select.rect", json!({"x": 100, "y": 100, "width": 100, "height": 60})).unwrap();
+    drag(&mut h, [150.0, 130.0], [250.0, 180.0]);
+    assert_eq!(photocraft_engine::float_cmds::floating(h.state().session.active().unwrap()).unwrap().offset, (100, 50));
+    begin(&mut h);
+    assert_eq!(quad(&h), [[200.0, 150.0], [300.0, 150.0], [300.0, 210.0], [200.0, 210.0]]);
+    let st = h.state().session.active().unwrap();
+    assert!(photocraft_engine::float_cmds::floating(st).is_none());
+    assert_eq!(st.doc.selection.as_ref().unwrap().content_bounds(), photocraft_geom::Rect::new(200, 150, 300, 210));
 }
 
 /// Scale ×2, then down again, then ⌘Z: back to the ×2 box, not the fill before the transform.
@@ -264,6 +277,32 @@ fn holding_space_still_pans_while_transforming() {
     h.run_steps(2);
     assert!(close(quad(&h), q0), "the space-drag did not touch the box: {:?}", quad(&h));
     assert_ne!(h.state().ui.views[0].center, center0, "the view panned instead");
+}
+
+#[test]
+fn transform_preview_stays_visible_while_panning() {
+    let mut h = harness();
+    begin(&mut h);
+    let texture = h.state().transform_preview.as_ref().unwrap().texture.pick(&h.ctx, 1.0, 1.0, false).0;
+    let has_preview = |h: &Harness<'static, PhotocraftApp>| {
+        h.output().shapes.iter().any(|clipped| matches!(&clipped.shape, egui::epaint::Shape::Mesh(mesh) if mesh.texture_id == texture))
+    };
+    assert!(has_preview(&h), "the transformed pixels are visible before panning");
+
+    let center0 = h.state().ui.views[0].center;
+    let from = screen(&h, [200.0, 160.0]);
+    let to = from + vec2(50.0, 40.0);
+    h.event(egui::Event::Key { key: Key::Space, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::NONE });
+    h.run_steps(1);
+    h.event(egui::Event::PointerMoved(from));
+    h.run_steps(1);
+    h.event(egui::Event::PointerButton { pos: from, button: PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE });
+    h.run_steps(1);
+    h.event(egui::Event::PointerMoved(to));
+    h.run_steps(1);
+
+    assert_ne!(h.state().ui.views[0].center, center0, "the held Hand panned the view");
+    assert!(has_preview(&h), "the transformed layer stays visible during the pan");
 }
 
 /// A transform started by dragging a Move-tool control: that first drag is undoable too.

@@ -6,8 +6,11 @@
 use egui::{Align2, Rect, RichText, Sense, Stroke, StrokeKind, pos2, vec2};
 use serde_json::{Map, Value, json};
 
+use photocraft_engine::prefs::UnitsAndRulers;
+
 use crate::theme::Tokens;
 use crate::{icons, widgets};
+use photocraft_engine::document_preset_cmds::DocumentSettings;
 
 /// A blank-document preset: (name, width px, height px, ppi).
 pub type Preset = (&'static str, u32, u32, f32);
@@ -111,7 +114,7 @@ pub fn set_clipboard(f: &mut Map<String, Value>, w: u32, h: u32) {
         return;
     }
     f.insert("__clipboard".into(), json!([w, h]));
-    apply_preset(f, &(CLIPBOARD, w, h, 72.0));
+    apply_preset(f, &(CLIPBOARD, w, h, 72.0), &UnitsAndRulers::default());
 }
 
 /// The clipboard image's size, when the dialog offers the Clipboard preset.
@@ -163,15 +166,39 @@ pub fn swap_size(f: &mut Map<String, Value>) {
     }
 }
 
-/// Apply a preset to the dialog fields.
-pub fn apply_preset(f: &mut Map<String, Value>, p: &Preset) {
+/// Print and photo presets (listed at 300 ppi) are specified in inches, screen presets in pixels.
+fn is_print(p: &Preset) -> bool {
+    p.3 >= 300.0
+}
+
+/// A built-in preset at Preferences › Units & Rulers › New Document Preset Resolutions, as in
+/// Photoshop: a print preset keeps its size in inches at the Print Resolution (Letter at 200 ppi is
+/// 1700 x 2200 px), a screen preset keeps its pixels at the Screen Resolution. The Clipboard preset
+/// is the copied pixels and keeps its own resolution. A resolution that isn't a positive finite
+/// number leaves the preset as listed.
+pub fn at_pref_resolutions(p: &Preset, units: &UnitsAndRulers) -> Preset {
+    let ppi = (if is_print(p) { units.print_resolution } else { units.screen_resolution }) as f32;
+    if p.0 == CLIPBOARD || !(ppi.is_finite() && ppi > 0.0) {
+        return *p;
+    }
+    if !is_print(p) {
+        return (p.0, p.1, p.2, ppi);
+    }
+    let scale = ppi / p.3;
+    let px = |v: u32| (v as f32 * scale).round().clamp(1.0, 300_000.0) as u32;
+    (p.0, px(p.1), px(p.2), ppi)
+}
+
+/// Apply a built-in preset (at the preference resolutions, see [`at_pref_resolutions`]) to the
+/// dialog fields.
+pub fn apply_preset(f: &mut Map<String, Value>, p: &Preset, units: &UnitsAndRulers) {
+    let (name, w, h, ppi) = at_pref_resolutions(p, units);
     f.remove("__savedPreset");
-    f.insert("width".into(), json!(p.1));
-    f.insert("height".into(), json!(p.2));
-    f.insert("resolution".into(), json!(p.3));
-    f.insert("__preset".into(), json!(p.0));
-    // Print and photo presets are specified in inches, screen presets in pixels.
-    f.insert("__unit".into(), json!(if p.3 >= 300.0 { "in" } else { "px" }));
+    f.insert("width".into(), json!(w));
+    f.insert("height".into(), json!(h));
+    f.insert("resolution".into(), json!(ppi));
+    f.insert("__preset".into(), json!(name));
+    f.insert("__unit".into(), json!(if is_print(p) { "in" } else { "px" }));
 }
 
 /// Fields `file.new` takes (drops the dialog's `__` UI keys).
@@ -230,17 +257,101 @@ fn page_icon(ui: &egui::Ui, r: Rect, w: u32, h: u32, t: &Tokens) {
 
 /// Restore a snapshot without replacing the new document's name or its clipboard offer.
 pub fn apply_saved_preset(f: &mut Map<String, Value>, preset: &photocraft_engine::document_preset_cmds::DocumentPreset) {
+    apply_settings(f, &preset.settings);
+    f.insert("__savedPreset".into(), json!(preset.name));
+}
+
+/// Restore every setting of a saved or recent document (all but its name).
+pub fn apply_settings(f: &mut Map<String, Value>, settings: &DocumentSettings) {
     f.remove("backgroundColor");
-    if let Some(params) = preset.settings.command_params().as_object() {
+    if let Some(params) = settings.command_params().as_object() {
         f.extend(params.clone());
     }
-    f.insert("__unit".into(), json!(preset.settings.unit));
-    f.insert("__resUnit".into(), json!(preset.settings.resolution_unit));
-    f.insert("__savedPreset".into(), json!(preset.name));
+    f.insert("__unit".into(), json!(settings.unit));
+    f.insert("__resUnit".into(), json!(settings.resolution_unit));
+    f.remove("__savedPreset");
     f.remove("__preset");
     // Typed Width/Height belong to the previous values (`shown_size`).
     f.remove(&typed_key("width"));
     f.remove(&typed_key("height"));
+}
+
+/// The dialog's settings as `document.presets.save` / `document.recent.add` take them: the
+/// `file.new` params plus the display units.
+pub fn document_settings(f: &Map<String, Value>) -> Value {
+    let mut settings = command_params(f);
+    let unit = get_s(f, "__unit", "px");
+    settings["unit"] = json!(if UNITS.iter().any(|u| u.0 == unit) { unit.as_str() } else { "px" });
+    settings["resolutionUnit"] = json!(if get_s(f, "__resUnit", "in") == "cm" { "cm" } else { "in" });
+    settings
+}
+
+/// Whether the dialog currently holds `settings` (so its Recent card shows selected).
+fn holds(f: &Map<String, Value>, settings: &DocumentSettings) -> bool {
+    // Unset fields hold the dialog's defaults, as the details pane shows them.
+    let (w, h) = (get_f(f, "width", 1920.0), get_f(f, "height", 1080.0));
+    (w, h, get_f(f, "resolution", 72.0)) == (settings.width as f32, settings.height as f32, settings.resolution)
+        && f.get("depth").and_then(Value::as_u64).unwrap_or(8) == u64::from(settings.depth)
+        && get_s(f, "mode", "rgb") == settings.mode
+        && get_s(f, "background", "white") == settings.background
+}
+
+/// A card in the preset grid: a built-in preset or a recently created document.
+enum Card {
+    Builtin(Preset),
+    Recent(DocumentSettings),
+}
+
+impl Card {
+    /// Pixel size and resolution; a built-in preset at the Units & Rulers preset resolutions.
+    fn size(&self, units: &UnitsAndRulers) -> (u32, u32, f32) {
+        match self {
+            Card::Builtin(listed) => {
+                let p = at_pref_resolutions(listed, units);
+                (p.1, p.2, p.3)
+            }
+            Card::Recent(s) => (s.width, s.height, s.resolution),
+        }
+    }
+
+    /// The preset's name; a recent document takes the name of the built-in preset it matches.
+    fn title(&self) -> &'static str {
+        match self {
+            Card::Builtin(p) => p.0,
+            Card::Recent(s) => {
+                CATEGORIES.iter().flat_map(|c| c.1.iter()).find(|p| (p.1, p.2, p.3) == (s.width, s.height, s.resolution)).map_or("Custom", |p| p.0)
+            }
+        }
+    }
+
+    /// The size line, in the unit the preset is specified in (a recent one: the unit it was made in).
+    fn size_line(&self, units: &UnitsAndRulers) -> String {
+        let (w, h, ppi) = self.size(units);
+        let unit = match self {
+            Card::Builtin(p) if is_print(p) => "in",
+            Card::Builtin(_) => "px",
+            Card::Recent(s) => s.unit.as_str(),
+        };
+        if unit == "px" {
+            format!("{w} x {h} px @ {} ppi", widgets::fmt_num(f64::from(ppi)))
+        } else {
+            let v = |n: u32| widgets::fmt_num(f64::from(to_unit(n as f32, unit, ppi)));
+            format!("{} x {} {unit} @ {} ppi", v(w), v(h), widgets::fmt_num(f64::from(ppi)))
+        }
+    }
+}
+
+/// The Recent category: the Clipboard preset, the documents recently created here (newest
+/// first), then the built-in defaults they don't already cover.
+fn recent_cards(f: &Map<String, Value>, recent: &[DocumentSettings], units: &UnitsAndRulers) -> Vec<Card> {
+    let mut cards: Vec<Card> = clipboard_preset(f).map(Card::Builtin).into_iter().collect();
+    cards.extend(recent.iter().cloned().map(Card::Recent));
+    let defaults = CATEGORIES[0].1.iter().filter(|p| {
+        let (_, w, h, ppi) = at_pref_resolutions(p, units);
+        !recent.iter().any(|s| (s.width, s.height, s.resolution) == (w, h, ppi))
+    });
+    cards.extend(defaults.copied().map(Card::Builtin));
+    cards
 }
 
 fn saved_presets(app: &mut crate::PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Value>) -> bool {
@@ -300,10 +411,7 @@ fn save_preset(app: &mut crate::PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<St
         f.insert("__presetName".into(), json!(name));
         ui.horizontal(|ui| {
             if widgets::secondary_button(ui, tl!("Save"), 110.0).clicked() || enter {
-                let mut settings = command_params(f);
-                settings["unit"] = json!(get_s(f, "__unit", "px"));
-                settings["resolutionUnit"] = json!(get_s(f, "__resUnit", "in"));
-                match app.run("document.presets.save", json!({"name":name,"settings":settings})) {
+                match app.run("document.presets.save", json!({"name":name,"settings":document_settings(f)})) {
                     Ok(_) => {
                         if let Some(preset) = app.session.presets.documents.last() {
                             apply_saved_preset(f, preset);
@@ -354,9 +462,11 @@ pub fn body(app: &mut crate::PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<Strin
     ui.add_space(6.0);
     widgets::hairline(ui);
     ui.add_space(8.0);
-    let presets = CATEGORIES.iter().find(|c| c.0 == cat).map_or(CATEGORIES[0].1, |c| c.1);
-    // The clipboard image's size comes first among the Recent presets.
-    let presets: Vec<Preset> = clipboard_preset(f).filter(|_| cat == CATEGORIES[0].0).into_iter().chain(presets.iter().copied()).collect();
+    let units = app.session.prefs().units_and_rulers.clone();
+    let presets: Vec<Card> = match CATEGORIES.iter().find(|c| c.0 == cat) {
+        Some(c) if c.0 != CATEGORIES[0].0 => c.1.iter().copied().map(Card::Builtin).collect(),
+        _ => recent_cards(f, &app.session.presets.recent_documents, &units),
+    };
     let chosen = get_s(f, "__preset", "");
     ui.horizontal_top(|ui| {
         // Left: preset grid.
@@ -369,51 +479,65 @@ pub fn body(app: &mut crate::PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<Strin
             ui.label(RichText::new(crate::i18n::fmt(tl!("BLANK DOCUMENT PRESETS ({n})"), &[("n", &presets.len().to_string())])).size(11.0).color(t.text_faint));
             ui.add_space(6.0);
             let card = vec2(164.0, 112.0);
-            for row in presets.chunks(3) {
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = 8.0;
-                    for p in row {
-                        let (r, resp) = ui.allocate_exact_size(card, Sense::click());
-                        let on = chosen == p.0;
-                        ui.painter().rect_filled(
-                            r,
-                            t.radius,
+            // Up to 20 recent documents: scroll past three rows rather than grow the dialog.
+            egui::ScrollArea::vertical().id_salt("new-document-presets").max_height(3.0 * (card.y + 8.0)).show(ui, |ui| {
+                for row in presets.chunks(3) {
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 8.0;
+                        for c in row {
+                            let (r, resp) = ui.allocate_exact_size(card, Sense::click());
+                            let (w, h, _) = c.size(&units);
+                            let on = match c {
+                                Card::Builtin(p) => chosen == p.0,
+                                Card::Recent(settings) => holds(f, settings),
+                            };
+                            ui.painter().rect_filled(
+                                r,
+                                t.radius,
+                                if on {
+                                    t.row_selected
+                                } else if resp.hovered() {
+                                    t.hover
+                                } else {
+                                    t.field
+                                },
+                            );
                             if on {
-                                t.row_selected
-                            } else if resp.hovered() {
-                                t.hover
-                            } else {
-                                t.field
-                            },
-                        );
-                        if on {
-                            ui.painter().rect_stroke(r, t.radius, Stroke::new(1.5, t.accent), StrokeKind::Inside);
+                                ui.painter().rect_stroke(r, t.radius, Stroke::new(1.5, t.accent), StrokeKind::Inside);
+                            }
+                            page_icon(ui, Rect::from_center_size(pos2(r.center().x, r.top() + 34.0), vec2(40.0, 40.0)), w, h, &t);
+                            let title = card_title(ui.painter(), tl!(c.title()), card.x - 12.0, t.text);
+                            let elided = title.elided;
+                            ui.painter().galley(pos2(r.center().x, r.top() + 70.0 - title.size().y / 2.0), title, t.text);
+                            let size = c.size_line(&units);
+                            ui.painter().text(pos2(r.center().x, r.top() + 97.0), Align2::CENTER_CENTER, &size, egui::FontId::proportional(10.5), t.text_faint);
+                            let resp = match c {
+                                // A recent document's tooltip names everything it restores.
+                                Card::Recent(s) => {
+                                    let background = match s.background.as_str() {
+                                        "white" => tl!("White"),
+                                        "black" => tl!("Black"),
+                                        "transparent" => tl!("Transparent"),
+                                        "backgroundColor" => tl!("Background Color"),
+                                        hex => hex,
+                                    };
+                                    resp.on_hover_text(format!("{} · {size} · {}/{} · {background}", tl!(c.title()), s.mode.to_uppercase(), s.depth))
+                                }
+                                Card::Builtin(_) if elided => resp.on_hover_text(tl!(c.title())),
+                                Card::Builtin(_) => resp,
+                            };
+                            if resp.clicked() {
+                                match c {
+                                    Card::Builtin(p) => apply_preset(f, p, &units),
+                                    Card::Recent(settings) => apply_settings(f, settings),
+                                }
+                                create |= resp.double_clicked() || resp.triple_clicked();
+                            }
                         }
-                        page_icon(ui, Rect::from_center_size(pos2(r.center().x, r.top() + 34.0), vec2(40.0, 40.0)), p.1, p.2, &t);
-                        let title = card_title(ui.painter(), tl!(p.0), card.x - 12.0, t.text);
-                        let elided = title.elided;
-                        ui.painter().galley(pos2(r.center().x, r.top() + 70.0 - title.size().y / 2.0), title, t.text);
-                        let unit = if p.3 >= 300.0 { "in" } else { "px" };
-                        let size = if unit == "in" {
-                            format!(
-                                "{} x {} in @ {} ppi",
-                                widgets::fmt_num(to_unit(p.1 as f32, "in", p.3) as f64),
-                                widgets::fmt_num(to_unit(p.2 as f32, "in", p.3) as f64),
-                                p.3
-                            )
-                        } else {
-                            format!("{} x {} px @ {} ppi", p.1, p.2, p.3)
-                        };
-                        ui.painter().text(pos2(r.center().x, r.top() + 97.0), Align2::CENTER_CENTER, size, egui::FontId::proportional(10.5), t.text_faint);
-                        let resp = if elided { resp.on_hover_text(tl!(p.0)) } else { resp };
-                        if resp.clicked() {
-                            apply_preset(f, p);
-                            create |= resp.double_clicked() || resp.triple_clicked();
-                        }
-                    }
-                });
-                ui.add_space(8.0);
-            }
+                    });
+                    ui.add_space(8.0);
+                }
+            });
         });
         ui.add_space(10.0);
         // Right: Preset Details.
@@ -421,7 +545,9 @@ pub fn body(app: &mut crate::PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<Strin
             ui.set_width(260.0);
             ui.label(RichText::new(tl!("PRESET DETAILS")).size(11.0).color(t.text_faint));
             ui.add_space(4.0);
-            let mut name = get_s(f, "name", tl!("Untitled-1"));
+            // Keep the canonical English default in state; only the TextEdit shows a translation.
+            let raw = get_s(f, "name", "Untitled-1");
+            let mut name = if raw == "Untitled-1" { tl!("Untitled-1").to_string() } else { raw };
             let r = ui.add(egui::TextEdit::singleline(&mut name).desired_width(250.0).font(egui::FontId::proportional(15.0)));
             if r.changed() {
                 f.insert("name".into(), json!(name));
@@ -439,10 +565,12 @@ pub fn body(app: &mut crate::PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<Strin
             ui.add_space(8.0);
             let ppi = get_f(f, "resolution", 72.0);
             let mut unit = get_s(f, "__unit", "px");
+            // A typed unit (`210mm` while in pixels) converts at the new document's resolution.
+            let units = widgets::FieldUnits { unit: widgets::unit_of_key(&unit), dpi: f64::from(ppi), ppi: 72.0 };
             small_label(ui, tl!("Width"));
             ui.horizontal(|ui| {
                 let mut w = shown_size(f, "width", 1920.0, &unit, ppi);
-                if widgets::value_field_prec(ui, &mut w, 0.01..=300_000.0, "", 110.0, widgets::unit_decimals(&unit)).changed() {
+                if widgets::value_field_units(ui, &mut w, 0.01..=300_000.0, 110.0, widgets::unit_decimals(&unit), units).changed() {
                     set_size(f, "width", w, &unit, ppi);
                 }
                 let opts: Vec<(String, &str)> = UNITS.iter().map(|u| (u.0.to_string(), u.1)).collect();
@@ -454,13 +582,15 @@ pub fn body(app: &mut crate::PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<Strin
             small_label(ui, tl!("Height"));
             ui.horizontal(|ui| {
                 let mut h = shown_size(f, "height", 1080.0, &unit, ppi);
-                if widgets::value_field_prec(ui, &mut h, 0.01..=300_000.0, "", 110.0, widgets::unit_decimals(&unit)).changed() {
+                if widgets::value_field_units(ui, &mut h, 0.01..=300_000.0, 110.0, widgets::unit_decimals(&unit), units).changed() {
                     set_size(f, "height", h, &unit, ppi);
                 }
                 ui.add_space(6.0);
-                small_label(ui, tl!("Orientation"));
+                // Page orientation (≠ Type › Orientation → Hướng chữ).
+                small_label(ui, crate::i18n::tr_ctx(crate::i18n::current(), "document", "Orientation"));
                 let (w, h) = (get_f(f, "width", 1920.0), get_f(f, "height", 1080.0));
                 for (icon, portrait) in [("rectangle-vertical", true), ("rectangle-horizontal", false)] {
+                    // Tooltip strings are looked up via `icons::button` → `tl!`; enum/state is aspect swap only.
                     if icons::button(ui, icon, 24.0, (h > w) == portrait, if portrait { "Portrait" } else { "Landscape" }).clicked() && (h > w) != portrait {
                         swap_size(f);
                     }
@@ -577,7 +707,7 @@ mod tests {
     fn resolution_keeps_physical_size_in_physical_units_and_pixels_in_px() {
         let a4 = CATEGORIES.iter().find(|c| c.0 == "Print").unwrap().1.iter().find(|p| p.0 == "A4").unwrap();
         let mut f = crate::state::UiState::new_document_fields();
-        apply_preset(&mut f, a4);
+        apply_preset(&mut f, a4, &Default::default());
         f.insert("__unit".into(), json!("in"));
         set_resolution(&mut f, 150.0);
         let p = command_params(&f);
@@ -585,11 +715,46 @@ mod tests {
         assert!(!f.contains_key("__preset"));
 
         let mut f = crate::state::UiState::new_document_fields();
-        apply_preset(&mut f, a4);
+        apply_preset(&mut f, a4, &Default::default());
         f.insert("__unit".into(), json!("px"));
         set_resolution(&mut f, 150.0);
         let p = command_params(&f);
         assert_eq!((p["width"].clone(), p["height"].clone(), p["resolution"].clone()), (json!(2480), json!(3508), json!(150.0)));
+    }
+
+    /// Units & Rulers › New Document Preset Resolutions: print presets keep their inches at the
+    /// Print Resolution, screen presets keep their pixels at the Screen Resolution.
+    #[test]
+    fn presets_follow_the_preset_resolution_preferences() {
+        let find = |cat: &str, name: &str| *CATEGORIES.iter().find(|c| c.0 == cat).unwrap().1.iter().find(|p| p.0 == name).unwrap();
+        let (letter, web) = (find("Print", "Letter"), find("Web", "Web Minimum"));
+        let stock = UnitsAndRulers::default();
+        assert_eq!(at_pref_resolutions(&letter, &stock), letter, "the defaults are the listed sizes");
+        assert_eq!(at_pref_resolutions(&web, &stock), web);
+
+        let units = UnitsAndRulers { print_resolution: 200.0, screen_resolution: 96.0, ..stock.clone() };
+        assert_eq!(at_pref_resolutions(&letter, &units), ("Letter", 1700, 2200, 200.0), "8.5 x 11 in at 200 ppi");
+        assert_eq!(at_pref_resolutions(&find("Print", "A4"), &units), ("A4", 1653, 2339, 200.0));
+        assert_eq!(at_pref_resolutions(&web, &units), ("Web Minimum", 1024, 768, 96.0), "pixels kept");
+        let clipboard = (CLIPBOARD, 123, 45, 72.0);
+        assert_eq!(at_pref_resolutions(&clipboard, &units), clipboard, "the copied pixels keep their resolution");
+
+        let mut f = crate::state::UiState::new_document_fields();
+        apply_preset(&mut f, &letter, &units);
+        assert_eq!((f["width"].as_u64(), f["height"].as_u64(), f["resolution"].as_f64()), (Some(1700), Some(2200), Some(200.0)));
+        assert_eq!((f["__preset"].as_str(), f["__unit"].as_str()), (Some("Letter"), Some("in")), "still a print preset below 300 ppi");
+        apply_preset(&mut f, &web, &units);
+        assert_eq!((f["width"].as_u64(), f["resolution"].as_f64(), f["__unit"].as_str()), (Some(1024), Some(96.0), Some("px")));
+
+        // Out-of-range values (a hand-edited preferences file) never make an unusable size.
+        for bad in [0.0, -5.0, f64::NAN, f64::INFINITY] {
+            let units = UnitsAndRulers { print_resolution: bad, screen_resolution: bad, ..stock.clone() };
+            assert_eq!(at_pref_resolutions(&letter, &units), letter, "{bad}");
+            assert_eq!(at_pref_resolutions(&web, &units), web, "{bad}");
+        }
+        let huge = UnitsAndRulers { print_resolution: 1e9, ..stock };
+        let (_, w, h, _) = at_pref_resolutions(&find("Art & Illustration", "Poster"), &huge);
+        assert_eq!((w, h), (300_000, 300_000), "clamped to the file.new limit");
     }
 
     #[test]
@@ -618,6 +783,35 @@ mod tests {
     }
 
     #[test]
+    fn recent_category_lists_clipboard_then_created_documents_then_uncovered_defaults() {
+        let settings = |w, h, ppi| DocumentSettings {
+            width: w,
+            height: h,
+            resolution: ppi,
+            mode: "rgb".into(),
+            depth: 8,
+            background: "white".into(),
+            background_color: None,
+            unit: "px".into(),
+            resolution_unit: "in".into(),
+        };
+        let mut f = Map::new();
+        set_clipboard(&mut f, 20, 30);
+        let cards = recent_cards(&f, &[settings(800, 600, 72.0), settings(1920, 1080, 72.0)], &UnitsAndRulers::default());
+        let titles: Vec<(&str, String)> = cards.iter().map(|c| (c.title(), c.size_line(&UnitsAndRulers::default()))).collect();
+        assert_eq!(
+            titles,
+            [
+                (CLIPBOARD, "20 x 30 px @ 72 ppi".to_string()),
+                ("Custom", "800 x 600 px @ 72 ppi".to_string()),
+                ("HDTV 1080p", "1920 x 1080 px @ 72 ppi".to_string()),
+                ("Default PhotoCraft Size", "7 x 5 in @ 300 ppi".to_string()),
+            ]
+        );
+        assert!(holds(&f, &settings(20, 30, 72.0)) && !holds(&f, &settings(800, 600, 72.0)));
+    }
+
+    #[test]
     fn clipboard_preset_comes_first_and_is_selected() {
         // Nothing on the clipboard: the dialog opens as before.
         let mut app = crate::PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
@@ -640,7 +834,7 @@ mod tests {
     fn preset_sets_size_resolution_and_create_params_drop_ui_keys() {
         let mut f = crate::state::UiState::new_document_fields();
         let a4 = CATEGORIES.iter().find(|c| c.0 == "Print").unwrap().1.iter().find(|p| p.0 == "A4").unwrap();
-        apply_preset(&mut f, a4);
+        apply_preset(&mut f, a4, &Default::default());
         let p = command_params(&f);
         assert_eq!(p["width"], 2480);
         assert_eq!(p["height"], 3508);
@@ -680,7 +874,7 @@ mod tests {
         assert_eq!(command_params(&f), expected);
         f.insert("width".into(), json!(42));
         assert_eq!(session.presets.documents[0], preset, "editing the form does not edit the snapshot");
-        apply_preset(&mut f, &(CLIPBOARD, 20, 30, 72.0));
+        apply_preset(&mut f, &(CLIPBOARD, 20, 30, 72.0), &Default::default());
         assert!(f.get("__savedPreset").is_none());
         assert_eq!((f["width"].as_u64(), f["height"].as_u64()), (Some(20), Some(30)));
     }
@@ -914,7 +1108,7 @@ mod tests {
             let mut h = harness();
             let mut f = fields(&h);
             super::super::set_clipboard(&mut f, 37, 23);
-            apply_preset(&mut f, &("Other size", 100, 200, 300.0));
+            apply_preset(&mut f, &("Other size", 100, 200, 300.0), &Default::default());
             f.extend(serde_json::json!({"mode":"gray","depth":8,"background":"white"}).as_object().unwrap().clone());
             set_fields(&mut h, f);
             let at = preset_title_at(&h, super::super::CLIPBOARD);
@@ -964,6 +1158,29 @@ mod tests {
         }
 
         #[test]
+        fn preset_cards_use_the_preset_resolution_preferences() {
+            let mut h = harness();
+            h.state_mut().run("prefs.set", serde_json::json!({"path": "unitsAndRulers.printResolution", "value": 150.0})).unwrap();
+            h.state_mut().run("prefs.set", serde_json::json!({"path": "unitsAndRulers.screenResolution", "value": 96.0})).unwrap();
+            h.get_by_label("Photo").click();
+            h.run_steps(2);
+            let at = preset_title_at(&h, "Landscape, 6 x 4");
+            click_at(&mut h, at);
+            assert_eq!(fields(&h)["__unit"], "in");
+            second_click_creates_once(&mut h, at);
+            assert_eq!(created(&h), (900, 600, 150.0), "6 x 4 in at 150 ppi");
+
+            h.state_mut().ui.open_dialog(DialogKind::NewDocument, UiState::new_document_fields());
+            h.run_steps(2);
+            h.get_by_label("Web").click();
+            h.run_steps(2);
+            let at = preset_title_at(&h, "Web Minimum");
+            click_at(&mut h, at);
+            enter(&mut h);
+            assert_eq!(created(&h), (1024, 768, 96.0));
+        }
+
+        #[test]
         fn arithmetic_dimensions_create_the_evaluated_size() {
             let mut h = harness();
             type_into(&mut h, 0, "1920/2");
@@ -999,7 +1216,7 @@ mod tests {
             let mut h = harness();
             let mut f = fields(&h);
             let web = CATEGORIES.iter().find(|c| c.0 == "Web").unwrap().1.iter().find(|p| p.0 == "Web Minimum").unwrap();
-            apply_preset(&mut f, web);
+            apply_preset(&mut f, web, &Default::default());
             set_fields(&mut h, f);
             type_into(&mut h, 0, "512");
             type_into(&mut h, 1, "512");

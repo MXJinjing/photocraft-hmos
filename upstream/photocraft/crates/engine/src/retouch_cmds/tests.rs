@@ -380,6 +380,40 @@ fn history_brush_restores_earlier_pixels() {
 }
 
 #[test]
+fn history_brush_reads_a_source_when_its_pixels_were_locked() {
+    // Given a white layer locked in history state 1, then unlocked and filled red.
+    let mut s = Session::new();
+    s.execute("file.new", json!({"width": 16, "height": 16, "depth": 8, "mode": "rgb", "background": "white"})).unwrap();
+    s.execute("layer.lockLayers", json!({"pixels": true})).unwrap();
+    s.execute("layer.lockLayers", json!({"pixels": false})).unwrap();
+    s.execute("edit.fill", json!({"color": "#ff0000"})).unwrap();
+
+    // When History Brush samples the locked historical pixels.
+    let result = s.execute("paint.historyBrush", json!({"points": [[8, 8]], "size": 4, "hardness": 100, "state": 1}));
+
+    // Then it paints white; the historical lock limits edits, not reads.
+    assert!(result.is_ok(), "{result:?}");
+    assert!(rgba(&s, 8, 8).iter().all(|v| *v > 0.99), "{:?}", rgba(&s, 8, 8));
+}
+
+#[test]
+fn history_brush_refuses_a_locked_destination_when_source_is_unlocked() {
+    // Given an unlocked white source and a red, currently locked destination.
+    let mut s = Session::new();
+    s.execute("file.new", json!({"width": 16, "height": 16, "depth": 8, "mode": "rgb", "background": "white"})).unwrap();
+    s.execute("edit.fill", json!({"color": "#ff0000"})).unwrap();
+    s.execute("layer.lockLayers", json!({"pixels": true})).unwrap();
+
+    // When History Brush samples the unlocked source and attempts to paint the locked destination.
+    let result = s.execute("paint.historyBrush", json!({"points": [[8, 8]], "size": 4, "hardness": 100, "state": 0}));
+
+    // Then the destination lock still rejects the edit and preserves red pixels.
+    assert!(result.is_err());
+    let pixel = rgba(&s, 8, 8);
+    assert!(pixel[0] > 0.99 && pixel[1] < 0.01, "{pixel:?}");
+}
+
+#[test]
 fn history_brush_errors_when_layer_is_new() {
     let mut s = session(20, 20, 8, "rgb");
     s.execute("layer.new.layer", json!({})).unwrap();
@@ -884,6 +918,32 @@ fn content_aware_move_moves_the_object_and_fills_its_place_at_all_depths() {
 }
 
 #[test]
+fn content_aware_move_transform_on_drop_scales_and_rotates_the_content() {
+    // A horizontal 16×6 bar in a 36×36 selection, dropped 80 px right and turned 90° with 125%
+    // width: it lands upright, 20 px tall, and the blend works around the turned content.
+    let bar = |x: i32, y: i32| if (20..36).contains(&x) && (30..36).contains(&y) { [0.05, 0.1, 0.9, 1.0] } else { texture(x, y) };
+    for depth in [8, 32] {
+        let mut s = session(160, 64, depth, "rgb");
+        paint_layer(&mut s, bar);
+        s.execute("select.rect", json!({"x": 10, "y": 15, "width": 36, "height": 36})).unwrap();
+        let r = s.execute("paint.contentAwareMove", json!({"offset": [80, 0], "rotate": 90, "scaleX": 125})).unwrap();
+        assert_eq!(r["transformed"], json!(true));
+        for (x, y) in [(108, 24), (108, 33), (108, 42), (106, 30)] {
+            assert!(is_object(rgba(&s, x, y)), "depth {depth}: the turned, stretched bar covers {x},{y}: {:?}", rgba(&s, x, y));
+        }
+        for (x, y) in [(101, 33), (115, 33)] {
+            assert!(!is_object(rgba(&s, x, y)), "depth {depth}: no unturned bar at {x},{y}");
+        }
+        assert!(!is_object(rgba(&s, 28, 33)), "depth {depth}: the old place is filled");
+        assert!(selected(&s, 108, 33) && !selected(&s, 28, 33), "depth {depth}: the selection followed");
+        // One step: undo brings the bar and the selection back.
+        s.execute("edit.undo", json!({})).unwrap();
+        assert!(is_object(rgba(&s, 28, 33)) && !is_object(rgba(&s, 108, 24)), "depth {depth}: undo");
+        assert!(selected(&s, 28, 33), "depth {depth}: undo restores the selection");
+    }
+}
+
+#[test]
 fn content_aware_extend_keeps_the_original() {
     let mut s = session(128, 64, 8, "rgb");
     paint_layer(&mut s, with_object(20, 26));
@@ -1020,10 +1080,21 @@ fn content_aware_move_fails_gracefully() {
         json!({"offset": [10, 0], "target": "mask"}),
         json!({"offset": [10, 0], "target": {"channel": 7}}),
         json!({"offset": [10, 0], "layer": 999}),
+        json!({"offset": [10, 0], "scaleX": 0}),
+        json!({"offset": [10, 0], "scaleY": 0.5}),
+        json!({"offset": [10, 0], "scaleX": 1e9}),
+        json!({"offset": [10, 0], "scaleX": "big"}),
+        json!({"offset": [10, 0], "rotate": 1e300}),
+        json!({"offset": [10, 0], "rotate": [45]}),
+        json!({"offset": [5000, 0], "scaleX": 200}),
+        json!({"offset": [0, 0], "scaleX": 100, "rotate": 360}),
     ] {
         assert!(s.execute("paint.contentAwareMove", p.clone()).is_err(), "{p}");
     }
     assert!(s.execute("paint.contentAwareMove", json!({"offset": [10, 0], "structure": 7.0, "color": null})).is_ok());
+    // Transform On Drop: scaling in place needs no drag; a big patch may reach past the edge.
+    assert!(s.execute("paint.contentAwareMove", json!({"offset": [0, 0], "scaleX": 150, "rotate": -30})).is_ok());
+    assert!(s.execute("paint.contentAwareMove", json!({"offset": [20, 0], "scaleX": -10000, "scaleY": 10000})).is_ok());
 }
 
 #[test]
@@ -1508,4 +1579,64 @@ fn spot_healing_keeps_film_grain_through_overlapping_strokes() {
             assert!((m - m0).abs() < 3.0, "{kind} depth {depth} stroke {}: mean {m} vs {m0}", i + 1);
         }
     }
+}
+
+#[test]
+fn remove_several_strokes_apply_as_one_job_and_one_undo_step() {
+    let mut s = square_session(8, "rgb");
+    let bg = rgba(&s, 10, 10);
+    let past = s.active().unwrap().history.past_len();
+    // Each stroke covers half of the square; together they remove it.
+    let r = s.execute("paint.remove", json!({"strokes": [[[38, 30], [45, 30]], [[47, 30], [54, 30]]], "size": 16})).unwrap();
+    assert!(r["damage"].is_array(), "{r}");
+    for (x, y) in [(41, 30), (46, 30), (51, 30)] {
+        assert!(near(rgba(&s, x, y), bg, 0.03), "({x}, {y}): {:?} vs {bg:?}", rgba(&s, x, y));
+    }
+    assert_eq!(s.active().unwrap().history.past_len(), past + 1, "one undo step for both strokes");
+    for p in [
+        json!({"strokes": [], "size": 16}),
+        json!({"strokes": "x", "size": 16}),
+        json!({"strokes": [[]], "size": 16}),
+        json!({"strokes": [[[1, 1]], "x"], "size": 16}),
+    ] {
+        assert!(s.execute("paint.remove", p).is_err());
+    }
+}
+
+#[test]
+fn remove_to_a_new_layer_leaves_the_target_untouched() {
+    let mut s = square_session(8, "rgb");
+    let target = s.active().unwrap().active_layer.unwrap();
+    let bg = rgba(&s, 10, 10);
+    let square = rgba(&s, 46, 30);
+    let past = s.active().unwrap().history.past_len();
+    let r = s.execute("paint.remove", json!({"points": [[38, 30], [54, 30]], "size": 16, "newLayer": true})).unwrap();
+    let nid = LayerId(r["layer"].as_u64().expect("the new layer's id"));
+    let d = s.active().unwrap();
+    assert_eq!(d.active_layer, Some(nid), "the new layer is active");
+    assert_ne!(nid, target);
+    let order: Vec<LayerId> = d.doc.walk().into_iter().map(|(_, _, l)| l.id).collect();
+    assert_eq!(order, vec![target, nid], "the new layer sits above the target");
+    assert_eq!(d.doc.layer(nid).unwrap().name, "Layer 1");
+    // The target keeps its pixels; the new layer carries the fill inside the hole only.
+    let old = d.doc.layer(target).unwrap().surface().unwrap();
+    assert!(near(old.rgba(46, 30), square, 0.001));
+    let new = d.doc.layer(nid).unwrap().surface().unwrap();
+    assert!(near(new.rgba(46, 30), bg, 0.03), "{:?}", new.rgba(46, 30));
+    assert_eq!(new.rgba(10, 10)[3], 0.0, "transparent away from the hole");
+    assert_eq!(d.history.past_len(), past + 1);
+    s.execute("edit.undo", json!({})).unwrap();
+    let d = s.active().unwrap();
+    assert!(d.doc.layer(nid).is_none(), "undo removes the layer");
+    assert_eq!(d.active_layer, Some(target));
+    // On an empty layer with Sample All Layers, the composite is what gets filled, onto a new layer.
+    s.execute("layer.new.layer", json!({})).unwrap();
+    let empty = s.active().unwrap().active_layer.unwrap();
+    let r = s.execute("paint.remove", json!({"points": [[38, 30], [54, 30]], "size": 16, "sampleAllLayers": true, "newLayer": true})).unwrap();
+    let nid = LayerId(r["layer"].as_u64().unwrap());
+    let d = s.active().unwrap();
+    let order: Vec<LayerId> = d.doc.walk().into_iter().map(|(_, _, l)| l.id).collect();
+    assert_eq!(order, vec![target, empty, nid]);
+    assert!(near(d.doc.layer(nid).unwrap().surface().unwrap().rgba(46, 30), bg, 0.03));
+    assert!(near(d.doc.layer(target).unwrap().surface().unwrap().rgba(46, 30), square, 0.001));
 }

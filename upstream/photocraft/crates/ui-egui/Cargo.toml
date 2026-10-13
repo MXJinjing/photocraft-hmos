@@ -14,6 +14,7 @@ harmonyos-ui = []
 workspace = true
 
 [dependencies]
+craft-ui = { workspace = true }
 photocraft-geom = { workspace = true }
 photocraft-color = { workspace = true }
 photocraft-cms = { workspace = true }
@@ -55,7 +56,15 @@ js-sys = "0.3"
 wasm-bindgen = "0.2"
 web-sys = { version = "0.3", features = ["Window", "Location", "Navigator"] }
 
+# Installed RAM for the GPU memory budget (`gpu_canvas::physical_memory`): the safe binding the
+# desktop app already uses, pinned to the same version.
+[target.'cfg(target_os = "windows")'.dependencies]
+winsafe = { version = "=0.0.29", default-features = false, features = ["kernel"] }
+
 [dev-dependencies]
+# egui's own default fonts in tests: the oracle for egui_fonts.rs, and contexts made with
+# `Context::default()` (no install_fonts) can lay out text.
+egui = { workspace = true, features = ["default_fonts"] }
 # Synthetic raw files for the open-time Camera Raw dialog tests.
 photocraft-raw = { workspace = true, features = ["testgen"] }
 egui_kittest = { workspace = true, features = ["wgpu", "snapshot", "eframe"] }
@@ -65,7 +74,9 @@ photocraft-testkit = { workspace = true }
 photocraft-psd = { workspace = true }
 
 [build-dependencies]
-# Deflates the translation catalogs (build.rs); already linked at run time to inflate them.
+# Deflates the translation catalogs and egui's default fonts (build.rs); already linked at run time to inflate them.
 flate2 = { workspace = true }
+# egui's default fonts, deflated by build.rs for egui_fonts.rs (the same version egui uses).
+epaint_default_fonts = "0.36"
 serde_json = { workspace = true }
 toml = "1"

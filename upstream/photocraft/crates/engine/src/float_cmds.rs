@@ -58,7 +58,7 @@ impl CutParts {
         // A mask has no alpha: it keeps its format, and the cut leaves background colour.
         let mut rest = if mask { surf.clone() } else { full.clone() };
         let mut piece = Surface::new(with_alpha);
-        let fill = !copy && (mask || crate::extra_cmds::is_background(l));
+        let fill = !copy && (mask || doc.is_background(layer));
         // A mask's untouched pixels (its default, e.g. white) move too, so take the whole canvas.
         let b = sel.content_bounds().intersect(&if mask { doc.bounds() } else { surf.content_bounds() });
         if !b.is_empty() {
@@ -165,7 +165,7 @@ fn can_float(s: &Session) -> std::result::Result<(), String> {
 /// floating? The Background is position-locked, but its selected pixels move (Photoshop).
 pub fn locked_for_float(doc: &Document, l: &photocraft_doc::Layer) -> bool {
     let locks = doc.effective_locks(l.id);
-    locks.all || (locks.position && !crate::extra_cmds::is_background(l))
+    locks.all || (locks.position && !doc.is_background(l.id))
 }
 
 fn float(s: &mut Session, p: &Value) -> Result<Value> {

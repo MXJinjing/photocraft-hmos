@@ -170,7 +170,7 @@ fn iris_depths_models_selection_tiles_and_cancellation() {
                             let t = Rect::new(x, y, (x + tile).min(area.x1), (y + tile).min(area.y1));
                             let src = Image::read_clamped(&surface, t.inflate(radius), bounds);
                             let mut data = reference::iris(&src, t, &ctx, &pins);
-                            crate::mix_selection(&mut data, t, &selection, &src);
+                            crate::mix_selection(&mut data, t, &selection, &src, alpha);
                             want.write_region(t, &data);
                         }
                     }

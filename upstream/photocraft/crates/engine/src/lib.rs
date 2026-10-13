@@ -23,6 +23,7 @@ pub mod build_info;
 mod canvas_geom;
 mod channel_clip;
 pub mod channel_cmds;
+mod clip_group;
 pub mod color_cmds;
 pub mod color_to_alpha_cmds;
 pub mod commands;
@@ -48,10 +49,12 @@ pub mod fx_visibility_cmds;
 pub mod gallery_cmds;
 pub mod gradient_fill_cmds;
 pub mod group_view_cmds;
+pub mod guide_layout;
 pub mod hidden_target;
 pub mod history_cmds;
 pub mod image_cmds;
 pub mod inspect;
+pub mod installed_profiles;
 pub mod jobs;
 pub mod kys;
 pub mod layer_copy_cmds;
@@ -62,15 +65,19 @@ pub mod layer_multi_cmds;
 pub mod layer_nav_cmds;
 pub mod layer_style;
 pub mod lens_cmds;
+pub mod link_watch;
 pub mod magnetic_cmds;
 pub mod mask_view_cmds;
 mod migrate_cmds;
 pub mod mode_cmds;
 pub mod multichannel_cmds;
+pub mod new_layer;
 pub mod notes_cmds;
 pub mod paint_cmds;
 mod path_edit_cmds;
 pub mod pattern_cmds;
+pub mod pattern_fill_cmds;
+pub mod perspective_crop_cmds;
 pub mod photo_cmds;
 pub mod pick_cmds;
 mod pixels;
@@ -86,6 +93,7 @@ pub mod redeye_cmds;
 pub mod render_cmds;
 pub mod retouch_cmds;
 pub mod sample_cmds;
+pub mod sampler_cmds;
 pub mod select_extra_cmds;
 pub mod selection_cmds;
 pub mod slice_cmds;
@@ -102,9 +110,11 @@ mod trap_cmds;
 pub mod type_caret_cmds;
 pub mod type_cmds;
 pub mod type_extra_cmds;
+pub mod type_mask_cmds;
 pub mod type_spell_cmds;
 pub mod type_styles_cmds;
 mod variables_cmds;
+pub use variables_cmds::{export_data_sets_with, import_data_sets_text};
 pub mod vector_cmds;
 mod video_cmds;
 pub use video_cmds::render_video_with;
@@ -203,6 +213,15 @@ pub struct DocState {
     /// A floating selection (`select.float`): the cut piece and where it floats, until dropped
     /// (view state: the document is unchanged until `select.drop`).
     pub floating: Option<float_cmds::Floating>,
+    /// Color Sampler points (`view.colorSamplers.*`, #1046): numbered sample positions in document
+    /// pixel coordinates. Per-document view state: discarded when the document closes, never saved
+    /// to `.pcraft` or PSD, and not a history step.
+    pub color_samplers: Vec<[f64; 2]>,
+    /// History panel snapshots, oldest first (`history.newSnapshot`, #2966). Kept for the
+    /// session only, as in Photoshop: not history states, and not saved with the document.
+    pub snapshots: Vec<history_cmds::Snapshot>,
+    /// The id the next snapshot gets; ids are never reused, so deleting one keeps the others.
+    next_snapshot: u64,
 }
 
 impl DocState {
@@ -228,6 +247,9 @@ impl DocState {
             fx_collapsed: Vec::new(),
             show_only: None,
             floating: None,
+            color_samplers: Vec::new(),
+            snapshots: Vec::new(),
+            next_snapshot: 1,
         }
     }
     /// The selected layers in bottom-to-top document order, always including the active layer.
@@ -381,6 +403,22 @@ pub struct Session {
     pub authorize: Option<fn(&str, &serde_json::Value) -> Result<()>>,
     /// Background jobs (see [`jobs`]).
     jobs: jobs::Jobs,
+    /// Color Sampler points dropped by the last canvas-size change (crop, Canvas Size, Image Size,
+    /// rotation), for the status message. Read with [`Session::take_samplers_removed`].
+    samplers_removed: usize,
+    /// The canvas-geometry map the next [`Session::edit`] applies to the Color Sampler points (crop,
+    /// Canvas Size, Image Size, rotation set it just before their edit). Consumed by the edit.
+    sampler_map: Option<photocraft_geom::Affine>,
+    /// Each open document's linked smart objects' files: size and modification time when last
+    /// seen ([`link_watch`]).
+    pub link_stamps: std::collections::HashMap<(u64, String), link_watch::Stamp>,
+    /// The stamps being taken on a worker thread ([`Session::start_link_scan`]).
+    pub link_scan: Option<link_watch::LinkScan>,
+    /// Select Subject's last result, reused while the pixels are unchanged (#2865).
+    subject_cache: smartselect_cmds::SubjectCache,
+    /// A finished live stroke offered to the `paint.stroke` / `paint.pencil` that commits it
+    /// ([`Session::offer_live_stroke`]).
+    pub(crate) live_commit: Option<brush_cmds::LiveCommit>,
 }
 
 /// Move item `i` of `v` to position `to`, clamped to the end. Returns where it went; `None` when
@@ -415,10 +453,29 @@ impl Session {
     pub fn set_active(&mut self, index: usize) -> bool {
         if index < self.docs.len() {
             self.active = Some(index);
+            self.sync_tools_mask_target();
             true
         } else {
             false
         }
+    }
+
+    /// Color Sampler points dropped by the last canvas-size change (crop, Canvas Size, Image Size,
+    /// rotation) since this was last called, for the status message. See [`edit`](Self::edit).
+    pub fn take_samplers_removed(&mut self) -> usize {
+        std::mem::take(&mut self.samplers_removed)
+    }
+
+    /// Move the Color Sampler points through `a` in the next [`Session::edit`] (crop, Canvas Size,
+    /// Image Size, rotation), dropping the ones that land outside the new canvas. View state: the
+    /// points stay pinned to their pixels, no history step. Cleared by the edit it is set for.
+    pub(crate) fn set_sampler_map(&mut self, a: photocraft_geom::Affine) {
+        self.sampler_map = Some(a);
+    }
+
+    pub fn sync_tools_mask_target(&mut self) {
+        let mask = self.active().is_some_and(|st| st.channel_view.target == crate::channel_cmds::ChannelTarget::LayerMask);
+        self.tools.target_mask(mask);
     }
 
     /// Move the document at `from` to tab position `to` (clamped to the last), keeping the active
@@ -454,6 +511,7 @@ impl Session {
         smart_cmds::on_close(self, index);
         if let Some(id) = self.docs.get(index).map(|d| d.doc.id) {
             self.cancel_jobs_on(id);
+            self.subject_cache.forget_doc(id);
         }
         let d = self.docs.remove(index);
         self.active = if self.docs.is_empty() {
@@ -482,6 +540,20 @@ impl Session {
             // Not reached: inline dispatch never starts a job. Waiting is still correct.
             jobs::Started::Job(j) => self.wait_job(j),
         }
+    }
+
+    /// Offer a finished live stroke to the next command: a `paint.stroke` / `paint.pencil` whose
+    /// params match it exactly takes its pixels instead of rendering the stroke again (its result
+    /// then says `"fromLive": true`); any other command drops the offer. The command still runs
+    /// through the normal dispatch, so authorization, the journal and history are unchanged.
+    pub fn offer_live_stroke(&mut self, live: brush_cmds::LiveStroke) -> Result<()> {
+        self.live_commit = Some(live.into_commit()?);
+        Ok(())
+    }
+
+    /// Withdraw an offer the command didn't take.
+    pub fn clear_live_stroke(&mut self) {
+        self.live_commit = None;
     }
 
     /// Is the command currently runnable? (drives menu enablement)
@@ -522,9 +594,30 @@ impl Session {
             && params.get("layer").and_then(Value::as_u64).is_some_and(|l| self.active().is_some_and(|st| st.doc.layer(LayerId(l)).is_some()))
     }
 
+    /// The precondition of a command whose params document `"layer":id` (it acts on that layer),
+    /// when `params` name an existing layer of the active document: checked on that layer rather
+    /// than on the active one, which stays active (#466). A script, action or agent can then
+    /// Replace Contents, Rasterize or Merge Down a layer without selecting it first. `None` for
+    /// other commands, or without such a layer.
+    pub(crate) fn explicit_layer_enabled(&mut self, spec: &commands::CommandSpec, params: &Value) -> Option<std::result::Result<(), String>> {
+        if !spec.params.contains("\"layer\":id") {
+            return None;
+        }
+        let target = LayerId(params.get("layer")?.as_u64()?);
+        let d = self.active_mut()?;
+        d.doc.layer(target)?;
+        let active = d.active_layer.replace(target);
+        let r = (spec.enabled)(self);
+        if let Some(d) = self.active_mut() {
+            d.active_layer = active;
+        }
+        Some(r)
+    }
+
     /// Apply an undoable edit to the active document.
     pub fn edit<R>(&mut self, label: &str, f: impl FnOnce(&mut Document, &mut Option<LayerId>) -> Result<R>) -> Result<R> {
         let restrict = self.color_restrict;
+        let sampler_map = self.sampler_map.take();
         let st = self.active_mut().ok_or(EngineError::NoDocument)?;
         let before = st.doc.clone();
         // Selecting layers is not a step, so the state this edit leaves behind targets what was
@@ -540,11 +633,32 @@ impl Session {
         st.active_layer = active;
         fix_selection(st);
         channel_cmds::fix_view(st);
-        // An edit that changes no pixels (a selection, guides, a layer's name) leaves the canvas
-        // as it is; anything else recomposites the whole document unless the command reports
-        // its own damage after this. A new lasso selection on a large document used to cost a
-        // full recomposite (seconds on the CPU path, #1773).
-        let unchanged = layer_multi_cmds::same_pixels(&before, &st.doc);
+        // A canvas-size change (crop, Canvas Size, Image Size, rotation) moves the Color Sampler
+        // points with their pixels and drops the ones that land outside the new canvas. View
+        // state: not a history step. A mapped edit (the four above) gives the exact map; any other
+        // size change falls back to dropping whatever is now outside.
+        let mut samplers_removed = 0;
+        if let Some(a) = sampler_map {
+            let bounds = st.doc.bounds();
+            let n = st.color_samplers.len();
+            st.color_samplers.retain_mut(|p| {
+                let q = a.apply(photocraft_geom::Point::new(p[0], p[1]));
+                *p = [q.x, q.y];
+                bounds.contains(q.x.floor() as i32, q.y.floor() as i32)
+            });
+            samplers_removed = n - st.color_samplers.len();
+        } else if st.doc.size != before.size {
+            let bounds = st.doc.bounds();
+            let n = st.color_samplers.len();
+            st.color_samplers.retain(|p| bounds.contains(p[0].floor() as i32, p[1].floor() as i32));
+            samplers_removed = n - st.color_samplers.len();
+        }
+        // The pixels the edit can have changed, as its undo would report them: nothing for a
+        // selection, guides or a layer's name (a new lasso selection used to recomposite a large
+        // document, seconds on the CPU path, #1773), a new or deleted layer's bounds (a
+        // duplicate or a paste), and everything when that can't be bounded. A command may still
+        // report its own, tighter damage after this.
+        let damage = layer_multi_cmds::step_damage(&before, &st.doc);
         let key = self.coalesce_request.clone();
         let st = self.active_mut().ok_or(EngineError::NoDocument)?;
         let layers = st.layer_target();
@@ -557,7 +671,12 @@ impl Session {
         }
         st.coalesce = key;
         st.revision += 1;
-        st.last_damage = unchanged.then_some(photocraft_geom::Rect::EMPTY);
+        st.last_damage = damage;
+        self.samplers_removed += samplers_removed;
+        if damage.is_none_or(|d| !d.is_empty()) {
+            // Free the mask early; a stale entry would only miss (it is keyed by pixels).
+            self.subject_cache = Default::default();
+        }
         Ok(r)
     }
 
@@ -570,6 +689,7 @@ impl Session {
         st.active_layer = Some(id);
         st.selected_layers = vec![id];
         st.layer_anchor = Some(id);
+        channel_cmds::fix_view(st);
         // Selecting a layer is not an edit: keep a clean document clean.
         let clean = st.saved_revision == st.revision;
         st.revision += 1;
@@ -673,6 +793,15 @@ impl Session {
 
 /// Undo / redo: target the layers the restored state targeted, as far as they still exist.
 fn restore_target(st: &mut DocState, layers: LayerTarget) {
+    // Deselect Layers is a valid history target, not a missing layer to replace with the top
+    // layer. An edit after deselection must undo back to no active or selected layers (#3042).
+    if layers.active.is_none() && layers.selected.is_empty() {
+        st.active_layer = None;
+        st.selected_layers.clear();
+        st.layer_anchor = None;
+        channel_cmds::fix_view(st);
+        return;
+    }
     if layers.active.is_some_and(|id| st.doc.layer(id).is_some()) {
         st.active_layer = layers.active;
         st.selected_layers = layers.selected;

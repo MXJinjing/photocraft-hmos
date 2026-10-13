@@ -31,17 +31,41 @@ fn pref_unit(u: photocraft_engine::prefs::Unit) -> &'static str {
 pub(crate) fn pref_resample(i: photocraft_engine::prefs::Interpolation) -> &'static str {
     use photocraft_engine::prefs::Interpolation;
     match i {
+        Interpolation::BicubicAutomatic => "automatic",
         Interpolation::Nearest => "nearest",
         Interpolation::Bilinear => "bilinear",
-        Interpolation::BicubicSharper => "lanczos",
+        Interpolation::Bicubic => "bicubic",
+        Interpolation::BicubicSmoother => "bicubicSmoother",
+        Interpolation::BicubicSharper => "bicubicSharper",
         Interpolation::PreserveDetails => "preserveDetails",
-        _ => "bicubic",
     }
 }
 const ANCHORS: [&str; 9] = ["topLeft", "top", "topRight", "left", "center", "right", "bottomLeft", "bottom", "bottomRight"];
 
 pub fn is_sizing(command: &str) -> bool {
     matches!(command, "image.imageSize" | "image.canvasSize")
+}
+
+/// Alt+Cancel (Reset): restore the dimensions and options from when the dialog opened.
+pub fn reset(f: &mut Map<String, Value>) {
+    if !f.contains_key("__sizing") {
+        return;
+    }
+    let w = num(f, "__origW");
+    let h = num(f, "__origH");
+    f.insert("width".into(), json!(w));
+    f.insert("height".into(), json!(h));
+    if f.get("__command").and_then(Value::as_str) == Some("image.imageSize") {
+        f.insert("resolution".into(), json!(num(f, "__origRes")));
+        f.insert("__constrain".into(), json!(true));
+        if let Some(r) = f.get("__resample").cloned() {
+            f.insert("resample".into(), r);
+        }
+    } else {
+        f.insert("relative".into(), json!(false));
+        f.insert("anchor".into(), json!("center"));
+        f.insert("extensionColor".into(), json!("background"));
+    }
 }
 
 pub fn open(app: &mut PhotocraftApp, command: &str) -> Option<u64> {
@@ -65,6 +89,7 @@ pub fn open(app: &mut PhotocraftApp, command: &str) -> Option<u64> {
         f.insert("__constrain".into(), json!(true));
         f.insert("resolution".into(), json!(res));
         f.insert("resample".into(), json!(resample));
+        f.insert("__resample".into(), json!(resample));
     } else {
         f.insert("relative".into(), json!(false));
         f.insert("anchor".into(), json!("center"));
@@ -143,7 +168,9 @@ fn dim_field(ui: &mut egui::Ui, f: &mut Map<String, Value>, key: &str, orig_key:
     let mut v = to_unit(px, &unit, orig, res) as f32;
     let range = if unit == "px" { -300000.0..=300000.0 } else { -30000.0..=30000.0 };
     // Each unit keeps its own precision: whole pixels, 3 places for inches, 2 for cm/mm/picas (#2434).
-    let changed = crate::widgets::value_field_prec(ui, &mut v, range, "", 90.0, crate::widgets::unit_decimals(&unit)).changed();
+    // A typed unit (`2in` while in pixels) converts at the dialog's resolution.
+    let units = crate::widgets::FieldUnits { unit: crate::widgets::unit_of_key(&unit), dpi: res, ppi: 72.0 };
+    let changed = crate::widgets::value_field_units(ui, &mut v, range, 90.0, crate::widgets::unit_decimals(&unit), units).changed();
     if changed {
         let px = from_unit(v as f64, &unit, orig, res);
         f.insert(key.into(), json!(if unit == "px" { px.round() } else { px }));
@@ -260,7 +287,9 @@ fn image_size(ui: &mut egui::Ui, f: &mut Map<String, Value>) {
         label(ui, "", 90.0);
         let mut on = resampling;
         if crate::widgets::checkbox(ui, &mut on, tl!("Resample")).changed() {
-            f.insert("resample".into(), json!(if on { "bicubic" } else { "none" }));
+            // Back on, it takes the method it had when the dialog opened.
+            let method = f.get("__resample").cloned().unwrap_or_else(|| json!("bicubic"));
+            f.insert("resample".into(), if on { method } else { json!("none") });
             if !on {
                 f.insert("width".into(), json!(ow));
                 f.insert("height".into(), json!(oh));
@@ -268,12 +297,16 @@ fn image_size(ui: &mut egui::Ui, f: &mut Map<String, Value>) {
         }
         if resampling {
             let mut cur = resample.clone();
+            // Photoshop's list, then Lanczos.
             let opts = [
+                ("automatic".to_string(), tl!("Automatic")),
                 ("preserveDetails".to_string(), tl!("Preserve Details")),
+                ("bicubicSmoother".to_string(), tl!("Bicubic Smoother (enlargement)")),
+                ("bicubicSharper".to_string(), tl!("Bicubic Sharper (reduction)")),
                 ("bicubic".to_string(), tl!("Bicubic (smooth gradients)")),
-                ("lanczos".to_string(), tl!("Lanczos (sharp)")),
-                ("bilinear".to_string(), tl!("Bilinear")),
                 ("nearest".to_string(), tl!("Nearest Neighbor (hard edges)")),
+                ("bilinear".to_string(), tl!("Bilinear")),
+                ("lanczos".to_string(), tl!("Lanczos (sharp)")),
             ];
             if crate::widgets::dropdown(ui, "is-resample", &mut cur, &opts, 200.0) {
                 f.insert("resample".into(), json!(cur));
@@ -430,6 +463,45 @@ mod tests {
         d.fields.insert("anchor".into(), json!("topLeft"));
         crate::dialogs::confirm(&mut app, id).unwrap();
         assert_eq!(app.session.active().unwrap().doc.size, photocraft_doc::Size::new(120, 50));
+    }
+
+    #[test]
+    fn alt_reset_restores_open_dimensions() {
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        app.session.execute("file.new", json!({"width": 200, "height": 100, "resolution": 72})).unwrap();
+        let id = open(&mut app, "image.imageSize").unwrap();
+        let d = app.ui.dialog_mut(id).unwrap();
+        d.fields.insert("width".into(), json!(50));
+        d.fields.insert("height".into(), json!(25));
+        d.fields.insert("resolution".into(), json!(300));
+        d.fields.insert("__constrain".into(), json!(false));
+        reset(&mut d.fields);
+        assert_eq!((num(&d.fields, "width"), num(&d.fields, "height"), num(&d.fields, "resolution")), (200.0, 100.0, 72.0));
+        assert_eq!(d.fields.get("__constrain"), Some(&json!(true)));
+        assert!(app.ui.dialogs.iter().any(|x| x.id == id), "reset leaves the dialog open");
+    }
+
+    /// The dialog starts on Preferences › General › Image Interpolation: Bicubic Automatic opens
+    /// as Automatic and the others as themselves (Bicubic Sharper used to open as Lanczos).
+    #[test]
+    fn resample_follows_the_interpolation_preference() {
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        app.session.execute("file.new", json!({"width": 200, "height": 100})).unwrap();
+        for (pref, method) in
+            [("bicubicAutomatic", "automatic"), ("bicubicSharper", "bicubicSharper"), ("bicubicSmoother", "bicubicSmoother"), ("nearestNeighbor", "nearest")]
+        {
+            app.session.execute("prefs.set", json!({"path": "general.imageInterpolation", "value": pref})).unwrap();
+            let id = open(&mut app, "image.imageSize").unwrap();
+            let f = &app.ui.dialog_mut(id).unwrap().fields;
+            assert_eq!((f.get("resample"), f.get("__resample")), (Some(&json!(method)), Some(&json!(method))), "{pref}");
+            app.ui.close_dialog(id);
+        }
+        let id = open(&mut app, "image.imageSize").unwrap();
+        let d = app.ui.dialog_mut(id).unwrap();
+        d.fields.insert("width".into(), json!(50));
+        d.fields.insert("height".into(), json!(25));
+        crate::dialogs::confirm(&mut app, id).unwrap();
+        assert_eq!(app.session.active().unwrap().doc.size, photocraft_doc::Size::new(50, 25));
     }
 
     /// #441: a typed zero width showed "0 px × 1 px" while OK resized to 1×1.

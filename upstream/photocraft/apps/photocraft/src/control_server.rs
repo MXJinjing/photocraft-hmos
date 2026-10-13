@@ -9,7 +9,7 @@ use std::time::Instant;
 
 use photocraft_automation::budgets::write_reply;
 use photocraft_automation::security::{
-    ConnectionLimiter, LineRead, MAX_CONNECTIONS, MAX_REQUEST_BYTES, authentication_reply, configure_stream, read_bounded_line,
+    ConnectionLimiter, LineRead, MAX_CONNECTIONS, MAX_REQUEST_BYTES, authentication_reply, configure_stream, read_bounded_line, repeat_auth_reply,
 };
 use photocraft_ui_egui::ControlRequest;
 use photocraft_ui_egui::control::{REPLY_DEADLINE, timeout_error};
@@ -75,6 +75,12 @@ fn serve(stream: TcpStream, token: &str, tx: Sender<ControlRequest>, ctx: egui::
             let (reply, ok) = authentication_reply(&line, token);
             authenticated = ok;
             if write_reply(&mut out, &reply).is_err() || out.flush().is_err() || !authenticated {
+                break;
+            }
+            continue;
+        }
+        if let Some(reply) = repeat_auth_reply(&line) {
+            if write_reply(&mut out, &reply).is_err() || out.flush().is_err() {
                 break;
             }
             continue;
@@ -196,6 +202,46 @@ mod tests {
         reader.read_line(&mut line).unwrap();
         let after: Value = serde_json::from_str(&line).unwrap();
         assert_eq!(after["id"], 7);
+        assert_eq!(after["result"], "still serving");
+        drop(reader);
+        drop(stream);
+        handler.join().unwrap();
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn repeat_auth_reports_already_authenticated_without_dispatching() {
+        const TOKEN: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (tx, rx) = channel::<ControlRequest>();
+        let server = std::thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            serve(stream, TOKEN, tx, egui::Context::default());
+        });
+        let handler = std::thread::spawn(move || {
+            let req = rx.recv_timeout(Duration::from_secs(5)).unwrap();
+            assert_eq!(req.method, "test.after", "a repeat auth must not reach the UI dispatcher");
+            req.reply.send(json!({"ok": true, "result": "still serving"})).unwrap();
+        });
+        let mut stream = TcpStream::connect(addr).unwrap();
+        stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        let mut reader = BufReader::new(stream.try_clone().unwrap());
+        let mut line = String::new();
+        for id in ["auth", "again"] {
+            writeln!(stream, "{}", json!({"id": id, "method": "auth", "params": {"token": TOKEN}})).unwrap();
+            line.clear();
+            reader.read_line(&mut line).unwrap();
+        }
+        let again: Value = serde_json::from_str(&line).unwrap();
+        assert_eq!(again["id"], "again");
+        assert_eq!(again["ok"], false);
+        assert_eq!(again["error"], "already authenticated");
+        writeln!(stream, "{}", json!({"id": 9, "method": "test.after"})).unwrap();
+        line.clear();
+        reader.read_line(&mut line).unwrap();
+        let after: Value = serde_json::from_str(&line).unwrap();
+        assert_eq!(after["id"], 9);
         assert_eq!(after["result"], "still serving");
         drop(reader);
         drop(stream);

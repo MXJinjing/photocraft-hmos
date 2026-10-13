@@ -236,6 +236,19 @@ impl B {
     fn finish(&mut self, a: In, b: Option<In>, invert: bool, contour: &Contour, times_shape: bool, out: usize) {
         self.finish_lut(a, b, invert, contour_lut(contour), times_shape, out);
     }
+    /// A glow's last step: its contour over the Range, then (centre-source inner glows) the
+    /// inverse, then × the shape when inner.
+    fn finish_glow(&mut self, a: In, lut: Option<Vec<f32>>, inner: bool, center: bool) {
+        let mut s =
+            stage(Kernel::MFinish, Some(a), None, [0.0, if center { 2.0 } else { 0.0 }, f32::from(u8::from(lut.is_some())), f32::from(u8::from(inner))], 0);
+        s.lut = lut.map(Arc::new);
+        if inner {
+            s.s = Some(In::Shape);
+        }
+        s.out = Some(0);
+        self.stages.push(s);
+    }
+
     fn finish_lut(&mut self, a: In, b: Option<In>, invert: bool, lut: Option<Vec<f32>>, times_shape: bool, out: usize) {
         let flag = |v: bool| f32::from(u8::from(v));
         let mut s = stage(Kernel::MFinish, Some(a), b, [flag(b.is_some()), flag(invert), flag(lut.is_some()), flag(times_shape)], 0);
@@ -267,7 +280,7 @@ pub(crate) fn blur_kernel(size: f32) -> Option<(i32, Vec<f32>)> {
 fn contour_lut(c: &Contour) -> Option<Vec<f32>> {
     match c {
         Contour::Linear => None,
-        Contour::Custom { points, .. } => Some(photocraft_compose::adjust::curve_lut(points)),
+        Contour::Custom { points, corners, .. } => Some(photocraft_compose::adjust::contour_curve_lut(points, corners)),
     }
 }
 
@@ -319,9 +332,9 @@ pub(crate) fn program_with(e: &Effect, light: &GlobalLight, vector_shape: bool, 
                 GlowTechnique::Precise => {
                     let d = b.field(if inner { FieldKind::Inside } else { FieldKind::Outside }, g.size);
                     let solid = g.size * g.spread;
-                    let soft = (g.size - solid).max(1e-3);
-                    let m = b.push(stage(Kernel::MGlow, Some(d), None, [solid, soft, f32::from(u8::from(center)), 0.0], 0));
-                    b.finish_lut(m, None, false, photocraft_compose::effects::glow_lut(g), inner, 0);
+                    let soft = (g.size + 1.0 - solid).max(1e-3);
+                    let m = b.push(stage(Kernel::MGlow, Some(d), None, [solid, soft, 0.0, 0.0], 0));
+                    b.finish_glow(m, photocraft_compose::effects::glow_lut(g), inner, center);
                 }
                 GlowTechnique::Softer => {
                     // Inner glows (edge, and centre as 1 - the edge result) spread 1 - alpha.
@@ -333,19 +346,19 @@ pub(crate) fn program_with(e: &Effect, light: &GlobalLight, vector_shape: bool, 
                         m = b.dilate(src, d, r);
                     }
                     let m = b.blur(m, bw);
-                    b.finish_lut(m, None, center, photocraft_compose::effects::glow_lut(g), inner, 0);
+                    b.finish_glow(m, photocraft_compose::effects::glow_lut(g), inner, center);
                 }
             }
             1
         }
         Effect::Satin(s) => {
             // satin_map
-            let (dx, dy) = offset(s.angle, s.distance);
+            let (dx, dy) = offset(s.angle, photocraft_compose::effects::satin_distance(s));
             let a = b.shift(In::Shape, dx, dy, 0.0, false);
             let a = b.conv(a, photocraft_compose::effects::tent_kernel(s.size));
             let c = b.shift(In::Shape, -dx, -dy, 0.0, false);
             let c = b.conv(c, photocraft_compose::effects::tent_kernel(s.size));
-            b.finish(a, Some(c), s.invert, &s.contour, true, 0);
+            b.finish_lut(a, Some(c), s.invert, photocraft_compose::effects::satin_lut(&s.contour), true, 0);
             1
         }
         Effect::BevelEmboss(bv) => {
@@ -363,8 +376,10 @@ pub(crate) fn program_with(e: &Effect, light: &GlobalLight, vector_shape: bool, 
             } else {
                 let din = b.field(FieldKind::BevelInside, size);
                 let dout = b.field(FieldKind::BevelOutside, size);
-                let h = b.push(stage(Kernel::MBevelH, Some(din), Some(dout), [paint(g.paint), size, 0.0, 0.0], 0));
-                if g.chisel_soft > 0.0 { b.conv(h, photocraft_compose::effects::tent_kernel(g.chisel_soft)) } else { h }
+                let soft = g.chisel_soft > 0.0;
+                let h = b.push(stage(Kernel::MBevelH, Some(din), Some(dout), [paint(g.paint), size, f32::from(u8::from(soft)), 0.0], 0));
+                // As `effects::bevel_height`: only emboss styles blur a Chisel Soft ramp.
+                if soft && g.paint == BevelPaint::Both { b.conv(h, photocraft_compose::effects::tent_kernel(g.chisel_soft)) } else { h }
             };
             if let Some(c) = &bv.contour {
                 // Contour element: the height through the contour (`bevel_contour_lut`).
@@ -374,7 +389,7 @@ pub(crate) fn program_with(e: &Effect, light: &GlobalLight, vector_shape: bool, 
                 h = b.push(st);
             }
             if let Some(t) = &bv.texture
-                && let Some(pat) = photocraft_doc::pattern::find(patterns, &t.id, &t.name).filter(|p| !p.is_empty())
+                && let Some(pat) = photocraft_doc::pattern::find(patterns, &t.id, &t.name).filter(|p| p.is_paintable())
             {
                 // Texture element (`effects::bevel_height`): luminance × depth / unit added.
                 let unit = if bv.depth.abs() > 1e-6 { (g.depth / bv.depth).abs().max(1e-3) } else { g.width.max(1.0) };
@@ -405,6 +420,7 @@ pub(crate) fn program_with(e: &Effect, light: &GlobalLight, vector_shape: bool, 
                 for which in [0.0, 1.0] {
                     let mut s = stage(Kernel::MBevelShade, Some(h), None, [ca * ce, -sa * ce, se, se], 1);
                     s.p1 = [*depth, *region, which, f32::from(u8::from(lut.is_some()))];
+                    s.p3 = [f32::from(u8::from(g.paint == BevelPaint::Outer && bv.technique != BevelTechnique::Smooth)), 0.0, 0.0, 0.0];
                     s.lut = lut.clone();
                     s.s = Some(In::Shape);
                     s.out = Some(out);

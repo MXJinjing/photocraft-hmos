@@ -391,8 +391,10 @@ pub enum DngStorage {
 pub struct DngSpec {
     pub width: usize,
     pub height: usize,
-    /// 1 (CFA) or 3 (LinearRaw).
+    /// 1 (CFA, or monochrome LinearRaw with `monochrome`) or 3 (LinearRaw).
     pub samples: usize,
+    /// With `samples` 1: a monochrome LinearRaw image (no CFA tags) instead of CFA data.
+    pub monochrome: bool,
     /// Row-major samples (`width * height * samples`).
     pub data: Vec<u16>,
     pub bits: u16,
@@ -427,6 +429,8 @@ pub struct DngSpec {
     pub orientation: u16,
     pub make: String,
     pub model: String,
+    /// Extra IFD0 entries, written after the generated ones (e.g. malformed colour tags).
+    pub ifd0_extra: Vec<(u16, Val)>,
 }
 
 impl DngSpec {
@@ -436,6 +440,7 @@ impl DngSpec {
             width,
             height,
             samples: 1,
+            monochrome: false,
             data,
             bits: 16,
             cfa: [0, 1, 1, 2],
@@ -461,7 +466,18 @@ impl DngSpec {
             profile_gain_table_map: None,
             make: "Photocraft".into(),
             model: "Synthetic".into(),
+            ifd0_extra: Vec::new(),
         }
+    }
+
+    /// A monochrome (one-sample LinearRaw) DNG around `data`, as monochrome cameras and film
+    /// scanners write them: no CFA tags and no colour matrices.
+    pub fn monochrome(width: usize, height: usize, data: Vec<u16>) -> Self {
+        DngSpec { monochrome: true, ..Self::cfa(width, height, data) }
+    }
+
+    fn is_cfa(&self) -> bool {
+        self.samples == 1 && !self.monochrome
     }
 
     fn pack(&self, rows: std::ops::Range<usize>) -> Vec<u8> {
@@ -500,14 +516,14 @@ impl DngSpec {
             (256, Val::Long(vec![self.width as u32])),
             (257, Val::Long(vec![self.height as u32])),
             (258, Val::Short(vec![self.bits; self.samples])),
-            (262, Val::Short(vec![if self.samples == 1 { 32803 } else { 34892 }])),
+            (262, Val::Short(vec![if self.is_cfa() { 32803 } else { 34892 }])),
             (277, Val::Short(vec![self.samples as u16])),
             (284, Val::Short(vec![1])),
             (50717, Val::Long(vec![self.white; self.samples])),
             (50713, Val::Short(vec![self.black_repeat.0, self.black_repeat.1])),
             (50714, Val::Long(self.black.clone())),
         ];
-        if self.samples == 1 {
+        if self.is_cfa() {
             raw.push((33421, Val::Short(vec![2, 2])));
             raw.push((33422, Val::Byte(self.cfa.to_vec())));
             raw.push((50710, Val::Byte(vec![0, 1, 2])));
@@ -725,6 +741,7 @@ impl DngSpec {
         if let Some(m) = &self.profile_gain_table_map {
             ifd0.push((52525, Val::Undefined(m.clone())));
         }
+        ifd0.extend(self.ifd0_extra.iter().cloned());
         let i0 = t.ifd(ifd0);
         t.chain = vec![i0];
         t.build()
