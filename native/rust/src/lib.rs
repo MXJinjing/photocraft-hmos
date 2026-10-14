@@ -18,6 +18,8 @@ mod cursor;
 mod display_color;
 #[cfg(any(target_env = "ohos", test))]
 mod documents;
+#[cfg(any(target_env = "ohos", test))]
+mod drop_import;
 #[cfg(feature = "host-recovery-test")]
 mod fault_injection;
 mod file_open;
@@ -70,6 +72,8 @@ enum Message {
     Active(bool),
     Input(input::Input),
     Open(String, Vec<u8>),
+    Drop(String, Vec<u8>, f32, f32),
+    DropFile(String, std::fs::File, f32, f32),
     Close,
     Wake(Duration),
     Command(String, serde_json::Value),
@@ -321,6 +325,50 @@ pub unsafe extern "C" fn pc_open(text: *const u8, n: usize, data: *const u8, len
 }
 /// # Safety
 /// Pointer/length pairs must reference valid, readable memory until this call returns.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pc_drop(
+    text: *const u8,
+    n: usize,
+    data: *const u8,
+    len: usize,
+    x: f32,
+    y: f32,
+) {
+    if !x.is_finite() || !y.is_finite() {
+        return;
+    }
+    if let (Some(text), Some(data)) = (unsafe { bytes(text, n) }, unsafe { bytes(data, len) }) {
+        send(Message::Drop(
+            String::from_utf8_lossy(text).into_owned(),
+            data.to_vec(),
+            x,
+            y,
+        ));
+    }
+}
+/// # Safety
+/// `text`/`n` must be readable and `fd` open until this call returns.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pc_drop_file(text: *const u8, n: usize, fd: i32, x: f32, y: f32) {
+    if !x.is_finite() || !y.is_finite() {
+        return;
+    }
+    let Some(text) = (unsafe { bytes(text, n) }) else {
+        return;
+    };
+    // SAFETY: ArkTS holds its descriptor open during this call; only our duplicate is queued.
+    match unsafe { file_open::duplicate(fd) } {
+        Ok(file) => send(Message::DropFile(
+            String::from_utf8_lossy(text).into_owned(),
+            file,
+            x,
+            y,
+        )),
+        Err(error) => bridge::notify(0, "error", &error, &[]),
+    }
+}
+/// # Safety
+/// Pointer/length pairs must reference valid, readable memory until this call returns.
 /// The notification function supplied to pc_init must remain valid for the process lifetime.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pc_command(ptr: *const u8, len: usize) {
@@ -490,12 +538,7 @@ fn worker(config: Config, rx: mpsc::Receiver<Message>) {
                         }
                         chrome.invalidate();
                         cursor.invalidate();
-                        bridge::notify(
-                            0,
-                            "stage",
-                            "creating native GPU surface",
-                            &[],
-                        );
+                        bridge::notify(0, "stage", "creating native GPU surface", &[]);
                         visible = w > 0 && h > 0;
                         let initialize_gpu = render.egui_render_state().is_none();
                         render.bind(render::Window(ptr), w, h)?;
@@ -505,7 +548,8 @@ fn worker(config: Config, rx: mpsc::Receiver<Message>) {
                             app.perf.gpu_info.selected = "gl".into();
                             if rs.adapter.get_info().device_type == wgpu::DeviceType::Cpu {
                                 return Err(
-                                    "No hardware GPU adapter; drawing stopped; restart PhotoCraft".into()
+                                    "No hardware GPU adapter; drawing stopped; restart PhotoCraft"
+                                        .into(),
                                 );
                             }
                             app.set_wgpu(rs);
@@ -566,6 +610,14 @@ fn worker(config: Config, rx: mpsc::Receiver<Message>) {
                                 return Ok(());
                             }
                         }
+                        if value.kind == "drop_hover" {
+                            if let Ok(feedback) =
+                                drop_import::feedback(&app, &ctx, value.x, value.y, value.code)
+                            {
+                                bridge::notify(0, "drop_target", &feedback, &[]);
+                            }
+                            return Ok(());
+                        }
                         if value.kind == "system_theme" {
                             appearance.publish_token(&value.text);
                             deadline = Some(Instant::now());
@@ -586,6 +638,14 @@ fn worker(config: Config, rx: mpsc::Receiver<Message>) {
                     }
                     Message::Open(name, data) => {
                         app.open_bytes(&name, &data)?;
+                        deadline = Some(Instant::now());
+                    }
+                    Message::Drop(name, data, x, y) => {
+                        drop_import::receive(&mut app, &ctx, name, data, x, y)?;
+                        deadline = Some(Instant::now());
+                    }
+                    Message::DropFile(name, file, x, y) => {
+                        drop_import::receive(&mut app, &ctx, name, file_open::read(file)?, x, y)?;
                         deadline = Some(Instant::now());
                     }
                     Message::Close => {
@@ -719,9 +779,9 @@ fn worker(config: Config, rx: mpsc::Receiver<Message>) {
                 bridge::notify(0, "error", &error, &[]);
                 None
             }
-            Err(_) => {
-                Some("Native rendering panic; GPU drawing stopped; restart PhotoCraft to recover".into())
-            }
+            Err(_) => Some(
+                "Native rendering panic; GPU drawing stopped; restart PhotoCraft to recover".into(),
+            ),
         };
         if let Some(reason) = failure {
             bridge::notify(
