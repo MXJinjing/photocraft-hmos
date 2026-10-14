@@ -538,10 +538,20 @@ fn notification_autohide_preferences() {
 }
 
 #[test]
-fn linux_only_preferences_show_only_on_linux() {
-    assert_eq!(is_hidden("performance.linuxDisplayServer"), !cfg!(target_os = "linux"));
+fn linux_only_preferences_show_only_on_desktop_linux() {
+    // OHOS triples still report target_os = "linux"; gate on target_env = "ohos".
+    assert_eq!(
+        is_desktop_linux(),
+        cfg!(all(target_os = "linux", not(target_env = "ohos")))
+    );
+    assert_eq!(is_hidden("performance.linuxDisplayServer"), !is_desktop_linux());
+    // Injected flag: HarmonyOS / non-desktop-Linux hosts keep the preference out of the dialog.
+    assert!(is_hidden_for("performance.linuxDisplayServer", false));
+    assert!(!is_hidden_for("performance.linuxDisplayServer", true));
     assert!(!is_hidden("performance.gpuBackend"));
+    assert!(!is_hidden_for("performance.gpuBackend", false));
     assert!(LINUX_ONLY.iter().all(|p| choices(p).is_some()), "every Linux-only preference is a real one");
+    assert_eq!("performance.linuxDisplayServer", LINUX_ONLY[0]);
 }
 
 #[test]

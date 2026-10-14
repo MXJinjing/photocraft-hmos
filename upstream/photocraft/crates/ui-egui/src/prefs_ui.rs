@@ -2797,6 +2797,13 @@ mod tests {
         assert!(!prefs::is_hidden("general.autoShowHomeScreen"));
         assert!(!prefs::is_hidden("interface.uiScale"));
         assert!(!prefs::is_hidden("interface.uiFontSize"));
+        // LINUX_ONLY: follow is_desktop_linux() (target_env = "ohos" on HarmonyOS triples).
+        assert_eq!(
+            prefs::is_hidden("performance.linuxDisplayServer"),
+            !prefs::is_desktop_linux()
+        );
+        assert!(prefs::is_hidden_for("performance.linuxDisplayServer", false));
+        assert!(!prefs::is_hidden_for("performance.linuxDisplayServer", true));
         // Hidden values still round-trip through the dialog untouched.
         let (mut app, _) = app_with_store();
         app.run("prefs.set", json!({"values": {"type.smartQuotes": false}})).unwrap();
