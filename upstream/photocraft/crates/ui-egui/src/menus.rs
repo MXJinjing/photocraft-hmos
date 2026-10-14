@@ -300,10 +300,15 @@ pub(crate) fn invoke_unguarded(app: &mut PhotocraftApp, ctx: &egui::Context, id:
         }
         "file.save" => {
             // Writes back only to a layered file; a flat one goes through Save As.
+            // HarmonyOS (and other hosts with `default_save`) must use `save` so ordinary Save
+            // reuses the host's authorized destination instead of a one-shot Save As token.
             let tga_bits = crate::targa_options_ui::bits_param(&params, id)?;
             match params.get("path").and_then(Value::as_str) {
                 Some(path) => app.save_as_with(Some(path.to_string()), tga_bits),
-                None => match app.session.active().and_then(|d| d.path.clone()).filter(|p| photocraft_engine::file_cmds::saves_in_place(p)) {
+                None if app.services.default_save.is_some() => app.save(None),
+                None => match app.session.active().and_then(|d| d.path.clone()).filter(|p| {
+                    photocraft_engine::file_cmds::saves_in_place(p) && !p.starts_with("save-as/")
+                }) {
                     Some(path) => app.save_in_place(path),
                     None => app.save_as_with(None, tga_bits),
                 },
@@ -863,7 +868,12 @@ fn translated_menu_label(lang: crate::i18n::Lang, item: &MenuItem) -> String {
     {
         return crate::i18n::tr_id(lang, &item.id, "Quick Export as PNG").replace("PNG", fmt);
     }
-    crate::i18n::tr_id(lang, &item.id, &item.label).to_string()
+    let label = crate::i18n::tr_id(lang, &item.id, &item.label);
+    if cfg!(feature = "harmonyos-ui") {
+        label.replace("PhotoCraft", crate::brand::APP_NAME)
+    } else {
+        label.to_string()
+    }
 }
 
 /// Menu tree entry for rendering and for `ui.inspect`.
@@ -1103,10 +1113,39 @@ impl ItemCache {
     }
 }
 
+
+/// Horizontal room the expanded File…Help titles need (label widths + button padding).
+pub fn menu_bar_needed_width(ui: &egui::Ui) -> f32 {
+    let lang = crate::i18n::current();
+    let font = egui::TextStyle::Button.resolve(ui.style());
+    // Matches `button_padding = (6, 3)` used while drawing the titles.
+    const PAD_X: f32 = 12.0;
+    TOP_MENUS
+        .iter()
+        .map(|&top| {
+            let label = crate::i18n::tr(lang, top).to_owned();
+            let text_w = ui.painter().layout_no_wrap(label, font.clone(), egui::Color32::WHITE).size().x;
+            text_w + PAD_X
+        })
+        .sum()
+}
+
+/// Hit area of the collapsed hamburger control in the menu bar.
+pub const MENU_BAR_HAMBURGER_WIDTH: f32 = 28.0;
+
+/// True when the expanded titles need more than `budget` points of room.
+pub fn menu_bar_collapses(needed: f32, budget: f32) -> bool {
+    needed > budget.max(0.0)
+}
+
 /// Draws the menu bar; returns the inner edge of the menu titles, facing the rest of the title bar
 /// (the right edge of the last title, or its left edge in a right-to-left UI, where File is at the
 /// right). The bar itself fills the row.
-pub fn menu_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> f32 {
+pub fn menu_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui, budget: f32) -> f32 {
+    // `budget` is how much horizontal room the titles may take. When the expanded File…Help strip
+    // needs more than that, the titles fold into a hamburger (`align-justify` SVG) whose popup lists
+    // every top-level menu as a submenu.
+
     // Built only while a menu is open: every item's enabled/checked state scales with the
     // document (layer lookups), which cost milliseconds per frame on large layouts (#125). While
     // one stays open, the items are reused until what they depend on changes.
@@ -1132,7 +1171,79 @@ pub fn menu_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> f32 {
             let ui = mirrored.as_mut().unwrap_or(ui);
             ui.spacing_mut().button_padding = egui::vec2(6.0, 3.0);
             nav.bar_bottom = Some(ui.max_rect().bottom());
-            let mut buttons = Vec::with_capacity(TOP_MENUS.len());
+            let collapse = menu_bar_collapses(menu_bar_needed_width(ui), budget);
+            let mut buttons = Vec::with_capacity(if collapse { 1 } else { TOP_MENUS.len() });
+            if collapse {
+                // Three-line (align-justify) SVG: opens a secondary menu of File…Help.
+                let tip = crate::i18n::tr(lang, "Menus").to_owned();
+                let title = ui.add(
+                    egui::Button::image(crate::icons::image("align-justify", 14.0, t.text_dim))
+                        .frame(false)
+                        .min_size(egui::vec2(MENU_BAR_HAMBURGER_WIDTH, ui.spacing().interact_size.y.max(24.0))),
+                );
+                let open_now = egui::Popup::is_id_open(ui.ctx(), egui::Popup::default_response_id(&title));
+                if title.hovered() || open_now {
+                    crate::icons::paint(ui, title.rect, "align-justify", 14.0, t.text);
+                }
+                let title = title.on_hover_text(tip.clone());
+                title.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tip.clone()));
+                let bar = egui::containers::menu::MenuConfig::find(ui);
+                let config = egui::containers::menu::MenuConfig::new().close_behavior(bar.close_behavior).style(bar.style.clone());
+                let open = title.clicked().then_some(egui::SetOpenCommand::Toggle);
+                let opening = title.clicked();
+                let close = if opening {
+                    egui::PopupCloseBehavior::IgnoreClicks
+                } else {
+                    egui::PopupCloseBehavior::CloseOnClickOutside
+                };
+                egui::Popup::menu(&title)
+                    .align(crate::direction::below())
+                    .open_memory(open)
+                    .close_behavior(close)
+                    .style(config.style.clone())
+                    .info(egui::UiStackInfo::new(egui::UiKind::Menu).with_tag_value(egui::containers::menu::MenuConfig::MENU_CONFIG_TAG, config))
+                    .show(|ui| {
+                        let items = &built
+                            .get_or_init(|| {
+                                let state = crate::native_menu::state_hash(app_ref, None);
+                                let input = crate::native_menu::had_input(ui.ctx());
+                                let items = kept.take().and_then(|c| c.reuse(state, input)).unwrap_or_else(|| menu_items(app_ref));
+                                ItemCache { state, items }
+                            })
+                            .items;
+                        ui.set_min_width(180.0);
+                        crate::menu_nav::level(ui, 1, &mut nav, |ui, nav| {
+                            for top in TOP_MENUS {
+                                let mine: Vec<&MenuItem> = items.iter().filter(|i| i.path.first().map(String::as_str) == Some(top)).collect();
+                                let enabled = !mine.is_empty();
+                                ui.add_enabled_ui(enabled, |ui| {
+                                    nav.row(ui, 0, enabled, None, |ui, nav| {
+                                        let label = crate::i18n::tr(lang, top);
+                                        let r = ui.menu_button(label, |ui| {
+                                            ui.set_min_width(220.0);
+                                            if mine.is_empty() {
+                                                ui.weak(crate::i18n::tr(lang, "(coming soon)"));
+                                            }
+                                            if top == "Help" {
+                                                crate::menu_nav::level(ui, 1, nav, |ui, nav| {
+                                                    help_search(ui, items, opening, &mut clicked, nav);
+                                                    render_level_rows(ui, &mine, 1, &mut clicked, nav);
+                                                });
+                                            } else {
+                                                render_level(ui, &mine, 1, &mut clicked, nav);
+                                            }
+                                        });
+                                        if r.inner.is_some() {
+                                            nav.set_anchor(1, r.response.rect);
+                                        }
+                                        (r.response, ())
+                                    });
+                                });
+                            }
+                        });
+                    });
+                buttons.push(title);
+            } else {
             for top in TOP_MENUS {
                 // egui's menu_button toggles on release; these titles open on the press (one
                 // gesture can press, drag to an item and release), so each drives its popup.
@@ -1191,6 +1302,7 @@ pub fn menu_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> f32 {
                         }
                     });
                 buttons.push(title);
+            }
             }
             edge = if rtl { buttons.iter().map(|b| b.rect.left()).fold(edge, f32::min) } else { buttons.iter().map(|b| b.rect.right()).fold(edge, f32::max) };
             switch_on_hover(ui.ctx(), &buttons);
@@ -1515,7 +1627,7 @@ mod tests {
         let app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
         let mut harness = Harness::builder().with_size(egui::vec2(1200.0, 700.0)).build_ui_state(
             |ui, app| {
-                menu_bar(app, ui);
+                menu_bar(app, ui, 10_000.0);
             },
             app,
         );
@@ -1646,7 +1758,7 @@ mod tests {
                 let app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
                 let mut harness = Harness::builder().with_size(egui::vec2(width, 200.0)).build_ui_state(
                     |ui, app| {
-                        menu_bar(app, ui);
+                        menu_bar(app, ui, 10_000.0);
                     },
                     app,
                 );
@@ -1705,7 +1817,7 @@ mod tests {
         let app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
         let mut harness = Harness::builder().with_size(egui::vec2(1200.0, 700.0)).build_ui_state(
             |ui, app| {
-                menu_bar(app, ui);
+                menu_bar(app, ui, 10_000.0);
             },
             app,
         );
@@ -1734,7 +1846,7 @@ mod tests {
         let app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
         let mut harness = Harness::builder().with_size(egui::vec2(1200.0, 700.0)).build_ui_state(
             |ui, app| {
-                menu_bar(app, ui);
+                menu_bar(app, ui, 10_000.0);
             },
             app,
         );
@@ -1826,7 +1938,7 @@ mod tests {
                 }
                 h.run_steps(3);
             };
-            let open = |h: &Harness<'_, PhotocraftApp>| h.query_by_label_contains("About PhotoCraft").is_some();
+            let open = |h: &Harness<'_, PhotocraftApp>| h.query_by_label_contains(&format!("About {}", crate::brand::APP_NAME)).is_some();
             let field_id = egui::Id::new("help-menu-search").with("field");
             let help = h.get_by_label("Help").rect().center();
             click(&mut h, help);
@@ -1854,7 +1966,7 @@ mod tests {
             let app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
             let mut harness = Harness::builder().with_size(egui::vec2(1200.0, 900.0)).build_ui_state(
                 |ui, app| {
-                    menu_bar(app, ui);
+                    menu_bar(app, ui, 10_000.0);
                 },
                 app,
             );
@@ -1881,7 +1993,7 @@ mod tests {
         let app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
         let mut harness = Harness::builder().with_size(egui::vec2(900.0, 240.0)).build_ui_state(
             |ui, app| {
-                menu_bar(app, ui);
+                menu_bar(app, ui, 10_000.0);
             },
             app,
         );
@@ -1909,7 +2021,7 @@ mod tests {
         let app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
         let mut harness = Harness::builder().with_size(egui::vec2(900.0, 220.0)).build_ui_state(
             |ui, app| {
-                menu_bar(app, ui);
+                menu_bar(app, ui, 10_000.0);
             },
             app,
         );

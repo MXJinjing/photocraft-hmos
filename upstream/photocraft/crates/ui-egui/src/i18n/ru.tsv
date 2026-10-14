@@ -3005,3 +3005,12 @@ curves	Smooth	Сгладить
 	Remove after each stroke	Удалять после каждого штриха
 	Apply the removal ({key})	Применить удаление ({key})
 	Strokes to remove: {n} (Enter applies, Esc cancels)	Штрихов к удалению: {n} (Enter применяет, Esc отменяет)
+
+
+# Status bar panel controls
+	Only show canvas	Показать только холст
+	Right sidebar	Правая боковая панель
+	Connected pen	Подключённое перо
+	No pen connected	Перо не подключено
+	Battery unavailable	Заряд батареи недоступен
+	Battery: {percent}%	Заряд батареи: {percent}%

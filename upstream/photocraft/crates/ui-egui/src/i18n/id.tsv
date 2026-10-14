@@ -3048,3 +3048,12 @@ curves	Smooth	Haluskan
 	Remove after each stroke	Hapus setelah setiap goresan
 	Apply the removal ({key})	Terapkan penghapusan ({key})
 	Strokes to remove: {n} (Enter applies, Esc cancels)	Goresan untuk dihapus: {n} (Enter menerapkan, Esc membatalkan)
+
+
+# Status bar panel controls
+	Only show canvas	Tampilkan kanvas saja
+	Right sidebar	Bilah sisi kanan
+	Connected pen	Pena terhubung
+	No pen connected	Tidak ada pena terhubung
+	Battery unavailable	Baterai tidak tersedia
+	Battery: {percent}%	Baterai: {percent}%

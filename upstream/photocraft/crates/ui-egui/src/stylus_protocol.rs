@@ -9,7 +9,7 @@ pub const HOST_EVENT: &str = "photocraft-stylus-input";
 pub const VERSION: u32 = 1;
 pub const STATE_PROPERTY: &str = "__photocraftStylusState";
 
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct StylusPacket {
     pub version: u32,
     #[serde(flatten)]
@@ -97,6 +97,27 @@ mod tests {
         assert!(feed.take_gestures().is_empty());
         assert!(!feed.submit(StylusInput::Gesture { gesture: PenGesture::DoubleTap, timestamp_ms: f64::NAN }));
         assert!(feed.take_gestures().is_empty());
+    }
+
+    #[test]
+    fn connection_metadata_is_optional_bounded_and_cleared_on_disconnect() {
+        let feed = StylusFeed::default();
+        let submit = |json: &str| feed.submit(StylusPacket::from_json(json).unwrap().input);
+        assert!(submit(r#"{"version":1,"type":"connection","connected":true,"deviceName":" M-Pencil ","batteryPercent":0}"#));
+        assert_eq!(feed.device().name.as_deref(), Some("M-Pencil"));
+        assert_eq!(feed.device().battery_percent, Some(0));
+        assert!(!submit(r#"{"version":1,"type":"connection","connected":true,"deviceName":"M-Pencil","batteryPercent":0}"#));
+        assert!(submit(r#"{"version":1,"type":"connection","connected":true,"deviceName":"Other pen","batteryPercent":101}"#));
+        assert_eq!(feed.device().battery_percent, None);
+        assert!(submit(r#"{"version":1,"type":"connection","connected":false,"deviceName":"Old pen","batteryPercent":80}"#));
+        assert_eq!(feed.device(), Default::default());
+        assert!(submit(r#"{"version":1,"type":"connection","connected":true}"#));
+        assert_eq!(feed.device().name, None);
+        assert_eq!(feed.device().battery_percent, None);
+        feed.set_device(true, Some("\0\n".into()), Some(100));
+        assert_eq!(feed.device().name, None);
+        feed.set_device(true, Some("笔".repeat(200)), Some(100));
+        assert_eq!(feed.device().name.unwrap().chars().count(), 128);
     }
 
     #[test]

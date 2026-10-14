@@ -9,22 +9,26 @@ export class WindowChrome {
   private retries: number[] = [];
   // 矩形事件可早于窗口状态更新；先采用事件值，再延迟查询稳定后的几何信息。
   private rectChanged = (rect: window.TitleButtonRect): void => { this.publish(rect); this.refresh(); };
-  private statusChanged = (): void => { this.refresh(); };
+  // Status / size 回调签名不同，必须分开注册，否则 ArkTS overload 无法匹配 windowSizeChange。
+  private statusChanged = (_status: window.WindowStatusType): void => {
+    this.onLayoutSignal();
+  };
+  private sizeChanged = (_size: window.Size): void => {
+    this.onLayoutSignal();
+  };
 
   constructor(win: window.Window) { this.win = win; }
 
   start(): void {
     if (deviceInfo.deviceType !== '2in1' && deviceInfo.deviceType !== 'tablet') { return; }
     try {
-      // Keep the native caption buttons and border; merge content into the title bar.
-      this.win.setWindowDecorHeight(TITLE_HEIGHT);
-      this.win.setWindowDecorVisible(false);
-      // Let the system own dragging and double-click maximize for the integrated caption area.
-      this.win.setWindowTitleMoveEnabled(true);
+      // Listeners must register even when decor APIs fail outside freeform; otherwise a later
+      // freeform entry never refreshes title-button clearance.
       this.win.on('windowTitleButtonRectChange', this.rectChanged);
       this.win.on('windowStatusChange', this.statusChanged);
-      this.win.on('windowSizeChange', this.statusChanged);
+      this.win.on('windowSizeChange', this.sizeChanged);
       this.watching = true;
+      this.applyDecor();
       this.refresh();
     } catch (error) {
       let failure = error as BusinessError;
@@ -38,8 +42,30 @@ export class WindowChrome {
     this.cancelRetries();
     this.readRect();
     // Window status, size and caption geometry can arrive in separate transactions.
-    for (let delay of [50, 200, 600]) {
+    // Freeform entry may need longer than a size change before the three-button rect is ready.
+    for (let delay of [50, 200, 600, 1200]) {
       this.retries.push(setTimeout((): void => { if (this.watching) { this.readRect(); } }, delay));
+    }
+  }
+
+  private onLayoutSignal(): void {
+    // 切入自由多窗时系统才露出三键区；先重套 decor，再刷几何。
+    this.applyDecor();
+    this.refresh();
+  }
+
+  private applyDecor(): void {
+    if (!this.watching) { return; }
+    try {
+      // Keep the native caption buttons and border; merge content into the title bar.
+      this.win.setWindowDecorHeight(TITLE_HEIGHT);
+      this.win.setWindowDecorVisible(false);
+      // Let the system own dragging and double-click maximize for the integrated caption area.
+      this.win.setWindowTitleMoveEnabled(true);
+    } catch (error) {
+      // Outside freeform these often throw 1300002 / 801; keep listening and retry on status change.
+      let failure = error as BusinessError;
+      console.info(`Integrated title bar decor unavailable: ${failure.code} ${failure.message}`);
     }
   }
 
@@ -78,7 +104,7 @@ export class WindowChrome {
     if (!this.watching) { return; }
     this.win.off('windowTitleButtonRectChange', this.rectChanged);
     this.win.off('windowStatusChange', this.statusChanged);
-    this.win.off('windowSizeChange', this.statusChanged);
+    this.win.off('windowSizeChange', this.sizeChanged);
     this.watching = false;
     this.clear();
   }

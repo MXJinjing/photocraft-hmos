@@ -2741,3 +2741,12 @@ curves	Smooth	Suavizar
 	Remove after each stroke	Eliminar después de cada trazo
 	Apply the removal ({key})	Aplicar la eliminación ({key})
 	Strokes to remove: {n} (Enter applies, Esc cancels)	Trazos por eliminar: {n} (Intro aplica, Esc cancela)
+
+
+# Status bar panel controls
+	Only show canvas	Mostrar solo el lienzo
+	Right sidebar	Barra lateral derecha
+	Connected pen	Lápiz conectado
+	No pen connected	Ningún lápiz conectado
+	Battery unavailable	Batería no disponible
+	Battery: {percent}%	Batería: {percent}%

@@ -24,12 +24,17 @@ below to provide additional pen actions and connection state.
 | `pointer` | `source`, `sample` | Source is `mouse`, `pen` or `touch`. Sample is a pen reading or `null` when no pen is down. Non-pen samples are discarded. |
 | `barrelButton` | `pressed`, `timestampMs` | Side-button state; the shared recognizer derives double-tap or long-press. |
 | `gesture` | `gesture`, `timestampMs` | An adapter has recognized `doubleTap` or `longPress`. Preferences decide the action. |
-| `connection` | `connected` | Whether a pen is attached, independently of contact with the screen. |
+| `connection` | `connected`, optional `deviceName`, `batteryPercent` | Whether a pen is attached, independently of screen contact, with its current name and battery (0–100). Missing metadata means unavailable. |
 
 A sample contains `pressure` (0–1), `tiltX` and `tiltY` (degrees, −90–90), `rotation`
 (degrees, normalized to 0–360 exclusive), and `eraser` (boolean). Omitted sample fields default
 to pressure 1, zero tilt/rotation and eraser false. The shared sink clamps numeric ranges and
 replaces non-finite sample values.
+
+Connection metadata is a snapshot. Disconnect clears the previous device's name and battery.
+Names are limited to 128 non-control characters; invalid battery ranges become unavailable.
+Version 1 packets without metadata continue to work. The title-bar pen icon is always available,
+including before any connection, and its menu shows the current device status above preferences.
 
 All producers sharing a feed must use the same timestamp clock. Web/native-container adapters
 use Unix epoch milliseconds, matching `Date.now()`. Convert SDK timestamps before submission;
@@ -67,16 +72,24 @@ Never cache/replay gestures: that could open a menu again after a page reload.
 
 `entry/src/main/ets/stylus/StylusProtocol.ets` defines typed packet factories, the injection
 script and a `StylusAdapter` lifecycle interface (`start`, `stop`, `publishState`).
-`HarmonyStylusAdapter.ets` is the implementation using Pen Kit and InputKit:
+`HarmonyStylusAdapter.ets` uses Pen Kit, InputKit and ConnectivityKit:
 
 - SDK `doubleTap` becomes the shared `doubleTap` action.
 - SDK `squeeze` becomes the shared `longPress` action used by the current preferences.
-- Device changes and a one-second poll publish connection state.
+- Device changes and a one-second poll publish connection state and the InputKit device name.
+- After a pen is detected, the native page requests Bluetooth access once per adapter lifetime.
+  Denial keeps pen settings and InputKit names available. Connected Bluetooth HID and BLE devices are queried independently and deduplicated.
+  Matches prefer exact device address, then name. When InputKit supplies a driver name, a
+  fallback requires exactly one input pen and one recognisable connected remote pen.
+  Only an unambiguous match supplies the remote name and battery. NearLink/non-Bluetooth pens and devices not reporting battery show unavailable.
+- Battery reads are serialized; a slower read remains valid across one-second polls of the
+  same device. Device revisions and lifecycle generations reject results from disconnected,
+  replaced or restarted devices.
 - Registration failures are handled separately, allowing supported capabilities to keep working.
 - Start/stop are idempotent; asynchronous connection queries from a previous lifecycle are ignored.
 
-`Index.ets` owns the adapter and forwards packets to ArkWeb. It starts/stops the adapter with
-the page lifecycle and asks it to publish current state after the web page loads.
+`Index.ets` owns the adapter and forwards packets to the native Rust host. It starts/stops
+the adapter with the page lifecycle. The Rust input bridge submits the shared contract.
 
 Android and iPadOS native adapters are not implemented in this repository. They can implement
 the same lifecycle and packet contract using their own SDKs without changing the canvas,

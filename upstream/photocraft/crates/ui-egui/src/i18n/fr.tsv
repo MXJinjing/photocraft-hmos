@@ -3061,3 +3061,12 @@ curves	Smooth	Lisser
 	Remove after each stroke	Supprimer après chaque trait
 	Apply the removal ({key})	Appliquer la suppression ({key})
 	Strokes to remove: {n} (Enter applies, Esc cancels)	Traits à supprimer : {n} (Entrée applique, Échap annule)
+
+
+# Status bar panel controls
+	Only show canvas	Afficher uniquement la zone de travail
+	Right sidebar	Barre latérale droite
+	Connected pen	Stylet connecté
+	No pen connected	Aucun stylet connecté
+	Battery unavailable	Batterie indisponible
+	Battery: {percent}%	Batterie : {percent}%

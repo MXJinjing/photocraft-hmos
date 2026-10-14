@@ -2,12 +2,15 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const ts = require(process.argv[2] || 'typescript');
-let calls = [], events = {}, failPrint = false, failWrite = false;
+let calls = [], events = {}, failPrint = false, failWrite = false, fastWrite = false;
 const task = { on: (event, cb) => events[event] = cb, off: event => delete events[event] };
 const fileIo = {
   OpenMode: { READ_WRITE: 1, CREATE: 2, TRUNC: 4 },
   open: async path => { calls.push(['open', path]); return { fd: 42 }; },
-  write: async (_fd, bytes) => { if (failWrite) return 0; return Math.min(7, bytes.byteLength); },
+  write: async (_fd, bytes) => {
+    if (failWrite) return 0;
+    return fastWrite ? bytes.byteLength : Math.min(7, bytes.byteLength);
+  },
   fsync: async () => {}, close: async () => calls.push(['close']),
   unlink: async path => calls.push(['unlink', path])
 };
@@ -41,9 +44,15 @@ vm.runInNewContext(result.outputText, { module: mod, exports: mod.exports, conso
   failPrint = true; await assert.rejects(adapter.open(metadata, pdf), /service unavailable/);
   failPrint = false; failWrite = true; await assert.rejects(adapter.open(metadata, pdf), /写入不完整/);
   failWrite = false;
+  fastWrite = true;
+  const largePdf = new ArrayBuffer(256 * 1024 * 1024 + 5);
+  new Uint8Array(largePdf).set(new TextEncoder().encode('%PDF-1.4'));
+  await adapter.open(metadata, largePdf);
+  events.succeed();
+  fastWrite = false;
   await assert.rejects(adapter.open(metadata, new ArrayBuffer(0)), /为空/);
   await assert.rejects(adapter.open(metadata, new TextEncoder().encode('invalid').buffer), /不是 PDF/);
   await assert.rejects(adapter.open(JSON.stringify({ copies: 2 }), pdf), /份数/);
   adapter.stop(); await assert.rejects(adapter.open(metadata, pdf), /cancelled/);
-  console.log('Passed: PDF validation, partial writes, UIAbility context, preview lifetime, completion/cancel/failure/block, service errors and disposal.');
+  console.log('Passed: PDF validation, partial writes, >256 MiB PDFs, UIAbility context, preview lifetime, completion/cancel/failure/block, service errors and disposal.');
 })().catch(e => { console.error(e); process.exitCode = 1; });

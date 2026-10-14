@@ -3758,3 +3758,12 @@ curves	Smooth	Εξομάλυνση
 	Remove after each stroke	Αφαίρεση μετά από κάθε πινελιά
 	Apply the removal ({key})	Εφαρμογή της αφαίρεσης ({key})
 	Strokes to remove: {n} (Enter applies, Esc cancels)	Πινελιές προς αφαίρεση: {n} (Enter εφαρμόζει, Esc ακυρώνει)
+
+
+# Status bar panel controls
+	Only show canvas	Εμφάνιση μόνο του καμβά
+	Right sidebar	Δεξιά πλαϊνή στήλη
+	Connected pen	Συνδεδεμένη γραφίδα
+	No pen connected	Δεν έχει συνδεθεί γραφίδα
+	Battery unavailable	Η στάθμη μπαταρίας δεν είναι διαθέσιμη
+	Battery: {percent}%	Μπαταρία: {percent}%

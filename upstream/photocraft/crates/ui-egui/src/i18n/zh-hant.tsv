@@ -2650,3 +2650,12 @@ curves	Smooth	平滑
 	Remove after each stroke	每次描邊後移除
 	Apply the removal ({key})	套用移除 ({key})
 	Strokes to remove: {n} (Enter applies, Esc cancels)	待移除的描邊：{n}（Enter 套用，Esc 取消）
+
+
+# Status bar panel controls
+	Only show canvas	只顯示畫布
+	Right sidebar	右側面板
+	Connected pen	已連接的筆
+	No pen connected	未連接筆
+	Battery unavailable	電量無法取得
+	Battery: {percent}%	電量：{percent}%

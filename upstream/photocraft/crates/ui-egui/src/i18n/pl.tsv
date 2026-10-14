@@ -3657,3 +3657,12 @@ curves	Smooth	Wygładź
 	Remove after each stroke	Usuwaj po każdym pociągnięciu
 	Apply the removal ({key})	Zastosuj usuwanie ({key})
 	Strokes to remove: {n} (Enter applies, Esc cancels)	Pociągnięcia do usunięcia: {n} (Enter stosuje, Esc anuluje)
+
+
+# Status bar panel controls
+	Only show canvas	Pokaż tylko płótno
+	Right sidebar	Prawy panel boczny
+	Connected pen	Podłączone pióro
+	No pen connected	Brak podłączonego pióra
+	Battery unavailable	Poziom baterii niedostępny
+	Battery: {percent}%	Bateria: {percent}%

@@ -3820,3 +3820,12 @@ curves	Smooth	Vloeiend maken
 	Remove after each stroke	Verwijderen na elke streek
 	Apply the removal ({key})	Verwijdering toepassen ({key})
 	Strokes to remove: {n} (Enter applies, Esc cancels)	Streken om te verwijderen: {n} (Enter past toe, Esc annuleert)
+
+
+# Status bar panel controls
+	Only show canvas	Alleen canvas tonen
+	Right sidebar	Rechterzijbalk
+	Connected pen	Verbonden pen
+	No pen connected	Geen pen verbonden
+	Battery unavailable	Batterijniveau niet beschikbaar
+	Battery: {percent}%	Batterij: {percent}%

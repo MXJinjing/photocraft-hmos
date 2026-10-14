@@ -7,6 +7,7 @@
 //! preset selects it, double-clicking or dragging it onto the canvas applies it. Every action is
 //! an engine command (`gradient.presets.*`, `pattern.presets.*`, `style.presets.*`,
 //! `shape.presets.*`, `tool.presets.*`, `cloneSource.*`); this module only draws and dispatches.
+//! On touch/pen, grid and list cells scroll by default; drag arms after a double-press that stays held.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -311,6 +312,7 @@ pub(crate) struct GroupView {
     pub(crate) items: Vec<ItemView>,
 }
 
+#[derive(Debug)]
 pub(crate) enum Ev {
     Select(String),
     Activate(String),
@@ -335,6 +337,8 @@ pub(crate) struct Place<'a> {
     pub(crate) canvas: Rect,
     pub(crate) max_h: f32,
     pub(crate) new_tip: &'a str,
+    /// Mouse keeps press-drag reorder; touch/pen scroll unless double-press-and-hold.
+    pub(crate) pointer: crate::stylus::PointerSource,
 }
 
 pub(crate) fn browser(
@@ -346,7 +350,7 @@ pub(crate) fn browser(
     thumb: &mut dyn FnMut(&egui::Ui, Rect, usize, usize),
 ) -> Vec<Ev> {
     let t = Tokens::get(ui.ctx());
-    let Place { canvas, max_h, new_tip } = place;
+    let Place { canvas, max_h, new_tip, pointer } = place;
     let mut ev = Vec::new();
     let size = *st.sizes.get(panel).unwrap_or(&40.0);
     let list = size <= MIN_THUMB + 0.5;
@@ -442,7 +446,10 @@ pub(crate) fn browser(
             for (ii, it) in g.items.iter().enumerate() {
                 let (cx, cy) = ((ii % cols) as f32, (ii / cols) as f32);
                 let r = Rect::from_min_size(area.min + vec2(pad + cx * (cell.x + gap), cy * (cell.y + gap)), cell);
-                let resp = ui.interact(r, ui.id().with((panel, gi, ii)), Sense::click_and_drag());
+                let item = ui.id().with((panel, gi, ii));
+                let sense = crate::list_drag::row_sense(ui.ctx(), pointer, item);
+                let resp = ui.interact(r, item, sense);
+                let resp = crate::list_drag::after_row(ui.ctx(), pointer, item, &resp);
                 resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &it.name));
                 let is_sel = selected.as_deref() == Some(&it.key);
                 if list {
@@ -471,7 +478,9 @@ pub(crate) fn browser(
                 } else if resp.clicked() {
                     ev.push(Ev::Select(it.key.clone()));
                 }
-                if resp.dragged()
+                let can_drag = !crate::list_drag::prefers_scroll(pointer) || crate::list_drag::is_armed(ui.ctx(), item);
+                if can_drag
+                    && resp.dragged()
                     && let Some(pp) = ui.ctx().pointer_interact_pos()
                 {
                     // A ghost of the swatch follows the pointer.
@@ -481,7 +490,8 @@ pub(crate) fn browser(
                     lp.rect_stroke(gr, 3.0, Stroke::new(1.0, t.accent), egui::StrokeKind::Outside);
                     lp.text(gr.center(), Align2::CENTER_CENTER, "+", FontId::proportional(16.0), t.accent);
                 }
-                if resp.drag_stopped()
+                if can_drag
+                    && resp.drag_stopped()
                     && let Some(pp) = ui.ctx().pointer_interact_pos()
                     && !r.contains(pp)
                 {
@@ -650,10 +660,17 @@ pub fn gradients_panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let canvas = canvas_drop_rect(app);
     let mut st = std::mem::take(&mut app.ui.presets_ui);
     let max_h = (ui.available_height() - 40.0).clamp(90.0, 260.0);
-    let events = browser(ui, &mut st, "gradients", &groups, Place { canvas, max_h, new_tip: tl!("Create new gradient") }, &mut |ui, r, gi, ii| {
-        let stops = groups_src[gi].items[ii].resolve(fg, bg);
-        paint_gradient(ui, r, &stops);
-    });
+    let events = browser(
+        ui,
+        &mut st,
+        "gradients",
+        &groups,
+        Place { canvas, max_h, new_tip: tl!("Create new gradient"), pointer: app.stylus.feed.source() },
+        &mut |ui, r, gi, ii| {
+            let stops = groups_src[gi].items[ii].resolve(fg, bg);
+            paint_gradient(ui, r, &stops);
+        },
+    );
     app.ui.presets_ui = st;
     for e in events {
         match &e {
@@ -698,11 +715,17 @@ pub fn patterns_panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let mut st = std::mem::take(&mut app.ui.presets_ui);
     let max_h = (ui.available_height() - 40.0).clamp(90.0, 280.0);
     let ctx = ui.ctx().clone();
-    let events =
-        browser(ui, &mut st, "patterns", &groups, Place { canvas, max_h, new_tip: tl!("Create new pattern from the selection") }, &mut |ui, r, gi, ii| {
+    let events = browser(
+        ui,
+        &mut st,
+        "patterns",
+        &groups,
+        Place { canvas, max_h, new_tip: tl!("Create new pattern from the selection"), pointer: app.stylus.feed.source() },
+        &mut |ui, r, gi, ii| {
             let tex = pattern_texture(&ctx, &pats[gi][ii]);
             ui.painter().image(tex.id(), r, Rect::from_min_max(Pos2::ZERO, pos2(1.0, 1.0)), Color32::WHITE);
-        });
+        },
+    );
     app.ui.presets_ui = st;
     for e in events {
         match &e {
@@ -803,7 +826,7 @@ pub fn styles_panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         &mut st,
         "styles",
         &groups,
-        Place { canvas, max_h: 300.0, new_tip: tl!("Create new style from the selected layer") },
+        Place { canvas, max_h: 300.0, new_tip: tl!("Create new style from the selected layer"), pointer: app.stylus.feed.source() },
         &mut |ui, r, gi, ii| {
             ui.painter().rect_filled(r, 2.0, t.field);
             ui.painter().image(texes[gi][ii].id(), r, Rect::from_min_max(Pos2::ZERO, pos2(1.0, 1.0)), Color32::WHITE);
@@ -847,7 +870,7 @@ pub fn shapes_panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         &mut st,
         "shapes",
         &groups,
-        Place { canvas, max_h: 300.0, new_tip: tl!("Create new shape from the current path") },
+        Place { canvas, max_h: 300.0, new_tip: tl!("Create new shape from the current path"), pointer: app.stylus.feed.source() },
         &mut |ui, r, gi, ii| {
             let tex = shape_texture(&ctx, &src[gi].items[ii]);
             ui.painter().image(tex.id(), r.shrink(2.0), Rect::from_min_max(Pos2::ZERO, pos2(1.0, 1.0)), t.text);
@@ -1231,6 +1254,253 @@ mod tests {
         app.run("file.new", json!({"width": 64, "height": 48})).unwrap();
         app.sync_views();
         (app, ctx)
+    }
+
+    // Feed the same Touch + primary-pointer events as the HarmonyOS native host.
+    fn browser_frame(ctx: &egui::Context, st: &mut PresetUi, panel: &str, time: f64, events: Vec<egui::Event>) -> (Vec<Ev>, Rect) {
+        browser_frame_with_source(ctx, st, panel, time, events, crate::stylus::PointerSource::Touch)
+    }
+
+    fn browser_frame_with_source(
+        ctx: &egui::Context,
+        st: &mut PresetUi,
+        panel: &str,
+        time: f64,
+        events: Vec<egui::Event>,
+        pointer: crate::stylus::PointerSource,
+    ) -> (Vec<Ev>, Rect) {
+        let mut emitted = Vec::new();
+        let mut cell = Rect::NOTHING;
+        let items = (0..if panel == "scroll-test" { 200 } else { 1 })
+            .map(|i| ItemView { key: if i == 0 { "preset".into() } else { format!("preset-{i}") }, name: "Preset".into() })
+            .collect();
+        let groups = vec![GroupView { name: "Source".into(), items }, GroupView { name: "Destination".into(), items: Vec::new() }];
+        let input = egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(600.0, 300.0))), time: Some(time), events, ..Default::default() };
+        ctx.run_ui(input, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
+                emitted = browser(
+                    ui,
+                    st,
+                    panel,
+                    &groups,
+                    Place { canvas: Rect::from_min_max(pos2(300.0, 0.0), pos2(600.0, 300.0)), max_h: 200.0, new_tip: "New", pointer },
+                    &mut |_, r, gi, ii| {
+                        if gi == 0 && ii == 0 {
+                            cell = r;
+                        }
+                    },
+                );
+            });
+        })
+        .textures_delta
+        .clear();
+        (emitted, cell)
+    }
+
+    fn touch_pointer(phase: egui::TouchPhase, p: Pos2) -> Vec<egui::Event> {
+        let mut events = vec![egui::Event::Touch { device_id: egui::TouchDeviceId(0), id: egui::TouchId(1), phase, pos: p, force: None }];
+        events.push(egui::Event::PointerMoved(p));
+        match phase {
+            egui::TouchPhase::Start | egui::TouchPhase::End => events.push(egui::Event::PointerButton {
+                pos: p,
+                button: egui::PointerButton::Primary,
+                pressed: phase == egui::TouchPhase::Start,
+                modifiers: egui::Modifiers::NONE,
+            }),
+            _ => {}
+        }
+        if phase == egui::TouchPhase::End {
+            events.push(egui::Event::PointerGone);
+        }
+        events
+    }
+
+    #[test]
+    fn browser_double_press_hold_emits_canvas_drop_and_group_move() {
+        for panel in [crate::swatches_ui::PANEL, "gradients", "patterns", "styles", "shapes"] {
+            for size in [20.0, 40.0] {
+                for onto_canvas in [true, false] {
+                    let ctx = egui::Context::default();
+                    let mut st = PresetUi::default();
+                    st.sizes.insert(panel.into(), size);
+                    let (_, cell) = browser_frame(&ctx, &mut st, panel, 0.0, Vec::new());
+                    browser_frame(&ctx, &mut st, panel, 0.01, Vec::new());
+                    let start = cell.center();
+                    let target =
+                        if onto_canvas { pos2(400.0, 180.0) } else { pos2(100.0, cell.top() + cell.height() + if size == 20.0 { 17.0 } else { 21.0 }) };
+                    browser_frame(&ctx, &mut st, panel, 0.02, touch_pointer(egui::TouchPhase::Start, start));
+                    browser_frame(&ctx, &mut st, panel, 0.04, touch_pointer(egui::TouchPhase::End, start));
+                    browser_frame(&ctx, &mut st, panel, 0.06, touch_pointer(egui::TouchPhase::Start, start));
+                    // Hold beyond egui's long-touch deadline before moving.
+                    browser_frame(&ctx, &mut st, panel, 1.0, Vec::new());
+                    let (during, _) = browser_frame(&ctx, &mut st, panel, 1.05, touch_pointer(egui::TouchPhase::Move, target));
+                    assert!(during.is_empty(), "a held drag must not select or activate");
+                    assert!(ctx.dragged_id().is_some(), "the preset must own the drag");
+                    let (released, _) = browser_frame(&ctx, &mut st, panel, 1.08, touch_pointer(egui::TouchPhase::End, target));
+                    if onto_canvas {
+                        assert!(released.iter().any(|e| matches!(e, Ev::Drop(k, p) if k == "preset" && *p == target)), "{panel}, size {size}: {released:?}");
+                    } else {
+                        assert!(
+                            released.iter().any(|e| matches!(e, Ev::Move(k, g) if k == "preset" && g == "Destination")),
+                            "{panel}, size {size}: {released:?}"
+                        );
+                    }
+                    assert!(ctx.dragged_id().is_none());
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn browser_finger_double_press_tolerates_offset_timing_and_tap_jitter() {
+        for (first_jitter, second_offset, gap) in [(0.0, 8.0, 0.1), (0.0, 0.0, 0.4), (8.0, 8.0, 0.1)] {
+            for source in [crate::stylus::PointerSource::Touch, crate::stylus::PointerSource::Pen] {
+                for size in [20.0, 40.0] {
+                    let ctx = egui::Context::default();
+                    let mut st = PresetUi::default();
+                    st.sizes.insert("patterns".into(), size);
+                    let (_, cell) = browser_frame_with_source(&ctx, &mut st, "patterns", 0.0, Vec::new(), source);
+                    browser_frame_with_source(&ctx, &mut st, "patterns", 0.01, Vec::new(), source);
+                    let start = cell.center();
+                    let first_end = start + vec2(first_jitter, 0.0);
+                    let second = start + vec2(second_offset, 0.0);
+                    browser_frame_with_source(&ctx, &mut st, "patterns", 0.02, touch_pointer(egui::TouchPhase::Start, start), source);
+                    browser_frame_with_source(&ctx, &mut st, "patterns", 0.08, touch_pointer(egui::TouchPhase::Move, first_end), source);
+                    browser_frame_with_source(&ctx, &mut st, "patterns", 0.1, touch_pointer(egui::TouchPhase::End, first_end), source);
+                    browser_frame_with_source(&ctx, &mut st, "patterns", 0.1 + gap, touch_pointer(egui::TouchPhase::Start, second), source);
+                    browser_frame_with_source(&ctx, &mut st, "patterns", 1.1, Vec::new(), source);
+                    let target = pos2(400.0, 180.0);
+                    browser_frame_with_source(&ctx, &mut st, "patterns", 1.2, touch_pointer(egui::TouchPhase::Move, target), source);
+                    let (released, _) = browser_frame_with_source(&ctx, &mut st, "patterns", 1.3, touch_pointer(egui::TouchPhase::End, target), source);
+                    assert!(
+                        released.iter().any(|e| matches!(e, Ev::Drop(k, _) if k == "preset")),
+                        "{source:?}: jitter {first_jitter}, offset {second_offset}, gap {gap}: {released:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn browser_scroll_or_expired_tap_cannot_arm_the_next_press() {
+        for (move_away, gap) in [(30.0, 0.1), (0.0, 0.6)] {
+            let ctx = egui::Context::default();
+            let mut st = PresetUi::default();
+            st.sizes.insert("patterns".into(), 40.0);
+            let (_, cell) = browser_frame(&ctx, &mut st, "patterns", 0.0, Vec::new());
+            browser_frame(&ctx, &mut st, "patterns", 0.01, Vec::new());
+            let start = cell.center();
+            browser_frame(&ctx, &mut st, "patterns", 0.02, touch_pointer(egui::TouchPhase::Start, start));
+            browser_frame(&ctx, &mut st, "patterns", 0.05, touch_pointer(egui::TouchPhase::Move, start + vec2(move_away, 0.0)));
+            browser_frame(&ctx, &mut st, "patterns", 0.08, touch_pointer(egui::TouchPhase::Move, start));
+            browser_frame(&ctx, &mut st, "patterns", 0.1, touch_pointer(egui::TouchPhase::End, start));
+            browser_frame(&ctx, &mut st, "patterns", 0.1 + gap, touch_pointer(egui::TouchPhase::Start, start));
+            browser_frame(&ctx, &mut st, "patterns", 1.6, Vec::new());
+            let target = pos2(400.0, 180.0);
+            browser_frame(&ctx, &mut st, "patterns", 1.7, touch_pointer(egui::TouchPhase::Move, target));
+            let (released, _) = browser_frame(&ctx, &mut st, "patterns", 1.8, touch_pointer(egui::TouchPhase::End, target));
+            assert!(!released.iter().any(|e| matches!(e, Ev::Drop(_, _) | Ev::Move(_, _))), "swipe {move_away}, gap {gap}: {released:?}");
+        }
+    }
+
+    #[test]
+    fn browser_touch_tap_selects_without_dropping() {
+        let ctx = egui::Context::default();
+        let mut st = PresetUi::default();
+        let (_, cell) = browser_frame(&ctx, &mut st, "patterns", 0.0, Vec::new());
+        browser_frame(&ctx, &mut st, "patterns", 0.01, Vec::new());
+        browser_frame(&ctx, &mut st, "patterns", 0.02, touch_pointer(egui::TouchPhase::Start, cell.center()));
+        let (events, _) = browser_frame(&ctx, &mut st, "patterns", 0.04, touch_pointer(egui::TouchPhase::End, cell.center()));
+        assert!(matches!(events.as_slice(), [Ev::Select(k)] if k == "preset"));
+    }
+
+    #[test]
+    fn browser_single_touch_drag_scrolls_without_dropping() {
+        for size in [20.0, 40.0] {
+            let ctx = egui::Context::default();
+            let mut st = PresetUi::default();
+            st.sizes.insert("scroll-test".into(), size);
+            // Register a touch device before the layout pass, as on an active Pad.
+            browser_frame(&ctx, &mut st, "scroll-test", 0.0, vec![touch_pointer(egui::TouchPhase::Start, pos2(590.0, 290.0)).remove(0)]);
+            browser_frame(&ctx, &mut st, "scroll-test", 0.01, vec![touch_pointer(egui::TouchPhase::End, pos2(590.0, 290.0)).remove(0)]);
+            let (_, cell) = browser_frame(&ctx, &mut st, "scroll-test", 0.02, Vec::new());
+            let start = cell.center();
+            let target = start - vec2(0.0, 30.0);
+            browser_frame(&ctx, &mut st, "scroll-test", 0.04, touch_pointer(egui::TouchPhase::Start, start));
+            let (events, _) = browser_frame(&ctx, &mut st, "scroll-test", 0.08, touch_pointer(egui::TouchPhase::Move, target));
+            let (_, shifted) = browser_frame(&ctx, &mut st, "scroll-test", 0.09, Vec::new());
+            assert!(events.is_empty(), "scrolling must not emit a preset event: {events:?}");
+            assert!(
+                shifted.top() < cell.top(),
+                "single-finger drag must scroll the browser: size={size}, before={cell:?}, after={shifted:?}, drag={:?}, touch={}",
+                ctx.dragged_id(),
+                ctx.input(|i| i.has_touch_screen())
+            );
+            let (events, _) = browser_frame(&ctx, &mut st, "scroll-test", 0.1, touch_pointer(egui::TouchPhase::End, target));
+            assert!(events.is_empty(), "releasing a scroll must not drop: {events:?}");
+        }
+    }
+
+    #[test]
+    fn browser_mouse_drag_works_but_switching_to_touch_requires_double_press() {
+        use crate::stylus::PointerSource;
+        for source in [PointerSource::Mouse, PointerSource::Touch, PointerSource::Pen] {
+            let ctx = egui::Context::default();
+            let mut st = PresetUi::default();
+            // Previous mouse senses must not allow the first touch/pen press to drop.
+            let (_, cell) = browser_frame_with_source(&ctx, &mut st, "patterns", 0.0, Vec::new(), PointerSource::Mouse);
+            browser_frame_with_source(&ctx, &mut st, "patterns", 0.01, Vec::new(), PointerSource::Mouse);
+            let target = pos2(400.0, 180.0);
+            for (time, phase, pos) in [(0.02, egui::TouchPhase::Start, cell.center()), (0.04, egui::TouchPhase::Move, target)] {
+                let events =
+                    touch_pointer(phase, pos).into_iter().filter(|e| source == PointerSource::Touch || !matches!(e, egui::Event::Touch { .. })).collect();
+                browser_frame_with_source(&ctx, &mut st, "patterns", time, events, source);
+            }
+            let events = touch_pointer(egui::TouchPhase::End, target)
+                .into_iter()
+                .filter(|e| source == PointerSource::Touch || !matches!(e, egui::Event::Touch { .. }))
+                .collect();
+            let (released, _) = browser_frame_with_source(&ctx, &mut st, "patterns", 0.06, events, source);
+            if source == PointerSource::Mouse {
+                assert!(matches!(released.as_slice(), [Ev::Drop(k, p)] if k == "preset" && *p == target));
+            } else {
+                assert!(released.is_empty(), "{source:?}: first press must not drop {released:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn browser_double_press_takes_drag_from_scroll_area() {
+        let ctx = egui::Context::default();
+        let mut st = PresetUi::default();
+        st.sizes.insert("scroll-test".into(), 40.0);
+        let p = pos2(590.0, 290.0);
+        browser_frame(&ctx, &mut st, "scroll-test", 0.0, vec![touch_pointer(egui::TouchPhase::Start, p).remove(0)]);
+        browser_frame(&ctx, &mut st, "scroll-test", 0.01, vec![touch_pointer(egui::TouchPhase::End, p).remove(0)]);
+        let (_, cell) = browser_frame(&ctx, &mut st, "scroll-test", 0.02, Vec::new());
+        for (time, phase) in [(0.04, egui::TouchPhase::Start), (0.06, egui::TouchPhase::End), (0.08, egui::TouchPhase::Start)] {
+            browser_frame(&ctx, &mut st, "scroll-test", time, touch_pointer(phase, cell.center()));
+        }
+        browser_frame(&ctx, &mut st, "scroll-test", 1.0, Vec::new());
+        let target = pos2(400.0, 180.0);
+        browser_frame(&ctx, &mut st, "scroll-test", 1.04, touch_pointer(egui::TouchPhase::Move, target));
+        let (_, after) = browser_frame(&ctx, &mut st, "scroll-test", 1.05, Vec::new());
+        assert_eq!(after, cell, "an armed preset drag must not scroll its source panel");
+        let (events, _) = browser_frame(&ctx, &mut st, "scroll-test", 1.08, touch_pointer(egui::TouchPhase::End, target));
+        assert!(matches!(events.as_slice(), [Ev::Drop(k, p)] if k == "preset" && *p == target));
+    }
+
+    #[test]
+    fn browser_quick_double_tap_still_activates() {
+        let ctx = egui::Context::default();
+        let mut st = PresetUi::default();
+        let (_, cell) = browser_frame(&ctx, &mut st, "patterns", 0.0, Vec::new());
+        browser_frame(&ctx, &mut st, "patterns", 0.01, Vec::new());
+        for (time, phase) in [(0.02, egui::TouchPhase::Start), (0.04, egui::TouchPhase::End), (0.06, egui::TouchPhase::Start)] {
+            browser_frame(&ctx, &mut st, "patterns", time, touch_pointer(phase, cell.center()));
+        }
+        let (events, _) = browser_frame(&ctx, &mut st, "patterns", 0.08, touch_pointer(egui::TouchPhase::End, cell.center()));
+        assert!(matches!(events.as_slice(), [Ev::Activate(k)] if k == "preset"));
     }
 
     #[test]

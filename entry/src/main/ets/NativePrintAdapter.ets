@@ -3,7 +3,7 @@ import { print } from '@kit.BasicServicesKit';
 import { fileIo, fileUri } from '@kit.CoreFileKit';
 
 class PrintMetadata {
-  name: string = 'PhotoCraft';
+  name: string = 'PhotoCraft For HarmonyOS';
   copies: number = 1;
   printer: string = '';
 }
@@ -28,14 +28,14 @@ export class NativePrintAdapter {
     let job = JSON.parse(metadata) as PrintMetadata;
     if (job.printer !== undefined && job.printer.length > 0) { throw new Error('请在系统打印面板中选择打印机'); }
     if (job.copies !== 1) { throw new Error('请在系统打印面板中设置份数'); }
-    if (bytes.byteLength < 5 || bytes.byteLength > 256 * 1024 * 1024) {
-      throw new Error('打印文件为空或超过 256 MiB');
+    if (bytes.byteLength < 5) {
+      throw new Error('打印文件为空或不完整');
     }
     let header = new Uint8Array(bytes, 0, 5);
     if (header[0] !== 37 || header[1] !== 80 || header[2] !== 68 || header[3] !== 70 || header[4] !== 45) {
       throw new Error('打印文件不是 PDF');
     }
-    let name = job.name.replace(/[\\/:*?"<>|]/g, '_').substring(0, 80) || 'PhotoCraft';
+    let name = job.name.replace(/[\\/:*?"<>|]/g, '_').substring(0, 80) || 'PhotoCraft For HarmonyOS';
     let path = `${this.context.cacheDir}/${name}-${Date.now()}-${this.sequence++}.pdf`;
     try {
       let file = await fileIo.open(path, fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.CREATE | fileIo.OpenMode.TRUNC);

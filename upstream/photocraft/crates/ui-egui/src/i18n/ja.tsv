@@ -3670,3 +3670,12 @@ curves	Smooth	スムーズ
 	Remove after each stroke	ストロークごとに削除
 	Apply the removal ({key})	削除を適用 ({key})
 	Strokes to remove: {n} (Enter applies, Esc cancels)	削除するストローク: {n}（Enter で適用、Esc で取り消し）
+
+
+# Status bar panel controls
+	Only show canvas	キャンバスのみ表示
+	Right sidebar	右サイドバー
+	Connected pen	接続中のペン
+	No pen connected	ペンが接続されていません
+	Battery unavailable	バッテリー情報なし
+	Battery: {percent}%	バッテリー: {percent}%

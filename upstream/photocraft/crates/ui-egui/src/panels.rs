@@ -90,18 +90,17 @@ pub fn toolbar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         .exact_size(w)
         .frame(egui::Frame::NONE.fill(t.chrome).inner_margin(egui::Margin::symmetric(m, 8)))
         .show(ui, |ui| {
-            if t.pro {
-                // Photoshop's toolbar header chevrons switch between one and two columns.
-                let (cr, resp) = ui.allocate_exact_size(vec2(bx, 14.0), Sense::click());
-                // The chevrons point the way the toolbar grows or shrinks: towards the canvas.
-                let (shrink, grow) = if crate::direction::is_rtl() { ("chevrons-right", "chevrons-left") } else { ("chevrons-left", "chevrons-right") };
-                icons::paint(ui, cr, if double { shrink } else { grow }, 11.0, if resp.hovered() { t.text } else { t.text_faint });
-                resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tl!("Toolbar")));
-                if resp.clicked() {
-                    app.ui.panels.toolbar_double = !app.ui.panels.toolbar_double;
-                }
-                ui.add_space(4.0);
+            // Photoshop's toolbar header chevrons switch between one and two columns.
+            // Every theme gets the toggle (not only Pro): Studio/Classic/etc. previously hid it.
+            let (cr, resp) = ui.allocate_exact_size(vec2(bx, 14.0), Sense::click());
+            // The chevrons point the way the toolbar grows or shrinks: towards the canvas.
+            let (shrink, grow) = if crate::direction::is_rtl() { ("chevrons-right", "chevrons-left") } else { ("chevrons-left", "chevrons-right") };
+            icons::paint(ui, cr, if double { shrink } else { grow }, 11.0, if resp.hovered() { t.text } else { t.text_faint });
+            resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tl!("Toolbar")));
+            if resp.clicked() {
+                app.ui.panels.toolbar_double = !app.ui.panels.toolbar_double;
             }
+            ui.add_space(4.0);
             // Subtle violet wash at the bottom of the toolbar.
             let full = ui.max_rect();
             if !t.bevel && !t.pro && t.dark() {
@@ -132,6 +131,7 @@ pub fn toolbar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
             // taller than the window scrolls and keeps the chips at the bottom.
             egui::ScrollArea::vertical()
                 .id_salt("toolbar-columns")
+                .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
                 .auto_shrink([false, true])
                 .max_height((ui.available_height() - footer).max(0.0))
                 .min_scrolled_height(0.0)
@@ -542,7 +542,7 @@ pub fn title_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                 let max = ui.ctx().input(|i| i.viewport().maximized.unwrap_or(false));
                 ui.ctx().send_viewport_cmd(egui::ViewportCommand::Maximized(!max));
             }
-            let title = app.session.active().map(|d| format!("{}{}", d.doc.name, if d.is_dirty() { "  •" } else { "" })).unwrap_or_else(|| "PhotoCraft".into());
+            let title = app.session.active().map(|d| format!("{}{}", d.doc.name, if d.is_dirty() { "  •" } else { "" })).unwrap_or_else(|| crate::brand::APP_NAME.into());
             // The menus and the far-end controls are laid out first; the title is centred in
             // whatever room is left between them (`free`, left to right: menus then controls, or
             // controls then menus in a right-to-left UI), shortened or dropped rather than drawn
@@ -562,10 +562,20 @@ pub fn title_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                 }
                 // With the macOS menu bar the menus are at the top of the screen instead. Either way
                 // this is the menus' inner edge, facing the title.
+                // Budget the titles so a narrow bar folds them into a hamburger before they
+                // crowd out the right-hand controls (workspace / search / theme / stylus).
+                let native_button_room = if app.host_titlebar.x > 0.0 { app.host_titlebar.x + 4.0 } else { 0.0 };
+                let right_edge_budget = if custom { full.right() - crate::titlebar::WIDTH - 4.0 } else { (full.right() - native_button_room).max(full.left()) };
+                let stylus_reserve = 110.0;
+                let menu_budget = if rtl {
+                    (ui.cursor().right() - full.left() - TITLE_GAP - WORKSPACE_MIN - stylus_reserve).max(crate::menus::MENU_BAR_HAMBURGER_WIDTH)
+                } else {
+                    (right_edge_budget - ui.cursor().left() - TITLE_GAP - WORKSPACE_MIN - stylus_reserve).max(crate::menus::MENU_BAR_HAMBURGER_WIDTH)
+                };
                 let menus_end = if app.services.native_menu.is_some() {
                     if rtl { ui.cursor().right() } else { ui.cursor().left() }
                 } else {
-                    crate::menus::menu_bar(app, ui)
+                    crate::menus::menu_bar(app, ui, menu_budget)
                 };
                 // The menu bar takes the whole row, so the far-end group gets its own rect: from
                 // the menus to the bar's end, or to the caption buttons. Host titlebar reserves
@@ -595,7 +605,7 @@ pub fn title_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                     // A narrow bar drops what is also in a menu, Discord first (below), then
                     // the theme toggle (Preferences), then search (Edit › Search), and narrows
                     // the switcher (Window › Workspace) before anything runs over.
-                    let stylus_room = if app.stylus.feed.ever_connected() { crate::chrome_ui::stylus_menu_width(ui) + 16.0 } else { 0.0 };
+                    let stylus_room = crate::chrome_ui::stylus_menu_width() + 16.0;
                     let room = (ui.available_width() - stylus_room).max(0.0);
                     let icons_shown: u8 = if room >= WORKSPACE_MIN + 2.0 * ICON_SLOT {
                         2
@@ -692,7 +702,7 @@ pub fn system_title_bar(app: &PhotocraftApp) -> bool {
 /// marks unsaved changes, like the `•` in the app-drawn title), or just the app name with no
 /// document open.
 pub fn window_title(app: &PhotocraftApp) -> String {
-    app.session.active().map(|d| format!("{}{} \u{2014} PhotoCraft", if d.is_dirty() { "*" } else { "" }, d.doc.name)).unwrap_or_else(|| "PhotoCraft".into())
+    app.session.active().map(|d| format!("{}{} \u{2014} {}", if d.is_dirty() { "*" } else { "" }, d.doc.name, crate::brand::APP_NAME)).unwrap_or_else(|| crate::brand::APP_NAME.into())
 }
 
 /// Keep the OS window title (and the taskbar / Alt-Tab entry) on the active file. Sends
@@ -769,19 +779,19 @@ mod title_tests {
 
     #[test]
     fn window_title_with_no_document_is_the_app_name() {
-        assert_eq!(window_title(&app(true)), "PhotoCraft");
+        assert_eq!(window_title(&app(true)), crate::brand::APP_NAME);
     }
 
     #[test]
     fn window_title_follows_the_active_file() {
         let mut app = app(true);
         open_named(&mut app, "foo.psd");
-        assert_eq!(window_title(&app), "foo.psd \u{2014} PhotoCraft");
+        assert_eq!(window_title(&app), format!("foo.psd \u{2014} {}", crate::brand::APP_NAME));
         // Unsaved changes gain a `*` prefix, like the `•` in the app-drawn title.
         if let Some(st) = app.session.active_mut() {
             st.revision += 1;
         }
-        assert_eq!(window_title(&app), "*foo.psd \u{2014} PhotoCraft");
+        assert_eq!(window_title(&app), format!("*foo.psd \u{2014} {}", crate::brand::APP_NAME));
     }
 
     #[test]
@@ -819,11 +829,11 @@ mod title_tests {
         let ctx = egui::Context::default();
         crate::PhotocraftApp::setup_context(&ctx, crate::theme::ThemeKind::ALL[0]);
         super::sync_window_title(&mut app, &ctx);
-        assert_eq!(app.last_window_title, "PhotoCraft");
+        assert_eq!(app.last_window_title, crate::brand::APP_NAME);
         let mut out = ctx.run_ui(egui::RawInput::default(), |_| {});
         out.textures_delta.clear();
         let cmds = out.viewport_output.remove(&egui::ViewportId::ROOT).map(|v| v.commands).unwrap_or_default();
-        assert!(cmds.iter().any(|c| matches!(c, egui::ViewportCommand::Title(t) if t == "PhotoCraft")), "{cmds:?}");
+        assert!(cmds.iter().any(|c| matches!(c, egui::ViewportCommand::Title(t) if t == crate::brand::APP_NAME)), "{cmds:?}");
         // Same document state again: the cached title stops a repeat command.
         super::sync_window_title(&mut app, &ctx);
         let mut out = ctx.run_ui(egui::RawInput::default(), |_| {});
@@ -832,7 +842,7 @@ mod title_tests {
         assert!(!cmds.iter().any(|c| matches!(c, egui::ViewportCommand::Title(_))), "repeat Title: {cmds:?}");
         open_named(&mut app, "foo.psd");
         super::sync_window_title(&mut app, &ctx);
-        assert_eq!(app.last_window_title, "foo.psd \u{2014} PhotoCraft");
+        assert_eq!(app.last_window_title, format!("foo.psd \u{2014} {}", crate::brand::APP_NAME));
     }
 }
 
@@ -885,7 +895,8 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
             ui.style_mut().spacing.scroll = egui::style::ScrollStyle { bar_width: 4.0, ..egui::style::ScrollStyle::floating() };
             // DragScroll::Always: touch/Pad can scroll the options bar without a scrollbar.
             egui::ScrollArea::horizontal().id_salt("tool-options").auto_shrink([false, false])
-                .scroll_source(egui::scroll_area::ScrollSource { scroll_bar: true, drag: egui::scroll_area::DragScroll::Always, mouse_wheel: true })
+                .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
+                .scroll_source(egui::scroll_area::ScrollSource { scroll_bar: false, drag: egui::scroll_area::DragScroll::Always, mouse_wheel: true })
                 .show(ui, |ui| {
             // Font ink can extend beyond its advance width at fractional positions.
             // Include its gutter in the container layout, including right-aligned actions.
@@ -1570,27 +1581,36 @@ pub fn status_bar_heights(t: &Tokens) -> (f32, f32) {
 
 pub fn status_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let t = Tokens::get(ui.ctx());
+    let button_size = crate::status_panel_controls::button_size(t.pro);
     egui::Panel::bottom("status_bar")
-        .exact_size(status_bar_heights(&t).0)
+        .exact_size(button_size + 2.0)
+        .show_separator_line(false)
         .frame(egui::Frame::NONE.fill(t.chrome).inner_margin(egui::Margin::symmetric(10, 0)))
         .show(ui, |ui| {
             let control_h = status_bar_heights(&t).1;
+            // Draw the divider inside the bar so the original 30-point Fit button fits without
+            // increasing the bar by the panel separator's extra point.
+            let rect = ui.max_rect();
+            ui.painter().hline(rect.x_range(), rect.top(), ui.visuals().widgets.noninteractive.bg_stroke);
+            let body_rect = crate::status_panel_controls::show(app, ui, button_size);
+            let mut body = ui.new_child(egui::UiBuilder::new().id_salt("status-body").max_rect(body_rect));
+            body.set_clip_rect(body.clip_rect().intersect(body_rect));
             // Read from the right in a right-to-left UI, with the trailing group at the left.
-            crate::direction::horizontal_centered(ui, |ui| {
+            crate::direction::horizontal_centered(&mut body, |ui| {
                 if t.pro {
                     crate::chrome_ui::status_bar_pro(app, ui);
-                    // Background job progress with Cancel, at the far end (#210).
-                    ui.with_layout(crate::direction::trailing(), |ui| crate::jobs_ui::status_progress(app, ui));
                     return;
                 }
                 if let (Some(st), Some(i)) = (app.session.active(), app.session.active_index()) {
                     let (w, h, mode, bits, layers) =
                         (st.doc.size.width, st.doc.size.height, crate::canvas::mode_label(&st.doc), st.doc.depth.bits(), st.doc.layer_count());
                     let mut pct = app.ui.views[i].zoom * 100.0;
-                    if widgets::compact_value_field(ui, &mut pct, crate::zoom_levels::percent_range(&app.ui.views[i]), "%", 78.0, control_h).changed() {
+                    let (zoom_response, zoom_rect) = widgets::compact_value_field_with_rect(ui, &mut pct, crate::zoom_levels::percent_range(&app.ui.views[i]), "%", 78.0, control_h);
+                    if zoom_response.changed() {
                         app.ui.views[i].zoom = crate::zoom_levels::clamp(pct / 100.0, app.ui.views[i].doc_size);
                         app.ui.views[i].fit_pending = false;
                     }
+                    crate::status_panel_controls::fit_button(app, ui, zoom_rect);
                     widgets::vline(ui, 16.0);
                     label(ui, &crate::i18n::fmt(tl!("{mode} Color · {bits} bit"), &[("mode", mode), ("bits", &bits.to_string())]));
                     widgets::vline(ui, 16.0);
@@ -1605,19 +1625,6 @@ pub fn status_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                     let is_err = app.ui.status_error || app.ui.status.starts_with("Couldn");
                     ui.label(RichText::new(&app.ui.status).color(if is_err { t.warning } else { t.text_faint }));
                 }
-                ui.with_layout(crate::direction::trailing(), |ui| {
-                    if app.session.active().is_some()
-                        && !t.pro
-                        && widgets::compact_button(ui, tl!("Fit"), control_h).clicked()
-                        && let Some(i) = app.session.active_index()
-                    {
-                        app.ui.views[i].fit_pending = true;
-                    }
-                    if app.session.has_jobs() {
-                        ui.add_space(6.0);
-                        crate::jobs_ui::status_progress(app, ui);
-                    }
-                });
             });
         });
 }
@@ -2638,7 +2645,11 @@ fn layer_row(
     let t = Tokens::get(ctx);
     // Photoshop's default (medium) thumbnails: 32 pt rows.
     let row_h = if t.pro { 32.0 } else { 46.0 };
-    let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), row_h), Sense::click_and_drag());
+    let source = app.stylus.feed.source();
+    let item = egui::Id::new(("layer-row", l.id.0));
+    let sense = crate::list_drag::row_sense(ctx, source, item);
+    let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), row_h), sense);
+    let resp = crate::list_drag::after_row(ctx, source, item, &resp);
     // A drag from a mask's thumbnail drags that mask, not the layer (#3113, #3119).
     let mask_drag = starts_mask_drag(ctx, l, &resp);
     if let Some(kind) = mask_drag {
@@ -2647,7 +2658,7 @@ fn layer_row(
     let mask_drag = mask_drag.is_some();
     layer_drag_and_drop(app, ctx, ui, l, rect, &resp, actions);
     fx_drop(ctx, ui, l, rect, actions);
-    if resp.drag_started() && !mask_drag {
+    if crate::list_drag::may_begin_drag(ctx, source, item, &resp) && !mask_drag {
         crate::layer_transfer::begin_from_panel(app, ctx, l.id);
     }
     // Rows are painted: name them for screen readers and UI tests.
@@ -2684,7 +2695,12 @@ fn layer_row(
     let eye = Rect::from_min_size(pos2(x, rect.center().y - 11.0), vec2(22.0, 22.0));
     // The eye takes drags too (so a drag starting on it never reorders the row): dragging down
     // the eyes gives every row swept over the visibility the first eye toggled to.
-    let eye_resp = ui.interact(eye, ui.id().with(("eye", l.id.0)), Sense::click_and_drag());
+    let eye_sense = if crate::list_drag::prefers_scroll(app.stylus.feed.source()) {
+        Sense::click()
+    } else {
+        Sense::click_and_drag()
+    };
+    let eye_resp = ui.interact(eye, ui.id().with(("eye", l.id.0)), eye_sense);
     // A hidden layer's eye box is left empty (still clickable).
     if l.visible {
         // Centre the drawing in the column while preserving the visibility hit area.
@@ -3726,7 +3742,9 @@ fn layer_drag_and_drop(
     let key = egui::Id::new("layer-drag");
     // A drag from the mask thumbnail (`starts_mask_drag`) moves the mask, not the layer.
     let mask_drag = ctx.data(|d| d.get_temp::<MaskDrag>(mask_drag_key())).is_some_and(|(id, _)| id == l.id.0);
-    if resp.drag_started() && !mask_drag {
+    let source = app.stylus.feed.source();
+    let item = egui::Id::new(("layer-row", l.id.0));
+    if crate::list_drag::may_begin_drag(ctx, source, item, resp) && !mask_drag {
         ctx.data_mut(|d| d.insert_temp(key, l.id.0));
     }
     let Some(dragged) = ctx.data(|d| d.get_temp::<u64>(key)) else { return };
@@ -5051,8 +5069,7 @@ mod toolbar_tests {
     use egui_kittest::kittest::Queryable;
 
     /// #1197: the header chevron switches the toolbar between one and two columns.
-    #[test]
-    fn header_chevron_toggles_two_columns() {
+    fn assert_header_chevron_toggles(kind: crate::theme::ThemeKind) {
         let app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
         let mut h = egui_kittest::Harness::builder().with_size(vec2(800.0, 1400.0)).build_ui_state(
             |ui, app: &mut PhotocraftApp| {
@@ -5064,7 +5081,7 @@ mod toolbar_tests {
             },
             app,
         );
-        PhotocraftApp::setup_context(&h.ctx, crate::theme::ThemeKind::Pro);
+        PhotocraftApp::setup_context(&h.ctx, kind);
         h.run_steps(2);
         let left = |h: &egui_kittest::Harness<'_, PhotocraftApp>| h.ctx.data(|d| d.get_temp::<f32>(egui::Id::new("toolbar-test-left"))).unwrap_or(0.0);
         let single = left(&h);
@@ -5072,13 +5089,24 @@ mod toolbar_tests {
 
         h.get_by_label("Toolbar").click();
         h.run_steps(2);
-        assert!(h.state().ui.panels.toolbar_double);
-        assert!(left(&h) > single + 20.0, "the toolbar did not widen: {single} -> {}", left(&h));
+        assert!(h.state().ui.panels.toolbar_double, "chevron missing or inert under {kind:?}");
+        assert!(left(&h) > single + 20.0, "the toolbar did not widen under {kind:?}: {single} -> {}", left(&h));
 
         h.get_by_label("Toolbar").click();
         h.run_steps(2);
         assert!(!h.state().ui.panels.toolbar_double);
         assert_eq!(left(&h), single);
+    }
+
+    #[test]
+    fn header_chevron_toggles_two_columns() {
+        assert_header_chevron_toggles(crate::theme::ThemeKind::Pro);
+    }
+
+    /// Non-Pro themes also expose the column toggle (Studio previously hid it).
+    #[test]
+    fn header_chevron_toggles_two_columns_studio() {
+        assert_header_chevron_toggles(crate::theme::ThemeKind::Studio);
     }
 
     fn click(h: &mut egui_kittest::Harness<'_, PhotocraftApp>, p: egui::Pos2) {

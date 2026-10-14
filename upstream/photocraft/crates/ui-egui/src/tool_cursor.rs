@@ -32,6 +32,7 @@ enum Shape {
 struct Cached {
     shape: Shape,
     scale: f32,
+    opacity: u8,
     image: CustomCursorImage,
 }
 
@@ -64,7 +65,11 @@ impl egui::plugin::Plugin for CursorLifecycle {
 }
 
 pub(crate) fn circle(painter: &Painter, at: Pos2, radius: f32, centre: bool) -> CursorIcon {
-    show(painter, at, Shape::Circle { radius, centre })
+    circle_with_opacity(painter, at, radius, centre, 1.0)
+}
+
+pub(crate) fn circle_with_opacity(painter: &Painter, at: Pos2, radius: f32, centre: bool, opacity: f32) -> CursorIcon {
+    show_with_opacity(painter, at, Shape::Circle { radius, centre }, opacity)
 }
 
 pub(crate) fn crosshair(painter: &Painter, at: Pos2, length: f32, gap: f32) -> CursorIcon {
@@ -77,8 +82,9 @@ pub(crate) fn outline(painter: &Painter, at: Pos2, rings: Vec<Vec<Vec2>>, centre
 
 /// Can this pass show an OS cursor bitmap? eframe's immediate viewports and its web integration
 /// don't upload cursor images; every desktop root viewport does (winit custom cursors).
+/// The OHOS host forwards stock cursor icons only, so its tool cursors must be painted.
 fn native(ctx: &egui::Context) -> bool {
-    cfg!(not(target_arch = "wasm32")) && ctx.viewport_id() == egui::ViewportId::ROOT
+    cfg!(all(not(target_arch = "wasm32"), not(target_env = "ohos"))) && ctx.viewport_id() == egui::ViewportId::ROOT
 }
 
 /// Bitmap pixels per egui point. winit takes an `NSCursor` image's dimensions as logical points on
@@ -105,45 +111,62 @@ fn hand_with(ctx: &egui::Context, closed: bool, bitmap: bool) -> CursorIcon {
 }
 
 fn show(painter: &Painter, at: Pos2, shape: Shape) -> CursorIcon {
+    show_with_opacity(painter, at, shape, 1.0)
+}
+
+fn show_with_opacity(painter: &Painter, at: Pos2, shape: Shape, opacity: f32) -> CursorIcon {
     let ctx = painter.ctx();
     // Where cursor images can't be uploaded (immediate viewports, the web), paint the shape.
     if native(ctx) {
         let scale = native_scale(ctx);
-        if let Some(image) = cached_image(ctx, &shape, scale) {
+        if let Some(image) = cached_image_with_opacity(ctx, &shape, scale, opacity) {
             ctx.set_cursor_image(Some(image));
             return CursorIcon::None;
         }
         // An enormous tip cannot fit an OS cursor. Preserve its full-size outline, with an OS
         // crosshair at the hotspot so the user still gets immediate position feedback.
-        paint(painter, at, &shape);
-        if let Some(image) = cached_image(ctx, &Shape::Crosshair { length: 6.0, gap: 2.0 }, scale) {
+        paint_with_opacity(painter, at, &shape, opacity);
+        if let Some(image) = cached_image_with_opacity(ctx, &Shape::Crosshair { length: 6.0, gap: 2.0 }, scale, opacity) {
             ctx.set_cursor_image(Some(image));
         }
         return CursorIcon::None;
     }
-    paint(painter, at, &shape);
+    paint_with_opacity(painter, at, &shape, opacity);
     CursorIcon::None
 }
 
 fn cached_image(ctx: &egui::Context, shape: &Shape, scale: f32) -> Option<CustomCursorImage> {
+    cached_image_with_opacity(ctx, shape, scale, 1.0)
+}
+
+fn cached_image_with_opacity(ctx: &egui::Context, shape: &Shape, scale: f32, opacity: f32) -> Option<CustomCursorImage> {
     let id = egui::Id::new("photocraft-tool-cursor");
+    let opacity = opacity_byte(opacity);
     if let Some(cached) = ctx.data(|d| d.get_temp::<Cached>(id))
         && cached.shape == *shape
         && cached.scale == scale
+        && cached.opacity == opacity
     {
         return Some(cached.image);
     }
-    let image = rasterize(shape, scale)?;
-    ctx.data_mut(|d| d.insert_temp(id, Cached { shape: shape.clone(), scale, image: image.clone() }));
+    let image = rasterize_with_opacity(shape, scale, f32::from(opacity) / 255.0)?;
+    ctx.data_mut(|d| d.insert_temp(id, Cached { shape: shape.clone(), scale, opacity, image: image.clone() }));
     Some(image)
 }
 
+#[allow(dead_code)]
 fn paint(painter: &Painter, at: Pos2, shape: &Shape) {
+    paint_with_opacity(painter, at, shape, 1.0)
+}
+
+fn paint_with_opacity(painter: &Painter, at: Pos2, shape: &Shape, opacity: f32) {
     if extent(shape).is_none() {
         return;
     }
     let [dark, light] = crate::theme::Tokens::cursor_outline();
+    let opacity = f32::from(opacity_byte(opacity)) / 255.0;
     for (width, color) in [(3.0, dark), (1.0, light)] {
+        let color = color.gamma_multiply(opacity);
         let stroke = Stroke::new(width, color);
         match shape {
             Shape::Circle { radius, centre } => {
@@ -317,7 +340,12 @@ fn push_stroke_pixel(rgba: &mut Vec<u8>, distance: f32, scale: f32, dark: egui::
     rgba.extend_from_slice(&[white, white, white, (255.0 * alpha).round() as u8]);
 }
 
+#[allow(dead_code)]
 fn rasterize(shape: &Shape, scale: f32) -> Option<CustomCursorImage> {
+    rasterize_with_opacity(shape, scale, 1.0)
+}
+
+fn rasterize_with_opacity(shape: &Shape, scale: f32, opacity: f32) -> Option<CustomCursorImage> {
     if !scale.is_finite() || scale <= 0.0 {
         return None;
     }
@@ -355,6 +383,11 @@ fn rasterize(shape: &Shape, scale: f32) -> Option<CustomCursorImage> {
         for &d in &dist {
             push_stroke_pixel(&mut rgba, d, scale, dark, light);
         }
+        if opacity < 1.0 {
+            for px in rgba.chunks_exact_mut(4) {
+                px[3] = (f32::from(px[3]) * opacity).round() as u8;
+            }
+        }
         return Some(CustomCursorImage { rgba: Arc::from(rgba), size: [side, side], hotspot: [hot, hot] });
     }
     for row in 0..side {
@@ -367,10 +400,14 @@ fn rasterize(shape: &Shape, scale: f32) -> Option<CustomCursorImage> {
             let alpha = a_light + a_dark * (1.0 - a_light);
             // Straight RGBA, as required by winit, not egui's premultiplied representation.
             let white = if alpha > 0.0 { (255.0 * a_light / alpha).round() as u8 } else { 0 };
-            rgba.extend_from_slice(&[white, white, white, (255.0 * alpha).round() as u8]);
+            rgba.extend_from_slice(&[white, white, white, (255.0 * alpha * opacity).round() as u8]);
         }
     }
     Some(CustomCursorImage { rgba: Arc::from(rgba), size: [side, side], hotspot: [hot, hot] })
+}
+
+fn opacity_byte(opacity: f32) -> u8 {
+    if opacity.is_finite() { (opacity.clamp(0.0, 1.0) * 255.0).round() as u8 } else { 0 }
 }
 
 #[cfg(test)]

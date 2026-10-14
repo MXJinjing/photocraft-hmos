@@ -3230,3 +3230,12 @@ curves	Smooth	매끄럽게
 	Remove after each stroke	획마다 제거
 	Apply the removal ({key})	제거 적용 ({key})
 	Strokes to remove: {n} (Enter applies, Esc cancels)	제거할 획: {n} (Enter 적용, Esc 취소)
+
+
+# Status bar panel controls
+	Only show canvas	캔버스만 표시
+	Right sidebar	오른쪽 사이드바
+	Connected pen	연결된 펜
+	No pen connected	연결된 펜 없음
+	Battery unavailable	배터리 정보 없음
+	Battery: {percent}%	배터리: {percent}%

@@ -1,7 +1,7 @@
 {
   "name": "entry",
   "version": "1.0.0",
-  "description": "PhotoCraft entry module",
+  "description": "PhotoCraft For HarmonyOS entry module",
   "main": "",
   "author": "",
   "license": "MIT OR Apache-2.0",
