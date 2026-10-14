@@ -41,6 +41,8 @@ void pc_reply(uint64_t,bool,const uint8_t*,size_t,const uint8_t*,size_t);
 void pc_open(const uint8_t*,size_t,const uint8_t*,size_t);
 void pc_reply_file(uint64_t,const uint8_t*,size_t,int32_t);
 void pc_open_file(const uint8_t*,size_t,int32_t);
+void pc_drop_file(const uint8_t*,size_t,int32_t,float,float);
+void pc_drop(const uint8_t*,size_t,const uint8_t*,size_t,float,float);
 void pc_command(const uint8_t*,size_t);
 }
 namespace {
@@ -304,6 +306,25 @@ napi_value OpenFile(napi_env env,napi_callback_info info) {
     pc_open_file(reinterpret_cast<const uint8_t*>(name.data()),name.size(),fd);
     return Undefined(env);
 }
+napi_value Drop(napi_env env,napi_callback_info info) {
+    size_t n=4;napi_value args[4];napi_get_cb_info(env,info,&n,args,nullptr,nullptr);
+    if(n!=4)return Undefined(env);
+    auto name=String(env,args[0]);void* data=nullptr;size_t size=0;double x=0,y=0;
+    if(napi_get_arraybuffer_info(env,args[1],&data,&size)!=napi_ok ||
+       napi_get_value_double(env,args[2],&x)!=napi_ok || napi_get_value_double(env,args[3],&y)!=napi_ok)return Undefined(env);
+    pc_drop(reinterpret_cast<const uint8_t*>(name.data()),name.size(),static_cast<uint8_t*>(data),size,static_cast<float>(x),static_cast<float>(y));
+    return Undefined(env);
+}
+napi_value DropFile(napi_env env,napi_callback_info info) {
+    size_t n=4;napi_value args[4];napi_get_cb_info(env,info,&n,args,nullptr,nullptr);
+    if(n!=4)return Undefined(env);
+    int32_t fd=-1;double x=0,y=0;
+    if(napi_get_value_int32(env,args[1],&fd)!=napi_ok || napi_get_value_double(env,args[2],&x)!=napi_ok ||
+       napi_get_value_double(env,args[3],&y)!=napi_ok)return Undefined(env);
+    auto name=String(env,args[0]);
+    pc_drop_file(reinterpret_cast<const uint8_t*>(name.data()),name.size(),fd,static_cast<float>(x),static_cast<float>(y));
+    return Undefined(env);
+}
 napi_value Active(napi_env env,napi_callback_info info) {
     size_t n=1;napi_value arg;bool active=false;napi_get_cb_info(env,info,&n,&arg,nullptr,nullptr);
     if(n)napi_get_value_bool(env,arg,&active);pc_active(active);return Undefined(env);
@@ -323,6 +344,8 @@ napi_value Init(napi_env env,napi_value exports) {
         {"open",nullptr,Open,nullptr,nullptr,nullptr,napi_default,nullptr},
         {"replyFile",nullptr,ReplyFile,nullptr,nullptr,nullptr,napi_default,nullptr},
         {"openFile",nullptr,OpenFile,nullptr,nullptr,nullptr,napi_default,nullptr},
+        {"dropFile",nullptr,DropFile,nullptr,nullptr,nullptr,napi_default,nullptr},
+        {"drop",nullptr,Drop,nullptr,nullptr,nullptr,napi_default,nullptr},
         {"active",nullptr,Active,nullptr,nullptr,nullptr,napi_default,nullptr},
         {"close",nullptr,Close,nullptr,nullptr,nullptr,napi_default,nullptr},
         {"command",nullptr,Command,nullptr,nullptr,nullptr,napi_default,nullptr}

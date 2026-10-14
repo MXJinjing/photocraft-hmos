@@ -1,0 +1,7 @@
+10-14 16:41:05.575 25574 25741 I A0D001/thub.storytold.photocraft.hmos/PhotoCraft: Rust notification {"kind":"stage","text":"Rust worker entered"}
+10-14 16:41:05.591 25574 25741 I A0D001/thub.storytold.photocraft.hmos/PhotoCraft: Rust notification {"kind":"stage","text":"egui context ready"}
+10-14 16:41:05.648 25574 25741 I A0D001/thub.storytold.photocraft.hmos/PhotoCraft: Rust notification {"kind":"stage","text":"editor ready"}
+10-14 16:41:05.691 25574 25741 I A0D001/thub.storytold.photocraft.hmos/PhotoCraft: Rust notification {"kind":"stage","text":"fonts ready"}
+10-14 16:41:05.692 25574 25741 I A0D001/thub.storytold.photocraft.hmos/PhotoCraft: Rust notification {"kind":"stage","text":"creating native GPU surface"}
+10-14 16:41:05.714 25574 25741 I A0D001/thub.storytold.photocraft.hmos/PhotoCraft: Rust notification {"kind":"stage","text":"Display P3 output (system managed)"}
+10-14 16:41:05.732 25574 25741 I A0D001/thub.storytold.photocraft.hmos/PhotoCraft: Rust notification {"kind":"ready","text":"Native egui / wgpu GLES"}

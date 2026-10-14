@@ -169,7 +169,7 @@ impl PhotocraftApp {
     }
 
     /// Where a drop at `at` lands. Over a window or dialog it's neither the canvas nor the tabs.
-    pub(crate) fn drop_target(&self, ctx: &egui::Context, at: Option<egui::Pos2>) -> DropTarget {
+    pub fn drop_target(&self, ctx: &egui::Context, at: Option<egui::Pos2>) -> DropTarget {
         let Some(p) = at.filter(|p| ctx.layer_id_at(*p).is_none_or(|l| l.order == egui::Order::Background)) else {
             return DropTarget::Elsewhere;
         };
