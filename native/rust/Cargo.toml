@@ -10,6 +10,10 @@ license = "MIT OR Apache-2.0"
 [lib]
 crate-type = ["staticlib", "rlib"]
 
+[features]
+# Simulator-only fault injection; never enabled in normal HAPs.
+host-recovery-test = []
+
 [dependencies]
 photocraft-ui-egui = { path = "../../upstream/photocraft/crates/ui-egui", default-features = false, features = ["harmonyos-ui"] }
 photocraft-text = { path = "../../upstream/photocraft/crates/text" }

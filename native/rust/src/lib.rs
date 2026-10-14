@@ -7,9 +7,9 @@
     clippy::todo,
     clippy::unreachable
 )]
-mod bridge;
 #[cfg(any(target_env = "ohos", test))]
 mod appearance;
+mod bridge;
 #[cfg(any(target_env = "ohos", test))]
 mod chrome;
 #[cfg(any(target_env = "ohos", test))]
@@ -18,9 +18,13 @@ mod cursor;
 mod display_color;
 #[cfg(any(target_env = "ohos", test))]
 mod documents;
+#[cfg(feature = "host-recovery-test")]
+mod fault_injection;
 #[cfg(any(target_env = "ohos", test))]
 mod ime;
 mod input;
+#[cfg(any(target_env = "ohos", test))]
+mod recovery;
 #[cfg(target_env = "ohos")]
 mod render;
 #[cfg(any(target_env = "ohos", test))]
@@ -360,7 +364,14 @@ fn worker(config: Config, rx: mpsc::Receiver<Message>) {
     ctx.set_request_repaint_callback(|info| send(Message::Wake(info.delay)));
     app.perf.gpu_info.canvas = "cpu".into();
     app.perf.gpu_info.selected = "cpu".into();
-    let mut render: Option<render::Render> = None;
+    let mut render = match render::Render::new(config.display_p3) {
+        Ok(render) => render,
+        Err(error) => {
+            bridge::notify(0, "error", &error, &[]);
+            return;
+        }
+    };
+    let ui_pass_in_progress = std::cell::Cell::new(false);
     let mut active = true;
     let mut visible = false;
     let mut deadline: Option<Instant> = None;
@@ -375,13 +386,15 @@ fn worker(config: Config, rx: mpsc::Receiver<Message>) {
     // 输入、窗口生命周期和帧消息共用一个队列，编辑器状态仅在 worker 上修改。
     let mut cursor = cursor::CursorSync::default();
     loop {
+        // Repaint callbacks and input must not bypass a failed producer's backoff.
+        deadline = deadline.map(|next| render.recovery.frame_deadline(next));
         let wait = deadline.map(|d| d.saturating_duration_since(Instant::now()));
         let message = match wait {
             Some(wait) => match rx.recv_timeout(wait) {
                 Ok(m) => m,
                 Err(mpsc::RecvTimeoutError::Timeout) => {
                     deadline = None;
-                    if active && visible && render.is_some() {
+                    if active && visible && render.attached() {
                         unsafe {
                             pc_request_vsync();
                         }
@@ -395,50 +408,64 @@ fn worker(config: Config, rx: mpsc::Receiver<Message>) {
                 Err(_) => break,
             },
         };
+        let rendering_operation = matches!(
+            &message,
+            Message::Attach(..) | Message::Resize(..) | Message::Detach | Message::Frame
+        );
         let result =
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| -> Result<(), String> {
                 match message {
                     Message::Attach(ptr, w, h) => {
+                        if render.recovery.halted {
+                            return Ok(());
+                        }
                         chrome.invalidate();
                         cursor.invalidate();
-                        bridge::notify(0, "stage", "creating native GPU surface", &[]);
-                        if let Some(r) = render.as_mut() {
-                            r.bind(render::Window(ptr), w, h)?;
-                        } else {
-                            let r =
-                                render::Render::new(render::Window(ptr), w, h, config.display_p3)?;
-                            r.color.install(&mut app.session.color);
-                            app.perf.gpu_info.set_adapter(&r.adapter.get_info());
-                            app.perf.gpu_info.selected = "gl".into();
-                            if r.adapter.get_info().device_type == wgpu::DeviceType::Cpu {
-                                let reason: String =
-                                    "No hardware graphics adapter; using CPU composition".into();
-                                app.perf.gpu_info.fallback = Some(reason.clone());
-                                app.perf.gpu_fallback = Some(reason);
-                            } else {
-                                app.set_wgpu(r.egui_render_state());
-                            }
-                            render = Some(r);
-                        }
+                        bridge::notify(
+                            0,
+                            "stage",
+                            "creating native GPU surface",
+                            &[],
+                        );
                         visible = w > 0 && h > 0;
+                        let initialize_gpu = render.egui_render_state().is_none();
+                        render.bind(render::Window(ptr), w, h)?;
+                        render.color().install(&mut app.session.color);
+                        if initialize_gpu && let Some(rs) = render.egui_render_state() {
+                            app.perf.gpu_info.set_adapter(&rs.adapter.get_info());
+                            app.perf.gpu_info.selected = "gl".into();
+                            if rs.adapter.get_info().device_type == wgpu::DeviceType::Cpu {
+                                return Err(
+                                    "No hardware GPU adapter; drawing stopped; restart PhotoCraft".into()
+                                );
+                            }
+                            app.set_wgpu(rs);
+                            render.observe_canvas(&app);
+                            if !app.gpu_active() {
+                                return Err(app
+                                    .perf
+                                    .gpu_fallback
+                                    .clone()
+                                    .unwrap_or_else(|| "GPU canvas initialization failed".into()));
+                            }
+                        }
                         bridge::resume();
                         deadline = Some(Instant::now());
                         bridge::notify(0, "ready", "Native egui / wgpu GLES", &[]);
                     }
                     Message::Resize(w, h) => {
-                        visible = w > 0 && h > 0;
-                        if let Some(r) = render.as_mut() {
-                            r.resize(w, h)?;
+                        if render.recovery.halted {
+                            return Ok(());
                         }
+                        visible = w > 0 && h > 0;
+                        render.resize(w, h)?;
                         deadline = Some(Instant::now());
                     }
                     Message::Detach => {
                         ime.suspend();
-                        if let Some(r) = render.as_mut() {
-                            r.detach();
-                        }
                         visible = false;
                         deadline = None;
+                        render.detach();
                         input.cancel(egui::Pos2::ZERO, &mut events);
                     }
                     Message::Active(value) => {
@@ -455,6 +482,21 @@ fn worker(config: Config, rx: mpsc::Receiver<Message>) {
                         }
                     }
                     Message::Input(value) => {
+                        #[cfg(feature = "host-recovery-test")]
+                        if value.kind == "key" && value.action == 0 && value.ctrl && value.alt {
+                            if value.code == 2032 {
+                                // Ctrl+Alt+P: panic inside the next UI pass.
+                                fault_injection::request();
+                                deadline = Some(Instant::now());
+                                return Ok(());
+                            }
+                            if value.code == 2023 {
+                                // Ctrl+Alt+G: mark the shared device lost.
+                                render.inject_fault();
+                                deadline = Some(Instant::now());
+                                return Ok(());
+                            }
+                        }
                         if value.kind == "system_theme" {
                             appearance.publish_token(&value.text);
                             deadline = Some(Instant::now());
@@ -499,12 +541,25 @@ fn worker(config: Config, rx: mpsc::Receiver<Message>) {
                         if !active || !visible {
                             return Ok(());
                         }
-                        let Some(r) = render.as_mut() else {
+                        if render.recovery.halted {
+                            deadline = None;
                             return Ok(());
-                        };
+                        }
+                        if !render.attached() {
+                            return Ok(());
+                        }
+                        let now = Instant::now();
+                        let next = render.recovery.frame_deadline(now);
+                        if next > now {
+                            deadline = Some(next);
+                            return Ok(());
+                        }
+                        if let Some(fault) = render.fault() {
+                            return Err(fault);
+                        }
                         let size = egui::vec2(
-                            r.config.width as f32 / (config.scale * ctx.zoom_factor()),
-                            r.config.height as f32 / (config.scale * ctx.zoom_factor()),
+                            render.width as f32 / (config.scale * ctx.zoom_factor()),
+                            render.height as f32 / (config.scale * ctx.zoom_factor()),
                         );
                         let mut raw = egui::RawInput {
                             screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
@@ -530,7 +585,9 @@ fn worker(config: Config, rx: mpsc::Receiver<Message>) {
                             config.scale * ctx.zoom_factor(),
                         );
                         ime.pointer_input(&raw.events);
+                        ui_pass_in_progress.set(true);
                         let mut output = editor_frame(&ctx, &mut app, raw);
+                        ui_pass_in_progress.set(false);
                         // Preferences and menu actions have applied the theme by this point.
                         if let Some(color) = chrome.update(app.ui.theme) {
                             bridge::notify(0, "chrome", &color, &[]);
@@ -575,32 +632,51 @@ fn worker(config: Config, rx: mpsc::Receiver<Message>) {
                             .get(&egui::ViewportId::ROOT)
                             .map(|v| v.repaint_delay)
                             .unwrap_or(Duration::MAX);
-                        if !r.paint(&ctx, output)? {
-                            deadline = Some(Instant::now() + Duration::from_millis(50));
-                        } else if let Some(next) = Instant::now().checked_add(delay) {
-                            deadline = Some(deadline.map_or(next, |d| d.min(next)));
+                        if render.paint(&ctx, output)? {
+                            if let Some(next) = Instant::now().checked_add(delay) {
+                                deadline = Some(deadline.map_or(next, |d| d.min(next)));
+                            }
                         }
                     }
                 }
                 Ok(())
             }));
-        match result {
-            Ok(Ok(())) => {}
-            Ok(Err(e)) => {
-                app.ui.status = e.clone();
+        let failure = match result {
+            Ok(Ok(())) => None,
+            Ok(Err(error)) if rendering_operation => Some(error),
+            Ok(Err(error)) => {
+                app.ui.status = error.clone();
                 app.ui.status_error = true;
-                bridge::notify(0, "error", &e, &[]);
+                bridge::notify(0, "error", &error, &[]);
+                None
             }
             Err(_) => {
-                bridge::notify(
-                    0,
-                    "error",
-                    "Native rendering failed; document remains in memory",
-                    &[],
-                );
-                render = None;
-                deadline = None;
+                Some("Native rendering panic; GPU drawing stopped; restart PhotoCraft to recover".into())
             }
+        };
+        if let Some(reason) = failure {
+            bridge::notify(
+                0,
+                "diagnostic",
+                &format!("Native rendering recovery: {reason}"),
+                &[],
+            );
+            recovery::stop_gpu(&mut app, &reason);
+            if ui_pass_in_progress.get() {
+                let _ = recovery::finish_interrupted_pass(&ctx);
+                ui_pass_in_progress.set(false);
+                // Already mirrored at startup; replaying the older atlas over the
+                // completed interrupted pass would replace newer font patches.
+                initial_textures.clear();
+            }
+            render.halt();
+            bridge::notify(
+                0,
+                "error",
+                &format!("GPU rendering stopped: {reason}. Restart PhotoCraft to recover."),
+                &[],
+            );
+            deadline = None;
         }
     }
 }
@@ -655,6 +731,8 @@ fn editor_frame(
             first_pass = false;
             app.host_logic(ui.ctx());
         }
+        #[cfg(feature = "host-recovery-test")]
+        fault_injection::check();
         app.host_ui(ui);
     })
 }

@@ -1,6 +1,6 @@
 # HarmonyOS native self-drawing host
 
-This repository runs PhotoCraft v0.6.0 as a Rust native library inside the HAP. XComponent supplies a NativeWindow; wgpu's GLES/EGL backend and egui-wgpu draw the original editor. The document compositor remains on the CPU in this first iteration.
+This repository runs PhotoCraft as a Rust native library inside the HAP. XComponent supplies a NativeWindow; wgpu's GLES/EGL backend and egui-wgpu draw the original editor and share the device with the upstream GPU document compositor. GPU failure stops native drawing and leaves the current system-composited frame in place until the app is restarted.
 
 The adapter is a separate Cargo workspace, outside the upstream subtree. Upstream algorithms and documents are reused through path dependencies. Its lockfile pins the same dependency versions as the upstream lockfile; do not regenerate it wholesale when updating upstream. Both workspaces use the verified wgpu-hal path patch.
 
@@ -26,6 +26,8 @@ Native Rust and ArkTS/C++ changes require rebuilding and installing the HAP. `sc
 
 One Rust worker owns the editor, egui context, device and renderer. XComponent callbacks copy input to its channel. A native window reference is acquired in the surface callback and released after the worker drops its surface. Device, renderer and texture cache survive surface detach/rebind.
 
+The host retains its own window reference and keeps rendering state isolated from the bridge callbacks. Device faults, rendering errors and escaped Rust panics drop GPU presentation, halt the worker's frame loop and report an error through ArkUI. The existing system-composited frame remains visible where the window surface permits it; no CPU NativeWindow producer is attempted. Restarting PhotoCraft creates a fresh GPU surface. See [rendering stop and verification](recovery.md).
+
 Only requested frames use Native VSync. ArkTS receives system-service requests via N-API's thread-safe callback. The Rust worker waits for picker completion; the ArkTS main thread remains available. The writer returns success only after all bytes are written, flushed and the file descriptor is closed. Picker cancellation and write errors keep the document dirty. Each Save opens the system picker before encoding. ArkTS associates the selected display name with its URI; the encoder uses the display name and the writer consumes the URI only through system file APIs. Automatic migration of Web storage is outside this experiment.
 
 After each editor frame, the adapter checks `ThemeKind::chrome_css()` and sends a `chrome` notification on the first frame or a theme change. Surface reattachment and foreground activation invalidate that cache. ArkTS validates and stores the colour in `photocraftChrome`, updates the page background, and reuses `SystemBars.ets` to paint the status/navigation areas with contrasting icons. Window-stage completion and foreground restoration use the stored colour, so they cannot overwrite an already received theme with the loading colour. The XComponent continues to lay out inside the safe area.
@@ -42,7 +44,7 @@ The custom-editor IME adapter binds both egui text fields and canvas Type sessio
 
 The v0.5.0 menu comparison isolated Help's focus loss to opening on press before the title release. Help now opens on a completed click and closes on outside clicks or an explicit command selection. Its search retains focus through keyboard resize and editor taps, allowing the native IME bridge to show the keyboard automatically. Other menus retain upstream press-to-open behaviour.
 
-System clipboard, automatic recovery and large-image performance acceptance are deferred. Fonts and signing secrets are never committed.
+System clipboard, document crash recovery and large-image performance acceptance are deferred. Fonts and signing secrets are never committed.
 
 ## Touch regression checks
 
