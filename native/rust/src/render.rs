@@ -2,7 +2,7 @@
 use raw_window_handle::{
     DisplayHandle, HasDisplayHandle, HasWindowHandle, OhosNdkWindowHandle, WindowHandle,
 };
-use std::{ffi::c_void, ptr::NonNull};
+use std::{ffi::c_void, ptr::NonNull, sync::Arc};
 
 unsafe extern "C" {
     fn OH_NativeWindow_NativeObjectUnreference(object: *mut c_void) -> i32;
@@ -32,25 +32,25 @@ impl HasWindowHandle for Window {
         Ok(unsafe { WindowHandle::borrow_raw(OhosNdkWindowHandle::new(ptr).into()) })
     }
 }
-pub struct Render {
+struct GpuRender {
     pub surface: Option<wgpu::Surface<'static>>,
     pub device: wgpu::Device,
     pub queue: wgpu::Queue,
-    pub renderer: egui_wgpu::Renderer,
+    pub renderer: Arc<egui::mutex::RwLock<egui_wgpu::Renderer>>,
     pending_free: Vec<egui::TextureId>,
     pub config: wgpu::SurfaceConfiguration,
     pub adapter: wgpu::Adapter,
     pub instance: wgpu::Instance,
     pub window: Option<std::sync::Arc<Window>>,
     pub color: crate::display_color::DisplayColor,
+    health: photocraft_ui_egui::gpu_canvas::DeviceHealth,
 }
-impl Render {
-    pub fn new(window: Window, w: u32, h: u32, request_p3: bool) -> Result<Self, String> {
+impl GpuRender {
+    pub fn new(window: Arc<Window>, w: u32, h: u32, request_p3: bool) -> Result<Self, String> {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: wgpu::Backends::GL,
             ..wgpu::InstanceDescriptor::new_without_display_handle()
         });
-        let window = std::sync::Arc::new(window);
         let surface = instance
             .create_surface(window.clone())
             .map_err(|e| e.to_string())?;
@@ -101,7 +101,12 @@ impl Render {
             },
             &[],
         );
-        let renderer = egui_wgpu::Renderer::new(&device, config.format, Default::default());
+        let renderer = Arc::new(egui::mutex::RwLock::new(egui_wgpu::Renderer::new(
+            &device,
+            config.format,
+            Default::default(),
+        )));
+        let health = photocraft_ui_egui::gpu_canvas::DeviceHealth::watch(&device);
         Ok(Self {
             surface: Some(surface),
             device,
@@ -113,7 +118,23 @@ impl Render {
             instance,
             window: Some(window),
             color,
+            health,
         })
+    }
+    pub fn egui_render_state(&self) -> egui_wgpu::RenderState {
+        egui_wgpu::RenderState {
+            adapter: self.adapter.clone(),
+            available_adapters: vec![self.adapter.clone()],
+            instance: self.instance.clone(),
+            device: self.device.clone(),
+            queue: self.queue.clone(),
+            target_format: self.config.format,
+            renderer: self.renderer.clone(),
+            surface_config: egui_wgpu::SurfaceConfig {
+                present_mode: self.config.present_mode,
+                desired_maximum_frame_latency: Some(self.config.desired_maximum_frame_latency),
+            },
+        }
     }
     pub fn resize(&mut self, w: u32, h: u32) -> Result<(), String> {
         if w == 0 || h == 0 {
@@ -134,8 +155,7 @@ impl Render {
         self.surface = None;
         self.window = None;
     }
-    pub fn bind(&mut self, window: Window, w: u32, h: u32) -> Result<(), String> {
-        let window = std::sync::Arc::new(window);
+    pub fn bind(&mut self, window: Arc<Window>, w: u32, h: u32) -> Result<(), String> {
         let surface = self
             .instance
             .create_surface(window.clone())
@@ -164,17 +184,24 @@ impl Render {
         ctx: &egui::Context,
         mut output: egui::FullOutput,
     ) -> Result<bool, String> {
-        for (id, deltas) in &mut output.textures_delta.set {
+        // The host already mirrored these images. Consume egui's delta container
+        // before driver calls so unwinding cannot trigger its debug Drop assertion.
+        let mut texture_updates = std::mem::take(&mut output.textures_delta.set);
+        self.pending_free.extend(output.textures_delta.free.drain());
+        output.textures_delta.clear();
+        if let Some(fault) = self.health.fault() {
+            return Err(fault.to_string());
+        }
+        // Keep the shared renderer alive independently of `self`: a lost surface can be
+        // rebound while this guard owns the callback resources.
+        let shared_renderer = self.renderer.clone();
+        let mut renderer = shared_renderer.write();
+        for (id, deltas) in &mut texture_updates {
             for delta in deltas {
                 self.color.texture(ctx, *id, &mut delta.image);
-                self.renderer
-                    .update_texture(&self.device, &self.queue, *id, delta);
+                renderer.update_texture(&self.device, &self.queue, *id, delta);
             }
         }
-        self.pending_free.extend(output.textures_delta.free.drain());
-        // Atlas updates have been uploaded. egui requires deltas to be consumed
-        // explicitly, including when a lost/occluded surface skips presentation.
-        output.textures_delta.clear();
         let Some(surface) = &self.surface else {
             return Ok(false);
         };
@@ -217,8 +244,7 @@ impl Render {
         };
         let mut encoder = self.device.create_command_encoder(&Default::default());
         let mut commands =
-            self.renderer
-                .update_buffers(&self.device, &self.queue, &mut encoder, &jobs, &screen);
+            renderer.update_buffers(&self.device, &self.queue, &mut encoder, &jobs, &screen);
         let view = frame.texture.create_view(&Default::default());
         {
             let attachments = [Some(wgpu::RenderPassColorAttachment {
@@ -240,16 +266,138 @@ impl Render {
                 color_attachments: &attachments,
                 ..Default::default()
             });
-            self.renderer
-                .render(&mut pass.forget_lifetime(), &jobs, &screen);
+            renderer.render(&mut pass.forget_lifetime(), &jobs, &screen);
         }
         commands.push(encoder.finish());
         self.queue.submit(commands);
         self.queue.present(frame);
         for id in self.pending_free.drain(..) {
-            self.renderer.free_texture(&id);
+            renderer.free_texture(&id);
+        }
+        if let Some(fault) = self.health.fault() {
+            return Err(fault.to_string());
         }
         Ok(true)
+    }
+}
+
+/// Own the native reference independently of GPU lifetime. A panic during GPU
+/// creation, drawing or teardown cannot invalidate the host's bookkeeping.
+pub struct Render {
+    pub width: u32,
+    pub height: u32,
+    window: Option<Arc<Window>>,
+    gpu: Option<GpuRender>,
+    pub recovery: crate::recovery::Recovery,
+    cpu_color: crate::display_color::DisplayColor,
+    request_p3: bool,
+    #[cfg(feature = "host-recovery-test")]
+    injected_fault: Option<String>,
+}
+impl Render {
+    pub fn new(request_p3: bool) -> Result<Self, String> {
+        Ok(Self {
+            width: 0,
+            height: 0,
+            window: None,
+            gpu: None,
+            recovery: Default::default(),
+            cpu_color: crate::display_color::DisplayColor::new(false)?,
+            request_p3,
+            #[cfg(feature = "host-recovery-test")]
+            injected_fault: None,
+        })
+    }
+    pub fn attached(&self) -> bool {
+        self.window.is_some()
+    }
+    pub fn color(&self) -> &crate::display_color::DisplayColor {
+        self.gpu.as_ref().map_or(&self.cpu_color, |gpu| &gpu.color)
+    }
+    pub fn fault(&self) -> Option<String> {
+        #[cfg(feature = "host-recovery-test")]
+        if let Some(fault) = &self.injected_fault {
+            return Some(fault.clone());
+        }
+        self.gpu
+            .as_ref()
+            .and_then(|gpu| gpu.health.fault())
+            .map(|fault| fault.to_string())
+    }
+    #[cfg(feature = "host-recovery-test")]
+    pub fn inject_fault(&mut self) {
+        if let Some(gpu) = &self.gpu {
+            gpu.health.mark(photocraft_ui_egui::gpu_canvas::Fault::Lost(
+                "injected native device loss".into(),
+            ));
+        } else {
+            self.injected_fault = Some("injected native device loss (CPU producer)".into());
+        }
+    }
+    pub fn egui_render_state(&self) -> Option<egui_wgpu::RenderState> {
+        self.gpu.as_ref().map(GpuRender::egui_render_state)
+    }
+    pub fn observe_canvas(&mut self, app: &photocraft_ui_egui::PhotocraftApp) {
+        // GpuCanvas installs the device's single callback pair. Keep that same
+        // flag in the host even after upstream removes the canvas on a fault.
+        if let Some(health) = app.gpu_health()
+            && let Some(gpu) = self.gpu.as_mut()
+        {
+            gpu.health = health;
+        }
+    }
+    pub fn bind(&mut self, window: Window, w: u32, h: u32) -> Result<(), String> {
+        if self.recovery.halted {
+            return Ok(());
+        }
+        self.window = Some(Arc::new(window));
+        self.width = w;
+        self.height = h;
+        let window = self.window.clone().ok_or("native window unavailable")?;
+        if let Some(gpu) = self.gpu.as_mut() {
+            gpu.bind(window, w, h)?;
+        } else {
+            self.gpu = Some(GpuRender::new(window, w, h, self.request_p3)?);
+        }
+        Ok(())
+    }
+    pub fn resize(&mut self, w: u32, h: u32) -> Result<(), String> {
+        self.width = w;
+        self.height = h;
+        if self.recovery.halted {
+            return Ok(());
+        }
+        if w == 0 || h == 0 {
+            return Ok(());
+        }
+        if let Some(gpu) = self.gpu.as_mut() {
+            gpu.resize(w, h)
+        } else {
+            Ok(())
+        }
+    }
+    pub fn detach(&mut self) {
+        if let Some(gpu) = self.gpu.as_mut() {
+            gpu.detach();
+        }
+        self.window = None;
+    }
+    pub fn halt(&mut self) {
+        if let Some(gpu) = self.gpu.take() {
+            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| drop(gpu)));
+        }
+        self.recovery.failed();
+    }
+    pub fn paint(
+        &mut self,
+        ctx: &egui::Context,
+        output: egui::FullOutput,
+    ) -> Result<bool, String> {
+        if self.recovery.halted || !self.attached() || self.width == 0 || self.height == 0 {
+            return Ok(false);
+        }
+        let gpu = self.gpu.as_mut().ok_or("native GPU renderer unavailable")?;
+        gpu.paint(ctx, output)
     }
 }
 

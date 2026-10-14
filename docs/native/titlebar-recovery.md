@@ -20,7 +20,26 @@ Validation:
 - Dual-target Rust release build and signed HAP build passed; `verify_native.py` passed (2026-10-10 validation).
 - Installed on real device `3GLUN25314G05064` after confirming the app had no open documents (2026-10-10).
 - Floating-window and restored foreground large-window screenshots show workspace/stylus controls clear of the native caption buttons. Device log reports a 139×37 vp caption rectangle and 147 vp reserved width.
-- The attempted maximize-button interaction returned to the desktop; this does not establish a complete maximize/recover interaction test. Intermittent failures across repeated transitions remain to be observed.
-- 2026-10-11 freeform-entry fix: CLI unit tests only; real-device verification deferred to the user.
+- The 2026-10-10 maximize-button attempt returned to the desktop; that attempt alone did not establish a complete maximize/recover interaction test. See the later user validation below.
+- 2026-10-11 freeform-entry fix: CLI unit tests passed; device validation was initially deferred to the user.
+
+## Real-device validation, 2026-10-14
+
+- The user confirmed that freeform mode works on their Pad. A captured 2800×1840 frame shows the desktop behind PhotoCraft, native caption buttons, and the resize affordance. `WindowManagerService` reported `photocraft0` at `[234,145,2345,1579]`, visible and focusable, with `DecoStatus: true`.
+- The user also tested maximization and window resizing successfully, and supplied the two screenshots below, taken at 16:06:27 and 16:06:36 (Asia/Shanghai). This closes the earlier pending manual acceptance for maximization and resizing. These are user-run tests; the screenshots document their resulting states rather than an automated transition sequence.
+- The maximized view renders the editor across the available display area. The smaller floating view renders within the new window bounds and keeps native caption buttons clear of workspace controls. The smaller view also shows clipping of the large start-page heading and the wide brush toolbar; this layout limitation remains visible in the evidence and is not a GPU recovery failure.
+- Repeated transition stress testing and fault injection during a resize are not established by these screenshots.
+
+### Captured floating window
+
+![PhotoCraft in HarmonyOS freeform mode](titlebar-recovery-freeform.jpeg)
+
+### User-tested maximized window
+
+![PhotoCraft maximized on the Pad at 16:06:27](titlebar-recovery-maximized.jpg)
+
+### User-tested resized floating window
+
+![PhotoCraft after resizing on the Pad at 16:06:36](titlebar-recovery-resized.jpg)
 
 Local evidence (not committed): `work/titlebar-recovery-after.jpeg`, `work/titlebar-recovery-restored.jpeg`, `work/titlebar-recovery-hilog.log`, `work/titlebar-recovery-build.log`.

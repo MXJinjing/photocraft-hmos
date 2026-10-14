@@ -139,7 +139,7 @@ export class NativeDropAdapter {
       return new DroppedImage(source.name.length > 0 ? source.name : 'dropped-image', new ArrayBuffer(0), file);
     } catch (error) {
       try { await fileIo.close(file); } catch (closeError) { console.error('Drop file close failed'); }
-      throw error;
+      throw error as Error;
     }
   }
 
