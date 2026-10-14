@@ -476,6 +476,8 @@ struct Writer<'a> {
     next: usize,
     sample: CSample,
     warnings: Warnings,
+    /// Only collect the warnings ([`losses`]): no pixels are rendered or encoded.
+    dry: bool,
 }
 
 /// Straight RGBA floats as interleaved PNG samples at `sample` depth.
@@ -559,6 +561,20 @@ impl Writer<'_> {
         attrs
     }
 
+    /// What saving a non-group layer's pixels loses: a type, shape, fill or smart object layer
+    /// becomes pixels, and its pixel mask is applied to them.
+    fn content_warnings(&mut self, layer: &Layer) {
+        if !matches!(layer.content, LayerContent::Raster(_)) {
+            self.warnings.layer(&layer.name, &format!("{} layers are saved to OpenRaster as pixels", layer.content.kind_name().to_lowercase()));
+        }
+        if let Some(mask) = layer.mask.as_ref().filter(|m| m.enabled) {
+            if mask.feather > 0.0 {
+                self.warnings.layer(&layer.name, "layer mask feathering is not applied in OpenRaster");
+            }
+            self.warnings.layer(&layer.name, "layer masks were applied to the layer pixels");
+        }
+    }
+
     /// The layer's own pixels (straight RGBA floats) and their bounds; its pixel mask applied.
     fn pixels(&mut self, layer: &Layer) -> (Rect, Vec<[f32; 4]>) {
         let canvas = self.doc.bounds();
@@ -578,15 +594,10 @@ impl Writer<'_> {
                 solo.mask = None;
                 solo.effects = Default::default();
                 let r = photocraft_compose::composite_bounds(&solo, canvas).unwrap_or(canvas).intersect(&canvas);
-                self.warnings.layer(&layer.name, &format!("{} layers are saved to OpenRaster as pixels", layer.content.kind_name().to_lowercase()));
                 (r, photocraft_compose::render_layer(&solo, r).px)
             }
         };
         if let Some(mask) = layer.mask.as_ref().filter(|m| m.enabled) {
-            if mask.feather > 0.0 {
-                self.warnings.layer(&layer.name, "layer mask feathering is not applied in OpenRaster");
-            }
-            self.warnings.layer(&layer.name, "layer masks were applied to the layer pixels");
             let mut values = Vec::new();
             mask.values_into(rect, &mut values);
             for (p, m) in buf.iter_mut().zip(values) {
@@ -623,6 +634,10 @@ impl Writer<'_> {
                 }
                 _ => {
                     let attrs = self.common(layer);
+                    self.content_warnings(layer);
+                    if self.dry {
+                        continue;
+                    }
                     let (rect, px) = self.pixels(layer);
                     let (rect, px) = if rect.is_empty() { (Rect::from_xywh(0, 0, 1, 1), vec![[0.0; 4]]) } else { (rect, px) };
                     let src = format!("data/layer{}.png", self.next);
@@ -648,10 +663,8 @@ pub(crate) fn export(doc: &Document) -> Result<ExportResult> {
     let mut zip = ZipWriter::new();
     // The mimetype must be the first entry, stored, so the type is readable at a fixed offset.
     zip.add("mimetype", MIMETYPE)?;
-    let mut w = Writer { doc, zip, xml: String::new(), next: 0, sample, warnings: Warnings::default() };
-    if doc.depth == SampleType::F32 {
-        w.warnings.note("32-bit float layers are saved as 16-bit PNGs");
-    }
+    let mut w = Writer { doc, zip, xml: String::new(), next: 0, sample, warnings: Warnings::default(), dry: false };
+    document_warnings(doc, &mut w.warnings);
     w.xml.push_str(&format!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<image version=\"0.0.6\" w=\"{}\" h=\"{}\" xres=\"{}\" yres=\"{}\"><stack>",
         doc.size.width,
@@ -661,24 +674,48 @@ pub(crate) fn export(doc: &Document) -> Result<ExportResult> {
     ));
     w.layers(&doc.layers, 1)?;
     w.xml.push_str("</stack></image>\n");
-    let Writer { mut zip, xml, mut warnings, .. } = w;
+    let Writer { mut zip, xml, warnings, .. } = w;
     zip.add("stack.xml", xml.as_bytes())?;
     let merged = photocraft_compose::flatten(doc);
     zip.add("mergedimage.png", &png(doc.size.width, doc.size.height, &merged.px, sample)?)?;
     let thumb = photocraft_compose::thumbnail(doc, THUMBNAIL_SIDE);
     let thumb = Image::from_raw(thumb.width, thumb.height, ChannelLayout::Rgba, CSample::U8, thumb.pixels)?;
     zip.add("Thumbnails/thumbnail.png", &codecs::encode(&thumb, Format::Png, &codecs::EncodeOptions::default())?)?;
+    Ok(ExportResult { bytes: zip.finish()?, warnings: warnings.finish() })
+}
+
+/// What saving `doc` to OpenRaster loses that isn't in a layer.
+fn document_warnings(doc: &Document, warnings: &mut Warnings) {
+    if doc.depth == SampleType::F32 {
+        warnings.note("32-bit float layers are saved as 16-bit PNGs");
+    }
     if !doc.channels.is_empty() {
         warnings.note("alpha channels are not saved to OpenRaster");
     }
     if !doc.metadata.text.is_empty() || doc.metadata.xmp.is_some() || doc.metadata.exif.is_some() {
         warnings.note("metadata (XMP, EXIF, text) is not saved to OpenRaster");
     }
-    if doc.icc_profile.is_some() {
+    // Readers assume sRGB, so an sRGB document loses nothing by the missing tag.
+    let srgb = |bytes: &[u8]| photocraft_cms::Profile::parse(bytes).is_ok_and(|p| p.same_colors(photocraft_cms::Builtin::Srgb.profile()));
+    if doc.icc_profile.as_deref().is_some_and(|b| !srgb(b)) {
         warnings.note("the colour profile is not saved to OpenRaster; readers assume sRGB");
     }
     if doc.mode == ColorMode::Grayscale {
         warnings.note("grayscale layers are saved as RGB");
     }
-    Ok(ExportResult { bytes: zip.finish()?, warnings: warnings.finish() })
+}
+
+/// Everything saving `doc` to OpenRaster would lose (the warnings [`export`] gives), without
+/// rendering or encoding anything. Empty when an OpenRaster file holds the whole document, so it
+/// can be the document's own file; otherwise a save to OpenRaster is a copy (#3806).
+pub fn losses(doc: &Document) -> Vec<String> {
+    if !matches!(doc.mode, ColorMode::Rgb | ColorMode::Grayscale) {
+        return vec!["OpenRaster holds RGB layers; convert the document to RGB or Grayscale first".into()];
+    }
+    let mut w = Writer { doc, zip: ZipWriter::new(), xml: String::new(), next: 0, sample: CSample::U8, warnings: Warnings::default(), dry: true };
+    document_warnings(doc, &mut w.warnings);
+    if let Err(e) = w.layers(&doc.layers, 1) {
+        w.warnings.note(&e.to_string());
+    }
+    w.warnings.finish()
 }

@@ -147,3 +147,19 @@ fn cut_a_colour_channel_clears_only_that_channel() {
     s.undo();
     assert!(near(&px(&s, 5, 5), &left), "one undoable step");
 }
+
+#[test]
+fn clearing_a_channel_reports_allocation_failure_without_editing() {
+    for depth in [8, 16, 32] {
+        let mut s = session(depth);
+        let id = s.active().unwrap().active_layer.unwrap();
+        let before = s.active().unwrap().doc.clone();
+        let history = s.active().unwrap().history.entries();
+        crate::allocation::fail_next_for_test();
+        let result = s.edit("Clear", |doc, _| crate::channel_cmds::clear_color_channel(doc, id, 0, [1.0; 4]));
+        let _ = crate::allocation::capacity::<u8>(0, "reset failpoint");
+        assert!(result.is_err());
+        assert_eq!(*s.active().unwrap().doc, *before);
+        assert_eq!(s.active().unwrap().history.entries(), history);
+    }
+}

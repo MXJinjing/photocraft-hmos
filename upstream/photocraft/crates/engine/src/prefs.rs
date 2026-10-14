@@ -55,10 +55,10 @@ choice!(TypeUnit { Points = "points", Pixels = "pixels", Millimeters = "mm" } de
 choice!(PointSize { PostScript = "postScript", Traditional = "traditional" } default PostScript);
 choice!(Interpolation { BicubicAutomatic = "bicubicAutomatic", Nearest = "nearestNeighbor", Bilinear = "bilinear", Bicubic = "bicubic", BicubicSmoother = "bicubicSmoother", BicubicSharper = "bicubicSharper", PreserveDetails = "preserveDetails" } default BicubicAutomatic);
 choice!(ColorPicker { Adobe = "adobe", System = "system" } default Adobe);
-choice!(Theme { Pro = "pro", ProMedium = "proMedium", ProLightGray = "proLightGray", ProLight = "proLight", Studio = "studio", StudioLight = "studioLight", Classic = "classic", SolarizedDark = "solarizedDark", Adwaita = "adwaita", AdwaitaDark = "adwaitaDark", BreezeLight = "breezeLight", BreezeDark = "breezeDark" } default ProMedium);
+choice!(Theme { Pro = "pro", ProMedium = "proMedium", ProLightGray = "proLightGray", ProLight = "proLight", Studio = "studio", StudioLight = "studioLight", Classic = "classic", SolarizedDark = "solarizedDark", Adwaita = "adwaita", AdwaitaDark = "adwaitaDark", BreezeLight = "breezeLight", BreezeDark = "breezeDark", SoftDark = "softDark", SoftLight = "softLight" } default ProMedium);
 choice!(AppearanceMode { Auto = "auto", Dark = "dark", Light = "light" } default Dark);
-choice!(DarkTheme { Pro = "pro", ProMedium = "proMedium", Studio = "studio", SolarizedDark = "solarizedDark", AdwaitaDark = "adwaitaDark", BreezeDark = "breezeDark" } default ProMedium);
-choice!(LightTheme { StudioLight = "studioLight", ProLightGray = "proLightGray", ProLight = "proLight", Classic = "classic", Adwaita = "adwaita", BreezeLight = "breezeLight" } default StudioLight);
+choice!(DarkTheme { Pro = "pro", ProMedium = "proMedium", Studio = "studio", SolarizedDark = "solarizedDark", AdwaitaDark = "adwaitaDark", BreezeDark = "breezeDark", SoftDark = "softDark" } default ProMedium);
+choice!(LightTheme { ProLight = "proLight", ProLightGray = "proLightGray", StudioLight = "studioLight", Classic = "classic", Adwaita = "adwaita", BreezeLight = "breezeLight", SoftLight = "softLight" } default ProLight);
 choice!(CanvasColor { Default = "default", Black = "black", DarkGray = "darkGray", MediumGray = "mediumGray", LightGray = "lightGray", Custom = "custom" } default Default);
 choice!(CanvasBorder { DropShadow = "dropShadow", Line = "line", None = "none" } default DropShadow);
 choice!(UiScale { Auto = "auto", P75 = "75", P80 = "80", P85 = "85", P90 = "90", P95 = "95", P100 = "100", P125 = "125", P150 = "150", P175 = "175", P200 = "200", P250 = "250", P300 = "300" } default Auto);
@@ -301,7 +301,7 @@ impl Default for Interface {
             theme: Theme::ProMedium,
             appearance_mode: AppearanceMode::Dark,
             dark_theme: DarkTheme::ProMedium,
-            light_theme: LightTheme::StudioLight,
+            light_theme: LightTheme::ProLight,
             favorite_themes: Vec::new(),
             canvas_color: CanvasColor::Default,
             canvas_custom_color: "#282828".into(),
@@ -1022,6 +1022,10 @@ pub struct Preferences {
     /// the footer slider's card scale, saved as the user changes them and restored at launch.
     /// JSON owned by the shell.
     pub brush_picker: Value,
+    /// The brush the tool was last using (settings and tip references, never the full bitmaps;
+    /// shaped by `brush_cmds::remembered_brush`), restored at launch so the tool starts where it
+    /// was left. Written only when `ToolState::brush_rev` moves.
+    pub last_brush: Value,
     /// The tools' options-bar settings (Move › Auto-Select, marquee Feather, tolerance, …) that
     /// differ from their defaults, saved as the user changes them and restored at launch, as
     /// Photoshop remembers each tool's options between sessions. JSON owned by the shell.
@@ -1069,7 +1073,6 @@ pub const HIDDEN_UNTIL_IMPLEMENTED: &[&str] = &[
     "workspace.autoShowHiddenPanels",
     "workspace.enableFloatingDocumentWindowDocking",
     "fileHandling.saveInBackground",
-    "fileHandling.maximizePsdCompatibility",
     "performance.cacheLevels",
     "performance.effectCacheMb",
     "performance.legacyCompositing",
@@ -1095,13 +1098,27 @@ pub const HIDDEN_UNTIL_IMPLEMENTED: &[&str] = &[
     "integrations.controlPort",
 ];
 
-/// Is the preference at `path` (`"section.key"`) hidden from the Preferences dialog?
-pub fn is_hidden(path: &str) -> bool {
-    HIDDEN_UNTIL_IMPLEMENTED.contains(&path) || (!cfg!(target_os = "linux") && LINUX_ONLY.contains(&path))
+/// Desktop Linux (X11/Wayland). HarmonyOS / OHOS builds must not show this preference.
+/// Official OHOS triples (`*-linux-ohos`) still report `target_os = "linux"`; gate on
+/// `target_env = "ohos"` instead (same style as wasm's `target_arch = "wasm32"`). Cross-compile
+/// HarmonyOS HAP Rust with an ohos triple so this cfg is true.
+pub const fn is_desktop_linux() -> bool {
+    cfg!(all(target_os = "linux", not(target_env = "ohos")))
 }
 
-/// Preferences that only do something on Linux; the dialog doesn't show them elsewhere. They
-/// still load, save and round-trip on every platform.
+/// Is the preference at `path` (`"section.key"`) hidden from the Preferences dialog?
+pub fn is_hidden(path: &str) -> bool {
+    is_hidden_for(path, is_desktop_linux())
+}
+
+/// Same as [`is_hidden`], with an explicit desktop-Linux flag so OHOS/non-Linux behaviour can
+/// be unit-tested on any host.
+pub fn is_hidden_for(path: &str, desktop_linux: bool) -> bool {
+    HIDDEN_UNTIL_IMPLEMENTED.contains(&path) || (!desktop_linux && LINUX_ONLY.contains(&path))
+}
+
+/// Preferences that only do something on desktop Linux; the dialog doesn't show them on
+/// Windows, macOS, wasm, or OHOS/HarmonyOS. They still load, save and round-trip everywhere.
 pub const LINUX_ONLY: &[&str] = &["performance.linuxDisplayServer"];
 
 /// Choices of an enumerated preference (dotted path, e.g. `"cursors.painting"`).
@@ -1527,9 +1544,8 @@ impl Session {
             st.history.trim(&st.doc);
         }
         photocraft_compose::set_effect_cache_budget(budget << 20);
-        if let Ok(mut engine) = photocraft_text::shared().lock() {
-            engine.fonts.set_missing_glyph_protection(self.prefs().type_.missing_glyph_protection());
-        }
+        // Without waiting for the system font scan: this runs on the UI thread at launch.
+        photocraft_text::set_shared_missing_glyph_protection(self.prefs().type_.missing_glyph_protection());
         crate::plugin_cmds::sync_prefs(self);
     }
 
@@ -1560,8 +1576,12 @@ impl Session {
             && let Some(theme) = interface.get("theme").and_then(Value::as_str).and_then(Theme::parse)
         {
             let (mode, slot) = match theme {
-                Theme::Pro | Theme::ProMedium | Theme::Studio | Theme::SolarizedDark | Theme::AdwaitaDark | Theme::BreezeDark => ("dark", "darkTheme"),
-                Theme::StudioLight | Theme::ProLightGray | Theme::ProLight | Theme::Classic | Theme::Adwaita | Theme::BreezeLight => ("light", "lightTheme"),
+                Theme::Pro | Theme::ProMedium | Theme::Studio | Theme::SolarizedDark | Theme::AdwaitaDark | Theme::BreezeDark | Theme::SoftDark => {
+                    ("dark", "darkTheme")
+                }
+                Theme::StudioLight | Theme::ProLightGray | Theme::ProLight | Theme::Classic | Theme::Adwaita | Theme::BreezeLight | Theme::SoftLight => {
+                    ("light", "lightTheme")
+                }
             };
             interface.insert("appearanceMode".into(), json!(mode));
             interface.insert(slot.into(), json!(theme.name()));
@@ -1591,7 +1611,9 @@ impl Session {
     }
 
     /// Set one dotted path, routing `colorSettings.*` to the colour state.
-    fn set_pref(&mut self, path: &str, value: Value) -> std::result::Result<(), String> {
+    /// Batches defer colour validation until their complete candidate is staged. Returns
+    /// whether colour settings were touched, including whole-section/root-object updates.
+    fn set_pref(&mut self, path: &str, value: Value, validate_color: bool) -> std::result::Result<bool, String> {
         if let Some(rest) = path.strip_prefix("colorSettings") {
             let mut cur = serde_json::to_value(&self.color.settings).map_err(|e| e.to_string())?;
             let rest = rest.trim_start_matches('.');
@@ -1600,19 +1622,23 @@ impl Session {
             } else {
                 set_path(&mut cur, rest, value)?;
             }
-            self.color.settings = serde_json::from_value(cur).map_err(|e| format!("invalid value for `{path}`: {e}"))?;
-            crate::color_cmds::validate_settings(&self.color.settings)?;
+            let next = serde_json::from_value(cur).map_err(|e| format!("invalid value for `{path}`: {e}"))?;
+            if validate_color {
+                crate::color_cmds::validate_settings(&next)?;
+            }
+            self.color.settings = next;
             self.prefs.edit(|_| ());
-            return Ok(());
+            return Ok(true);
         }
         let mut next = self.prefs().clone();
+        let mut color_changed = false;
         if path.is_empty() || SECTIONS.iter().any(|(id, _)| *id == path) || matches!(path, "shortcuts" | "menus" | "toolbar") {
             // Whole section (or everything): merge the object key by key so each value is checked.
             let obj = value.as_object().ok_or_else(|| format!("`{path}` needs an object"))?;
             for (k, v) in obj {
                 let p = if path.is_empty() { k.clone() } else { format!("{path}.{k}") };
                 if path.is_empty() && k == "colorSettings" {
-                    self.set_pref("colorSettings", v.clone())?;
+                    color_changed |= self.set_pref("colorSettings", v.clone(), validate_color)?;
                     continue;
                 }
                 if v.is_object() && !p.starts_with("shortcuts") && !p.ends_with(".colors") && next.get(&p).is_some_and(|c| c.is_object()) {
@@ -1678,10 +1704,18 @@ impl Session {
                     next.interface.light_theme = LightTheme::BreezeLight;
                     next.interface.appearance_mode = AppearanceMode::Light;
                 }
+                Theme::SoftDark => {
+                    next.interface.dark_theme = DarkTheme::SoftDark;
+                    next.interface.appearance_mode = AppearanceMode::Dark;
+                }
+                Theme::SoftLight => {
+                    next.interface.light_theme = LightTheme::SoftLight;
+                    next.interface.appearance_mode = AppearanceMode::Light;
+                }
             }
         }
         self.prefs.edit(|p| *p = next);
-        Ok(())
+        Ok(color_changed)
     }
 }
 
@@ -1715,12 +1749,21 @@ fn prefs_set(s: &mut Session, p: &Value) -> Result<Value> {
     }
     // All or nothing: validate against a scratch copy first.
     let (saved_prefs, saved_color) = (s.prefs().clone(), s.color.settings.clone());
+    let mut color_changed = false;
     for (path, v) in &changes {
-        if let Err(e) = s.set_pref(path, v.clone()) {
-            s.prefs.edit(|p| *p = saved_prefs);
-            s.color.settings = saved_color;
-            return Err(bad(cmd, e));
+        match s.set_pref(path, v.clone(), false) {
+            Ok(touched) => color_changed |= touched,
+            Err(e) => {
+                s.prefs.edit(|p| *p = saved_prefs);
+                s.color.settings = saved_color;
+                return Err(bad(cmd, e));
+            }
         }
+    }
+    if color_changed && let Err(e) = crate::color_cmds::validate_settings(&s.color.settings) {
+        s.prefs.edit(|p| *p = saved_prefs);
+        s.color.settings = saved_color;
+        return Err(bad(cmd, e));
     }
     // `colorSettings.blendTextGamma` lives in the compositor too, as `edit.colorSettings` sets it.
     photocraft_compose::psblend::set_text_gamma(s.color.settings.blend_text_gamma);
@@ -1740,7 +1783,7 @@ fn prefs_reset(s: &mut Session, p: &Value) -> Result<Value> {
             let defaults = serde_json::to_value(crate::color_cmds::ColorSettings::default()).map_err(|e| bad("prefs.reset", e.to_string()))?;
             let key = path.strip_prefix("colorSettings.").unwrap_or(path);
             let def = get_path(&defaults, key).cloned().ok_or_else(|| bad("prefs.reset", format!("unknown preference `{path}`")))?;
-            s.set_pref(path, def).map_err(|e| bad("prefs.reset", e))?;
+            s.set_pref(path, def, true).map_err(|e| bad("prefs.reset", e))?;
         }
         None => {
             s.color.settings = Default::default();

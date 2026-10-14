@@ -49,9 +49,12 @@ pub(crate) fn sample(preview: FontPreview) -> Option<(f32, [f32; 2])> {
     Some((size, box_for(size)))
 }
 
-/// Family, display scale, the font database generations (so a family installed or fetched
-/// (served fonts) after its first miss gets a sample once it is available) and the point size.
-type Key = (String, u32, (u64, u64), u32);
+/// Family, display scale, the shared font database's generation (so a family installed or
+/// fetched (served fonts) after its first miss gets a sample once it is available) and the point
+/// size. Not the served catalog's generation: a listed family has no sample until its fonts are
+/// registered, which moves the database's generation, and keying on the catalog re-rendered
+/// every sample whenever it changed.
+type Key = (String, u32, u64, u32);
 #[derive(Clone)]
 struct Samples {
     latin: TextureHandle,
@@ -111,7 +114,7 @@ fn images(engine: &mut photocraft_text::TextEngine, family: &str, scale: u32, si
 
 fn key(ctx: &egui::Context, family: &str, size: f32) -> Key {
     let scale = ctx.pixels_per_point().ceil().clamp(1.0, 4.0) as u32;
-    (family.to_owned(), scale, (photocraft_text::fonts::generation(), photocraft_text::served::generation()), size as u32)
+    (family.to_owned(), scale, photocraft_text::fonts::shared_generation(), size as u32)
 }
 
 /// Width a row reserves for its samples: wider once a painted row showed the family covers

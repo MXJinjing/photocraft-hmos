@@ -141,6 +141,20 @@ fn click_slop_scales_with_zoom() {
     assert!(is_click([10.0, 10.0], &[], 0.0));
 }
 
+/// #4205: the click slop is in screen points, so on a 2x (HiDPI) display at 100 % a 2 pt jitter
+/// (4 device px = 4 document px) is still a click that opens Create Rectangle, not a tiny shape.
+#[test]
+fn a_click_with_jitter_opens_the_dialog_on_hidpi() {
+    let mut app = app();
+    app.ppp = 2.0;
+    let i = app.session.active_index().unwrap();
+    app.ui.views[i].zoom = 1.0;
+    let before = layers(&app);
+    press(&mut app, Tool::Rectangle, [20.0, 30.0], [24.0, 30.0]);
+    only_dialog(&app);
+    assert_eq!(layers(&app), before, "a jittery click draws nothing");
+}
+
 #[test]
 fn cancel_draws_nothing_and_ok_remembers_the_size() {
     let mut app = app();

@@ -10,9 +10,11 @@
 //! resampling. The params are the data in every case (strokes, pins and planes are small
 //! compared with a field or a mesh, and replay is deterministic), so nothing needs a blob.
 
+use std::cell::RefCell;
+
 use photocraft_algo::liquify::{LiquifyField, LiquifyStroke, apply_liquify, auto_cell};
 use photocraft_algo::perspective::{PerspectiveMap, Plane, Straighten, straighten};
-use photocraft_algo::puppet::{PuppetDensity, PuppetMode, PuppetPin, PuppetWarp, puppet_warp};
+use photocraft_algo::puppet::{PuppetDensity, PuppetMode, PuppetPin, PuppetWarp, puppet_warp, puppet_warp_with_mask};
 use photocraft_algo::transform::Interp;
 use photocraft_algo::warp::{warp_mesh_gray, warp_mesh_surface};
 use photocraft_color::PixelFormat;
@@ -216,7 +218,7 @@ fn smart_layer(s: &Session) -> std::result::Result<(), String> {
 fn check_locks(l: &Layer, group: Locks, position: bool) -> Result<()> {
     let locks = l.locks.union(group);
     if locks.all || locks.pixels || (position && locks.position) {
-        return Err(EngineError::Other(format!("layer \"{}\" is locked", l.name)));
+        return Err(EngineError::Other(format!("Could not complete your request because the layer \"{}\" is locked", l.name)));
     }
     Ok(())
 }
@@ -244,6 +246,9 @@ fn run_on_layer(s: &mut Session, cmd: &str, label: &str, p: &Value, moves: bool,
         }
         let l = doc.layer_mut(id).ok_or(EngineError::NoLayer(id))?;
         if let LayerContent::Smart(_) = l.content {
+            // As filters do: a pixel or full lock refuses the smart filter (the position lock
+            // doesn't, since the smart object itself stays put).
+            check_locks(l, group, false)?;
             let sf = SmartFilter { command: cmd.to_string(), params: params.clone(), blend: photocraft_color::BlendMode::Normal, opacity: 1.0, visible: true };
             return crate::smart_cmds::add_smart_filter(doc, id, sf, selection.as_ref());
         }
@@ -325,7 +330,23 @@ fn puppet(s: &mut Session, p: &Value, cmd: &str) -> Result<Value> {
     }
     let it = interp(p);
     let too_far = || bad(cmd, "the pins stretch the content too far: the result would cover more than 2^30 pixels");
-    run_on_layer(s, cmd, "Puppet Warp", p, true, &|surf, sel, _| deform_selected(surf, sel, &|x| puppet_surface(x, &w, it).ok_or_else(too_far)), None)
+    // A linked layer mask moves with the pixels on the same mesh (#4910): the layer's warp
+    // solves the mesh once and leaves the moved mask here for the mask step.
+    let linked = s.active().and_then(|d| d.doc.layer(id)).and_then(|l| l.mask.as_ref()).filter(|m| m.linked).map(|m| m.surface.clone());
+    let moved_mask: RefCell<Option<Surface>> = RefCell::new(None);
+    let layer_fn = |surf: &Surface, sel: Option<&Surface>, _: Rect| {
+        deform_selected(surf, sel, &|x| {
+            let b = x.content_bounds();
+            if b.is_empty() {
+                return Ok(x.clone());
+            }
+            let (out, mask) = puppet_warp_with_mask(x, b, &w, it, linked.as_ref()).ok_or_else(too_far)?;
+            *moved_mask.borrow_mut() = mask;
+            Ok(out)
+        })
+    };
+    let mask_fn = |m: &Surface, _: Option<&Surface>| Ok(moved_mask.borrow_mut().take().unwrap_or_else(|| m.clone()));
+    run_on_layer(s, cmd, "Puppet Warp", p, true, &layer_fn, Some(&mask_fn))
 }
 
 fn perspective(s: &mut Session, p: &Value, cmd: &str) -> Result<Value> {

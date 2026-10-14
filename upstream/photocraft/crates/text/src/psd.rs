@@ -244,7 +244,7 @@ pub fn apply_txt2_frame(layer: &mut TextLayer, tysh: &[u8], txt2: &E) {
     let m = arr_f(frame.path(&["2", "2"]));
     let matrix = if m.len() == 6 && m.iter().all(|v| v.is_finite()) { Affine { m: [m[0], m[1], m[2], m[3], m[4], m[5]] } } else { Affine::IDENTITY };
     let at = match layer.shape {
-        TextShape::Point => {
+        TextShape::Point | TextShape::Path { .. } => {
             let p = arr_f(frame.get("0"));
             if p.len() == 2 && p.iter().all(|v| v.is_finite()) { Affine::translate(p[0], p[1]) } else { Affine::IDENTITY }
         }
@@ -260,7 +260,7 @@ pub fn apply_txt2_frame(layer: &mut TextLayer, tysh: &[u8], txt2: &E) {
     // the frame folded into its transform and its `bounds` near the origin: applying the frame
     // again would move it twice.
     let origin = match layer.shape {
-        TextShape::Point => Point::new(0.0, 0.0),
+        TextShape::Point | TextShape::Path { .. } => Point::new(0.0, 0.0),
         TextShape::Box { .. } => {
             let b = engine_data(&t.text)
                 .map(|e| {
@@ -584,7 +584,7 @@ pub(crate) fn char_style(base: Option<&E>, d: &E, fonts: &[String], k: f32) -> C
     let num = |key: &str| g(key).and_then(E::as_f64);
     let flag = |key: &str| g(key).and_then(E::as_bool);
     let mut s = CharStyle::default();
-    if let Some(ps) = g("Font").and_then(E::as_i64).and_then(|i| fonts.get(i as usize)) {
+    if let Some(ps) = g("Font").and_then(E::as_i64).and_then(|i| usize::try_from(i).ok()).and_then(|i| fonts.get(i)) {
         let r = guess_from_postscript(ps);
         s.font_family = r.family;
         s.weight = r.weight;
@@ -1183,7 +1183,8 @@ pub fn build_engine_data(layer: &TextLayer, template: Option<E>, dpi: f32) -> E 
         dict.set("UseFractionalGlyphWidths", E::Bool(true));
     }
     let (shape_type, box_bounds) = match layer.shape {
-        TextShape::Point => (0, None),
+        // PSD path type is not written yet: the layer saves as point text.
+        TextShape::Point | TextShape::Path { .. } => (0, None),
         TextShape::Box { x, y, width, height } => (1, Some([x, y, x + width, y + height])),
     };
     let mut photoshop = E::Dict(vec![("ShapeType".into(), E::Int(shape_type))]);
@@ -1296,8 +1297,8 @@ pub fn build_tysh(layer: &TextLayer, dpi: f32, ink: Option<[f32; 4]>) -> Vec<u8>
             },
         ),
     );
-    let [l, t, r, b] = match (layer.shape, ink) {
-        (TextShape::Box { x, y, width, height }, _) => [x, y, x + width, y + height],
+    let [l, t, r, b] = match (&layer.shape, ink) {
+        (&TextShape::Box { x, y, width, height }, _) => [x, y, x + width, y + height],
         (_, Some(i)) => i,
         _ => [0.0; 4],
     };

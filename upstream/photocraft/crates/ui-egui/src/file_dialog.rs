@@ -167,9 +167,17 @@ impl PhotocraftApp {
         {
             suggested = dir.join(suggested);
         }
+        // The format comes from the extension, so a name typed without one (common where file
+        // extensions are hidden, #5039) gets the suggested file's extension, as Photoshop's
+        // Save As appends the extension of the chosen file type.
+        let suggested_ext = suggested.extension().and_then(|e| e.to_str()).map(|e| e.to_ascii_lowercase());
         self.ask_file(FileDialogRequest::Save { suggested: suggested.to_string_lossy().into_owned() }, move |app, answer| match answer {
             FileDialogAnswer::SaveTo(path) => {
                 let path = Self::lowercased_extension(app, path);
+                let path = match &suggested_ext {
+                    Some(ext) if Path::new(&path).extension().is_none() => Path::new(&path).with_extension(ext).to_string_lossy().into_owned(),
+                    _ => path,
+                };
                 // The web answers a download name, which has no folder to remember.
                 if let Some(doc) = doc
                     && let Some(dir) = Path::new(&path).parent().filter(|p| !p.as_os_str().is_empty())
@@ -309,7 +317,7 @@ impl PhotocraftApp {
 }
 
 /// The folder an open dialog starts in: the directory of the most recent file (UI-217-3).
-fn last_used_dir(recent: &[String]) -> Option<String> {
+pub(crate) fn last_used_dir(recent: &[String]) -> Option<String> {
     let dir = std::path::Path::new(recent.first()?).parent()?;
     (!dir.as_os_str().is_empty()).then(|| dir.to_string_lossy().into_owned())
 }

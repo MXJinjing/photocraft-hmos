@@ -51,6 +51,7 @@ const F_LAB: u32 = 65536u;      // Lab document: Normal mixes in CIELAB
 const F_HDR: u32 = 262144u;     // 32-bit float document: HDR blends and Exposure retain values above 1
 const F_QUANT: u32 = 32768u;    // lerp: A rounded to p0.x steps (adjustment results, integer docs)
 const F_ADD_DIFF: u32 = 16384u;  // lerp: A + (B - C) premultiplied (clips on pass-through groups)
+const F_BLEND_IF: u32 = 524288u; // lerp: B back towards A by the Blend If ranges in p0..p3
 const F_TEXT_GAMMA: u32 = 8192u; // blend / atop / fx merge: type layer, mix coverage at gamma p4.w
 
 @group(0) @binding(0) var<uniform> chunk: Chunk;
@@ -627,15 +628,14 @@ fn adjust(c: vec3<f32>) -> vec3<f32> {
             let hsl = rgb_to_hsl(c);
             var hh: f32;
             var ss: f32;
-            // Range edits (LUT rows indexed by the original hue, faded out towards grey).
+            // Range edits (LUT rows indexed by the original hue), in full however dull the colour.
             var dh = 0.0;
             var ds = 0.0;
             var dl = 0.0;
             if (p1.x > 0.5) {
-                let chroma = min((max(c.r, max(c.g, c.b)) - min(c.r, min(c.g, c.b))) * 4.0, 1.0);
-                dh = lut(0, hsl.x) * chroma;
-                ds = lut(1, hsl.x) * chroma;
-                dl = lut(2, hsl.x) * chroma;
+                dh = lut(0, hsl.x);
+                ds = lut(1, hsl.x);
+                dl = lut(2, hsl.x);
             }
             let sat = clamp(p0.y + ds, -1.0, 1.0);
             let light = clamp(p0.z, -1.0, 1.0);
@@ -875,12 +875,78 @@ fn fs_lerp(in: VOut) -> @location(0) vec4<f32> {
         if (al <= 0.0) { return vec4(0.0); }
         return vec4(clamp(pm.rgb / al, vec3(0.0), vec3(1.0)), al);
     }
+    if ((op.flags & F_BLEND_IF) != 0u) {
+        // compose::apply_blend_if: "This Layer" is C (the layer's own content with its masks),
+        // or B itself for an adjustment layer; "Underlying Layer" is A.
+        var this_px = b;
+        if (op.p4.y < 0.5) {
+            this_px = textureLoad(tex_c, p, 0);
+        }
+        let k = blend_if_weight(this_px, a);
+        if (k >= 1.0) {
+            return b;
+        }
+        let alpha = a.a + (b.a - a.a) * k;
+        if (alpha <= 0.0) { return vec4(0.0); }
+        return vec4(clamp((a.rgb * a.a + (b.rgb * b.a - a.rgb * a.a) * k) / alpha, vec3(0.0), vec3(1.0)), alpha);
+    }
     let k = op.opacity * mask_value(doc_px(p));
     let wa = a.a * (1.0 - k);
     let wb = b.a * k;
     let alpha = wa + wb;
     if (alpha <= 0.0) { return vec4(0.0); }
     return vec4((a.rgb * wa + b.rgb * wb) / alpha, alpha);
+}
+
+// ---- Blend If (photocraft_doc::BlendRange, compose::blend_if_weight) ---------------------------
+
+// 0 at or below `lo`, 1 at or above `hi`; a hard step at `lo` when unsplit.
+fn bi_ramp(lo: f32, hi: f32, x: f32) -> f32 {
+    if (hi <= lo) {
+        return select(0.0, 1.0, x >= lo);
+    }
+    return clamp((x - lo) / (hi - lo), 0.0, 1.0);
+}
+
+// How much of value `v` (0..255) shows through range `e` (0 = Gray, then the channels) on side
+// `s` (0 = this layer, 1 = underlying). The ranges are packed by `plan::blend_if_params`.
+fn bi_weight(e: u32, s: u32, v: f32) -> f32 {
+    var f = array<vec4<f32>, 4>(op.p0, op.p1, op.p2, op.p3);
+    let i = (e * 2u + s) * 2u;
+    let black = f[i / 4u][i % 4u];
+    let white = f[(i + 1u) / 4u][(i + 1u) % 4u];
+    let b_lo = floor(black / 256.0);
+    let b_hi = black - b_lo * 256.0;
+    let w_lo = floor(white / 256.0);
+    let w_hi = white - w_lo * 256.0;
+    return bi_ramp(b_lo, b_hi, v) * bi_ramp(255.0 - w_hi, 255.0 - w_lo, 255.0 - v);
+}
+
+// The product of every range over the layer's own colour and the colour beneath it (a side
+// without content, alpha 0, doesn't count). `p4.x` marks a one-channel document.
+fn blend_if_weight(this_px: vec4<f32>, under: vec4<f32>) -> f32 {
+    var k = 1.0;
+    for (var s = 0u; s < 2u; s = s + 1u) {
+        let px = select(this_px, under, s == 1u);
+        if (px.a <= 0.0) {
+            continue;
+        }
+        // The CPU gets 8- and 16-bit levels exactly (k / 255 × 255 = k), but GPU arithmetic can
+        // land a few millionths below, which flips a hard threshold at that level: values that
+        // close to a level are that level. Real 8/16-bit values off a level are ≥ 1/257 away.
+        let raw = clamp(px.rgb, vec3(0.0), vec3(1.0)) * 255.0;
+        let v = select(raw, round(raw), abs(raw - round(raw)) < vec3(1e-4));
+        if (op.p4.x > 0.5) {
+            k = k * bi_weight(0u, s, v.r) * bi_weight(1u, s, v.r);
+        } else {
+            let gray = 0.299 * v.r + 0.587 * v.g + 0.114 * v.b;
+            k = k * bi_weight(0u, s, gray) * bi_weight(1u, s, v.r) * bi_weight(2u, s, v.g) * bi_weight(3u, s, v.b);
+        }
+        if (k <= 0.0) {
+            return 0.0;
+        }
+    }
+    return k;
 }
 
 // ---- layer effects (compose::effects::composite_with_effects) -------------------------------

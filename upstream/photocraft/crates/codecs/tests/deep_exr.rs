@@ -254,6 +254,9 @@ fn gen_deep(
     out
 }
 
+/// RGBA float channels in chlist (alphabetical) order, no Z (everything composites).
+const RGBA_NO_Z: [Chan; 4] = [Chan { name: "A", ty: 2 }, Chan { name: "B", ty: 2 }, Chan { name: "G", ty: 2 }, Chan { name: "R", ty: 2 }];
+
 /// RGBA(Z) float channels in chlist (alphabetical) order.
 const RGBAZ: [Chan; 5] =
     [Chan { name: "A", ty: 2 }, Chan { name: "B", ty: 2 }, Chan { name: "G", ty: 2 }, Chan { name: "R", ty: 2 }, Chan { name: "Z", ty: 2 }];
@@ -708,4 +711,132 @@ fn real_deep_files_decode() {
         assert_eq!(img.to_f32_samples().expect("f32").len(), 256 * 256 * 4, "{name}");
         assert!(img.warnings.iter().any(|w| matches!(w, photocraft_codecs::DecodeWarning::DeepFlattened { .. })), "{name}");
     }
+}
+
+/// `gen_deep` for a cropped render: the data window sits at `(dwx, dwy)` inside a larger
+/// display window of `sw × sh` (the stage the renderer composed onto). Scanline chunk Y
+/// coordinates are absolute display rows, so they carry the data-window offset.
+#[allow(clippy::too_many_arguments)]
+fn gen_deep_cropped(
+    w: usize,
+    h: usize,
+    dwx: i32,
+    dwy: i32,
+    sw: usize,
+    sh: usize,
+    channels: &[Chan],
+    counts: &[u32],
+    sample: &dyn Fn(usize, usize) -> Vec<f32>,
+) -> Vec<u8> {
+    let mut out = Vec::new();
+    out.extend_from_slice(&0x0131_2f76u32.to_le_bytes());
+    out.extend_from_slice(&(2u32 | 0x800).to_le_bytes());
+
+    let mut chlist = Vec::new();
+    for c in channels {
+        chlist.extend_from_slice(c.name.as_bytes());
+        chlist.push(0);
+        chlist.extend_from_slice(&c.ty.to_le_bytes());
+        chlist.push(0);
+        chlist.extend_from_slice(&[0u8; 3]);
+        chlist.extend_from_slice(&1i32.to_le_bytes());
+        chlist.extend_from_slice(&1i32.to_le_bytes());
+    }
+    chlist.push(0);
+    attr(&mut out, "channels", "chlist", &chlist);
+    attr(&mut out, "compression", "compression", &[0u8]);
+    // box2i is inclusive: the windows end at position + size - 1.
+    let dw: Vec<u8> = [dwx, dwy, dwx + w as i32 - 1, dwy + h as i32 - 1].iter().flat_map(|v| v.to_le_bytes()).collect();
+    attr(&mut out, "dataWindow", "box2i", &dw);
+    let disp: Vec<u8> = [0i32, 0, sw as i32 - 1, sh as i32 - 1].iter().flat_map(|v| v.to_le_bytes()).collect();
+    attr(&mut out, "displayWindow", "box2i", &disp);
+    attr(&mut out, "lineOrder", "lineOrder", &[0]);
+    attr(&mut out, "pixelAspectRatio", "float", &1f32.to_le_bytes());
+    attr(&mut out, "screenWindowCenter", "v2f", &[0f32.to_le_bytes(), 0f32.to_le_bytes()].concat());
+    attr(&mut out, "screenWindowWidth", "float", &1f32.to_le_bytes());
+    attr(&mut out, "type", "string", b"deepscanline");
+    attr(&mut out, "version", "int", &1i32.to_le_bytes());
+    out.push(0);
+
+    // One scanline block per data row; the pixel indexing stays data-relative.
+    let mut chunks: Vec<Vec<u8>> = Vec::new();
+    for y in 0..h {
+        let pixels: Vec<usize> = (y * w..y * w + w).collect();
+        let mut c = Vec::new();
+        c.extend_from_slice(&(dwy + y as i32).to_le_bytes());
+        let mut table = Vec::with_capacity(pixels.len() * 4);
+        let mut acc = 0u32;
+        for &p in &pixels {
+            acc += counts[p];
+            table.extend_from_slice(&acc.to_le_bytes());
+        }
+        let mut data = Vec::new();
+        for (ci, _) in channels.iter().enumerate() {
+            for &p in &pixels {
+                for v in sample(p, ci) {
+                    data.extend_from_slice(&v.to_le_bytes());
+                }
+            }
+        }
+        c.extend_from_slice(&(table.len() as u64).to_le_bytes());
+        c.extend_from_slice(&(data.len() as u64).to_le_bytes());
+        c.extend_from_slice(&(data.len() as u64).to_le_bytes());
+        c.extend_from_slice(&table);
+        c.extend_from_slice(&data);
+        chunks.push(c);
+    }
+    let mut pos = out.len() + chunks.len() * 8;
+    let mut table = Vec::new();
+    for c in &chunks {
+        table.extend_from_slice(&(pos as u64).to_le_bytes());
+        pos += c.len();
+    }
+    out.extend_from_slice(&table);
+    for c in chunks {
+        out.extend_from_slice(&c);
+    }
+    out
+}
+
+/// A cropped render opens on the full display-window stage: MY27-style renders carry a
+/// `display_window` of the full frame (e.g. 4000×3000) while the deep data window is the
+/// render pass's crop inside it. The image must open at stage size with the data at its
+/// crop offset, transparent elsewhere — not cropped to the data window.
+#[test]
+fn cropped_deep_data_opens_on_the_display_stage() {
+    let (w, h, dwx, dwy, sw, sh) = (24usize, 16usize, 8i32, 6i32, 48usize, 32usize);
+    let counts = vec![1u32; w * h];
+    let sample = |p: usize, ci: usize| -> Vec<f32> {
+        // chlist order (RGBA_NO_Z): A, B, G, R.
+        let x = p % w;
+        let y = p / w;
+        match ci {
+            0 => vec![1.0],                 // A
+            1 => vec![0.5],                 // B
+            2 => vec![y as f32 / h as f32], // G
+            _ => vec![x as f32 / w as f32], // R
+        }
+    };
+    let bytes = gen_deep_cropped(w, h, dwx, dwy, sw, sh, &RGBA_NO_Z, &counts, &sample);
+    let img = decode(&bytes).expect("cropped deep EXR decodes");
+    assert_eq!((img.width(), img.height()), (sw as u32, sh as u32), "opens on the display window stage");
+    assert!(img.warnings.iter().any(|w| matches!(w, photocraft_codecs::DecodeWarning::DisplayWindowStage { origin, .. } if *origin == (dwx, dwy))));
+
+    // The data sits at its crop offset: the first data pixel's green channel carries its
+    // data-row fraction, everything outside the data region stays transparent black.
+    let s = img.to_f32_samples().expect("f32");
+    let nc = s.len() / (sw * sh);
+    let px = |x: usize, y: usize| -> Vec<f32> { s[y * sw * nc + x * nc..y * sw * nc + x * nc + nc].to_vec() };
+    let first = px(dwx as usize, dwy as usize);
+    assert!(
+        (first[0] - 0.0).abs() < 1e-5 && (first[1] - 0.0).abs() < 1e-5 && (first[2] - 0.5).abs() < 1e-5 && (first[3] - 1.0).abs() < 1e-5,
+        "first data pixel at the offset: {first:?}"
+    );
+    let last = px(dwx as usize + w - 1, dwy as usize + h - 1);
+    assert!(
+        (last[0] - (w - 1) as f32 / w as f32).abs() < 1e-5 && (last[1] - (h - 1) as f32 / h as f32).abs() < 1e-5,
+        "last data pixel keeps its coordinates: {last:?}"
+    );
+    let outside = px(0, 0);
+    assert_eq!(outside, vec![0.0, 0.0, 0.0, 0.0], "outside the data region: transparent");
 }

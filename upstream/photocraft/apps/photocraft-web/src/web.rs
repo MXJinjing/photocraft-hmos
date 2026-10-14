@@ -17,12 +17,12 @@ type Inbox = Arc<Mutex<Vec<(String, Vec<u8>)>>>;
 type HostFonts = Arc<Mutex<Vec<(String, Vec<u8>)>>>;
 type CloseRequest = Arc<AtomicBool>;
 
-/// Everything File › Open reads: PhotoCraft, Photoshop, OpenRaster and Affinity documents, flat images, and
+/// Everything File › Open reads: PhotoCraft, Photoshop, OpenRaster, Krita and Affinity documents, flat images, and
 /// Photoshop brushes (.abr), gradients (.grd) and swatches (.aco, .ase), which go to the preset libraries.
 const OPEN_EXTS: &[&str] = &[
-    "pcraft", "pdn", "ora", "psd", "psb", "psdt", "png", "jpg", "jpeg", "tif", "tiff", "webp", "gif", "bmp", "tga", "ico", "qoi", "exr", "hdr", "pbm", "pgm",
-    "ppm", "pam", "pfm", "fits", "fit", "fts", "heic", "heif", "hif", "dng", "cr2", "cr3", "nef", "nrw", "arw", "pef", "orf", "rw2", "raf", "abr", "grd",
-    "svg", "svgz", "aco", "ase", "af", "afdesign", "afphoto", "afpub",
+    "pcraft", "pdn", "ora", "kra", "krz", "psd", "psb", "psdt", "png", "jpg", "jpeg", "tif", "tiff", "webp", "gif", "bmp", "tga", "ico", "qoi", "exr", "hdr",
+    "pbm", "pgm", "ppm", "pam", "pfm", "dds", "fits", "fit", "fts", "dpx", "heic", "heif", "hif", "dng", "cr2", "cr3", "nef", "nrw", "arw", "pef", "orf",
+    "rw2", "raf", "abr", "grd", "svg", "svgz", "aco", "ase", "af", "afdesign", "afphoto", "afpub",
 ];
 const SVG_EXTS: &[&str] = &["svg", "svgz"];
 const CANVAS_ID: &str = "photocraft_canvas";
@@ -409,7 +409,12 @@ impl eframe::App for WebShell {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
-        if let Some(error) = self.presets.error() {
+        // Only while a preset change is unsaved. Storage the browser denies from the start (a
+        // sandboxed iframe, blocked site data) loses nothing until the first change, and that
+        // change brings the banner with the reason.
+        if self.presets.unsaved()
+            && let Some(error) = self.presets.error()
+        {
             egui::Panel::top("browser_preset_storage").show(ui, |ui| {
                 let tokens = photocraft_ui_egui::theme::Tokens::for_kind(self.app.ui.theme);
                 // Put retry first so floating brush windows cannot cover the control.
@@ -471,6 +476,7 @@ fn services(inbox: Inbox, ctx: egui::Context) -> Services {
             opts.xmp = if settings.xmp_all { photocraft_io::XmpEmbed::All } else { photocraft_io::XmpEmbed::None };
             opts.tga_bits = settings.tga_bits;
             opts.image_previews = settings.image_previews;
+            opts.psd_maximize_compatibility = settings.psd_maximize_compatibility;
             photocraft_io::export(doc, path, &opts).map(|r| (r.bytes, r.warnings)).map_err(|e| e.to_string())
         })),
         file_dialog: Some(Box::new(|request, _parent, reply| match request {
@@ -626,6 +632,7 @@ fn mime_for(name: &str) -> &'static str {
         Some("gif") => "image/gif",
         Some("psd" | "psb") => "image/vnd.adobe.photoshop",
         Some("ora") => "image/openraster",
+        Some("kra" | "krz") => "application/x-krita",
         _ => "application/octet-stream",
     }
 }

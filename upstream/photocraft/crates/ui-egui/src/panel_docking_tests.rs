@@ -163,6 +163,37 @@ fn capture_custom_panel_docking_visual_fixtures() {
 }
 
 #[test]
+fn floating_group_titles_are_opaque_in_studio_themes() {
+    // Studio's tab strip is transparent over the dock's card; a floating group must not show the canvas (#4509).
+    let mut app = app();
+    app.run("window.panel.float", json!({"panel":"swatches","x":40,"y":60,"width":300,"height":300})).unwrap();
+    let mut ready = false;
+    let mut h = Harness::builder().with_size(vec2(1280.0, 800.0)).wgpu().build_ui_state(
+        move |ui, app: &mut PhotocraftApp| {
+            if !ready {
+                PhotocraftApp::setup_context(ui.ctx(), crate::theme::ThemeKind::Studio);
+                app.ui.theme = crate::theme::ThemeKind::Studio;
+                ready = true;
+                return;
+            }
+            crate::panels::right_dock(app, ui);
+            egui::CentralPanel::default().frame(egui::Frame::NONE.fill(egui::Color32::from_rgb(255, 0, 255))).show(ui, |_| {});
+        },
+        app,
+    );
+    h.run_steps(5);
+    let area = h.ctx.memory(|m| m.area_rect(egui::Id::new("photocraft-panel-docking").with(("floating", &"swatches".to_string())))).unwrap();
+    let image = h.render().unwrap();
+    let ppp = image.width() as f32 / 1280.0;
+    let strip = egui::Rect::from_min_size(area.min, vec2(area.width(), 40.0)).shrink(2.0);
+    let magenta = (strip.left() as u32..strip.right() as u32)
+        .flat_map(|x| (strip.top() as u32..strip.bottom() as u32).map(move |y| (x, y)))
+        .filter(|&(x, y)| image.get_pixel((x as f32 * ppp) as u32, (y as f32 * ppp) as u32).0[..3] == [255, 0, 255])
+        .count();
+    assert_eq!(magenta, 0, "canvas shows through the floating group's title strip {strip:?}");
+}
+
+#[test]
 fn escape_cancels_the_first_drag_without_replacing_the_legacy_workspace() {
     let mut h = harness(app(), vec2(1280.0, 800.0));
     let source = h.query_all_by_label("Layers").find(|node| node.rect().height() <= 45.0).unwrap().rect().center();
@@ -502,6 +533,17 @@ fn explicit_reveal_activates_existing_tab_and_expands_custom_group() {
     let before = app.ui.docking.clone();
     assert!(app.run("window.panel.layers", json!({"show":"yes"})).is_err());
     assert_eq!(app.ui.docking, before);
+}
+
+// #4028: in a custom workspace too, a new adjustment layer brings Properties to the front.
+#[test]
+fn a_new_adjustment_layer_activates_properties_in_a_custom_workspace() {
+    let mut app = app();
+    app.run("window.panel.activate", json!({"panel":"adjustments"})).unwrap();
+    assert!(panel_active(app.ui.docking.as_ref().unwrap(), "adjustments"));
+    app.run("file.new", json!({"width":64,"height":64})).unwrap();
+    app.run("layer.newAdjustmentLayer.curves", json!({})).unwrap();
+    assert!(panel_active(app.ui.docking.as_ref().unwrap(), "properties"));
 }
 
 #[test]

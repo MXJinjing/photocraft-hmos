@@ -8,7 +8,8 @@
 //! - `select.drop` drops the piece into its layer and moves the selection with it, as one history
 //!   step.
 //! - Any other command drops the piece first (so it lands exactly where it was shown), except Undo,
-//!   which puts it back where it was cut (nothing was changed yet).
+//!   which puts it back where it was cut (nothing was changed yet), and `history.selectState`,
+//!   which puts it back and then returns to the chosen state.
 //!
 //! While floating, the document is unchanged; [`displayed`] gives the document with the piece at
 //! its offset, for the canvas. The selection stays where it was until the drop.
@@ -220,6 +221,13 @@ pub(crate) fn before_command(s: &mut Session, id: &str) -> Result<Option<Value>>
         "edit.undo" | "edit.stepBackward" => {
             st.floating = None;
             Ok(Some(json!({"floating": "returned"})))
+        }
+        // Returning to a History state puts the piece back too (it never reached the document),
+        // and then moves the history: dropping it first would add a step and discard the redo
+        // states the jump may be heading for.
+        "history.selectState" => {
+            st.floating = None;
+            Ok(None)
         }
         _ if keeps_floating(id) => Ok(None),
         _ => drop_floating(s).map(|_| None),

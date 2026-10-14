@@ -109,6 +109,7 @@ testgen::{all_cases, merged_only, layered, small, sample_descriptor, pattern_pla
 | RGBA8 extraction | ✓ | – | – | RGB / gray / CMYK layers; merged image also supports indexed / bitmap / duotone |
 | Builder | – | ✓ | – | RGB / gray / CMYK at 8/16 bit, masks, groups, blend modes, opacity, fill, visibility, clipping |
 | Patterns | ✓ | ✓ | ✓ | `Patt` / `Pat2` / `Pat3`, `.pat`, and `.abr` embedded patterns; non-empty tiles allow in-bounds channel subrectangles, decoded size is capped and PackBits expansion is input-bounded |
+| Actions (`.atn`) | ✓ | ✓ | ✓ | `atn::parse` / `atn::write`: version-16 sets (Photoshop 6+): actions with function key, modifiers and colour; steps with event code or string name, panel name, enabled/dialog flags and their descriptor. Exact round trip; version-12 (Photoshop 5) files are rejected as unsupported |
 
 Pattern channel subrectangles are padded with zeroes to the tile rectangle. All channel
 metadata and the total padded size are checked against `MAX_DECODED_BYTES` before any

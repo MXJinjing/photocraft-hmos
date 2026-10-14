@@ -115,8 +115,11 @@ pub(crate) fn color_halftone(src: &Image, out: Rect, ctx: &Ctx, max_radius: f32,
     res
 }
 
-/// Crystallize: Voronoi cells around jittered points, each filled with the
-/// (premultiplied) average colour of its pixels.
+/// Crystallize: Voronoi cells around jittered points, each filled with the colour at its
+/// point, as Photoshop's are: cells stay solid, so a black-and-white image (a layer mask
+/// being distressed) keeps hard edges and its weight instead of greying where cells straddle
+/// an edge. A cell whose point falls outside the image takes the (premultiplied) average
+/// colour of its pixels.
 pub(crate) fn crystallize(src: &Image, out: Rect, ctx: &Ctx, cell_size: f32, seed: u32) -> Vec<f32> {
     let n = src.ch;
     let cell = cell_size.max(2.0);
@@ -177,6 +180,14 @@ pub(crate) fn crystallize(src: &Image, out: Rect, ctx: &Ctx, cell_size: f32, see
             continue;
         }
         let (cx, cy) = if win.contains(x, y) { owners[i] } else { owner(x, y) };
+        let (sx, sy) = cell_point(cx, cy, cell, seed, origin);
+        let (sx, sy) = (sx.floor() as i32, sy.floor() as i32);
+        if src.rect.contains(sx, sy) && b.contains(sx, sy) {
+            for (c, v) in px.iter_mut().enumerate() {
+                *v = src.get(sx, sy, c);
+            }
+            continue;
+        }
         if cx < c0.0 || cy < c0.1 || cx > c1.0 || cy > c1.1 {
             continue;
         }

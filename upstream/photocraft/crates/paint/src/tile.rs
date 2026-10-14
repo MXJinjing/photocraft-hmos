@@ -6,11 +6,14 @@
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// A grayscale bitmap, row-major, 1 = full.
+///
+/// The samples are shared: cloning a tile (brush settings are cloned on every pointer event of a
+/// stroke, #4534) copies a pointer, not a sampled tip that may be thousands of pixels across.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GrayTile {
     pub width: u32,
     pub height: u32,
-    pub data: Vec<u16>,
+    pub data: std::sync::Arc<[u16]>,
 }
 
 impl GrayTile {
@@ -22,7 +25,7 @@ impl GrayTile {
                 data.push(q16(f(x, y)));
             }
         }
-        Self { width, height, data }
+        Self { width, height, data: data.into() }
     }
     /// Build from 0..1 floats (`width × height`).
     pub fn from_f32(width: u32, height: u32, v: &[f32]) -> Self {
@@ -47,7 +50,7 @@ impl GrayTile {
     pub fn preview(&self, max_side: u32) -> GrayTile {
         let q8 = |v: u32| ((v + 128) / 257 * 257) as u16;
         if !self.is_valid() {
-            return GrayTile { width: 1, height: 1, data: vec![0] };
+            return GrayTile { width: 1, height: 1, data: vec![0].into() };
         }
         let (w, h) = (self.width as usize, self.height as usize);
         let max = max_side.max(1) as usize;
@@ -64,7 +67,8 @@ impl GrayTile {
                 }
             }
         }
-        let data = sum.iter().zip(&cnt).map(|(s, c)| q8(if *c > 0 { (*s / u64::from(*c)) as u32 } else { 0 })).collect();
+        let data: Vec<u16> = sum.iter().zip(&cnt).map(|(s, c)| q8(if *c > 0 { (*s / u64::from(*c)) as u32 } else { 0 })).collect();
+        let data = data.into();
         GrayTile { width: nw as u32, height: nh as u32, data }
     }
 }
@@ -141,7 +145,7 @@ struct GrayTileIn {
 impl Serialize for GrayTile {
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         let mut bytes = Vec::with_capacity(self.data.len() * 2);
-        for v in &self.data {
+        for v in self.data.iter() {
             bytes.extend_from_slice(&v.to_le_bytes());
         }
         let enc = b64_encode(&bytes);
@@ -164,7 +168,7 @@ impl<'de> Deserialize<'de> for GrayTile {
         if n == 0 || data.len() != n {
             return Err(D::Error::custom(format!("tile data has {} samples, expected {}×{}", data.len(), t.width, t.height)));
         }
-        Ok(GrayTile { width: t.width, height: t.height, data })
+        Ok(GrayTile { width: t.width, height: t.height, data: data.into() })
     }
 }
 
@@ -300,6 +304,20 @@ impl PatternImage {
 mod tests {
     use super::*;
 
+    /// Cloning a tile (and the brush settings holding it, on every pointer event of a stroke)
+    /// shares its samples instead of copying them (#4534).
+    #[test]
+    fn clones_share_their_samples() {
+        let t = GrayTile::from_fn(64, 32, |x, y| ((x + y) % 7) as f32 / 6.0);
+        let c = t.clone();
+        assert!(std::sync::Arc::ptr_eq(&t.data, &c.data));
+        assert_eq!(t, c);
+        let brush = crate::brush::BrushSettings { tip: crate::brush::TipShape::Sampled(t.clone()), ..Default::default() };
+        let copy = brush.clone();
+        let crate::brush::TipShape::Sampled(ct) = &copy.tip else { panic!("sampled") };
+        assert!(std::sync::Arc::ptr_eq(&t.data, &ct.data), "the settings' clone shares the tip");
+    }
+
     #[test]
     fn base64_round_trip() {
         for n in 0..10 {
@@ -315,7 +333,7 @@ mod tests {
         let back: GrayTile = serde_json::from_str(&j).unwrap();
         assert_eq!(back, t);
         let f: GrayTile = serde_json::from_str(r#"{"width":2,"height":1,"data":[0.0,1.0]}"#).unwrap();
-        assert_eq!(f.data, vec![0, 65535]);
+        assert_eq!(f.data, vec![0, 65535].into());
         assert!(serde_json::from_str::<GrayTile>(r#"{"width":2,"height":2,"data":[0.0,1.0]}"#).is_err());
     }
 
@@ -329,8 +347,8 @@ mod tests {
         assert!(p.data.iter().all(|v| v % 257 == 0), "8-bit levels");
         // Small tiles keep their size; invalid ones never panic.
         assert_eq!(GrayTile::from_fn(5, 3, |_, _| 0.5).preview(96).width, 5);
-        assert!(GrayTile { width: 4, height: 4, data: vec![1] }.preview(96).is_valid());
-        assert!(GrayTile { width: 0, height: 0, data: vec![] }.preview(0).is_valid());
+        assert!(GrayTile { width: 4, height: 4, data: vec![1].into() }.preview(96).is_valid());
+        assert!(GrayTile { width: 0, height: 0, data: vec![].into() }.preview(0).is_valid());
     }
 
     #[test]

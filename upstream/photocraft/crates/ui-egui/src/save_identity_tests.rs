@@ -205,6 +205,29 @@ fn image_previews_preference_reaches_the_exporter() {
     }
 }
 
+/// Preferences › File Handling › Maximize PSD and PSB File Compatibility reaches the exporter of
+/// Save As, Save and automation saves: Always and Ask When Saving keep the PSD's real merged
+/// image, Never doesn't.
+#[test]
+fn maximize_compatibility_preference_reaches_the_exporter() {
+    let seen = Rc::new(RefCell::new(Vec::new()));
+    let mut app = app();
+    let log = seen.clone();
+    app.services.export = Some(Box::new(move |_, _, settings: &ExportSettings| {
+        log.borrow_mut().push(settings.psd_maximize_compatibility);
+        Ok((b"out".to_vec(), Vec::new()))
+    }));
+    let ctx = egui::Context::default();
+    for (value, expect) in [("always", true), ("never", false), ("ask", true)] {
+        app.run("prefs.set", json!({"path": "fileHandling.maximizePsdCompatibility", "value": value})).unwrap();
+        seen.borrow_mut().clear();
+        menus::invoke(&mut app, &ctx, "file.saveAs", json!({"path": format!("{value}.psd")})).unwrap();
+        menus::invoke(&mut app, &ctx, "file.save", json!({})).unwrap();
+        app.save_automation(Some(format!("{value} agent.psd"))).unwrap();
+        assert_eq!(*seen.borrow(), [expect; 3], "{value}");
+    }
+}
+
 /// #2399: Save and Save As start at the opened file's own encoding: a JPEG's estimated quality,
 /// a WebP lossy (at its quality) or lossless; a new document keeps the codec defaults.
 #[test]

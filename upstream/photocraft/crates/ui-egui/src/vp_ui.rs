@@ -19,6 +19,7 @@ use serde_json::{Value, json};
 
 use crate::PhotocraftApp;
 use crate::canvas::{ToolEvent, ViewXform};
+use crate::edit_history::{EditHistory, Step};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -63,7 +64,11 @@ pub struct VpSession {
     pub new_layer: bool,
     clip: Option<Clip>,
     drag: Option<Drag>,
+    history: EditHistory<VpEdit>,
 }
+
+/// What ⌘Z steps through: the planes and where the paste sits on them.
+type VpEdit = (Vec<VpPlane>, [f64; 2], f64);
 
 /// Most planes a session holds (the control channel can't make it allocate without bound).
 const MAX_PLANES: usize = 64;
@@ -149,6 +154,24 @@ impl VpSession {
             self.selected = Some(self.planes.len() - 1);
             // Photoshop hands over to Edit Plane once a plane is closed.
             self.tool = VpTool::EditPlane;
+        }
+    }
+
+    fn edit(&self) -> VpEdit {
+        (self.planes.clone(), self.paste_at, self.paste_width)
+    }
+
+    fn settle(&mut self, busy: bool) {
+        let now = self.edit();
+        self.history.settle(&now, busy || self.drag.is_some());
+    }
+
+    pub(crate) fn step(&mut self, step: Step) {
+        let mut now = self.edit();
+        if self.history.step(&mut now, step) {
+            (self.planes, self.paste_at, self.paste_width) = now;
+            self.drag = None;
+            self.selected = self.selected.filter(|i| *i < self.planes.len());
         }
     }
 
@@ -300,6 +323,7 @@ pub fn begin(app: &mut PhotocraftApp, ctx: &egui::Context) -> Result<(), String>
         new_layer: false,
         clip,
         drag: None,
+        history: EditHistory::new(&(Vec::new(), [0.25, 0.25], 0.5)),
     });
     app.ui.status = tl!("Vanishing Point: click four corners to create a plane").into();
     Ok(())
@@ -369,6 +393,7 @@ pub fn control(app: &mut PhotocraftApp, ui: &Value) -> Result<Value, String> {
     if let Some(b) = ui.get("newLayer").and_then(Value::as_bool) {
         s.new_layer = b;
     }
+    s.settle(false);
     Ok(s.describe())
 }
 
@@ -383,6 +408,7 @@ pub fn pointer(app: &mut PhotocraftApp, ev: ToolEvent, _mods: egui::Modifiers) {
             s.drag = None;
         }
     }
+    s.settle(false);
 }
 
 /// Keys while the mode is active (↩ and Esc are handled by `distort_ui::keys`).
@@ -400,6 +426,7 @@ pub fn keys(app: &mut PhotocraftApp, ctx: &egui::Context) {
         s.tool = VpTool::CreatePlane;
     } else if key(Key::Delete) || key(Key::Backspace) {
         s.delete_selected();
+        s.settle(false);
     }
 }
 
@@ -551,6 +578,9 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
             app.distort.vanishing = None;
         }
     });
+    if let Some(s) = app.distort.vanishing.as_mut() {
+        s.settle(ui.input(|i| i.pointer.any_down()));
+    }
 }
 
 #[cfg(test)]

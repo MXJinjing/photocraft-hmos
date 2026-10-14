@@ -8,12 +8,14 @@ license.workspace = true
 default = ["eframe-host"]
 eframe-host = ["dep:eframe"]
 # HarmonyOS package: hide project promotion and detailed About credits.
+# LINUX_ONLY prefs (X11/Wayland) use target_env = "ohos", not this feature.
 harmonyos-ui = []
 
 [lints]
 workspace = true
 
 [dependencies]
+craft-print = { workspace = true }
 craft-ui = { workspace = true }
 photocraft-geom = { workspace = true }
 photocraft-color = { workspace = true }

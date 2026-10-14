@@ -67,7 +67,7 @@ fn app() -> PhotocraftApp {
 fn harness((w, h, scale): (f32, f32, f32)) -> Harness<'static, PhotocraftApp> {
     let mut h = Harness::builder().with_size(egui::vec2(w / scale, h / scale)).with_pixels_per_point(scale).build_ui_state(
         |ui, app| {
-            crate::menus::menu_bar(app, ui);
+            crate::menus::menu_bar(app, ui, ui.available_width());
         },
         app(),
     );
@@ -563,9 +563,61 @@ fn submenus_stay_above_the_taskbar() {
     }
 }
 
+/// #3737 on X11 (Linux Mint, 1920 × 1080 px): the window manager maximized the window to the whole
+/// monitor without keeping it clear of the bottom panel, so the window's position is known but the
+/// panel covers its bottom. At 1× and at a 150% UI scale (1280 × 720 pt).
+fn maximized_under_a_panel(scale: f32) -> Harness<'static, PhotocraftApp> {
+    let size = egui::vec2(1920.0, 1080.0) / scale;
+    let mut h = harness((1920.0, 1080.0, scale));
+    let v = h.input_mut().viewports.entry(egui::ViewportId::ROOT).or_default();
+    v.monitor_size = Some(size);
+    v.inner_rect = Some(egui::Rect::from_min_size(egui::pos2(0.0, 0.0), size));
+    v.maximized = Some(true);
+    h.run_steps(3);
+    h
+}
+
+#[test]
+fn menus_of_a_maximized_window_stay_above_a_panel_it_runs_under() {
+    let mut scrolled = 0;
+    for scale in [1.0_f32, 1.5] {
+        for menu in LONGEST.iter().copied().chain(["View", "Window"]) {
+            let mut h = maximized_under_a_panel(scale);
+            let bottom = taskbar_bottom(&h);
+            let what = format!("{scale}x {menu}");
+            assert!((bottom - (1080.0 / scale - crate::work_area::TASKBAR)).abs() < 1.0, "{what}: visible bottom {bottom}");
+            open(&mut h, menu);
+            for r in popups(&h) {
+                assert!(r.bottom() <= bottom + 0.5, "{what}: popup {r:?} runs under the panel (from {bottom})");
+            }
+            let last = rows(&h, 0).len() - 1;
+            let in_view = |h: &Harness<'static, PhotocraftApp>| {
+                let nav = Nav::current(&h.ctx);
+                nav.views[0].expand(0.5).contains_rect(nav.rows[0][last].rect) && nav.views[0].bottom() <= bottom + 0.5
+            };
+            let Some(down) = h.query_by_label("Scroll menu down").map(|n| n.rect()) else {
+                assert!(in_view(&h), "{what}: fits, so its last row is in view");
+                continue;
+            };
+            scrolled += 1;
+            assert!(down.bottom() <= bottom, "{what}: ▼ at {down:?} is under the panel");
+            h.hover_at(down.center());
+            for _ in 0..400 {
+                h.run_steps(1);
+                if in_view(&h) {
+                    break;
+                }
+            }
+            assert!(in_view(&h), "{what}: ▼ scrolls to the last row, above the panel");
+        }
+    }
+    assert!(scrolled >= 3, "at 150% the long menus overflow above the panel: {scrolled}");
+}
+
 #[test]
 fn a_maximized_window_or_an_unknown_monitor_uses_the_whole_window() {
-    let mut h = taskbar_harness((1366.0, 728.0), 0.0, 1.0);
+    // Maximized inside the work area (the window manager kept it clear of the taskbar).
+    let mut h = taskbar_harness((1366.0, 720.0), 0.0, 1.0);
     h.input_mut().viewports.entry(egui::ViewportId::ROOT).or_default().maximized = Some(true);
     h.run_steps(2);
     assert_eq!(crate::work_area::visible_rect(&h.ctx), h.ctx.content_rect());
@@ -641,7 +693,7 @@ fn press_drag_release_reaches_other_menus_and_submenus() {
 fn harness_dt(dt: f32) -> Harness<'static, PhotocraftApp> {
     let mut h = Harness::builder().with_size(egui::vec2(1280.0, 720.0)).with_step_dt(dt).build_ui_state(
         |ui, app| {
-            crate::menus::menu_bar(app, ui);
+            crate::menus::menu_bar(app, ui, ui.available_width());
         },
         app(),
     );

@@ -25,8 +25,7 @@ use crate::widgets;
 /// The engine command the dialog drives.
 pub const COMMAND: &str = "select.colorRange";
 
-/// Select menu entries in Photoshop's order (engine value, label). Skin Tones is left out: the
-/// engine has no skin-tone model.
+/// Select menu entries in Photoshop's order (engine value, label).
 pub const SELECTS: &[(&str, &str)] = &[
     ("sampledColors", "Sampled Colors"),
     ("reds", "Reds"),
@@ -38,6 +37,7 @@ pub const SELECTS: &[(&str, &str)] = &[
     ("highlights", "Highlights"),
     ("midtones", "Midtones"),
     ("shadows", "Shadows"),
+    ("skinTones", "Skin Tones"),
     ("outOfGamut", "Out Of Gamut"),
 ];
 
@@ -82,7 +82,7 @@ pub fn controls(f: &Map<String, Value>) -> Controls {
     let select = s(f, "select", "sampledColors");
     let sampled = select == "sampledColors";
     let tonal = matches!(select, "highlights" | "midtones" | "shadows");
-    Controls { fuzziness: sampled || tonal, sampling: sampled, range: sampled && flag(f, "localized"), tonal }
+    Controls { fuzziness: sampled || tonal || select == "skinTones", sampling: sampled, range: sampled && flag(f, "localized"), tonal }
 }
 
 /// Open the dialog with Photoshop's defaults (Sampled Colors, Fuzziness 40, the foreground colour
@@ -141,6 +141,8 @@ pub fn params(f: &Map<String, Value>) -> Value {
             p.insert("localized".into(), json!(true));
             p.insert("range".into(), json!(num(f, "range", 100.0)));
         }
+    } else if select == "skinTones" {
+        p.insert("fuzziness".into(), json!(num(f, "fuzziness", 40.0)));
     } else if c.tonal {
         p.insert("fuzziness".into(), json!(num(f, "toneFuzziness", 20.0)));
         let range = match select {
@@ -390,7 +392,9 @@ fn radio(ui: &mut egui::Ui, on: bool, label: &str) -> egui::Response {
         if on {
             ui.painter().circle_filled(r.center(), 3.0, t.accent);
         }
-        let l = ui.add(egui::Label::new(egui::RichText::new(tl!(&label)).color(t.text_dim)).sense(Sense::click()));
+        let l = ui
+            .add(egui::Label::new(egui::RichText::new(tl!(&label)).color(t.text_dim)).selectable(false).sense(Sense::click()))
+            .on_hover_cursor(egui::CursorIcon::PointingHand);
         resp.union(l)
     })
     .inner
@@ -775,7 +779,7 @@ mod tests {
     fn harness(app: PhotocraftApp) -> Harness<'static, PhotocraftApp> {
         let mut h = Harness::builder().with_size(egui::vec2(1200.0, 900.0)).build_ui_state(
             |ui, app| {
-                crate::menus::menu_bar(app, ui);
+                crate::menus::menu_bar(app, ui, ui.available_width());
                 crate::dialogs::show(app, ui.ctx());
             },
             app,
@@ -940,6 +944,11 @@ mod tests {
         assert!(h.query_by_label("Midtones from:").is_some() && h.query_by_label("Midtones to:").is_some());
         set(&mut h, "select", json!("outOfGamut"));
         assert!(disabled(&h, "Fuzziness:") && h.query_by_label("Midtones from:").is_none());
+        // Skin Tones: Fuzziness (the colour one), no eyedroppers or clusters.
+        set(&mut h, "select", json!("skinTones"));
+        assert!(!disabled(&h, "Fuzziness:") && disabled(&h, "Localized Color Clusters") && disabled(&h, "Add to Sample"));
+        let skin: Map<String, Value> = serde_json::from_value(json!({"select": "skinTones", "fuzziness": 25.0, "points": [[1, 1]]})).unwrap();
+        assert_eq!(params(&skin), json!({"select": "skinTones", "invert": false, "fuzziness": 25.0}));
         assert_eq!(
             controls(&serde_json::from_value(json!({"select": "highlights"})).unwrap()),
             Controls { fuzziness: true, sampling: false, range: false, tonal: true }

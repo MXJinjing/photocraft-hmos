@@ -2,22 +2,22 @@ import { Want } from '@kit.AbilityKit';
 import { fileIo, fileUri } from '@kit.CoreFileKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 
-const MAX_OPEN_BYTES: number = 256 * 1024 * 1024;
 const STREAM_KEY: string = 'ability.params.stream';
 
 export class OpenedFile {
   name: string = '';
   uri: string = '';
-  bytes: ArrayBuffer = new ArrayBuffer(0);
+  file: fileIo.File;
 
-  constructor(name: string, bytes: ArrayBuffer, uri: string = '') {
+  constructor(name: string, file: fileIo.File, uri: string = '') {
     this.name = name;
     this.uri = uri;
-    this.bytes = bytes;
+    this.file = file;
   }
 }
 
-// 冷启动的打开请求可能早于编辑器初始化，先保留文件内容，待页面就绪后统一消费。
+// 冷启动时保留已授权的文件句柄，页面就绪后交给原生层读取并关闭原句柄。
+// 不在 ArkTS 主线程读取或缓存整个大文件。
 let queued: Array<OpenedFile> = [];
 let listener: (() => void) | null = null;
 
@@ -64,17 +64,8 @@ function enqueueUri(uri: string): void {
   let file: fileIo.File | null = null;
   try {
     file = fileIo.openSync(uri, fileIo.OpenMode.READ_ONLY);
-    let size = fileIo.statSync(file.fd).size;
-    if (size <= 0 || size > MAX_OPEN_BYTES) {
-      console.error(`Open skipped ${uri}: size ${size}`);
-      return;
-    }
-    let bytes = readAll(file.fd, size);
-    if (bytes === null) {
-      console.error(`Open read incomplete: ${uri}`);
-      return;
-    }
-    queued.push(new OpenedFile(displayName(uri), bytes, uri));
+    queued.push(new OpenedFile(displayName(uri), file, uri));
+    file = null; // Ownership moves to the inbox consumer.
     if (listener !== null) {
       listener();
     }
@@ -91,22 +82,6 @@ function enqueueUri(uri: string): void {
       }
     }
   }
-}
-
-function readAll(fd: number, size: number): ArrayBuffer | null {
-  let bytes = new ArrayBuffer(size);
-  let view = new Uint8Array(bytes);
-  let offset = 0;
-  while (offset < size) {
-    let chunk = new ArrayBuffer(Math.min(1024 * 1024, size - offset));
-    let read = fileIo.readSync(fd, chunk);
-    if (read <= 0) {
-      return null;
-    }
-    view.set(new Uint8Array(chunk, 0, read), offset);
-    offset += read;
-  }
-  return bytes;
 }
 
 function displayName(uri: string): string {

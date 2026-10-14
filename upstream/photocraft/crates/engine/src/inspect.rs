@@ -38,7 +38,7 @@ pub fn document(d: &DocState) -> Value {
         "isolatedLayers": d.isolated_layers.iter().map(|l| l.0).collect::<Vec<_>>(),
         "hasSelection": doc.selection.is_some(),
         "selectionBounds": doc.selection.as_ref().map(|s| { let r = s.content_bounds(); [r.x0, r.y0, r.width() as i32, r.height() as i32] }),
-        "layers": doc.layers.iter().rev().map(|l| layer_sel(l, &selected)).collect::<Vec<_>>(),
+        "layers": doc.layers.iter().rev().map(|l| layer_sel(l, &selected, Some(&doc.metadata))).collect::<Vec<_>>(),
         "history": d.history.entries(),
         "snapshots": d.snapshots.iter().map(|snap| json!({"id": snap.id, "name": snap.name})).collect::<Vec<_>>(),
         "canUndo": d.history.can_undo(),
@@ -63,11 +63,12 @@ pub fn document(d: &DocState) -> Value {
 
 /// Layer tree top-to-bottom (display order).
 pub fn layer(l: &Layer) -> Value {
-    layer_sel(l, &[])
+    layer_sel(l, &[], None)
 }
 
-/// [`layer`] with a `selected` flag on every node (Layers panel multi-selection).
-fn layer_sel(l: &Layer, selected: &[photocraft_doc::LayerId]) -> Value {
+/// [`layer`] with a `selected` flag on every node (Layers panel multi-selection); with the
+/// document's `meta`, a smart object whose file is embedded in the PSD says so.
+fn layer_sel(l: &Layer, selected: &[photocraft_doc::LayerId], meta: Option<&photocraft_doc::Metadata>) -> Value {
     let bounds = l.surface().map(|s| {
         let r = s.content_bounds();
         [r.x0, r.y0, r.width() as i32, r.height() as i32]
@@ -91,14 +92,16 @@ fn layer_sel(l: &Layer, selected: &[photocraft_doc::LayerId]) -> Value {
     });
     match &l.content {
         LayerContent::Group(g) => {
-            v["children"] = Value::Array(g.children.iter().rev().map(|c| layer_sel(c, selected)).collect());
+            v["children"] = Value::Array(g.children.iter().rev().map(|c| layer_sel(c, selected, meta)).collect());
             v["expanded"] = json!(g.expanded);
             if let Some(a) = &g.artboard {
                 v["artboard"] = json!({"rect": [a.rect.x0, a.rect.y0, a.rect.width(), a.rect.height()], "background": a.background.name(), "preset": a.preset});
             }
         }
         LayerContent::Adjustment(a) => {
-            v["adjustment"] = serde_json::to_value(a).unwrap_or(Value::Null);
+            // The same kind and parameters the adjustment commands take (`inBlack` 0..255, …),
+            // not the internal model.
+            v["adjustment"] = json!({"kind": crate::commands::adjustment_kind(a), "params": crate::adjust_params::to_params(a)});
         }
         LayerContent::Smart(sm) => {
             v["smartFilters"] = Value::Array(
@@ -109,11 +112,15 @@ fn layer_sel(l: &Layer, selected: &[photocraft_doc::LayerId]) -> Value {
             );
             v["smartFiltersEnabled"] = json!(sm.filters_enabled);
             // Where the contents come from. A PSD placed layer (embedded or linked in Photoshop) is
-            // `linked` to the `Idnt` uuid of its file, which its duplicates share; New Smart Object
-            // via Copy embeds its own copy of the file instead.
+            // `linked` to the `Idnt` uuid of its file, which its duplicates share; when the file
+            // is embedded in the PSD (a `liFD` item) it is reported as embedded, with that uuid.
+            // New Smart Object via Copy embeds its own copy of the file instead.
             v["smartSource"] = match &sm.source {
                 SmartSource::Embedded { file_name, .. } => json!({"kind": "embedded", "fileName": file_name}),
-                SmartSource::Linked { path } => json!({"kind": "linked", "path": path}),
+                SmartSource::Linked { path } => match meta.and_then(|m| photocraft_io::linked::embedded_file_name(m, path)) {
+                    Some(name) => json!({"kind": "embedded", "fileName": name, "uuid": path}),
+                    None => json!({"kind": "linked", "path": path}),
+                },
             };
         }
         LayerContent::Text(t) => {
@@ -164,6 +171,25 @@ mod tests {
     use super::*;
     use photocraft_color::PixelFormat;
     use photocraft_doc::{LayerMask, Path, VectorMask};
+
+    #[test]
+    fn an_adjustment_layer_is_reported_with_the_params_its_command_takes() {
+        let mut s = Session::new();
+        s.execute("file.new", json!({"width": 4, "height": 4})).unwrap();
+        s.execute("layer.newAdjustmentLayer.levels", json!({"inBlack": 10, "inWhite": 240, "gamma": 1.2})).unwrap();
+        let info = s.execute("document.inspect", json!({})).unwrap();
+        let adj = &info["layers"][0]["adjustment"];
+        assert_eq!(adj["kind"], "levels");
+        assert_eq!((adj["params"]["inBlack"].as_f64(), adj["params"]["inWhite"].as_f64()), (Some(10.0), Some(240.0)), "{adj}");
+        // Fed back to the command, the params give the same adjustment; no internal field names.
+        let model = match &s.active().unwrap().doc.layers[1].content {
+            LayerContent::Adjustment(a) => a.clone(),
+            c => panic!("{c:?}"),
+        };
+        let back = crate::adjust_params::from_params("levels", &adj["params"], None, photocraft_color::ColorMode::Rgb).unwrap();
+        assert_eq!(crate::adjust_params::to_params(&back), crate::adjust_params::to_params(&model));
+        assert!(!adj.to_string().contains('_'), "{adj}");
+    }
 
     #[test]
     fn document_inspect_reports_raster_and_vector_masks_when_nested() {

@@ -7,9 +7,9 @@ order = 5
 [[item]]
 id = "TYPE-218-1"
 target = "Type on a path: path shape, glyphs along the curve, caret follows, PSD round trip"
-status = "missing"
+status = "partial"
 issue = 218
-note = "doc text.rs:209 TextShape has Point and Box only"
+note = "TextShape::Path (doc text.rs) with glyphs placed rigidly along the curve by arc length (text warp.rs PathFrame), type.attachToPath and type.detachFromPath (#4365), .pcraft round trip. Missing: clicking a path with the Type tool, the caret and selection following the curve, and PSD path text (it saves as point text)"
 
 [[item]]
 id = "TYPE-218-2"
@@ -23,7 +23,7 @@ id = "TYPE-218-3"
 target = "Thai/Khmer/Indic fallback fonts; golden shaping tests for complex scripts and RTL"
 status = "partial"
 issue = 218
-note = "Thai is covered: THAI_FAMILIES (fonts.rs) lists the Windows, macOS and Linux families and thai_in_latin_font_falls_back_to_installed_thai_font checks a sample with above and below marks (#1909); Arabic and Hebrew fall back too. Khmer and Indic have no fallback list, and there are no per-script golden shaping tests (only a bidi test)"
+note = "Fallback fonts are covered for Thai, Khmer, Lao, Myanmar (THAI_FAMILIES, KHMER_FAMILIES, LAO_FAMILIES, MYANMAR_FAMILIES in fonts.rs; #1909, #3259), the nine Indic scripts (INDIC_FAMILIES: Nirmala UI, Kohinoor and Sangam MN, Noto Sans) and Arabic and Hebrew. Still missing: per-script golden shaping tests against reference output (only smoke tests that an installed font shapes without .notdef, plus a bidi test)"
 
 [[item]]
 id = "TYPE-218-4"

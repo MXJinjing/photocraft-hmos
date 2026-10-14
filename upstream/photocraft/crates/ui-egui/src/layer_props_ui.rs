@@ -124,7 +124,6 @@ const LINK_W: f32 = 20.0;
 /// sections (Character/Paragraph/Type Options for type, Appearance/Shape for shapes), then Quick
 /// Actions, all with the same collapsible headers (#155).
 pub fn properties(app: &mut PhotocraftApp, ui: &mut egui::Ui, layer: &Layer) {
-    let t = Tokens::get(ui.ctx());
     let mut run: Vec<(String, Value)> = Vec::new();
     if let Some(s) = layer.surface() {
         let b = app.cached_bounds(layer.id.0, s);
@@ -167,38 +166,8 @@ pub fn properties(app: &mut PhotocraftApp, ui: &mut egui::Ui, layer: &Layer) {
     if gradient {
         crate::gradient_ui::properties(app, ui, layer);
     }
-    if !gradient && section(ui, "align", tl!("Align and Distribute")) {
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 2.0;
-            for (i, kind) in ["leftEdges", "horizontalCenters", "rightEdges", "topEdges", "verticalCenters", "bottomEdges"].into_iter().enumerate() {
-                if i == 3 {
-                    ui.add_space(8.0);
-                }
-                let id = format!("layer.align.{kind}");
-                let on = app.session.is_enabled(&id);
-                let label = photocraft_engine::commands::find(&id).map_or(kind, |c| c.label);
-                let (r, resp) = ui.allocate_exact_size(vec2(24.0, 24.0), if on { Sense::click() } else { Sense::hover() });
-                if resp.hovered() && on {
-                    ui.painter().rect_filled(r, t.radius_sm, t.hover);
-                }
-                align_glyph(ui, r, kind, if on { t.icon } else { t.text_faint });
-                if resp.on_hover_text(crate::i18n::fmt(tl!("Align {what}"), &[("what", tl!(&label))])).clicked() {
-                    run.push((id, json!({})));
-                }
-            }
-        });
-        // The engine already supports equal-gap distribution in both axes. Make those
-        // existing commands discoverable here as well as through Layer > Distribute (#2349).
-        // Three or more selected layers are required; the engine remains authoritative.
-        ui.horizontal_wrapped(|ui| {
-            for (kind, text) in [("horizontally", tl!("Horizontally")), ("vertically", tl!("Vertically"))] {
-                let id = format!("layer.distribute.{kind}");
-                if ui.add_enabled(app.session.is_enabled(&id), egui::Button::new(text)).clicked() {
-                    run.push((id, json!({})));
-                }
-            }
-        });
-        ui.add_space(ROW_GAP);
+    if !gradient {
+        align_and_distribute(app, ui, &mut run);
     }
     for (id, p) in run.drain(..) {
         if let Err(e) = app.run(&id, p) {
@@ -216,6 +185,61 @@ pub fn properties(app: &mut PhotocraftApp, ui: &mut egui::Ui, layer: &Layer) {
     if let Some(id) = quick_actions_ui(app, ui, &content) {
         let ctx = ui.ctx().clone();
         if let Err(e) = crate::menus::invoke(app, &ctx, id, json!({})) {
+            app.ui.status = e;
+            app.ui.status_error = true;
+        }
+    }
+}
+
+/// The Align and Distribute section: its buttons run `layer.align.*` and `layer.distribute.*` on
+/// the selected layers (pushed onto `run`), greyed where the engine says they can't.
+fn align_and_distribute(app: &PhotocraftApp, ui: &mut egui::Ui, run: &mut Vec<(String, Value)>) {
+    let t = Tokens::get(ui.ctx());
+    if !section(ui, "align", tl!("Align and Distribute")) {
+        return;
+    }
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 2.0;
+        for (i, kind) in ["leftEdges", "horizontalCenters", "rightEdges", "topEdges", "verticalCenters", "bottomEdges"].into_iter().enumerate() {
+            if i == 3 {
+                ui.add_space(8.0);
+            }
+            let id = format!("layer.align.{kind}");
+            let on = app.session.is_enabled(&id);
+            let label = photocraft_engine::commands::find(&id).map_or(kind, |c| c.label);
+            let (r, resp) = ui.allocate_exact_size(vec2(24.0, 24.0), if on { Sense::click() } else { Sense::hover() });
+            if resp.hovered() && on {
+                ui.painter().rect_filled(r, t.radius_sm, t.hover);
+            }
+            align_glyph(ui, r, kind, if on { t.icon } else { t.text_faint });
+            let tip = crate::i18n::fmt(tl!("Align {what}"), &[("what", tl!(&label))]);
+            resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, on, &tip));
+            if resp.on_hover_text(tip).clicked() {
+                run.push((id, json!({})));
+            }
+        }
+    });
+    // The engine already supports equal-gap distribution in both axes. Make those
+    // existing commands discoverable here as well as through Layer > Distribute (#2349).
+    // Three or more selected layers are required; the engine remains authoritative.
+    ui.horizontal_wrapped(|ui| {
+        for (kind, text) in [("horizontally", tl!("Horizontally")), ("vertically", tl!("Vertically"))] {
+            let id = format!("layer.distribute.{kind}");
+            if ui.add_enabled(app.session.is_enabled(&id), egui::Button::new(text)).clicked() {
+                run.push((id, json!({})));
+            }
+        }
+    });
+    ui.add_space(ROW_GAP);
+}
+
+/// Several layers selected with the Background active: Photoshop's Properties keeps Align and
+/// Distribute for the selection there, above the Document properties (#4608).
+pub fn selection_align(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
+    let mut run = Vec::new();
+    align_and_distribute(app, ui, &mut run);
+    for (id, p) in run {
+        if let Err(e) = app.run(&id, p) {
             app.ui.status = e;
             app.ui.status_error = true;
         }

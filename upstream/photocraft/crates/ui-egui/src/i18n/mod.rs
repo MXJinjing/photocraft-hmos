@@ -187,7 +187,7 @@ fn expand(packed: &str, keys: &[&str]) -> Result<String, String> {
 }
 
 /// The registry. English first: it is the fallback and the source language.
-pub static LANGUAGES: [LangInfo; 20] = [
+pub static LANGUAGES: [LangInfo; 21] = [
     LangInfo { code: "en", name: "English", source: b"", plural: plural_one_other, complete_menus: false, catalog: OnceLock::new() },
     LangInfo { code: "ja", name: "日本語", source: catalog!("ja"), plural: plural_none, complete_menus: true, catalog: OnceLock::new() },
     LangInfo { code: "zh-hans", name: "简体中文", source: catalog!("zh-hans"), plural: plural_none, complete_menus: true, catalog: OnceLock::new() },
@@ -198,6 +198,10 @@ pub static LANGUAGES: [LangInfo; 20] = [
     LangInfo { code: "ru", name: "Русский", source: catalog!("ru"), plural: plural_russian, complete_menus: true, catalog: OnceLock::new() },
     // Ukrainian has the same one/few/many rule for integer counts.
     LangInfo { code: "uk", name: "Українська", source: catalog!("uk"), plural: plural_russian, complete_menus: true, catalog: OnceLock::new() },
+    // Serbian (Latin script, Ekavian) has the same one/few/many rule for integer counts. `sr-RS`,
+    // `sr-Latn-*` and `sr_RS@latin` resolve here; so do Cyrillic `sr` locales, which read Latin
+    // rather than English.
+    LangInfo { code: "sr", name: "Srpski", source: catalog!("sr"), plural: plural_russian, complete_menus: true, catalog: OnceLock::new() },
     LangInfo { code: "cs", name: "Čeština", source: catalog!("cs"), plural: plural_cs, complete_menus: true, catalog: OnceLock::new() },
     LangInfo { code: "fr", name: "Français", source: catalog!("fr"), plural: plural_fr, complete_menus: true, catalog: OnceLock::new() },
     LangInfo { code: "id", name: "Bahasa Indonesia", source: catalog!("id"), plural: plural_none, complete_menus: true, catalog: OnceLock::new() },
@@ -623,6 +627,94 @@ mod tests {
     }
 
     #[test]
+    fn russian_status_messages_agree_with_counts() {
+        let ru = Lang::from_code("ru").expect("ru registered");
+        let cases = [
+            (
+                "Exported {n} swatch to {file}",
+                "Exported {n} swatches to {file}",
+                ["Экспортирован {n} образец в {file}", "Экспортированы {n} образца в {file}", "Экспортировано {n} образцов в {file}"],
+            ),
+            (
+                "Imported {n} brush from {group}",
+                "Imported {n} brushes from {group}",
+                ["Импортирована {n} кисть из {group}", "Импортированы {n} кисти из {group}", "Импортировано {n} кистей из {group}"],
+            ),
+            (
+                "Imported {n} swatch from {file}",
+                "Imported {n} swatches from {file}",
+                ["Импортирован {n} образец из {file}", "Импортированы {n} образца из {file}", "Импортировано {n} образцов из {file}"],
+            ),
+            ("Played {n} step", "Played {n} steps", ["Воспроизведён {n} шаг", "Воспроизведены {n} шага", "Воспроизведено {n} шагов"]),
+            (
+                "Updated {n} linked smart object changed on disk",
+                "Updated {n} linked smart objects changed on disk",
+                [
+                    "Обновлён {n} связанный смарт-объект, изменённый на диске",
+                    "Обновлены {n} связанных смарт-объекта, изменённых на диске",
+                    "Обновлено {n} связанных смарт-объектов, изменённых на диске",
+                ],
+            ),
+            (
+                "{n} layer recorded by this comp was deleted. Update the comp, or clear the warning.",
+                "{n} layers recorded by this comp were deleted. Update the comp, or clear the warning.",
+                [
+                    "Удалён {n} слой, записанный в этом варианте. Обновите вариант или сбросьте предупреждение.",
+                    "Удалены {n} слоя, записанных в этом варианте. Обновите вариант или сбросьте предупреждение.",
+                    "Удалено {n} слоёв, записанных в этом варианте. Обновите вариант или сбросьте предупреждение.",
+                ],
+            ),
+            ("{n} sample point removed", "{n} sample points removed", ["Удалена {n} точка замера", "Удалены {n} точки замера", "Удалено {n} точек замера"]),
+            (
+                "Loaded {n} action from {file}",
+                "Loaded {n} actions from {file}",
+                ["Загружена {n} операция из {file}", "Загружены {n} операции из {file}", "Загружено {n} операций из {file}"],
+            ),
+            (
+                "Saved {n} action to {file}",
+                "Saved {n} actions to {file}",
+                ["Сохранена {n} операция в {file}", "Сохранены {n} операции в {file}", "Сохранено {n} операций в {file}"],
+            ),
+            (
+                "{n} step with no Photoshop equivalent left out",
+                "{n} steps with no Photoshop equivalent left out",
+                [
+                    "Пропущен {n} шаг без эквивалента в Photoshop",
+                    "Пропущены {n} шага без эквивалента в Photoshop",
+                    "Пропущено {n} шагов без эквивалента в Photoshop",
+                ],
+            ),
+        ];
+        // Include zero, teens, and compound counts as well as each basic form.
+        for (n, form) in [(0, 2), (1, 0), (2, 1), (3, 1), (4, 1), (5, 2), (11, 2), (12, 2), (14, 2), (21, 0), (22, 1), (25, 2), (101, 0), (112, 2)] {
+            for (one, other, forms) in cases {
+                let expected = forms[form].replace("{n}", &n.to_string());
+                assert_eq!(trn(ru, n, one, other), expected, "{one}, n={n}");
+            }
+        }
+        assert_eq!(
+            fmt(&trn(ru, 2, "Imported {n} brush from {group}", "Imported {n} brushes from {group}"), &[("group", "Кисти")]),
+            "Импортированы 2 кисти из Кисти"
+        );
+        assert_eq!(
+            fmt(&trn(ru, 22, "Loaded {n} action from {file}", "Loaded {n} actions from {file}"), &[("file", "actions.atn")]),
+            "Загружены 22 операции из actions.atn"
+        );
+    }
+
+    #[test]
+    fn russian_font_weights_and_reviewed_labels() {
+        let ru = Lang::from_code("ru").expect("ru registered");
+        assert_eq!(tr_ctx(ru, "fontWeight", "ExtraLight"), "Сверхтонкий");
+        assert_eq!(tr_ctx(ru, "fontWeight", "Light"), "Лёгкий");
+        assert_eq!(tr_ctx(ru, "fontWeight", "ExtraBold"), "Сверхжирный");
+        assert_eq!(tr_ctx(ru, "fontWeight", "Black"), "Сверхжирный (Black)");
+        assert_eq!(tr(ru, "Delete and Fill Selection"), "Удалить и залить выделение");
+        assert_eq!(tr(ru, "Discard the embedded profile (don't color manage)"), "Не использовать встроенный профиль (без управления цветом)");
+        assert_eq!(tr(ru, "No object found there — drag a rectangle around it"), "Объект не найден — обведите его прямоугольником");
+    }
+
+    #[test]
     fn ukrainian_resolves_locales_and_preferences() {
         let uk = Lang::from_code("uk").expect("uk registered");
         assert_eq!(uk.name(), "Українська");
@@ -677,6 +769,66 @@ mod tests {
             assert_eq!(trn(uk, n, "{n} item", "{n} items"), format!("{n} {item}"));
             assert_eq!(trn(uk, n, "{n} layer", "{n} layers"), format!("{n} {layer}"));
             assert_eq!(trn(uk, n, "Group · {n} layer", "Group · {n} layers"), format!("Група · {n} {layer}"));
+        }
+    }
+
+    #[test]
+    fn serbian_resolves_locales_and_preferences() {
+        let sr = Lang::from_code("sr").expect("sr registered");
+        assert_eq!(sr.name(), "Srpski");
+        assert!(sr.complete_menus());
+        for tag in ["sr", "SR", "sr-RS", "sr_RS", "sr_RS.UTF-8", "sr_RS@latin", "sr-Latn", "sr-Latn-RS", "sr-Cyrl-RS", "sr-ME"] {
+            assert_eq!(lang_from_tag(tag), Some(sr), "{tag}");
+            assert_eq!(Lang::from_pref(tag), sr, "{tag}");
+        }
+        assert_eq!(tr(sr, "File"), "Datoteka");
+        assert_eq!(tr(sr, "Layer"), "Sloj");
+        assert_eq!(tr(sr, "New document…"), "Novi dokument…");
+        assert_eq!(tr_id(sr, "select.all", "All"), "Izaberi sve", "an id override wins over the plain label");
+        assert_eq!(tr(sr, "All"), "Sve");
+        assert_eq!(tr_ctx(sr, "cameraRaw", "Light"), "Svetlo");
+        assert_eq!(tr_ctx(sr, "fontWeight", "Light"), "Lagano");
+        assert_eq!(fmt(tr(sr, "Camera Raw Filter ({layer})"), &[("layer", "Background")]), "Camera Raw filter (Background)");
+        for key in ["Alt", "⌥"] {
+            assert_eq!(
+                fmt(tr(sr, "Add a mask  (from the selection; {key} inverts)"), &[("key", key)]),
+                format!("Dodaj masku  (iz selekcije; {key} invertuje)")
+            );
+        }
+    }
+
+    #[test]
+    fn serbian_plural_messages_handle_teens_and_compound_counts() {
+        let sr = Lang::from_code("sr").expect("sr registered");
+        for (n, item, layer) in [
+            (0, "stavki", "slojeva"),
+            (1, "stavka", "sloj"),
+            (2, "stavke", "sloja"),
+            (4, "stavke", "sloja"),
+            (5, "stavki", "slojeva"),
+            (11, "stavki", "slojeva"),
+            (12, "stavki", "slojeva"),
+            (14, "stavki", "slojeva"),
+            (21, "stavka", "sloj"),
+            (22, "stavke", "sloja"),
+            (25, "stavki", "slojeva"),
+            (101, "stavka", "sloj"),
+            (111, "stavki", "slojeva"),
+            (112, "stavki", "slojeva"),
+            (122, "stavke", "sloja"),
+        ] {
+            assert_eq!(trn(sr, n, "{n} item", "{n} items"), format!("{n} {item}"));
+            assert_eq!(trn(sr, n, "{n} layer", "{n} layers"), format!("{n} {layer}"));
+            assert_eq!(trn(sr, n, "Group · {n} layer", "Group · {n} layers"), format!("Grupa · {n} {layer}"));
+        }
+        for (n, expected) in [
+            (1, "Uklonjena je 1 tačka uzorkovanja"),
+            (3, "Uklonjene su 3 tačke uzorkovanja"),
+            (5, "Uklonjeno je 5 tačaka uzorkovanja"),
+            (13, "Uklonjeno je 13 tačaka uzorkovanja"),
+            (21, "Uklonjena je 21 tačka uzorkovanja"),
+        ] {
+            assert_eq!(trn(sr, n, "{n} sample point removed", "{n} sample points removed"), expected);
         }
     }
 
@@ -1047,6 +1199,25 @@ mod tests {
         assert_eq!(tr_ctx(de, "layerLabel", "No Color"), "Keine Farbe");
         assert_eq!(tr_ctx(de, "layerLabel", "Seafoam"), "Meeresschaum");
         assert_eq!(tr(Lang::EN, "Seafoam"), "Seafoam");
+    }
+
+    /// These labels are passed to `tl!` dynamically, so the literal coverage scan misses them.
+    #[test]
+    fn russian_dynamic_selection_theme_and_measurement_labels_are_translated() {
+        let ru = Lang::from_code("ru").expect("ru registered");
+        let (inverse_label, _) =
+            crate::canvas_tool_menu::SELECTION_MENU.iter().flatten().find(|(_, id)| *id == "select.inverse").expect("selection menu has Select Inverse");
+        assert_eq!(tr(ru, inverse_label), "Инвертировать выделение");
+        for kind in [crate::theme::ThemeKind::ProLight, crate::theme::ThemeKind::ProLightGray] {
+            assert!(has(ru, kind.label()), "Russian theme label missing {}", kind.label());
+        }
+        for (_, label) in photocraft_engine::analysis_cmds::COLUMNS {
+            assert!(has(ru, label), "Russian measurement header missing {label}");
+        }
+        assert_eq!(tr(ru, "Pro (Light)"), "Pro (светлая)");
+        assert_eq!(tr(ru, "Pro (Light Gray)"), "Pro (светло-серая)");
+        assert_eq!(tr(ru, "Date and Time"), "Дата и время");
+        assert_eq!(tr(ru, "Integrated Density"), "Интегральная плотность");
     }
 
     /// Font style labels are built from dynamic words (weights, "Italic"), so the literal

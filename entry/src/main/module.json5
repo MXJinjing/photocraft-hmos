@@ -12,7 +12,12 @@
       {
         "name": "ohos.permission.PRINT"
       },
-      { "name": "ohos.permission.INTERNET" }
+      { "name": "ohos.permission.INTERNET" },
+      {
+        "name": "ohos.permission.ACCESS_BLUETOOTH",
+        "reason": "$string:stylus_bluetooth_reason",
+        "usedScene": { "abilities": ["EntryAbility"], "when": "inuse" }
+      }
     ],
     "abilities": [
       {

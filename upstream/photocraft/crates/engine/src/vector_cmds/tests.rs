@@ -363,6 +363,30 @@ fn selection_to_work_path_roundtrip_iou() {
     let r = s.execute("select.convertToShape", json!({"fill": "#00ff00"})).unwrap();
     assert_eq!(r["fill"], "#00ff00");
     assert_eq!(r["path"]["subpaths"].as_array().unwrap().len(), 3);
+
+    // tolerance and simplifyTolerance parameter
+    s.execute("path.toSelection", json!({"name": "src"})).unwrap();
+    let r_fine = s.execute("select.convertToShape", json!({"tolerance": 0.5, "name": "Fine Shape"})).unwrap();
+    assert_eq!(r_fine["name"], "Fine Shape");
+    let knots = |r: &Value| r["path"]["subpaths"].as_array().unwrap().iter().map(|sp| sp["knots"].as_array().unwrap().len()).sum::<usize>();
+    let fine_knots = knots(&r_fine);
+
+    s.execute("path.toSelection", json!({"name": "src"})).unwrap();
+    let r_coarse = s.execute("select.convertToShape", json!({"simplifyTolerance": 5.0, "name": "Coarse Shape"})).unwrap();
+    assert_eq!(r_coarse["name"], "Coarse Shape");
+    let coarse_knots = knots(&r_coarse);
+    assert!(fine_knots > coarse_knots, "fine tolerance {fine_knots} must have more knots than coarse {coarse_knots}");
+
+    // Undo restores state
+    assert!(s.undo());
+    assert_eq!(s.active().unwrap().doc.layers.last().unwrap().name, "Fine Shape");
+}
+
+#[test]
+fn convert_to_shape_requires_selection() {
+    let mut s = session(100, 100, 8);
+    assert!(!s.is_enabled("select.convertToShape"));
+    assert!(s.execute("select.convertToShape", json!({})).is_err());
 }
 
 #[test]
@@ -701,6 +725,28 @@ fn vector_mask_commands_and_compositing() {
     assert!(s.execute("layer.vectorMask.revealAll", json!({})).is_err());
 }
 
+/// #4201: the vector mask's feather takes the pixel mask's range (finite 0..=1000 px); anything
+/// else is refused before the edit, so no infinite feather can block a .pcraft save.
+#[test]
+fn vector_mask_edit_rejects_out_of_range_feather() {
+    let mut s = session(32, 32, 8);
+    s.execute("layer.new.layer", json!({})).unwrap();
+    let id = s.active().unwrap().active_layer.unwrap();
+    s.execute("layer.vectorMask.revealAll", json!({})).unwrap();
+    let feather = |s: &Session| doc(s).layer(id).unwrap().vector_mask.as_ref().unwrap().feather;
+    let steps = s.active().unwrap().history.past_len();
+    for bad in [json!(1e39), json!(-1), json!(1001), json!("x"), json!(null)] {
+        assert!(s.execute("layer.vectorMask.edit", json!({"feather": bad})).is_err(), "feather {bad}");
+        assert_eq!(feather(&s), 0.0, "feather {bad}");
+        assert_eq!(s.active().unwrap().history.past_len(), steps, "feather {bad}");
+    }
+    let r = s.execute("layer.vectorMask.edit", json!({"feather": 12.5})).unwrap();
+    assert_eq!(r["feather"], 12.5);
+    assert_eq!(feather(&s), 12.5);
+    s.execute("layer.vectorMask.edit", json!({"feather": 1000})).unwrap();
+    assert_eq!(feather(&s), 1000.0);
+}
+
 #[test]
 fn translate_vectors_moves_shapes_and_masks() {
     let mut s = session(100, 100, 8);
@@ -770,6 +816,31 @@ fn shape_info_bounds_of_curved_shapes_are_exact() {
             let id = s.execute("shape.create", params.clone()).unwrap()["layer"].as_u64().unwrap();
             let info = s.execute("shape.info", json!({"layer": id})).unwrap();
             assert_eq!(info["bounds"], want, "{params} at {depth}-bit");
+        }
+    }
+}
+
+#[test]
+fn shape_create_negative_size_rect_covers_the_ellipse_box() {
+    // Issue #4203: a rectangle with a negative width spanned x 50..70 while the ellipse and
+    // polygon with the same `rect` spanned 30..50.
+    for depth in [8, 16, 32] {
+        let mut s = session(100, 60, depth);
+        let ell = s.execute("shape.create", json!({"kind": "ellipse", "rect": [50, 10, -20, 30], "fill": "#0000ff"})).unwrap()["bounds"].clone();
+        assert_eq!(ell, json!([30, 10, 20, 30]), "{depth}-bit");
+        for params in [
+            json!({"kind": "rect", "rect": [50, 10, -20, 30], "fill": "#0000ff"}),
+            json!({"kind": "roundedRect", "rect": [50, 10, -20, 30], "radii": 5, "fill": "#0000ff"}),
+            json!({"kind": "rect", "rect": [50, 40, -20, -30], "fill": "#0000ff"}),
+        ] {
+            let r = s.execute("shape.create", params.clone()).unwrap();
+            assert_eq!(r["bounds"], ell, "{params} at {depth}-bit");
+            let sh = shape(&s, r["layer"].as_u64().unwrap());
+            let c = sh.cache.as_ref().unwrap();
+            let fmt = c.format();
+            let alpha = |x: i32, y: i32| photocraft_raster::to_rgba(&fmt, &c.read_region(photocraft_doc::Rect::from_xywh(x, y, 1, 1)))[3];
+            assert!(alpha(40, 25) > 0.99, "{params} at {depth}-bit");
+            assert!(alpha(60, 25) < 0.01, "{params} at {depth}-bit");
         }
     }
 }

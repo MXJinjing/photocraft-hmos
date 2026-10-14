@@ -265,3 +265,56 @@ fn the_brushes_tab_grid_is_centred_past_its_indent() {
     h.run_steps(6);
     rows_are_centred(&h, PANEL_LIST.indent, 2);
 }
+
+/// #4454: a card's size number sat under the tip thumbnail of any medium or large brush (the
+/// tip took up to 44.8 pt of a 42 pt cell, the number anchored to the cell's bottom), so the
+/// "30" of Hard Round and the "45" of Soft Round couldn't be read. At every footer scale that
+/// shows numbers, in each card kind, the tip now stays above the number, and bigger brushes still
+/// get bigger tips.
+#[test]
+fn card_tips_never_cover_their_size_number() {
+    let number_h = std::rc::Rc::new(std::cell::Cell::new(0.0_f32));
+    let seen = number_h.clone();
+    let mut h = Harness::new_ui(move |ui| {
+        let g = ui.painter().layout_no_wrap("45".into(), egui::FontId::proportional(CARD_NUM_FONT), Color32::WHITE);
+        seen.set(g.size().y);
+    });
+    PhotocraftApp::setup_context(&h.ctx, Default::default());
+    h.run();
+    let number_h = number_h.get();
+    assert!(number_h > 8.0, "the number has a real height: {number_h}");
+    let mut scale = CARD_COMPACT_SCALE + 0.01;
+    while scale <= *crate::brush_picker::SCALE_RANGE.end() + 1e-3 {
+        let scale_h = scale.max(CARD_MIN_H_SCALE);
+        // The tip cell of a full card (name row under it), a tip-and-name card and a tip-only one,
+        // as [`preset_card`] sizes them in a wide column.
+        let cells = [
+            vec2(CARD_TIP_W * scale, (CARD_MAX_H - CARD_PAD * 2.0 - CARD_NAME_H) * scale_h),
+            vec2(CARD_TIP_W * scale, (CARD_TIP_NAME_H - CARD_PAD * 2.0) * scale_h),
+            vec2((CARD_TIP_ONLY_W - 16.0) * scale, (CARD_TIP_ONLY_H - CARD_PAD * 2.0) * scale_h),
+        ];
+        for size in cells {
+            let cell = Rect::from_min_size(egui::pos2(10.0, 20.0), size);
+            let number_top = cell.bottom() - 1.0 - number_h;
+            let mut last = 0.0;
+            for brush in [1.0, 5.0, 13.0, 30.0, 45.0, 100.0, 2500.0] {
+                let tip = card_tip_rect(cell, Some(number_h), brush, scale);
+                assert!(tip.bottom() <= number_top + 1e-3, "scale {scale}, cell {size:?}, {brush} px: tip {tip:?} reaches the number at {number_top}");
+                assert!(cell.expand(1e-3).contains_rect(tip), "scale {scale}, {brush} px: tip {tip:?} leaves its cell {cell:?}");
+                assert!(tip.width() >= last, "scale {scale}, {brush} px: a bigger brush gets a smaller tip");
+                last = tip.width();
+            }
+        }
+        scale += 0.05;
+    }
+    // The tip-only grid's cells are tall enough for the number: a big brush's tip still spans
+    // the cell's width.
+    let cell = Rect::from_min_size(egui::pos2(0.0, 0.0), vec2(CARD_TIP_ONLY_W - 16.0, CARD_TIP_ONLY_H - CARD_PAD * 2.0));
+    assert!((card_tip_rect(cell, Some(number_h), 45.0, 1.0).width() - cell.width()).abs() < 1e-3);
+    // Compact cards: no number, the tip fills the cell; nonsense never makes a non-finite rect.
+    assert_eq!(card_tip_rect(cell, None, 45.0, 0.5).width(), cell.width() - 2.0);
+    for (n, size, scale) in [(f32::NAN, 30.0, 1.0), (500.0, f32::NAN, 1.0), (12.0, 30.0, f32::INFINITY), (12.0, -5.0, 0.0)] {
+        let r = card_tip_rect(cell, Some(n), size, scale);
+        assert!(r.min.is_finite() && r.max.is_finite(), "{n} {size} {scale}: {r:?}");
+    }
+}

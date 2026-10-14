@@ -52,7 +52,22 @@ fn preserve(p: &Value) -> Preserve {
 fn preset(id: &str) -> Option<(&'static str, FilterParams)> {
     Some(match id {
         "filter.blur.blur" => ("Blur", FilterParams::GaussianBlur { radius: 0.6 }),
-        "filter.blur.blurMore" => ("Blur More", FilterParams::GaussianBlur { radius: 1.4 }),
+        // Photoshop 27.11's Blur More is the 3×3 kernel [1 2 1; 2 2 2; 1 2 1] / 14 (its response
+        // to a single white pixel, exactly).
+        "filter.blur.blurMore" => (
+            "Blur More",
+            FilterParams::Custom {
+                kernel: vec![
+                    0.0, 0.0, 0.0, 0.0, 0.0, //
+                    0.0, 1.0, 2.0, 1.0, 0.0, //
+                    0.0, 2.0, 2.0, 2.0, 0.0, //
+                    0.0, 1.0, 2.0, 1.0, 0.0, //
+                    0.0, 0.0, 0.0, 0.0, 0.0,
+                ],
+                scale: 14.0,
+                offset: 0.0,
+            },
+        ),
         "filter.sharpen.sharpen" => ("Sharpen", FilterParams::UnsharpMask { amount: 60.0, radius: 0.5, threshold: 0.0 }),
         "filter.sharpen.sharpenMore" => ("Sharpen More", FilterParams::UnsharpMask { amount: 150.0, radius: 0.6, threshold: 0.0 }),
         "filter.sharpen.sharpenEdges" => ("Sharpen Edges", FilterParams::UnsharpMask { amount: 100.0, radius: 0.8, threshold: 6.0 }),
@@ -413,7 +428,7 @@ pub fn specs() -> Vec<CommandSpec> {
 /// The most recent filter command in the session journal, retargeted at the active layer: dialogs
 /// such as the Filter Gallery record the layer they ran on, and Last Filter applies to the
 /// current layer, as in Photoshop (#1270).
-pub(crate) fn last_filter(s: &Session) -> Option<(String, Value)> {
+pub fn last_filter(s: &Session) -> Option<(String, Value)> {
     let (id, mut params) = s.journal.iter().rev().find(|(id, _)| params_for(id, &Value::Null).is_some() && id.starts_with("filter.")).cloned()?;
     if let Value::Object(m) = &mut params {
         m.remove("layer");
@@ -627,6 +642,30 @@ mod tests {
         }
     }
 
+    #[test]
+    fn minimum_signed_offset_matches_its_wrapped_distance() {
+        for depth in [8, 16, 32] {
+            let make_session = || {
+                let mut s = Session::new();
+                s.execute("file.new", json!({"width": 48, "height": 32, "depth": depth})).unwrap();
+                s.execute("layer.new.layer", json!({})).unwrap();
+                paint_pattern(&mut s);
+                s
+            };
+            let mut actual = make_session();
+            let before = active_pixels(&actual);
+            actual.execute("filter.other.offset", json!({"horizontal": i32::MIN, "vertical": i32::MIN})).unwrap();
+            let mut expected = make_session();
+            expected.execute("filter.other.offset", json!({"horizontal": i32::MIN.rem_euclid(48), "vertical": i32::MIN.rem_euclid(32)})).unwrap();
+            let after = active_pixels(&actual);
+            assert_eq!(after, active_pixels(&expected), "depth {depth}");
+            assert_ne!(after, before);
+            actual.execute("edit.undo", json!({})).unwrap();
+            assert_eq!(active_pixels(&actual), before);
+            actual.execute("edit.redo", json!({})).unwrap();
+            assert_eq!(active_pixels(&actual), after);
+        }
+    }
     #[test]
     fn huge_offsets_clamp_instead_of_wrapping() {
         // 3e9 wrapped to a negative offset through `as i32`; it saturates now, so it

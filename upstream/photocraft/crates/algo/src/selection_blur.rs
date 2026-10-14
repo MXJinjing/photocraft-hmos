@@ -569,11 +569,14 @@ pub(crate) fn feather(m: &[f32], w: usize, h: usize, radius: f32) -> Vec<f32> {
     let s = f64::from(sigma);
     let (kh, kv) = (Kernel::new(s, r, gw), Kernel::new(s, r, gh));
     // Rows: only the bounding box's rows are non-zero.
+    // The run table is scratch: one buffer per worker thread, reused across rows instead of
+    // one allocation per row (thousands of 8-byte-per-sample Vecs on a 24 MP mask).
+    thread_local! { static RUNS: std::cell::RefCell<Vec<usize>> = const { std::cell::RefCell::new(Vec::new()) } }
     let mut tmp = vec![0.0f32; b.h() * gw];
     par_rows(&mut tmp, gw, 1, |y, row| {
         let o = (b.y0 + y) * w + win.x0;
         if let Some(s) = m.get(o..o + gw) {
-            kh.line(s, row, &mut Vec::new());
+            RUNS.with(|runs| kh.line(s, row, &mut runs.borrow_mut()));
         }
     });
     // Columns, a strip of columns at a time.

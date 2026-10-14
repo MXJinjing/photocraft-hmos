@@ -7,7 +7,9 @@
 //! one history step (or a smart filter on a smart object) and exactly replayable.
 //!
 //! Control channel: `ui.menu.invoke {"id":"filter.cameraRaw","params":{"ui":{"set":{…},
-//! "commit":true | "cancel":true}}}`; the reply describes the dialog.
+//! "commit":true | "cancel":true}}}`; the reply describes the dialog. `{"ui":{"saveSettings":true}}`
+//! and `{"ui":{"loadSettings":true}}` run Save Settings… / Load Settings… (Camera Raw `.xmp`
+//! settings files, see [`photocraft_io::camera_raw_xmp`]) through the file dialog.
 
 use egui::{Align2, Color32, FontId, Pos2, Rect as ERect, Sense, Stroke, TextureHandle, pos2, vec2};
 use photocraft_algo::camera_raw::{CameraRaw, Wheel, curve_lut};
@@ -122,9 +124,14 @@ impl CameraRawDialog {
     }
 
     fn image(px: &[[f32; 4]], w: usize, h: usize, display: &photocraft_engine::display_color::CanvasDisplay) -> egui::ColorImage {
-        let buf = photocraft_compose::Buffer { rect: Rect::new(0, 0, w as i32, h as i32), px: px.to_vec() };
-        let img = display.to_rgba8(&buf);
-        egui::ColorImage::from_rgba_unmultiplied([img.width as usize, img.height as usize], &img.pixels)
+        // Bands copied straight from `px`, converted in parallel (#4682), not a whole copy of the
+        // proxy converted on one thread.
+        super::camera_raw_detail_ui::display_image(Rect::new(0, 0, w as i32, h as i32), display, |r, out| {
+            let start = (r.y0.max(0) as usize).saturating_mul(w);
+            if let Some(src) = px.get(start..start.saturating_add(out.len())) {
+                out.copy_from_slice(src);
+            }
+        })
     }
 
     pub(crate) fn render(&mut self, ctx: &egui::Context) {
@@ -669,13 +676,21 @@ pub fn menu(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str, params: &Val
     for (key, value) in fields {
         match key.as_str() {
             "set" | "scope" | "view" => {}
-            "before" | "commit" | "cancel" if value.is_boolean() => {}
-            "before" | "commit" | "cancel" => return Some(Err(format!("Camera Raw {key} must be a boolean"))),
+            "before" | "commit" | "cancel" | "saveSettings" | "loadSettings" if value.is_boolean() => {}
+            "before" | "commit" | "cancel" | "saveSettings" | "loadSettings" => return Some(Err(format!("Camera Raw {key} must be a boolean"))),
             _ => return Some(Err(format!("unknown Camera Raw ui property {key}"))),
         }
     }
     if ui.get("commit").and_then(Value::as_bool) == Some(true) && ui.get("cancel").and_then(Value::as_bool) == Some(true) {
         return Some(Err("Camera Raw cannot commit and cancel together".into()));
+    }
+    for (key, run) in [("saveSettings", save_settings as fn(&mut PhotocraftApp) -> Result<Value, String>), ("loadSettings", load_settings)] {
+        if ui.get(key).and_then(Value::as_bool) == Some(true) {
+            if fields.len() > 1 {
+                return Some(Err(format!("Camera Raw {key} must be sent on its own")));
+            }
+            return Some(run(app));
+        }
     }
     let was_closed = app.camera_raw.is_none();
     let previous_view = app.ui.camera_raw_scope.clone();
@@ -764,6 +779,52 @@ fn menu_update(app: &mut PhotocraftApp, ctx: &egui::Context, ui: &Value) -> Opti
         return Some(commit(app));
     }
     Some(Ok(app.camera_raw.as_ref().map(|d| d.describe(&app.ui.camera_raw_scope, &app.ui.camera_raw_preview)).unwrap_or(Value::Null)))
+}
+
+/// Save Settings…: the dialog's settings as a Camera Raw `.xmp` settings file.
+fn save_settings(app: &mut PhotocraftApp) -> Result<Value, String> {
+    let d = app.camera_raw.as_ref().ok_or(tl!("Camera Raw isn't open"))?;
+    let bytes = photocraft_io::camera_raw_xmp::save(&d.params).into_bytes();
+    app.pick_save("Camera Raw Settings.xmp", move |app, path| {
+        let write = app.services.write.as_mut().ok_or("no writer configured")?;
+        write(&path, &bytes)?;
+        Ok(json!({"path": path}))
+    })
+}
+
+/// Load Settings…: applies a Camera Raw `.xmp` settings file's supported settings over the
+/// dialog's; the status bar names how many were not supported.
+fn load_settings(app: &mut PhotocraftApp) -> Result<Value, String> {
+    app.camera_raw.as_ref().ok_or(tl!("Camera Raw isn't open"))?;
+    app.pick_file_bytes_filtered(&["xmp"], |app, name, bytes| {
+        let file = crate::file_open::display_name(&name);
+        let d = app.camera_raw.as_mut().ok_or(tl!("Camera Raw isn't open"))?;
+        let mut next = d.params.clone();
+        let report = photocraft_io::camera_raw_xmp::load(&mut next, &bytes).map_err(|e| format!("{file}: {e}"))?;
+        next.validate_changes(&d.original).map_err(|e| format!("{file}: {e}"))?;
+        if d.params.point_curve != next.point_curve {
+            d.curve_state = Default::default();
+        }
+        d.dirty |= d.params != next;
+        d.params = next;
+        app.ui.status_error = false;
+        app.ui.status = if report.ignored.is_empty() {
+            crate::i18n::fmt(tl!("Loaded Camera Raw settings from {file}"), &[("file", &file)])
+        } else {
+            let template = "Loaded Camera Raw settings from {file} ({n} not supported)";
+            crate::i18n::fmt(tl!(template), &[("file", &file), ("n", &report.ignored.len().to_string())])
+        };
+        Ok(json!({"applied": report.applied, "ignored": report.ignored}))
+    })
+}
+
+fn report_file_error(app: &mut PhotocraftApp, r: Result<Value, String>) {
+    if let Err(e) = r
+        && e != crate::file_dialog::CANCELLED
+    {
+        app.ui.status_error = true;
+        app.ui.status = e;
+    }
 }
 
 fn commit(app: &mut PhotocraftApp) -> Result<Value, String> {
@@ -1133,6 +1194,13 @@ fn draw(app: &mut PhotocraftApp, ctx: &egui::Context, own_window: bool) {
         fu.add_space(12.0);
         widgets::checkbox(&mut fu, &mut d.show_before, tl!("Before (Y)"));
         fu.label(egui::RichText::new(format!("{:.0} ms", d.render_ms)).color(t.text_faint));
+        fu.add_space(12.0);
+        if fu.button(tl!("Save Settings…")).on_hover_text(tl!("Save these settings as a Camera Raw .xmp file")).clicked() {
+            action = Some("save");
+        }
+        if fu.button(tl!("Load Settings…")).on_hover_text(tl!("Load settings from a Camera Raw .xmp file")).clicked() {
+            action = Some("load");
+        }
     });
     super::camera_raw_scope_ui::persist(app, ctx);
     if ctx.input(|i| i.key_pressed(egui::Key::Y))
@@ -1150,6 +1218,14 @@ fn draw(app: &mut PhotocraftApp, ctx: &egui::Context, own_window: bool) {
             }
         }
         Some("cancel") => cancel(app),
+        Some("save") => {
+            let r = save_settings(app);
+            report_file_error(app, r);
+        }
+        Some("load") => {
+            let r = load_settings(app);
+            report_file_error(app, r);
+        }
         _ => {}
     }
 }
@@ -1359,6 +1435,9 @@ mod tests {
         let ctx = egui::Context::default();
         let warnings = app.open_bytes("IMG_0001.dng", &dng).unwrap();
         assert!(warnings.iter().any(|w| w.contains(photocraft_io::raw::DEVELOPED_NOTE)), "{warnings:?}");
+        // A raw has no embedded profile (ProPhoto RGB is the space it is developed into), so Ask
+        // When Opening (on by default) has nothing to ask about.
+        assert!(app.ui.dialogs.is_empty(), "no profile prompt for a raw");
         let raw = app.pending_raw_open.take().expect("a raw open queues the dialog");
         open_raw(&mut app, &ctx, raw).unwrap();
         let d = app.camera_raw.as_ref().unwrap();
@@ -1478,5 +1557,69 @@ mod tests {
         assert!(app.pending_raw_open.is_none());
         // A non-raw never queues the dialog; a closed document is an error, not a panic.
         assert!(open_raw(&mut app, &ctx, RawOpen { document: photocraft_doc::DocId(u64::MAX), name: "x".into(), path: None, bytes: None }).is_err());
+    }
+
+    #[test]
+    fn save_and_load_settings_round_trip_through_xmp_files() {
+        use crate::file_dialog::FileDialogAnswer;
+        use std::sync::{Arc, Mutex};
+        type Written = Arc<Mutex<Vec<(String, Vec<u8>)>>>;
+        let written: Written = Arc::default();
+        let w = written.clone();
+        let foreign = br#"<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+            <rdf:Description xmlns:crs="http://ns.adobe.com/camera-raw-settings/1.0/" crs:Clarity2012="+25" crs:RedHue="-5"/>
+            </rdf:RDF></x:xmpmeta>"#;
+        let answers = vec![
+            Some(FileDialogAnswer::SaveTo("/out/Look.xmp".into())),
+            Some(FileDialogAnswer::Contents("Look.xmp".into(), Vec::new())),
+            Some(FileDialogAnswer::Contents("Other.xmp".into(), foreign.to_vec())),
+            Some(FileDialogAnswer::Contents("Broken.xmp".into(), b"<nope".to_vec())),
+        ];
+        let services = crate::Services {
+            file_dialog: Some(crate::file_dialog::fake(answers).0),
+            write: Some(Box::new(move |p: &str, b: &[u8]| {
+                w.lock().unwrap().push((p.to_string(), b.to_vec()));
+                Ok(())
+            })),
+            ..Default::default()
+        };
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), services);
+        let ctx = egui::Context::default();
+        let frame = |app: &mut PhotocraftApp| app.poll_file_dialog(&egui::Context::default(), None);
+        app.run("file.new", json!({"width": 16, "height": 16})).unwrap();
+        app.run("layer.new.layer", json!({})).unwrap();
+        app.run("edit.fill", json!({"color": "#808080"})).unwrap();
+        menu(&mut app, &ctx, "filter.cameraRaw", &json!({"ui": {"set": {"exposure": 0.75, "contrast": -20, "hslSat": [0, 0, 0, 30, 0, 0, 0, 0]}}}))
+            .unwrap()
+            .unwrap();
+        let saved_params = app.camera_raw.as_ref().unwrap().params.clone();
+        assert!(menu(&mut app, &ctx, "filter.cameraRaw", &json!({"ui": {"saveSettings": true, "before": true}})).unwrap().is_err());
+        assert_eq!(menu(&mut app, &ctx, "filter.cameraRaw", &json!({"ui": {"saveSettings": true}})).unwrap().unwrap()["fileDialog"], "save");
+        frame(&mut app);
+        let (path, bytes) = written.lock().unwrap()[0].clone();
+        assert_eq!(path, "/out/Look.xmp");
+        let text = String::from_utf8(bytes.clone()).unwrap();
+        assert!(text.contains("crs:Exposure2012=\"+0.75\"") && text.contains("crs:SaturationAdjustmentGreen=\"+30\""), "{text}");
+        // Reset, then load the saved file back (the fake dialog's second answer, with its bytes).
+        app.camera_raw.as_mut().unwrap().params = CameraRaw::default();
+        let mut svc = crate::file_dialog::fake(vec![Some(FileDialogAnswer::Contents("Look.xmp".into(), bytes))]).0;
+        std::mem::swap(app.services.file_dialog.as_mut().unwrap(), &mut svc);
+        menu(&mut app, &ctx, "filter.cameraRaw", &json!({"ui": {"loadSettings": true}})).unwrap().unwrap();
+        frame(&mut app);
+        assert_eq!(app.camera_raw.as_ref().unwrap().params, saved_params);
+        std::mem::swap(app.services.file_dialog.as_mut().unwrap(), &mut svc);
+        // The original service's next answer is the empty file: an error, settings untouched.
+        menu(&mut app, &ctx, "filter.cameraRaw", &json!({"ui": {"loadSettings": true}})).unwrap().unwrap();
+        frame(&mut app);
+        assert_eq!(app.camera_raw.as_ref().unwrap().params, saved_params);
+        // A foreign preset applies what it holds over the current settings and reports the rest.
+        menu(&mut app, &ctx, "filter.cameraRaw", &json!({"ui": {"loadSettings": true}})).unwrap().unwrap();
+        frame(&mut app);
+        let p = &app.camera_raw.as_ref().unwrap().params;
+        assert_eq!((p.clarity, p.exposure), (25.0, 0.75));
+        assert!(app.ui.status.contains("Other.xmp") && app.ui.status.contains('1'), "{}", app.ui.status);
+        menu(&mut app, &ctx, "filter.cameraRaw", &json!({"ui": {"loadSettings": true}})).unwrap().unwrap();
+        frame(&mut app);
+        assert_eq!(app.camera_raw.as_ref().unwrap().params.clarity, 25.0);
     }
 }

@@ -349,3 +349,40 @@ fn now_iso_shape() {
     assert_eq!(t.len(), 20, "{t}");
     assert!(t.ends_with('Z') && &t[4..5] == "-");
 }
+
+#[test]
+fn count_set_group_takes_sizes_sent_as_whole_floats() {
+    // The options bar sends `{"markerSize": 8.0, "labelSize": 20.0}`; `as_u64` read neither, so
+    // the fields did nothing.
+    let mut s = session(100, 100, 8);
+    s.execute("count.add", json!({"x": 10, "y": 10})).unwrap();
+    s.execute("count.setGroup", json!({"markerSize": 8.0, "labelSize": 20.0})).unwrap();
+    let g = &d(&s).measurement.count_groups[0];
+    assert_eq!((g.marker_size, g.label_size), (8, 20));
+    // Out-of-range whole numbers clamp, also huge ones that `as u32` would have wrapped.
+    s.execute("count.setGroup", json!({"markerSize": 4_294_967_297u64, "labelSize": 1e300})).unwrap();
+    let g = &d(&s).measurement.count_groups[0];
+    assert_eq!((g.marker_size, g.label_size), (10, 72));
+}
+
+#[test]
+fn count_set_group_rejects_sizes_that_are_not_whole_numbers() {
+    let mut s = session(100, 100, 8);
+    s.execute("count.add", json!({"x": 10, "y": 10})).unwrap();
+    s.execute("count.setGroup", json!({"markerSize": 3, "labelSize": 12})).unwrap();
+    let past = s.active().unwrap().history.past_len();
+    for p in [
+        json!({"markerSize": 8.5}),
+        json!({"labelSize": 12.25}),
+        json!({"markerSize": -2}),
+        json!({"labelSize": -9.0}),
+        json!({"markerSize": "8"}),
+        json!({"labelSize": true}),
+    ] {
+        let err = s.execute("count.setGroup", p.clone()).unwrap_err();
+        assert!(matches!(err, EngineError::BadParams { .. }), "{p}: {err}");
+    }
+    let g = &d(&s).measurement.count_groups[0];
+    assert_eq!((g.marker_size, g.label_size), (3, 12), "a rejected call changes nothing");
+    assert_eq!(s.active().unwrap().history.past_len(), past);
+}

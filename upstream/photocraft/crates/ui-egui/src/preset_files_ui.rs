@@ -2,7 +2,8 @@
 //! Import Brushes…, the Preset Manager's Load…): Photoshop brushes (`.abr`) go to the brush
 //! library through `brush.presets.importAbr`, gradients (`.grd`) to the Gradients panel through
 //! `gradient.presets.importGrd`, swatches (`.aco`, `.ase`) to the Swatches panel through
-//! `swatches.import`, keyboard shortcut sets (`.kys`) to Edit › Keyboard Shortcuts through
+//! `swatches.import`, patterns (`.pat`) to the Patterns panel through `pattern.import`, keyboard
+//! shortcut sets (`.kys`) to Edit › Keyboard Shortcuts through
 //! [`crate::kys_import`], instead of opening as documents.
 
 use serde_json::{Value, json};
@@ -13,7 +14,7 @@ use crate::PhotocraftApp;
 /// the Swatches panel through [`crate::swatches_ui::import_bytes`]).
 /// `.psp` is Photoshop's live `Keyboard Shortcuts.psp` (the same XML as a `.kys`); other `.psp`
 /// settings files are refused with a clear message.
-pub const PRESET_EXTS: &[&str] = &["abr", "grd", "aco", "ase", "kys", "psp"];
+pub const PRESET_EXTS: &[&str] = &["abr", "grd", "pat", "aco", "ase", "kys", "psp"];
 
 fn ext(name: &str) -> String {
     std::path::Path::new(name).extension().map(|e| e.to_string_lossy().to_ascii_lowercase()).unwrap_or_default()
@@ -22,6 +23,23 @@ fn ext(name: &str) -> String {
 /// Is `name` a preset file this module imports?
 pub fn is_preset_file(name: &str) -> bool {
     PRESET_EXTS.contains(&ext(name).as_str())
+}
+
+/// Import from a gradient picker through the same preset command as File › Open.
+pub(crate) fn import_gradients_dialog(app: &mut PhotocraftApp) {
+    let result = app.pick_file_bytes_filtered(&["grd"], |app, name, bytes| {
+        if ext(&name) != "grd" {
+            return Err(tl!("Choose a gradient file (.grd).").into());
+        }
+        open(app, &name, &bytes).ok_or_else(|| tl!("Choose a gradient file (.grd).").to_string())??;
+        Ok(Value::Null)
+    });
+    if let Err(error) = result
+        && error != crate::file_dialog::CANCELLED
+    {
+        app.ui.status = error;
+        app.ui.status_error = true;
+    }
 }
 
 /// Command params for the file: a real path keeps the journal small; browser files arrive as bytes.
@@ -39,6 +57,7 @@ pub fn open(app: &mut PhotocraftApp, name: &str, bytes: &[u8]) -> Option<Result<
     let (cmd, what) = match ext(name).as_str() {
         "abr" => ("brush.presets.importAbr", "brushes"),
         "grd" => ("gradient.presets.importGrd", "gradients"),
+        "pat" => ("pattern.import", "patterns"),
         "aco" | "ase" => return Some(crate::swatches_ui::import_bytes(app, name, bytes, false).map(|_| ())),
         "kys" | "psp" => return Some(crate::kys_import::open_bytes(app, name, bytes).map(|_| ())),
         _ => return None,
@@ -60,10 +79,10 @@ pub fn open(app: &mut PhotocraftApp, name: &str, bytes: &[u8]) -> Option<Result<
         let n = r.get("count").and_then(Value::as_u64).unwrap_or(0);
         let warnings: Vec<String> = r.get("warnings").and_then(|w| serde_json::from_value(w.clone()).ok()).unwrap_or_default();
         app.ui.status_error = false;
-        let (one, other) = if what == "brushes" {
-            ("Imported {n} brush from {file}", "Imported {n} brushes from {file}")
-        } else {
-            ("Imported {n} gradient from {file}", "Imported {n} gradients from {file}")
+        let (one, other) = match what {
+            "brushes" => ("Imported {n} brush from {file}", "Imported {n} brushes from {file}"),
+            "patterns" => ("Imported {n} pattern from {file}", "Imported {n} patterns from {file}"),
+            _ => ("Imported {n} gradient from {file}", "Imported {n} gradients from {file}"),
         };
         let imported = crate::i18n::fmt(&crate::i18n::trn(crate::i18n::current(), n, one, other), &[("file", &stem)]);
         app.ui.status = match warnings.first() {
@@ -91,6 +110,7 @@ mod tests {
         assert!(is_preset_file("sunsets.grd"));
         assert!(is_preset_file("Brand.ACO"));
         assert!(is_preset_file("exchange.ase"));
+        assert!(is_preset_file("Debaser-ColourLibrary-Part6.PAT"));
         assert!(!is_preset_file("photo.psd"));
         assert!(!is_preset_file("abr"));
     }

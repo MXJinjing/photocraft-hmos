@@ -1,6 +1,6 @@
 # File-format parity
 
-> **Last reviewed:** 2026-10-12 · **Last updated:** 2026-10-12 · **Change:** minor (indexed BMP palette mode; Save keeps a JPEG's quality and a WebP's encoding) · **Target:** Adobe Photoshop 2026
+> **Last reviewed:** 2026-10-12 · **Last updated:** 2026-10-13 · **Change:** minor (palette PNGs open in Indexed Color mode, #4804; earlier: CMYK Invert, Posterize and Threshold on the inks; 16-bit Lab Invert; Photoshop-oracle floor 145/258; `.atn` import maps 112 events; DDS textures open, #1327; DPX read and write, #1049; #2465 fixed: CS2 placed layers with only a `PlLd` block open their contents; Photoshop Actions `.atn` read and write; `.shc` contour files read and write; earlier the same day: indexed BMP palette mode; Save keeps a JPEG's quality and a WebP's encoding) · **Target:** Adobe Photoshop 2026
 
 Every format Photoshop 2026 (27.11.0) reads or writes, with PhotoCraft's support, fidelity and
 tests. Photoshop's list comes from its `Info.plist` `CFBundleDocumentTypes`, the PiPL read/write
@@ -21,12 +21,12 @@ XL are missing (gap G10). Remaining: 300–500 h including PSD fidelity.
 
 | Format | Photoshop | PhotoCraft read | PhotoCraft write | Fidelity and tests |
 |---|---|---|---|---|
-| PSD | R/W | yes | yes | 1/8/16/32-bit; Bitmap, Gray, Indexed, RGB, CMYK, Multichannel, Lab, Duotone; layers, groups, masks, vector masks, adjustment and fill layers, effects, text, shapes, smart objects (SoLd/lnk2), smart filters (14 mapped, rest verbatim), slices, comps, Advanced Blending. Oracle floors: Photoshop-authored 133/256, io 146/170, psd-tools 236/309; round trip ≥ 169/170, 308/309, 258/256. Known failures: #1281, #2469, #2465 (#2374, text layers, closed 2026-10-10) |
+| PSD | R/W | yes | yes | 1/8/16/32-bit; Bitmap, Gray, Indexed, RGB, CMYK, Multichannel, Lab, Duotone; layers, groups, masks, vector masks, adjustment and fill layers, effects, text, shapes, smart objects (SoLd/lnk2; CS2 PlLd/lnkD read with their warp, kept as is or re-saved as SoLd once edited), smart filters (14 mapped, rest verbatim), slices, comps, Advanced Blending. Oracle floors: Photoshop-authored 145/258, io 146/170, psd-tools 236/309; round trip ≥ 169/170, 308/309, 258/256. Known failures: #1281, #2469 (#2374, text layers, closed 2026-10-10; #2465, CS2 `PlLd`-only smart objects, fixed 2026-10-12) |
 | PSB | R/W | yes | yes | Auto-switches above 2 GB (REL-212-2); 4–5 GB fixtures generated (FILE-216-2); > 4 GB fails on Windows (#375) |
 | Cloud PSD (.psdc) | R/W | no | no | Out of scope (Adobe cloud) |
 | TIFF | R/W | yes | yes | 8/16/32f, Gray/RGB/CMYK, BigTIFF, every IFD, banded parallel decode; layered TIFF both byte orders (FILE-215-7: extra alpha channels not written) |
 | JPEG | R/W | yes | yes | 8-bit Gray/RGB/CMYK, ICC/EXIF/XMP; Save keeps the opened file's quality (estimated from its quantisation tables, #2399); no JPEG Options dialog (quality 0–12, baseline/progressive) (FILE-215-19) |
-| PNG | R/W | yes | yes | 8/16-bit, ICC/text; APNG first frame only; alpha channels on open (#2225) |
+| PNG | R/W | yes | yes | 8/16-bit, ICC/text; APNG first frame only; alpha channels on open (#2225); palette PNGs open in Indexed Color mode with their transparent entry (#4804) |
 | GIF | R/W | yes | yes | File › Open keeps the first frame; New Video Layer from File and Video Frames to Layers take every frame, with the timeline rate from the delays (#572). Per-frame delays and keeping the frames in `.pcraft` are not done |
 | BMP | R/W | yes | yes | 8-bit; palette BMPs open in Indexed Color mode |
 | WebP | R/W | yes | yes | Lossless and our own lossy VP8 encoder; ICC/EXIF/XMP; Save keeps an opened file lossy (at its quality) or lossless (#2399) |
@@ -43,7 +43,7 @@ XL are missing (gap G10). Remaining: 300–500 h including PSD fidelity.
 | Generic EPS / AI | R (rasterize) | no | no | |
 | SVG | R (rasterize) | yes, as editable shape layers or a vector smart object | no | Better than Photoshop for editing; gradients approximated (FILE-215-9) |
 | JPEG 2000 | R/W | no (#1047) | no | |
-| Cineon / DPX | R (DPX), R/W (CIN) | no (#1049) | no | |
+| Cineon / DPX | R (DPX), R/W (CIN) | DPX: luma, RGB, RGBA at 8/10/12/16 bits, both byte orders (#1049); Cineon no | DPX: 8/10/12/16 bits (`dpxBits`, `--dpx-bits`); Cineon no | Writes DPX, which Photoshop only reads; header fields (creator, project, copyright, transfer, frame rate, time code…) round-trip; no Cineon, no RLE |
 | DICOM | R/W | no | no | |
 | PCX | R/W | no | no | |
 | Pixar | R/W | no | no | |
@@ -90,6 +90,7 @@ D5100 colour profile. Counts and the G14 estimate are unchanged.
 | Paint.NET `.pdn` | yes | no | [pdn.md](pdn.md) |
 | OpenRaster `.ora` | yes | yes | [ora.md](ora.md) |
 | ICO, QOI | yes | yes | |
+| DirectDraw Surface `.dds` | yes | no | Top mip level of a 2D texture: uncompressed RGB, RGBA or luminance, BC1–BC3 (DXT1/3/5), legacy or DX10 header. Cubemaps, arrays, volumes and BC4–BC7 are refused (#1327). Photoshop needs a plug-in |
 | Krita `.kra`, GIMP `.xcf`, Procreate | no | no | Not in Photoshop either |
 
 ### Affinity import notes (moved from `roadmap.md`)
@@ -130,9 +131,10 @@ remaining gaps in #1606 stay tracked with per-sample corpus ceilings.
 | LUTs `.cube` / `.3dl` / `.look` | R/W (Export Color Lookup) | R/W / R / R | `cms/src/lutfile.rs` |
 | Keyboard shortcuts `.kys` | R/W | R | `engine/src/kys.rs` |
 | ICC profiles | R | R | Own CMS |
-| Actions `.atn` | R/W | no | AUTO-219-2 |
+| Actions `.atn` | R/W | R/W | `psd/src/atn.rs` (version 16 sets, exact round trip), `engine/src/atn_cmds.rs` (112 Photoshop events ↔ commands; other steps kept verbatim). Panel menu, CLI `batch --actions set.atn`, `actions.load`/`actions.save`. Photoshop 5-era version 12 files unsupported (AUTO-219-2) |
 | Styles `.asl` | R/W | no | #1693 |
-| Contours `.shc`, custom shapes `.csh`, tool presets `.tpl` | R/W | no | FILE-215-15 |
+| Contours `.shc` | R/W | R/W | `psd/src/shc.rs`; Contour Editor Load…/Save… (FILE-215-15). No user contour library; not yet checked against a Photoshop-written file |
+| Custom shapes `.csh`, tool presets `.tpl` | R/W | no | |
 | Curves `.acv`, Levels `.alv`, other adjustment presets | R/W | not audited | |
 | C2PA Content Credentials | R/W | no | #1050 |
 
@@ -140,6 +142,14 @@ remaining gaps in #1606 stay tracked with per-sample corpus ceilings.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-13 | minor | Palette PNGs open in Indexed Color mode (#4804) |
+| 2026-10-12 | minor | `.atn`: 112 events mapped (Select and Mask, Filter Gallery Spatter, Ripple, Crystallize, Pattern Fill layers, mask targeting, Step Backward, points, Bitmap) |
+| 2026-10-12 | minor | DDS textures open, read-only (#1327) |
+| 2026-10-12 | minor | #2465 fixed: Photoshop CS2 placed layers (`PlLd` only, file in `lnkD`) open as editable smart objects and save their edits |
+| 2026-10-12 | minor | CMYK Invert, Posterize and Threshold work on the inks and 16-bit Lab Invert mirrors a and b around neutral (oracle bad pixels: CMYK 71–77% → 9–10%, 37% → 1.6%; lab16 invert 52% → 1.2%); Photoshop-oracle floor 133 → 145 of 258 |
+| 2026-10-12 | minor | DPX read and write (#1049); Cineon still missing |
+| 2026-10-12 | minor | Photoshop Actions `.atn`: read and write, 90 events mapped, the rest kept verbatim (AUTO-219-2) |
+| 2026-10-12 | minor | Presets table: Contours `.shc` read and write through the Contour Editor (FILE-215-15); `.csh` and `.tpl` stay missing |
 | 2026-10-12 | minor | Palette BMPs open in Indexed Color mode (#3802) |
 | 2026-10-12 | minor | Save writes a JPEG at its own estimated quality and a WebP lossy or lossless as opened (#2399) |
 | 2026-10-11 | minor | D5100 image area and fitted-look preservation in Camera Raw tuning |

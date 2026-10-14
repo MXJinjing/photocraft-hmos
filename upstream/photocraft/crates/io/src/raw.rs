@@ -38,7 +38,7 @@ fn limits() -> Limits {
 fn upright_preview(raw: &[u8], jpeg: &[u8]) -> Result<Image, IoError> {
     let img = codecs::decode_as_with(Format::Jpeg, jpeg, &codecs::DecodeOptions { keep_orientation: true, ..Default::default() })?;
     let own = img.meta.exif.as_deref().map_or(1, codecs::exif_orientation);
-    let o = if own != 1 { own } else { codecs::exif_orientation(raw) };
+    let o = if own != 1 { own } else { photocraft_raw::orientation(raw).unwrap_or_else(|| codecs::exif_orientation(raw)) };
     Ok(img.oriented(o)?)
 }
 

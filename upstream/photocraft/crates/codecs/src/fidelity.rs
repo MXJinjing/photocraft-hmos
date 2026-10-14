@@ -145,13 +145,19 @@ fn pick_layout(src: ChannelLayout, layouts: &[ChannelLayout], alpha: bool) -> Ch
     layouts[0]
 }
 
-pub(crate) fn plan(image: &Image, format: Format, _opts: &EncodeOptions) -> Plan {
+pub(crate) fn plan(image: &Image, format: Format, opts: &EncodeOptions) -> Plan {
     let c = caps(format);
     let (layout, sample) = (image.layout(), image.sample_type());
     match format {
         // PNM: integer data can use any layout (PAM); float goes to PFM
         // which only has gray and RGB.
         Format::Pnm if sample.is_float() => Plan { layout: pick_layout(layout, &[ChannelLayout::Gray, ChannelLayout::Rgb], false), sample: SampleType::F32 },
+        // DPX has no luma + alpha descriptor: gray with alpha is written as luma, alpha dropped.
+        // The sample type follows the chosen bits (U8 for 8, U16 for 10, 12 and 16).
+        Format::Dpx => Plan {
+            layout: if layout == ChannelLayout::GrayA { ChannelLayout::Gray } else { pick_layout(layout, c.layouts, c.alpha) },
+            sample: crate::codecs::dpx::plan_sample(opts.dpx_bits, sample),
+        },
         _ => Plan { layout: pick_layout(layout, c.layouts, c.alpha), sample: pick_sample(sample, c.depths) },
     }
 }
@@ -237,7 +243,9 @@ pub fn fidelity_warnings_with(image: &Image, format: Format, opts: &EncodeOption
         if m.dpi.is_some() && !c.dpi {
             w.push(W::DpiDropped);
         }
-        if !m.text.is_empty() && !c.text {
+        // DPX keeps its own header fields, not free-form text.
+        let text_kept = |k: &str| c.text && (format != Format::Dpx || crate::codecs::dpx::KEYS.contains(&k));
+        if m.text.iter().any(|(k, _)| !text_kept(k)) {
             w.push(W::TextDropped);
         }
     }

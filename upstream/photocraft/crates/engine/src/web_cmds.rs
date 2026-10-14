@@ -79,6 +79,10 @@ pub struct WebSettings {
     pub format: WebFormat,
     pub palette: PaletteKind,
     pub colors: usize,
+    /// Fixed opaque source palette in index order.
+    pub color_table: Option<Vec<[u8; 3]>>,
+    /// Replacements applied after quantization, preserving pixel indices.
+    pub color_table_edits: std::collections::BTreeMap<usize, [u8; 3]>,
     pub dither: Dither,
     /// 0..=1.
     pub dither_amount: f32,
@@ -104,6 +108,8 @@ impl Default for WebSettings {
             format: WebFormat::Png24,
             palette: PaletteKind::Selective,
             colors: 256,
+            color_table: None,
+            color_table_edits: Default::default(),
             dither: Dither::Diffusion,
             dither_amount: 0.88,
             transparency: true,
@@ -130,8 +136,13 @@ fn hex3(s: &str) -> Option<[f32; 3]> {
 impl WebSettings {
     /// Settings from command parameters (missing keys keep the defaults; Photoshop's preset
     /// names such as "GIF 128 Dithered" or "JPEG High" are accepted as `"preset"`).
+    ///
+    /// Without a preset there is no matte, as in Photoshop's scripted Save for Web
+    /// (`ExportOptionsSaveForWeb` left at its defaults): a GIF or PNG-8 keeps the colour of its
+    /// partly transparent pixels instead of lightening them towards white (#4115). Formats
+    /// without transparency still go over white.
     pub fn from_params(p: &Value, cmd: &str) -> Result<Self> {
-        let mut st = WebSettings::default();
+        let mut st = WebSettings { matte: None, ..WebSettings::default() };
         if let Some(preset) = p.get("preset").and_then(Value::as_str) {
             st = preset_settings(preset).ok_or_else(|| bad(cmd, format!("unknown preset `{preset}`")))?;
         }
@@ -196,6 +207,27 @@ impl WebSettings {
                 m => return Err(bad(cmd, format!("unknown metadata `{m}` (none|copyright|copyrightAndContact|all)"))),
             };
         }
+        if let Some(table) = p.get("colorTable") {
+            let table = table.as_array().filter(|a| (1..=256).contains(&a.len())).ok_or_else(|| bad(cmd, "colorTable must contain 1–256 #rrggbb colours"))?;
+            st.color_table = Some(
+                table
+                    .iter()
+                    .map(|v| v.as_str().and_then(hex3).map(|c| c.map(to8)).ok_or_else(|| bad(cmd, "colorTable entries must be #rrggbb colours")))
+                    .collect::<Result<Vec<_>>>()?,
+            );
+        }
+        if let Some(edits) = p.get("colorTableEdits") {
+            let edits = edits
+                .as_object()
+                .filter(|m| m.len() <= 256)
+                .ok_or_else(|| bad(cmd, "colorTableEdits must be an object of palette indices to #rrggbb colours"))?;
+            let table = st.color_table.as_ref().ok_or_else(|| bad(cmd, "colorTableEdits requires colorTable"))?;
+            for (index, value) in edits {
+                let index = index.parse::<usize>().ok().filter(|i| *i < table.len()).ok_or_else(|| bad(cmd, "colorTableEdits index is outside colorTable"))?;
+                let color = value.as_str().and_then(hex3).map(|c| c.map(to8)).ok_or_else(|| bad(cmd, "colorTableEdits values must be #rrggbb colours"))?;
+                st.color_table_edits.insert(index, color);
+            }
+        }
         Ok(st)
     }
 }
@@ -233,8 +265,21 @@ impl WebSettings {
             WebMetadata::All => "all",
         };
         let matte = self.matte.map_or("none".to_string(), |c| format!("#{:02x}{:02x}{:02x}", to8(c[0]), to8(c[1]), to8(c[2])));
-        json!({"format": format, "palette": palette, "colors": self.colors, "dither": dither, "ditherAmount": (self.dither_amount * 100.0).round(), "transparency": self.transparency, "matte": matte, "interlaced": self.interlaced, "webSnap": (self.web_snap * 100.0).round(), "quality": self.quality, "progressive": self.progressive, "optimized": self.optimized, "embedIcc": self.embed_icc, "metadata": metadata, "convertToSrgb": self.convert_to_srgb})
+        let mut p = json!({"format": format, "palette": palette, "colors": self.colors, "dither": dither, "ditherAmount": (self.dither_amount * 100.0).round(), "transparency": self.transparency, "matte": matte, "interlaced": self.interlaced, "webSnap": (self.web_snap * 100.0).round(), "quality": self.quality, "progressive": self.progressive, "optimized": self.optimized, "embedIcc": self.embed_icc, "metadata": metadata, "convertToSrgb": self.convert_to_srgb});
+        if let Some(table) = &self.color_table {
+            p["colorTable"] = json!(table.iter().map(|c| rgb_hex(*c)).collect::<Vec<_>>());
+        }
+        if !self.color_table_edits.is_empty() {
+            p["colorTableEdits"] =
+                json!(self.color_table_edits.iter().map(|(i, c)| (i.to_string(), rgb_hex(*c))).collect::<std::collections::BTreeMap<_, _>>());
+        }
+        p
     }
+}
+
+/// A palette colour in command/control-channel notation.
+pub fn rgb_hex(c: [u8; 3]) -> String {
+    format!("#{:02x}{:02x}{:02x}", c[0], c[1], c[2])
 }
 
 /// Save for Web's named presets.
@@ -324,6 +369,11 @@ pub struct Optimized {
     pub height: u32,
     /// Colours in the palette (indexed formats).
     pub colors: Option<usize>,
+    /// Opaque source palette before replacements (empty for non-indexed formats).
+    pub color_table: Vec<[u8; 3]>,
+    pub transparent_index: Option<usize>,
+    /// Indexed pixels for previews; empty for non-indexed formats or when preview is disabled.
+    pub indices: Vec<u8>,
     /// What the optimised file looks like, straight RGBA8 (for the dialog's previews).
     pub preview: Vec<u8>,
 }
@@ -359,13 +409,14 @@ pub fn web_xmp(doc: &Document, m: WebMetadata) -> Option<String> {
 /// the file looks like (the dialog's panes); exports skip it.
 #[allow(clippy::too_many_arguments)]
 pub fn optimize(px: &[[f32; 4]], bw: usize, rect: Rect, st: &WebSettings, icc: Option<&[u8]>, xmp: Option<&str>, dpi: f32, preview: bool) -> Result<Optimized> {
-    let (w, h) = (rect.width() as usize, rect.height() as usize);
-    if w == 0 || h == 0 {
-        return Err(other("empty slice"));
+    if bw == 0 || rect.x0 < 0 || rect.y0 < 0 || rect.is_empty() || rect.x1 as usize > bw || (rect.y1 as usize).checked_mul(bw).is_none_or(|end| end > px.len())
+    {
+        return Err(other("slice is outside the pixel buffer"));
     }
+    let (w, h) = (rect.width() as usize, rect.height() as usize);
     let row = |y: i32| {
         let o = y as usize * bw;
-        &px[o + rect.x0 as usize..o + rect.x1 as usize]
+        px.get(o + rect.x0 as usize..o + rect.x1 as usize).unwrap_or(&[])
     };
     let region = || (rect.y0..rect.y1).flat_map(row);
     let matte = st.matte.unwrap_or([1.0, 1.0, 1.0]);
@@ -375,6 +426,9 @@ pub fn optimize(px: &[[f32; 4]], bw: usize, rect: Rect, st: &WebSettings, icc: O
     let (ww, hh) = (w as u32, h as u32);
     let e = |e: photocraft_codecs::CodecError| other(e);
     let mut look: Vec<u8> = Vec::new();
+    let mut color_table = Vec::new();
+    let mut transparent_index = None;
+    let mut indices = Vec::new();
     let (bytes, colors) = match st.format {
         WebFormat::Png24 => {
             let alpha = st.transparency && region().any(|p| p[3] < 1.0);
@@ -451,16 +505,22 @@ pub fn optimize(px: &[[f32; 4]], bw: usize, rect: Rect, st: &WebSettings, icc: O
                 })
                 .collect();
             let room = if transparent { st.colors.saturating_sub(1).max(2) } else { st.colors };
-            // Large images: build adaptive palettes from an even ~1 MP sample (Exact needs all).
-            let n_opaque = work.iter().filter(|p| p[3] >= 0.5).count();
-            let step = if n_opaque > 1 << 20 && st.palette != PaletteKind::Exact { n_opaque / (1 << 20) + 1 } else { 1 };
-            let mut src: Vec<[f32; 4]> = work.iter().filter(|p| p[3] >= 0.5).step_by(step).copied().collect();
-            if src.is_empty() {
-                src = work.clone();
-            }
-            let mut pal = quantize::build_palette(&src, st.palette, room, Forced::None).map_err(other)?;
-            drop(src);
-            if st.web_snap > 0.0 {
+            let mut pal = if let Some(table) = &st.color_table {
+                if table.is_empty() || table.len() > if transparent { 255 } else { 256 } {
+                    return Err(other("colorTable has too many entries for this image's transparency"));
+                }
+                table.clone()
+            } else {
+                // Large images: build adaptive palettes from an even ~1 MP sample (Exact needs all).
+                let n_opaque = work.iter().filter(|p| p[3] >= 0.5).count();
+                let step = if n_opaque > 1 << 20 && st.palette != PaletteKind::Exact { n_opaque / (1 << 20) + 1 } else { 1 };
+                let mut src: Vec<[f32; 4]> = work.iter().filter(|p| p[3] >= 0.5).step_by(step).copied().collect();
+                if src.is_empty() {
+                    src = work.clone();
+                }
+                quantize::build_palette(&src, st.palette, room, Forced::None).map_err(other)?
+            };
+            if st.web_snap > 0.0 && st.color_table.is_none() {
                 let tol = (st.web_snap * 255.0) as u8;
                 for c in &mut pal {
                     let snap = c.map(|x| ((f32::from(x) / 51.0).round() * 51.0) as u8);
@@ -472,16 +532,23 @@ pub fn optimize(px: &[[f32; 4]], bw: usize, rect: Rect, st: &WebSettings, icc: O
             if transparent {
                 pal.truncate(255);
             }
+            let first = pal.first().copied().ok_or_else(|| other("empty colour table"))?;
+            color_table = pal.clone();
             let t = transparent.then(|| {
-                pal.push(pal[0]);
+                pal.push(first);
                 pal.len() - 1
             });
+            transparent_index = t;
             let idx = quantize_rows(&mut work, w, &pal, st.dither, st.dither_amount, t);
+            for (index, color) in &st.color_table_edits {
+                let slot = pal.get_mut(*index).filter(|_| Some(*index) != t).ok_or_else(|| other("colour edit is outside the opaque palette"))?;
+                *slot = *color;
+            }
             if preview {
                 look = idx
                     .iter()
                     .flat_map(|k| {
-                        let c = pal[*k as usize];
+                        let c = pal.get(*k as usize).copied().unwrap_or(first);
                         [c[0], c[1], c[2], if Some(*k as usize) == t { 0 } else { 255 }]
                     })
                     .collect();
@@ -492,10 +559,13 @@ pub fn optimize(px: &[[f32; 4]], bw: usize, rect: Rect, st: &WebSettings, icc: O
             } else {
                 photocraft_codecs::encode_png_indexed(ww, hh, &idx, &pal, tt, None).map_err(e)?
             };
+            if preview {
+                indices = idx;
+            }
             (bytes, Some(pal.len()))
         }
     };
-    Ok(Optimized { bytes, ext: st.format.ext(), width: ww, height: hh, colors, preview: look })
+    Ok(Optimized { bytes, ext: st.format.ext(), width: ww, height: hh, colors, color_table, transparent_index, indices, preview: look })
 }
 
 /// Nearest palette entry through a lazily filled 6-bit-per-channel inverse colour map: each
@@ -772,6 +842,21 @@ pub fn save_for_web_with_writer(s: &mut Session, p: &Value, write: &mut dyn FnMu
     save_for_web_impl(s, p, write, false)
 }
 
+/// Settings to seed the Save for Web dialog from on the next launch: `file_menu` is session
+/// state, so a complete export also writes the preferences' remembered dialog settings (like
+/// Fill, Liquify and the filter dialogs). The destination is per export, never remembered.
+fn remember_web_settings(s: &mut Session, cmd: &str, settings: &Value) {
+    let mut m = settings.clone();
+    if let Some(o) = m.as_object_mut() {
+        for k in ["path", "dir", "trustedSliceHtml"] {
+            o.remove(k);
+        }
+    }
+    s.prefs.edit(|p| {
+        p.dialogs.insert(cmd.to_string(), m);
+    });
+}
+
 fn save_for_web_impl(s: &mut Session, p: &Value, write: &mut dyn FnMut(&str, &[u8]) -> Result<()>, native_paths: bool) -> Result<Value> {
     let cmd = "file.export.saveForWebLegacy";
     if let Some(authorize) = s.authorize {
@@ -811,11 +896,14 @@ fn save_for_web_impl(s: &mut Session, p: &Value, write: &mut dyn FnMut(&str, &[u
     // Estimate only (the dialog's annotations): the whole image, or each chosen slice.
     if single.is_none() && dir.is_none() {
         let o = optimize(&buf.px, bw, wdoc.bounds(), &st, icc, xmp.as_deref(), dpi, false)?;
-        return Ok(json!({"format": o.ext, "bytes": o.bytes.len(), "width": o.width, "height": o.height, "colors": o.colors}));
+        return Ok(
+            json!({"format": o.ext, "bytes": o.bytes.len(), "width": o.width, "height": o.height, "colors": o.colors, "colorTable": o.color_table.iter().map(|c| rgb_hex(*c)).collect::<Vec<_>>(), "transparentIndex": o.transparent_index}),
+        );
     }
     if let Some(path) = single.filter(|_| dir.is_none() && (all.len() == 1 || p.get("slices").is_none())) {
         let o = optimize(&buf.px, bw, wdoc.bounds(), &st, icc, xmp.as_deref(), dpi, false)?;
         write(path, &o.bytes)?;
+        remember_web_settings(s, cmd, &last_web);
         s.file_menu.last_web = Some(last_web);
         crate::automate_cmds::fire_event(s, "export");
         return Ok(json!({"files": [path], "bytes": o.bytes.len(), "width": o.width, "height": o.height, "colors": o.colors}));
@@ -906,6 +994,7 @@ fn save_for_web_impl(s: &mut Session, p: &Value, write: &mut dyn FnMut(&str, &[u
         write(&web_derived_path(&dir, &format!("{base}.html"), native_paths)?, page.as_bytes())?;
         html_path = Some(hp);
     }
+    remember_web_settings(s, cmd, &last_web);
     s.file_menu.last_web = Some(last_web);
     crate::automate_cmds::fire_event(s, "export");
     Ok(json!({"files": files, "html": html_path, "bytes": total, "slices": chosen.len(), "width": wdoc.size.width, "height": wdoc.size.height}))
@@ -970,6 +1059,7 @@ fn quick_export(s: &mut Session, p: &Value) -> Result<Value> {
     );
     o.insert("convertToSrgb".into(), json!(prefs.convert_to_srgb));
     o.insert("transparency".into(), json!(true));
+    o.insert("matte".into(), json!("#ffffff"));
     match fmt.as_str() {
         "jpg" => {
             o.insert("format".into(), json!("jpeg"));
@@ -1378,7 +1468,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Save for Web (Legacy)…",
             &["File", "Export"],
             Some("Cmd+Alt+Shift+S"),
-            r##"{"preset":"GIF 128 Dithered|JPEG High|PNG-24|…"?,"format":"gif|png8|png24|jpeg|wbmp"="png24","palette":"perceptual|selective|adaptive|restrictive|exact|systemMac|systemWindows|uniform"="selective","colors":2..256=256,"dither":"none|diffusion|pattern|noise"="diffusion","ditherAmount":0..100=88,"transparency":bool=true,"matte":"#rrggbb|none"="#ffffff","interlaced":bool=false,"webSnap":0..100=0,"quality":0..100=60,"progressive":bool=false,"optimized":bool=true,"embedIcc":bool=false,"metadata":"none|copyright|copyrightAndContact|all"="copyright","convertToSrgb":bool=true,"width"|"height"|"percent"? (image size),"resample":"bicubic|bilinear|nearest"?,"path":file? (whole image),"dir":folder? (one file per slice in images/),"imagesFolder":relative-folder?="images","html":bool=false,"trustedSliceHtml":bool=false (only for trusted documents; emit raw no-image cell HTML),"slices":"all|user"="all","numbers":[n]?} → no path/dir: {bytes,width,height,colors} estimate; else {files, html, bytes}"##,
+            r##"{"preset":"GIF 128 Dithered|JPEG High|PNG-24|…"?,"format":"gif|png8|png24|jpeg|wbmp"="png24","palette":"perceptual|selective|adaptive|restrictive|exact|systemMac|systemWindows|uniform"="selective","colors":2..256=256,"colorTable":["#rrggbb",…]? (fixed opaque source palette, 1–256 entries; 255 with transparency),"colorTableEdits":{"0":"#rrggbb",…}? (replace entries after indexing; requires colorTable),"dither":"none|diffusion|pattern|noise"="diffusion","ditherAmount":0..100=88,"transparency":bool=true,"matte":"#rrggbb|none"="none" (a preset's own: white; formats without transparency go over white),"interlaced":bool=false,"webSnap":0..100=0,"quality":0..100=60,"progressive":bool=false,"optimized":bool=true,"embedIcc":bool=false,"metadata":"none|copyright|copyrightAndContact|all"="copyright","convertToSrgb":bool=true,"width"|"height"|"percent"? (image size),"resample":"bicubic|bilinear|nearest"?,"path":file? (whole image),"dir":folder? (one file per slice in images/),"imagesFolder":relative-folder?="images","html":bool=false,"trustedSliceHtml":bool=false (only for trusted documents; emit raw no-image cell HTML),"slices":"all|user"="all","numbers":[n]?} → no path/dir: {bytes,width,height,colors,colorTable,transparentIndex} estimate; else {files, html, bytes}"##,
             has_doc,
             save_for_web
         ),

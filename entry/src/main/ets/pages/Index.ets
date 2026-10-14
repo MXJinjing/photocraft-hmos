@@ -3,7 +3,7 @@ import { applicationDocumentUri } from '../documentDirectory';
 import { LocalDocuments } from '../LocalDocuments';
 import { savePickerOptions, SaveTargets } from '../savePicker';
 import { NativePrintAdapter } from '../NativePrintAdapter';
-import { common } from '@kit.AbilityKit';
+import { abilityAccessCtrl, common } from '@kit.AbilityKit';
 import { fileIo, fileUri, picker } from '@kit.CoreFileKit';
 import { i18n } from '@kit.LocalizationKit';
 import { BusinessError } from '@kit.BasicServicesKit';
@@ -15,6 +15,8 @@ import { HarmonyStylusAdapter } from '../stylus/HarmonyStylusAdapter';
 import { StylusPacket } from '../stylus/StylusProtocol';
 import { NativeImeAdapter, NativeImeState } from '../input/NativeImeAdapter';
 import { NativeCursorAdapter } from '../input/NativeCursorAdapter';
+import { IMAGE_DROP_TYPES, NativeDropAdapter } from '../input/NativeDropAdapter';
+import { isFiniteHoverPoint, penHoverLeaveMessage, penHoverMoveMessage } from '../input/PenHoverPreview';
 import { moveWindow, toggleWindowMaximize } from '../WindowChrome';
 import { window } from '@kit.ArkUI';
 import { configureDisplayColor } from '../DisplayColor';
@@ -71,8 +73,14 @@ struct Index {
   private saveTargets: SaveTargets = new SaveTargets();
   private stylus: HarmonyStylusAdapter = new HarmonyStylusAdapter((packet: StylusPacket): void => {
     if (this.alive) { native.input(JSON.stringify(new NativeStylusInput(packet))); }
+  }, async (): Promise<boolean> => {
+    let result = await abilityAccessCtrl.createAtManager().requestPermissionsFromUser(this.context, ['ohos.permission.ACCESS_BLUETOOTH']);
+    return result.authResults.length > 0 && result.authResults[0] === 0;
   });
   private cursor: NativeCursorAdapter = new NativeCursorAdapter(this.getUIContext());
+  private dropping: NativeDropAdapter = new NativeDropAdapter(this.context.cacheDir,
+    (key: string): void => { this.getUIContext().getDragController().cancelDataLoading(key); },
+    (name: string, fd: number): void => { native.openFile(name, fd); });
   private ime: NativeImeAdapter = new NativeImeAdapter((message: string): void => native.input(message));
   private printing: NativePrintAdapter = new NativePrintAdapter(this.context,
     (message: string): void => { if (this.alive) { this.failure = message; } });
@@ -83,7 +91,14 @@ struct Index {
         let path = file.uri.length > 0 ? new fileUri.FileUri(file.uri).path : '';
         if (this.documents?.owns(path)) name = path;
       } catch (error) { console.info('Open source path unavailable'); }
-      native.open(name, file.bytes);
+      try {
+        native.openFile(name, file.file.fd);
+      } catch (error) {
+        this.failure = (error as Error).message;
+      } finally {
+        try { fileIo.closeSync(file.file); }
+        catch (error) { console.error(`Open close failed: ${(error as Error).message}`); }
+      }
     }
   }
   aboutToAppear(): void {
@@ -117,7 +132,7 @@ struct Index {
       this.onTitlebarChanged();
       this.failure = '';
       setOpenListener(() => this.drainOpens());
-      setCloseRequest(() => native.close());
+      setCloseRequest((): void => { native.close(); });
       this.drainOpens();
       this.stylus.start();
     } catch (error) {
@@ -127,6 +142,7 @@ struct Index {
   aboutToDisappear(): void {
     this.alive = false;
     this.printing.stop();
+    this.dropping.stop();
     this.generation++;
     this.initialized = false;
     this.saveTargets.clear();
@@ -210,21 +226,13 @@ struct Index {
         native.reply(id, false, 'cancelled', new ArrayBuffer(0)); return;
       }
       let file = await fileIo.open(uris[0], fileIo.OpenMode.READ_ONLY);
-      let bytes: ArrayBuffer;
       try {
-        let size = (await fileIo.stat(file.fd)).size;
-        if (size <= 0 || size > 256 * 1024 * 1024) throw new Error('File is empty or exceeds 256 MiB');
-        bytes = new ArrayBuffer(size);
-        let view = new Uint8Array(bytes); let offset = 0;
-        while (offset < size) {
-          let chunk = new ArrayBuffer(Math.min(1024 * 1024, size - offset));
-          let read = await fileIo.read(file.fd, chunk);
-          if (read <= 0) throw new Error('Incomplete file read');
-          view.set(new Uint8Array(chunk, 0, read), offset); offset += read;
+        if (!this.alive || generation !== this.generation) {
+          native.reply(id, false, 'cancelled', new ArrayBuffer(0)); return;
         }
+        let opened = new fileUri.FileUri(uris[0]);
+        native.replyFile(id, this.documents?.owns(opened.path) ? opened.path : opened.name, file.fd);
       } finally { await fileIo.close(file); }
-      let opened = new fileUri.FileUri(uris[0]);
-      native.reply(id, true, this.documents?.owns(opened.path) ? opened.path : opened.name, bytes);
     } catch (error) {
       let failure = error as Error;
       native.reply(id, false, failure.message, new ArrayBuffer(0));
@@ -279,6 +287,37 @@ struct Index {
       native.reply(id, false, failure.message, new ArrayBuffer(0));
     }
   }
+  private async dropImages(event: DragEvent): Promise<void> {
+    const generation = this.generation;
+    const isCurrent = (): boolean => this.alive && this.initialized && generation === this.generation;
+    try {
+      const images = await this.dropping.receive(event, isCurrent);
+      if (!isCurrent()) { return; }
+      for (const image of images) {
+        native.open(image.name, image.bytes);
+        console.info('PhotoCraft drop queued: ' + image.name);
+      }
+    } catch (error) {
+      if (isCurrent()) { this.failure = (error as Error).message; }
+    } finally {
+      if (isCurrent()) { this.restoreEditorFocus(); }
+    }
+  }
+  private sendPenHoverMove(event: HoverEvent): void {
+    if (!this.alive || !this.initialized) { return; }
+    let x = Number(event.x);
+    let y = Number(event.y);
+    if (!isFiniteHoverPoint(x, y)) { return; }
+    // onHoverMove reports component-local vp; the native bridge expects physical pixels.
+    let xPx = this.getUIContext().vp2px(x);
+    let yPx = this.getUIContext().vp2px(y);
+    native.input(penHoverMoveMessage(xPx, yPx));
+  }
+  private sendPenHoverLeave(isHover: boolean): void {
+    // Hide on leave; actual hover motion resumes preview without an entry gate.
+    if (isHover || !this.alive || !this.initialized) { return; }
+    native.input(penHoverLeaveMessage());
+  }
   build() {
     Stack() {
       if (this.initialized) {
@@ -289,6 +328,15 @@ struct Index {
           this.ime.setOrigin(this.getUIContext().vp2px(Number(area.globalPosition.x)),
             this.getUIContext().vp2px(Number(area.globalPosition.y)));
         })
+        .allowDrop(IMAGE_DROP_TYPES)
+        .onDragMove((event: DragEvent): void => {
+          event.dragBehavior = DragBehavior.COPY;
+          event.setResult(DragResult.DROP_ENABLED);
+        })
+        // Required by startDataLoading: avoid the default prefetch consuming UDMF data.
+        .onDrop((event: DragEvent): void => { this.dropImages(event); }, { disableDataPrefetch: true })
+        .onHoverMove((event: HoverEvent): void => { this.sendPenHoverMove(event); })
+        .onHover((isHover: boolean): void => { this.sendPenHoverLeave(isHover); })
         .id('photocraft-editor').focusable(true).defaultFocus(true).focusOnTouch(true)
         .onBlur(() => { this.cursor.reset(); let input = new NativeInput(); input.kind = 'blur'; native.input(JSON.stringify(input)); })
       } else {
@@ -296,7 +344,7 @@ struct Index {
       }
       if (this.failure.length > 0) {
         Column() {
-          Text('PhotoCraft 原生运行错误').fontSize(20).fontColor('#FFFFFF')
+          Text('PhotoCraft For HarmonyOS 原生运行错误').fontSize(20).fontColor('#FFFFFF')
           Text(this.failure).fontSize(14).fontColor('#FFFFFF').margin({ top: 12 })
           if (!this.initialized) {
             Button('重试').onClick(() => { this.failure = ''; this.initializeHost(this.generation); })

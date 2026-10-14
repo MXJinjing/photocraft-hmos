@@ -307,7 +307,9 @@ pub fn encode_jpeg_rgb8(
     }
     let mut out = Vec::new();
     let mut enc = jpeg_encoder::Encoder::new(&mut out, quality.clamp(1, 100));
-    let subsampled = quality < 90;
+    // Like Photoshop's Save for Web: 4:2:0 chroma up to quality 50, 4:4:4 from 51 (measured on
+    // Photoshop 2025's output; its Save As keeps 4:2:0 at every quality).
+    let subsampled = quality <= 50;
     enc.set_progressive(progressive);
     // jpeg-encoder 0.6 writes corrupt baseline scans when optimised Huffman tables meet 4:2:0
     // (both zune-jpeg and image-rs decode them green); progressive output is fine.
@@ -343,6 +345,24 @@ mod tests {
 
     fn pattern(w: usize, h: usize, n: usize) -> Vec<u8> {
         (0..w * h).map(|i| (((i % w) * 7 + (i / w) * 13 + (i * i) % 5) % n) as u8).collect()
+    }
+
+    /// The luma sampling factors (h, v) of a baseline or progressive JPEG.
+    fn luma_sampling(bytes: &[u8]) -> Option<(u8, u8)> {
+        let i = bytes.windows(2).position(|w| w[0] == 0xFF && matches!(w[1], 0xC0..=0xC2))?;
+        let f = *bytes.get(i + 11)?;
+        Some((f >> 4, f & 15))
+    }
+
+    #[test]
+    fn jpeg_chroma_is_full_above_quality_50() {
+        let rgb: Vec<u8> = (0..16 * 16 * 3).map(|i| (i * 37 % 256) as u8).collect();
+        for (q, want) in [(1, (2, 2)), (50, (2, 2)), (51, (1, 1)), (60, (1, 1)), (89, (1, 1)), (100, (1, 1))] {
+            for progressive in [false, true] {
+                let bytes = encode_jpeg_rgb8(16, 16, &rgb, q, progressive, false, None, None, None).unwrap();
+                assert_eq!(luma_sampling(&bytes), Some(want), "quality {q} progressive {progressive}");
+            }
+        }
     }
 
     #[test]

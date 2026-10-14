@@ -2,7 +2,11 @@ use egui::{Event, Key, Modifiers, PointerButton, Pos2};
 use photocraft_ui_egui::stylus::{PenSample, PointerSource, StylusFeed, StylusInput};
 use serde::Deserialize;
 use std::collections::BTreeMap;
+use std::time::{Duration, Instant};
 
+/// After multi-touch ends, ignore Primary from a leftover finger re-reported across an
+/// empty platform snapshot. Short enough that a rapid second pinch is not swallowed.
+const LEFTOVER_GUARD: Duration = Duration::from_millis(100);
 #[derive(Deserialize, Default)]
 pub struct Contact {
     pub id: u64,
@@ -61,18 +65,130 @@ pub struct Input {
     #[serde(default)]
     pub end: usize,
 }
+
+/// Remember positions the platform can replay when contact/proximity ends.
+/// The first post-lift hover also establishes an anchor: a pressure/proximity
+/// transition can change reported coordinates even while the pen stays still.
+struct PreviewResume {
+    cached: [Option<Pos2>; 5],
+    first_hover: Option<Pos2>,
+}
+
+impl PreviewResume {
+    fn stationary(&self, pos: Pos2) -> bool {
+        self.cached
+            .iter()
+            .copied()
+            .chain([self.first_hover])
+            .flatten()
+            // Two logical points absorb small stationary pen jitter.
+            .any(|anchor| anchor.distance_sq(pos) <= 4.0)
+    }
+
+    fn blocks_hover(&mut self, pos: Pos2) -> bool {
+        if self.first_hover.is_none() {
+            self.first_hover = Some(pos);
+            return true;
+        }
+        self.stationary(pos)
+    }
+}
+
 #[derive(Default)]
 pub struct State {
     pressed: Option<PointerButton>,
     touches: BTreeMap<u64, Pos2>,
     touch_pointer: Option<u64>,
     pen_down: bool,
+    hover_origin: Option<Pos2>,
+    last_hover: Option<Pos2>,
+    contact_origin: Option<Pos2>,
+    last_pen: Option<Pos2>,
+    last_mouse: Option<Pos2>,
+    preview_resume: Option<PreviewResume>,
+    preview_hidden: bool,
     ignore_fingers: bool,
+    /// Multi-touch / pinch navigation is active; leftover fingers must not Primary.
+    touch_nav_active: bool,
+    /// After nav ends with an empty snapshot, briefly block Primary so a re-reported
+    /// leftover finger (platform quirk) cannot deposit a stroke/dot.
+    leftover_guard_until: Option<Instant>,
     axis_zoom: Option<f32>,
     pub modifiers: Modifiers,
     pub feed: StylusFeed,
 }
 impl State {
+    fn finger_owns_pointer(&self) -> bool {
+        !self.touches.is_empty()
+            || self.touch_nav_active
+            || self.ignore_fingers
+            || self
+                .leftover_guard_until
+                .is_some_and(|until| Instant::now() < until)
+    }
+
+    /// Synthesize the first contact immediately. The shared canvas state machine owns
+    /// provisional strokes and the transition to multi-touch navigation.
+    fn drive_single_finger_primary(
+        &mut self,
+        next: &BTreeMap<u64, Pos2>,
+        first: bool,
+        leftover_guard: bool,
+        events: &mut Vec<Event>,
+    ) {
+        if !first
+            || self.touch_pointer.is_some()
+            || self.pressed.is_some()
+            || self.touch_nav_active
+            || leftover_guard
+            || next.len() != 1
+        {
+            return;
+        }
+        let Some((&id, &pos)) = next.iter().next() else {
+            return;
+        };
+        self.touch_pointer = Some(id);
+        self.pressed = Some(PointerButton::Primary);
+        events.push(Event::PointerMoved(pos));
+        events.push(Event::PointerButton {
+            pos,
+            button: PointerButton::Primary,
+            pressed: true,
+            modifiers: self.modifiers,
+        });
+    }
+
+    fn resume_guard(&self) -> PreviewResume {
+        PreviewResume {
+            cached: [
+                self.hover_origin,
+                self.last_hover,
+                self.contact_origin,
+                self.last_pen,
+                self.last_mouse,
+            ],
+            first_hover: None,
+        }
+    }
+
+    fn hide_pen_preview(&mut self) {
+        self.preview_hidden = true;
+        let resume = self.resume_guard();
+        self.preview_resume.get_or_insert(resume);
+        self.hover_origin = None;
+    }
+
+    pub fn cursor_icon(&self, icon: egui::CursorIcon) -> egui::CursorIcon {
+        // PointerGone clears egui's outline, but its default cursor would make
+        // HarmonyOS's own pen pointer visible again while the pen is stationary.
+        if self.preview_hidden {
+            egui::CursorIcon::None
+        } else {
+            icon
+        }
+    }
+
     fn clear_touches(&mut self, events: &mut Vec<Event>) {
         for (id, pos) in std::mem::take(&mut self.touches) {
             events.push(Event::Touch {
@@ -85,10 +201,47 @@ impl State {
         }
         self.touch_pointer = None;
     }
+
+    /// Last finger-owned pointer position, if any.
+    fn finger_anchor(&self) -> Option<Pos2> {
+        self.touch_pointer
+            .and_then(|id| self.touches.get(&id).copied())
+            .or_else(|| self.touches.values().next().copied())
+    }
+
+    /// Drop finger contacts and any tool pointer they owned, releasing in place.
+    /// Releasing at a pen/mouse point instead would rubber-band ink between contacts.
+    fn suppress_fingers(&mut self, events: &mut Vec<Event>) {
+        let anchor = self.finger_anchor();
+        let had_touch_pointer = self.touch_pointer.is_some();
+        self.clear_touches(events);
+        if had_touch_pointer || self.pressed.is_some() {
+            let pos = anchor.unwrap_or(Pos2::ZERO);
+            if let Some(button) = self.pressed.take() {
+                events.push(Event::PointerButton {
+                    pos,
+                    button,
+                    pressed: false,
+                    modifiers: self.modifiers,
+                });
+            }
+            events.push(Event::PointerGone);
+        }
+    }
+
     pub fn cancel(&mut self, pos: Pos2, events: &mut Vec<Event>) {
         self.clear_touches(events);
         self.pen_down = false;
+        self.hover_origin = None;
+        self.last_hover = None;
+        self.contact_origin = None;
+        self.last_pen = None;
+        self.last_mouse = None;
+        self.preview_resume = None;
+        self.preview_hidden = false;
         self.ignore_fingers = false;
+        self.touch_nav_active = false;
+        self.leftover_guard_until = None;
         self.axis_zoom = None;
         if let Some(button) = self.pressed.take() {
             events.push(Event::PointerButton {
@@ -137,6 +290,10 @@ impl State {
                 // Keep palms suppressed until all fingers lift after a pen stroke.
                 if self.pen_down || self.ignore_fingers {
                     self.ignore_fingers = !input.points.is_empty();
+                    // Defensive: drop any leaked finger pointer so it cannot ink mid-stroke.
+                    if !self.touches.is_empty() || self.touch_pointer.is_some() {
+                        self.suppress_fingers(events);
+                    }
                     return;
                 }
                 if input.points.len() > 10
@@ -176,7 +333,41 @@ impl State {
                         }
                     }
                 }
+                // Two-or-more fingers are navigation only: never keep a tool primary press.
+                let multi = next.len() >= 2;
+                let entering_multi = multi && self.touches.len() < 2;
+                let leftover_guard = self
+                    .leftover_guard_until
+                    .is_some_and(|until| Instant::now() < until);
+                if multi {
+                    self.touch_nav_active = true;
+                    self.leftover_guard_until = None;
+                }
+                if multi && (self.touch_pointer.is_some() || self.pressed.is_some()) {
+                    let anchor = self
+                        .finger_anchor()
+                        .or_else(|| next.values().next().copied())
+                        .unwrap_or(Pos2::ZERO);
+                    if let Some(button) = self.pressed.take() {
+                        events.push(Event::PointerButton {
+                            pos: anchor,
+                            button,
+                            pressed: false,
+                            modifiers: self.modifiers,
+                        });
+                    }
+                    if self.touch_pointer.take().is_some() {
+                        events.push(Event::PointerGone);
+                    }
+                }
                 let first = self.touches.is_empty();
+                // egui's pinch anchor needs a pointer frame when multi-touch begins —
+                // including the common staggered case (finger one already down).
+                if entering_multi {
+                    if let Some(&pos) = next.values().next() {
+                        events.push(Event::PointerMoved(pos));
+                    }
+                }
                 for (&id, &pos) in &next {
                     let phase = if self.touches.contains_key(&id) {
                         egui::TouchPhase::Move
@@ -190,19 +381,23 @@ impl State {
                         pos,
                         force: None,
                     });
-                    if first && self.touch_pointer.is_none() && self.pressed.is_none() {
-                        self.touch_pointer = Some(id);
-                        self.pressed = Some(PointerButton::Primary);
-                        events.push(Event::PointerMoved(pos));
-                        events.push(Event::PointerButton {
-                            pos,
-                            button: PointerButton::Primary,
-                            pressed: true,
-                            modifiers: self.modifiers,
-                        });
-                    } else if self.touch_pointer == Some(id) {
+                    if self.touch_pointer == Some(id) {
                         events.push(Event::PointerMoved(pos));
                     }
+                }
+                if !multi {
+                    self.drive_single_finger_primary(&next, first, leftover_guard, events);
+                }
+                if next.is_empty() {
+                    if self.touch_nav_active {
+                        // Catch a leftover finger re-reported right after the platform
+                        // inserts an empty snapshot between multi-touch and the remnant.
+                        self.leftover_guard_until = Some(Instant::now() + LEFTOVER_GUARD);
+                        // Drop the pinch-anchor / deferred-finger hover so a following
+                        // gesture does not inherit a stale pointer position.
+                        events.push(Event::PointerGone);
+                    }
+                    self.touch_nav_active = false;
                 }
                 self.touches = next;
             }
@@ -211,7 +406,12 @@ impl State {
                 if input.action == 1 {
                     self.axis_zoom = None;
                 }
-                self.feed.report(PointerSource::Mouse, None);
+                // Axis callbacks can interleave with touchscreen snapshots, including
+                // the lift frame. They do not establish a new pointer owner: changing
+                // Touch to Mouse bypasses the canvas's block-finger-input preference.
+                if !self.finger_owns_pointer() {
+                    self.feed.report(PointerSource::Mouse, None);
+                }
                 events.push(Event::PointerMoved(pos));
                 if input.zoom.is_finite() && input.zoom > 0.0 {
                     let ratio = input.zoom / self.axis_zoom.unwrap_or(1.0);
@@ -235,13 +435,59 @@ impl State {
                 }
             }
             "pointer" => {
-                if input.action == 3 {
-                    self.cancel(pos, events);
+                // XComponent may replay a mouse callback after fingerContact was
+                // cleared by UP. Apply the same ownership/settling guard as touch
+                // snapshots, before cancellation or feed updates can clear it.
+                if input.source == PointerSource::Mouse && self.finger_owns_pointer() {
                     return;
                 }
+                if input.action == 3 {
+                    let resume = (self.preview_hidden
+                        || input.source == PointerSource::Pen
+                        || self.feed.source() == PointerSource::Pen)
+                        .then(|| {
+                            self.preview_resume
+                                .take()
+                                .unwrap_or_else(|| self.resume_guard())
+                        });
+                    self.cancel(pos, events);
+                    // Pointer cancellation hides a pen preview too. Focus blur
+                    // still calls cancel directly to restore normal OS cursors.
+                    if let Some(resume) = resume {
+                        self.preview_resume = Some(resume);
+                        self.preview_hidden = true;
+                    }
+                    return;
+                }
+                // A synthesized mouse release after pen-up has no mouse press
+                // to finish and must not restore a cached pointer position.
+                if input.source == PointerSource::Mouse
+                    && input.action == 1
+                    && self.pressed.is_none()
+                {
+                    return;
+                }
+                let pressure = input.sample.as_ref().map(|s| s.pressure).unwrap_or(
+                    if input.source == PointerSource::Pen {
+                        0.0
+                    } else {
+                        1.0
+                    },
+                );
+                let is_hover_move = input.action == 2 && pressure <= 0.0;
+                // Any pen activity while fingers are down must drop the finger pointer in place
+                // first. Moving/releasing at the pen point rubber-bands ink finger→tip.
+                if input.source == PointerSource::Pen
+                    && (!self.touches.is_empty() || self.touch_pointer.is_some())
+                {
+                    self.suppress_fingers(events);
+                    self.ignore_fingers = true;
+                }
                 if input.source == PointerSource::Pen && input.action == 0 {
-                    self.ignore_fingers = !self.touches.is_empty();
-                    self.clear_touches(events);
+                    if !self.touches.is_empty() || self.touch_pointer.is_some() {
+                        self.suppress_fingers(events);
+                        self.ignore_fingers = true;
+                    }
                     if let Some(button) = self.pressed.take() {
                         events.push(Event::PointerButton {
                             pos,
@@ -251,11 +497,46 @@ impl State {
                         });
                     }
                     self.pen_down = true;
+                    self.contact_origin = Some(pos);
+                    self.preview_resume = None;
+                    self.preview_hidden = false;
                 } else if self.pen_down && input.source != PointerSource::Pen {
                     return;
                 }
-                if input.source == PointerSource::Pen && input.action == 1 {
+                // Contact-time ArkUI hover echoes (pressure 0) must not move the stroke.
+                if self.pen_down && is_hover_move {
+                    return;
+                }
+                if input.source == PointerSource::Pen && is_hover_move {
+                    if let Some(resume) = self.preview_resume.as_mut() {
+                        if resume.blocks_hover(pos) {
+                            return;
+                        }
+                        self.preview_resume = None;
+                    }
+                    self.preview_hidden = false;
+                    self.hover_origin.get_or_insert(pos);
+                    self.last_hover = Some(pos);
+                } else if input.source == PointerSource::Mouse {
+                    if input.action == 2
+                        && self.preview_hidden
+                        && self
+                            .preview_resume
+                            .as_ref()
+                            .is_some_and(|resume| resume.stationary(pos))
+                    {
+                        return;
+                    }
+                    self.last_mouse = Some(pos);
+                    self.preview_hidden = false;
+                }
+                if input.source == PointerSource::Pen {
+                    self.last_pen = Some(pos);
+                }
+                let pen_up = input.source == PointerSource::Pen && input.action == 1;
+                if pen_up {
                     self.pen_down = false;
+                    self.hide_pen_preview();
                 }
                 self.feed.report(input.source, input.sample);
                 events.push(Event::PointerMoved(pos));
@@ -286,7 +567,21 @@ impl State {
                     }
                     _ => {}
                 }
+                if pen_up {
+                    events.push(Event::PointerGone);
+                }
             }
+            "hover_leave" => {
+                // ArkUI also announces hover leave when the pen makes contact.
+                if self.pen_down {
+                    return;
+                }
+                if self.feed.source() == PointerSource::Pen {
+                    self.hide_pen_preview();
+                }
+                events.push(Event::PointerGone);
+            }
+            "blur" => self.cancel(pos, events),
             "wheel" => events.push(Event::MouseWheel {
                 unit: egui::MouseWheelUnit::Point,
                 phase: egui::TouchPhase::Move,
@@ -313,7 +608,6 @@ impl State {
                     events.push(Event::Text(input.text));
                 }
             }
-            "blur" => self.cancel(pos, events),
             _ => {}
         }
     }

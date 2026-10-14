@@ -85,6 +85,11 @@ impl Prefix {
         }
     }
 
+    /// The document the cached composite belongs to, if any.
+    pub(crate) fn doc(&self) -> Option<photocraft_doc::DocId> {
+        self.context.as_ref().map(|d| d.id)
+    }
+
     pub(crate) fn prepare(&mut self, doc: &Document, plan: &Plan<'_>) -> Option<Checkpoint> {
         if self.budget == 0 {
             return None;

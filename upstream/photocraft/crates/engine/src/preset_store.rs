@@ -44,7 +44,7 @@ use std::io::Read;
 use std::sync::{Arc, Mutex, PoisonError};
 
 use photocraft_paint::tile::PREVIEW_SIDE;
-use photocraft_paint::{BrushPreset, BrushSettings, GrayTile, Pattern, StoredTile, TipShape};
+use photocraft_paint::{BrushPreset, BrushSettings, GrayTile, Pattern, PresetCaptures, StoredTile, TipShape};
 use serde::{Deserialize, Serialize};
 
 use crate::Session;
@@ -299,7 +299,7 @@ fn decode_tip_max(bytes: &[u8], max_side: u32) -> Result<GrayTile, String> {
     }
     let data: Vec<u16> =
         if bits == 8 { raw.iter().map(|&v| u16::from(v) * 257).collect() } else { raw.as_chunks::<2>().0.iter().map(|c| u16::from_le_bytes(*c)).collect() };
-    Ok(GrayTile { width: w, height: h, data })
+    Ok(GrayTile { width: w, height: h, data: data.into() })
 }
 
 // ------------------------------------------------------------------ group files
@@ -333,6 +333,9 @@ struct StoredPreset {
     /// before #1851, which load with every preset directly in its group.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     folder: Vec<String>,
+    /// [`BrushPreset::captures`]; missing for presets saved without the New Brush Preset dialog.
+    #[serde(default, skip_serializing_if = "PresetCaptures::is_default")]
+    captures: PresetCaptures,
 }
 
 /// What a group file records about each tip it references, so loading needs only the preview.
@@ -669,7 +672,14 @@ pub fn open(backend: Box<dyn PresetBackend>) -> Opened {
                             hashes.push(i.preview.clone());
                         }
                     }
-                    items.push(BrushPreset { name: sp.name, brush, builtin: false, group: g.group.clone(), folder: sanitize_folder(sp.folder) });
+                    items.push(BrushPreset {
+                        name: sp.name,
+                        brush,
+                        builtin: false,
+                        group: g.group.clone(),
+                        folder: sanitize_folder(sp.folder),
+                        captures: sp.captures,
+                    });
                 }
                 None => missing += 1,
             }
@@ -1006,7 +1016,13 @@ impl PresetStore {
             }
             let key = |r: &Option<StoredTile>| r.as_ref().map(|t| t.key.clone());
             let tips = TipRefs { tip: key(&refs[0]), dual_tip: key(&refs[1]), texture: key(&refs[2]) };
-            stored.push(StoredPreset { name: p.name.clone(), brush: settings_only(&mut p.brush), tips, folder: p.folder.clone() });
+            stored.push(StoredPreset {
+                name: p.name.clone(),
+                brush: settings_only(&mut p.brush),
+                tips,
+                folder: p.folder.clone(),
+                captures: p.captures.clone(),
+            });
             tiles.push(refs);
         }
         let gf = GroupFile { format: GROUP_FORMAT.into(), version: 1, group: group.to_string(), presets: stored, tips: infos };
@@ -1109,6 +1125,11 @@ impl Session {
         }
         self.brush_presets_changed();
         self.sync_preset_store();
+        // A brush remembered from the previous run (or picked before the store loaded) may be
+        // painting with previews; load the full tips now (a missing one keeps its preview).
+        let mut brush = std::mem::take(&mut self.tools.brush);
+        let _ = self.load_brush_tips(&mut brush);
+        self.tools.brush = brush;
         if let Some(st) = self.preset_store.as_mut() {
             warnings.extend(st.take_warnings());
         }
@@ -1123,7 +1144,11 @@ impl Session {
             if st.synced_rev != Some(rev) {
                 st.sync(&mut self.tools.presets);
                 st.synced_rev = Some(rev);
-                link_stored_tips(st, &mut self.tools.brush);
+                if link_stored_tips(st, &mut self.tools.brush) {
+                    // An embedded tip became a store reference: what the last-brush
+                    // persistence would write changed without a command touching the brush.
+                    self.tools.brush_changed();
+                }
             }
             st.sync_actions(&self.actions.list, actions_rev);
         }
@@ -1156,7 +1181,7 @@ impl Session {
 /// After a sync, an embedded bitmap of the tool's brush that the store now holds (the brush was
 /// just saved as a preset) becomes the stored tile, keeping its bitmap: the brush then matches its
 /// preset (Brushes panel highlight) like a preset picked from the library.
-fn link_stored_tips(st: &PresetStore, b: &mut BrushSettings) {
+fn link_stored_tips(st: &PresetStore, b: &mut BrushSettings) -> bool {
     let link = |g: &GrayTile| -> Option<StoredTile> {
         if !g.is_valid() {
             return None;
@@ -1164,24 +1189,29 @@ fn link_stored_tips(st: &PresetStore, b: &mut BrushSettings) {
         let h = tip_hash(g);
         st.tips.contains_key(&h).then(|| StoredTile { key: h, width: g.width, height: g.height, preview: Arc::new(g.preview(PREVIEW_SIDE)), full: None })
     };
+    let mut linked = false;
     if let TipShape::Sampled(g) = &b.tip
         && let Some(r) = link(g)
         && let TipShape::Sampled(g) = std::mem::take(&mut b.tip)
     {
         b.tip = TipShape::Stored(StoredTile { full: Some(Arc::new(g)), ..r });
+        linked = true;
     }
     if let TipShape::Sampled(g) = &b.dual_brush.tip
         && let Some(r) = link(g)
         && let TipShape::Sampled(g) = std::mem::take(&mut b.dual_brush.tip)
     {
         b.dual_brush.tip = TipShape::Stored(StoredTile { full: Some(Arc::new(g)), ..r });
+        linked = true;
     }
     if let Pattern::Tile(g) = &b.texture.pattern
         && let Some(r) = link(g)
         && let Pattern::Tile(g) = std::mem::take(&mut b.texture.pattern)
     {
         b.texture.pattern = Pattern::Stored(StoredTile { full: Some(Arc::new(g)), ..r });
+        linked = true;
     }
+    linked
 }
 
 #[cfg(test)]

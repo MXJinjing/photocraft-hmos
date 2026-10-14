@@ -7,7 +7,20 @@
 # Licensed MIT OR Apache-2.0. See LICENSE-translations.txt and ATTRIBUTION.md.
 # Product names and technology names retain their spelling.
 
+# Channel Options and New Spot Channel (#3761)
+	Channel Color	채널 색상
+	Color Indicates:	색상 표시 내용:
+	Solidity:	견고도:
+	Masked Areas	마스크 영역
+	Selected Areas	선택 영역
+	Spot Color	별색
+	Ink Characteristics	잉크 특성
+
 # Guide layout dialog
+
+# Custom print paper (#3820)
+	Paper Width	용지 너비
+	Paper Height	용지 높이
 	Columns	열
 	Rows	행
 	Number	개수
@@ -60,6 +73,8 @@
 	Save	저장
 	Save As…	다른 이름으로 저장…
 	Save a Copy…	사본 저장…
+	{name} can't keep everything in this document	{name}에는 이 문서의 모든 내용을 저장할 수 없습니다
+	Choose a format that keeps it, such as Photoshop (PSD), or save a copy.	Photoshop(PSD)처럼 모든 내용을 유지하는 형식을 선택하거나 사본을 저장하세요.
 	Revert	되돌리기
 	Export	내보내기
 	Quick Export as PNG	PNG로 빠르게 내보내기
@@ -97,6 +112,14 @@
 	Script Events Manager…	스크립트 이벤트 관리자…
 	Import	가져오기
 	Browse…	찾아보기…
+	Source Files	소스 파일
+	Use:	사용:
+	Files	파일
+	Folder	폴더
+	Add Open Files	열린 파일 추가
+	Sort By Name	이름순 정렬
+	Attempt to Automatically Align Source Images	소스 이미지 자동 정렬 시도
+	Create Smart Object after Loading Layers	레이어를 불러온 후 스마트 오브젝트 만들기
 	Reveal in Finder	Finder에서 보기
 	Show in Explorer	파일 탐색기에서 보기
 	Show in Folder	폴더에서 보기
@@ -121,6 +144,8 @@
 	Search…	검색…
 	Check Spelling…	맞춤법 검사…
 	Find and Replace Text…	텍스트 찾기 및 바꾸기…
+	Add to Dictionary	사전에 추가
+	No Spelling Suggestions	맞춤법 제안 없음
 	Fill…	채우기…
 	Stroke…	획…
 	Content-Aware Fill…	내용 인식 채우기…
@@ -135,6 +160,8 @@
 	Transform Again on a Copy	사본에 변형 다시 적용
 	Scale	크기 조절
 	Rotate	회전
+	Set horizontal skew	가로 기울이기 설정
+	Set vertical skew	세로 기울이기 설정
 	Skew	기울이기
 	Distort	왜곡
 	Perspective	원근
@@ -341,6 +368,7 @@
 	Update Modified Content	수정된 내용 업데이트
 	Update All Modified Content	수정된 모든 내용 업데이트
 	Stack Mode	스택 모드
+	Choose Stack Mode:	스택 모드 선택:
 	Entropy	엔트로피
 	Kurtosis	첨도
 	Maximum	최대값
@@ -512,6 +540,9 @@
 	Blur	흐림 효과
 	Blur Gallery	흐림 효과 갤러리
 	Field Blur…	필드 흐림 효과…
+# Field Blur pins (#3373)
+	No pin selected	선택한 핀 없음
+	Click the image to add a pin; drag a pin to move it, or its ring to change its blur. Delete removes the selected pin.	이미지를 클릭하여 핀을 추가합니다. 핀을 드래그하여 이동하고, 링을 드래그하여 흐림 정도를 바꿉니다. Delete 키로 선택한 핀을 삭제합니다.
 	Iris Blur…	조리개 흐림 효과…
 	Tilt-Shift…	기울기-이동…
 	Path Blur…	패스 흐림 효과…
@@ -700,6 +731,10 @@
 	Breeze Dark Theme	Breeze 어두운 테마
 	Breeze light	Breeze 밝게
 	Breeze Light Theme	Breeze 밝은 테마
+	Soft dark	소프트 다크
+	Soft light	소프트 라이트
+	Soft Dark Theme	소프트 다크 테마
+	Soft Light Theme	소프트 라이트 테마
 	Next Theme	다음 테마
 	Actions	액션
 	Brush Settings	브러시 설정
@@ -799,6 +834,9 @@
 	Appearance	모양새
 	Appearance (Layer Style)	모양새(레이어 스타일)
 	Apply Layer Mask	레이어 마스크 적용
+	Add Mask to Selection	선택 영역에 마스크 추가
+	Subtract Mask from Selection	선택 영역에서 마스크 빼기
+	Intersect Mask with Selection	마스크와 선택 영역 교차
 	Apply Per Tip	끝당 적용
 	Apply next selected layer comp	선택한 다음 레이어 구성 요소 적용
 	Apply previous selected layer comp	선택한 이전 레이어 구성 요소 적용
@@ -814,11 +852,18 @@
 	Background	배경
 	Background Color	배경색
 	Background Contents	배경 내용
+	Custom background color	사용자 정의 배경색
 	Balance	균형
 	Baseline	기준선
 	Baseline shift	기준선 이동
 	Basic	기본
 	Before (Y)	이전 (Y)
+	Save Settings…	설정 저장…
+	Load Settings…	설정 불러오기…
+	Save these settings as a Camera Raw .xmp file	이 설정을 Camera Raw .xmp 파일로 저장
+	Load settings from a Camera Raw .xmp file	Camera Raw .xmp 파일에서 설정 불러오기
+	Loaded Camera Raw settings from {file}	{file}에서 Camera Raw 설정을 불러왔습니다
+	Loaded Camera Raw settings from {file} ({n} not supported)	{file}에서 Camera Raw 설정을 불러왔습니다 (미지원 {n}개)
 	Begin recording	기록 시작
 	Bend:	구부림:
 	Bicubic	쌍입방
@@ -850,6 +895,7 @@
 	Cancel	취소
 	Reset	재설정
 	Cancel (Esc)	취소 (Esc)
+	Manage submitted jobs in the system print queue	제출된 작업은 시스템 인쇄 대기열에서 관리하세요
 	Cancel any current edits (Esc)	현재 편집 취소 (Esc)
 	Cancel current crop operation  (Esc)	현재 자르기 작업 취소  (Esc)
 	Cancel transform (Esc)	변형 취소 (Esc)
@@ -1117,6 +1163,9 @@
 	Ignore All	모두 무시
 	Image Size	이미지 크기
 	Import Brushes…	브러시 가져오기…
+	Gradient Preset Options	그레이디언트 사전 설정 옵션
+	Import .GRD	.GRD 가져오기
+	Choose a gradient file (.grd).	그레이디언트 파일 (.grd)을 선택하세요.
 	Import brushes (.abr)	브러시 가져오기(.abr)
 	Import Presets	사전 설정 가져오기
 	Imported	가져옴
@@ -1746,9 +1795,7 @@
 	Std Dev:	표준 편차:
 	Studio (Dark)	스튜디오(어둡게)
 	Studio (Light)	스튜디오(밝게)
-	Stylus	스타일러스
 	Stylus Wheel	스타일러스 휠
-	Block finger input	손가락 입력 차단
 	Subtract	빼기
 	Tabloid	타블로이드
 	Text Replacement	텍스트 대체
@@ -2043,6 +2090,11 @@
 	Rename Brush…	브러시 이름 바꾸기…
 	Delete Brush	브러시 삭제
 	New Brush Preset…	새 브러시 사전 설정…
+	Capture Brush Size in Preset	사전 설정에 브러시 크기 캡처
+	Include Tool Settings	도구 설정 포함
+	Include Color	색상 포함
+	Enter a name for the brush preset	브러시 사전 설정의 이름을 입력하십시오
+	A brush preset with this name already exists	이 이름의 브러시 사전 설정이 이미 있습니다
 	Brush Preset Options	브러시 사전 설정 옵션
 	Group name	그룹 이름
 	Brush name	브러시 이름
@@ -2101,6 +2153,10 @@
 	No path to make a selection from: draw one with the Pen tool or select one in the Paths panel.	선택 영역으로 만들 패스가 없습니다: 펜 도구로 그리거나 패스 패널에서 선택하세요.
 	Cancel opening	열기 취소
 	Cancelled opening {name}	{name} 열기를 취소했습니다
+	The document “{name}” does not have an embedded {mode} profile.	문서 “{name}”에 포함된 {mode} 프로파일이 없습니다.
+	The document “{name}” has an embedded color profile that does not match the current {mode} working space.	문서 “{name}”에 포함된 색상 프로파일이 현재 {mode} 작업 색상 공간과 일치하지 않습니다.
+	Embedded: {embedded}	포함됨: {embedded}
+	Working: {working}	작업 색상 공간: {working}
 	Developing {name}	{name} 현상 중
 	Cancelled {label}	{label} 작업을 취소했습니다
 	Esc to cancel	Esc 키로 취소
@@ -2909,6 +2965,7 @@ cameraRaw	Color	색상
 	Click to pick · Esc to cancel	클릭하여 선택 · Esc로 취소
 	Pick a screen pixel or press Esc to cancel	화면 픽셀을 선택하거나 Esc를 눌러 취소
 	Scroll to zoom	스크롤하여 확대/축소
+	Drag to pan · Scroll to zoom · Double-click to fit	드래그하여 이동 · 스크롤하여 확대/축소 · 두 번 클릭하여 맞추기
 	Show/Hide All Panels	모든 패널 표시/숨기기
 	Show/Hide Panels	패널 표시/숨기기
 	Could not open	열 수 없음
@@ -2958,6 +3015,7 @@ cameraRaw	Color	색상
 	Indigo	남색
 	Fuchsia	자홍색
 	Large document: redrawing on the CPU	큰 문서: CPU에서 다시 그리는 중
+	Redrawing	다시 그리는 중
 	This redraw took {seconds} s on the CPU.	이번 다시 그리기는 CPU에서 {seconds}초 걸렸습니다.
 	Edits that change the whole document, such as a layer's blend mode, opacity or visibility, redraw all of it.	레이어의 혼합 모드, 불투명도, 표시 여부처럼 문서 전체를 바꾸는 편집은 문서 전체를 다시 그립니다.
 	Its layers don't fit the GPU memory budget. Raising Memory usage in Preferences › Performance raises the budget, up to a quarter of this computer's memory.	레이어가 GPU 메모리 예산에 맞지 않습니다. 환경 설정 › 성능에서 메모리 사용량을 늘리면 이 컴퓨터 메모리의 4분의 1까지 예산이 늘어납니다.
@@ -3063,13 +3121,6 @@ fontWeight	Italic	기울임
 	XOR	XOR
 	Color Burn (Paint.NET)	색상 번 (Paint.NET)
 	Color Dodge (Paint.NET)	색상 닷지 (Paint.NET)
-	Double-tap pen body	펜 몸통 두 번 탭
-	Current tool and Eraser	현재 도구와 지우개
-	Previous tool	이전 도구
-	Long-press pen body	펜 몸통 길게 누르기
-	Show or hide context menu	상황에 맞는 메뉴 표시/숨기기
-	Choose printer, copies and duplex in the system print dialog.	시스템 인쇄 대화상자에서 프린터, 매수 및 양면 인쇄를 선택하세요.
-	System print preview opened	시스템 인쇄 미리보기가 열렸습니다
 	Stroke Options	획 옵션
 	Solid	실선
 	Dashed	파선
@@ -3205,6 +3256,7 @@ curves	Smooth	매끄럽게
 	Paint over hair or fur on the image; Alt paints the other mode	이미지의 머리카락이나 털 위를 칠합니다. Alt는 다른 모드로 칠합니다
 	Clear Brush Strokes	브러시 획 지우기
 	Show rulers	눈금자 표시
+	Presentation	프레젠테이션
 
 # Color Sampler (added with the i18n coverage repair)
 	Click to place · Alt-click or drag off-canvas to remove	클릭하여 배치 · Alt-클릭 또는 캔버스 밖으로 드래그하여 제거
@@ -3227,6 +3279,60 @@ curves	Smooth	매끄럽게
 	Light Red	연한 빨강
 	Medium Blue	중간 파랑
 	Light Gray	연한 회색
+	Object Finder	개체 찾기
+	No object found there — drag a rectangle around it	그곳에서 개체를 찾지 못했습니다 — 주위에 사각형을 드래그하세요
 	Remove after each stroke	획마다 제거
 	Apply the removal ({key})	제거 적용 ({key})
 	Strokes to remove: {n} (Enter applies, Esc cancels)	제거할 획: {n} (Enter 적용, Esc 취소)
+	Clear Brush Controls	브러시 제어 지우기
+	Reset All Locked Settings	모든 잠긴 설정 재설정
+	Copy Texture to Other Tools	다른 도구로 텍스처 복사
+
+# Actions panel: Load/Save Actions (.atn) and kept Photoshop steps
+	Load Actions…	액션 불러오기…
+	Save Actions…	액션 저장…
+	{name} (Photoshop)	{name} (Photoshop)
+	{message} ({note})	{message} ({note})
+@plural	Loaded {n} action from {file}|Loaded {n} actions from {file}	{file}에서 액션 {n}개를 불러왔습니다
+@plural	{n} step has no PhotoCraft equivalent yet|{n} steps have no PhotoCraft equivalent yet	{n}개 단계에는 아직 PhotoCraft에 해당하는 기능이 없습니다
+@plural	Saved {n} action to {file}|Saved {n} actions to {file}	{file}에 액션 {n}개를 저장했습니다
+@plural	{n} step with no Photoshop equivalent left out|{n} steps with no Photoshop equivalent left out	Photoshop에 해당하는 기능이 없는 {n}개 단계를 제외했습니다
+
+	File Naming	파일 이름 지정
+	Starting serial	시작 일련번호
+# Actions panel: set folders, dialog toggle, Insert Stop
+	Insert Stop…	정지 삽입…
+	Save Set…	세트 저장…
+	Message:	메시지:
+	Allow Continue	계속 허용
+	Show dialog during playback	재생 중 대화 상자 표시
+	Select an action first	먼저 액션을 선택하세요
+	Action playback stopped	액션 재생이 중지되었습니다
+	Step {step} is waiting for its dialog	{step}단계가 대화 상자를 기다리고 있습니다
+@plural	{n} action|{n} actions	액션 {n}개
+	Auto Add/Delete	자동 추가/삭제
+
+# Native Windows printing qualification
+	Don't also tick Mirror Image in Print Settings…: the two flips cancel out.	인쇄 설정에서도 이미지 반전을 켜지 마세요. 두 번 반전하면 원래대로 돌아갑니다.
+	Print Settings…	인쇄 설정…
+	Remember to turn off the printer's own colour management in Print Settings…	인쇄 설정에서 프린터 자체의 색상 관리를 끄세요…
+	Sent to {printer}	{printer}(으)로 전송됨
+	set in Print Settings…	인쇄 설정에서 지정…
+	ICO is limited to 256 × 256 pixels	ICO는 256 × 256픽셀로 제한됩니다
+
+# HarmonyOS host additions retained during upstream sync
+	Stylus	스타일러스
+	Block finger input	손가락 입력 차단
+	Double-tap pen body	펜 몸통 두 번 탭
+	Current tool and Eraser	현재 도구와 지우개
+	Previous tool	이전 도구
+	Long-press pen body	펜 몸통 길게 누르기
+	Show or hide context menu	상황에 맞는 메뉴 표시/숨기기
+	Choose printer, copies and duplex in the system print dialog.	시스템 인쇄 대화상자에서 프린터, 매수 및 양면 인쇄를 선택하세요.
+	System print preview opened	시스템 인쇄 미리보기가 열렸습니다
+	Only show canvas	캔버스만 표시
+	Right sidebar	오른쪽 사이드바
+	Connected pen	연결된 펜
+	No pen connected	연결된 펜 없음
+	Battery unavailable	배터리 정보 없음
+	Battery: {percent}%	배터리: {percent}%

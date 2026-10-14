@@ -50,7 +50,7 @@ Dispatch order matches `dialogs::show` in `dialogs.rs` (check earlier rows befor
 | `__stroke` | `stroke_ui.rs` | Edit › Stroke… |
 | `__createShape` | `shape_dialog.rs` | Click-with-shape-tool creation (rectangle, ellipse, …) |
 | `__deleteLayer` | `delete_layer_prompt.rs` | Layers panel trash confirmation |
-| `__newLayer` | `new_layer_ui.rs` | Layer › New › Layer… (⇧⌘N) |
+| `__newLayer` | `new_layer_ui.rs` | Layer › New › Layer… (⇧⌘N; ⌥⇧⌘N makes the layer without it) |
 | `__rasterize` | `rasterize_prompt.rs` | Rasterize-before-paint prompt |
 | `__resetAllTools` | `tool_reset.rs` | Reset All Tools confirmation |
 | `__cropPresetNew` / `__cropPresetDelete` | `crop_presets.rs` | New / delete crop preset |

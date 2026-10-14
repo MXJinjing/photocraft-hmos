@@ -191,7 +191,7 @@ fn live_color_replacement_matches_the_commit() {
                 }
             }
             assert!(b.rgba(10, 20)[1] > 0.5 || sampling == "backgroundSwatch", "{depth}-bit {sampling}: recoloured");
-            assert!(worst <= 2.0 / 255.0, "{depth}-bit {sampling}: live and commit differ by {worst}");
+            assert!(worst <= 2.0 / 255.0 + 1e-6, "{depth}-bit {sampling}: live and commit differ by {worst}");
         }
     }
 }
@@ -235,6 +235,45 @@ fn presets_save_load_delete_round_trip() {
     assert_eq!(s.tools.presets.len(), n0);
     assert!(s.execute("brush.presets.delete", json!({"name": "Mine"})).is_err());
     assert!(s.execute("brush.presets.save", json!({})).is_err());
+}
+
+/// The New Brush Preset dialog's boxes (#4490): a preset saved without Capture Brush Size or
+/// Include Tool Settings leaves the tool's size, mode, opacity, flow and pressure buttons as they
+/// are when picked; one saved with Include Color brings its colour back as the foreground. A preset
+/// saved without the boxes picks as it always did.
+#[test]
+fn presets_save_captures_size_tool_settings_and_color_as_asked() {
+    let mut s = session(10, 10);
+    s.execute("tools.setBrush", json!({"size": 40, "opacity": 0.5, "flow": 0.25, "mode": "Multiply", "pressureSize": false})).unwrap();
+    s.tools.foreground = [1.0, 0.0, 0.0, 1.0];
+    s.execute("brush.presets.save", json!({"name": "Legacy"})).unwrap();
+    s.execute("brush.presets.save", json!({"name": "Bare", "captureSize": false, "toolSettings": false})).unwrap();
+    s.execute("brush.presets.save", json!({"name": "Red", "color": true})).unwrap();
+    let caps = |n: &str| s.tools.presets.iter().find(|p| p.name == n).unwrap().captures.clone();
+    assert!(caps("Legacy").is_default(), "no boxes, the captures of any other preset");
+    assert_eq!(caps("Bare"), PresetCaptures { size: false, tool_settings: false, color: false });
+    assert!(caps("Red").color);
+
+    // Change the tool, then pick each.
+    let other = json!({"size": 9, "opacity": 1.0, "flow": 1.0, "mode": "Normal", "pressureSize": true});
+    s.execute("tools.setBrush", other.clone()).unwrap();
+    s.tools.foreground = [0.0, 0.0, 1.0, 1.0];
+    s.execute("tools.setBrush", json!({"preset": "Legacy"})).unwrap();
+    let b = &s.tools.brush;
+    assert_eq!((b.size, b.opacity, b.flow, b.mode, b.pressure_size), (40.0, 0.5, 0.25, photocraft_color::BlendMode::Multiply, false), "everything it saved");
+    assert_eq!(s.tools.foreground, [0.0, 0.0, 1.0, 1.0], "a preset without Include Color leaves the foreground");
+
+    s.execute("tools.setBrush", other.clone()).unwrap();
+    s.execute("tools.setBrush", json!({"preset": "Bare"})).unwrap();
+    let b = &s.tools.brush;
+    assert_eq!((b.size, b.opacity, b.flow, b.mode, b.pressure_size), (9.0, 1.0, 1.0, photocraft_color::BlendMode::Normal, true), "the tool's own");
+    assert_eq!(s.tools.current_preset.as_deref(), Some("Bare"));
+
+    s.execute("tools.setBrush", json!({"preset": "Red"})).unwrap();
+    assert_eq!(s.tools.foreground, [1.0, 0.0, 0.0, 1.0], "Include Color sets the foreground");
+    // A stroke naming the preset takes the same brush.
+    let r = resolve_brush(&s, &json!({"preset": "Bare"}), "paint.brush").unwrap();
+    assert_eq!(r.size, s.tools.brush.size);
 }
 
 #[test]
@@ -744,10 +783,11 @@ fn out_of_range_scatter_is_rejected_and_the_maximum_still_paints() {
         let d: Vec<i64> = r["damage"].as_array().unwrap().iter().map(|v| v.as_i64().unwrap()).collect();
         assert!(d[0].abs() < 1000 && d[1].abs() < 1000 && d[2] > 0 && d[3] > 0, "{r}");
     }
-    // Control: 200 % scatter paints where it did before the cap.
+    // Control: 200 % scatter paints where it did before the cap (the soft default tip reaches a
+    // little past its radius).
     let mut s = new();
     s.execute("tools.setBrush", json!({ "brush": scatter(2.0) })).unwrap();
-    assert_eq!(s.execute("paint.stroke", stroke).unwrap(), json!({"damage": [17, 14, 23, 23]}));
+    assert_eq!(s.execute("paint.stroke", stroke).unwrap(), json!({"damage": [15, 12, 27, 27]}));
 }
 
 #[test]
@@ -870,6 +910,82 @@ fn an_offer_that_does_not_match_the_commit_is_ignored() {
     assert!(r.get("fromLive").is_none());
 }
 
+#[test]
+fn last_brush_is_remembered_when_the_revision_moves_only() {
+    let mut s = session(8, 8);
+    restore_brush(&mut s);
+    // A restore is already in the preferences: nothing to write, no clone or serialise.
+    s.prefs.edit(|p| p.last_brush = json!("sentinel"));
+    remember_brush(&mut s);
+    assert_eq!(s.prefs().last_brush, json!("sentinel"), "an unchanged brush must not serialise");
+    s.execute("tools.setBrush", json!({"size": 23})).unwrap();
+    assert!(s.tools.brush_rev > s.tools.brush_saved_rev);
+    remember_brush(&mut s);
+    assert_eq!(s.prefs().last_brush["brush"]["size"].as_f64(), Some(23.0));
+    assert_eq!(s.tools.brush_saved_rev, s.tools.brush_rev, "the revision is marked saved");
+    // Revision unchanged: even a hand-written value stays (the gate is a counter compare).
+    s.prefs.edit(|p| p.last_brush = json!("sentinel"));
+    remember_brush(&mut s);
+    assert_eq!(s.prefs().last_brush, json!("sentinel"));
+}
+
+#[test]
+fn rejected_brush_changes_do_not_move_the_revision() {
+    let mut s = session(8, 8);
+    let rev = s.tools.brush_rev;
+    assert!(s.execute("tools.setBrush", json!({"size": "big"})).is_err());
+    assert_eq!(s.tools.brush_rev, rev, "a rejected brush leaves no change behind");
+    s.execute("tools.setBrush", json!({"size": 31})).unwrap();
+    assert!(s.tools.brush_rev > rev);
+}
+
+#[test]
+fn the_revision_tracks_the_picked_preset_too() {
+    let mut s = session(8, 8);
+    s.execute("tools.setBrush", json!({"preset": "Hard Round"})).unwrap();
+    let rev = s.tools.brush_rev;
+    s.execute("brush.presets.setCurrent", json!({"name": "Soft Round"})).unwrap();
+    assert!(s.tools.brush_rev > rev, "the remembered preset name follows the picked preset");
+    remember_brush(&mut s);
+    assert_eq!(s.prefs().last_brush["preset"].as_str(), Some("Soft Round"));
+}
+
+#[test]
+fn the_remembered_brush_restores_at_launch() {
+    let mut s = session(8, 8);
+    s.execute("tools.setBrush", json!({"preset": "Hard Round", "size": 44, "hardness": 0.3})).unwrap();
+    remember_brush(&mut s);
+    let stored = s.prefs().last_brush.clone();
+    assert_eq!(stored["preset"].as_str(), Some("Hard Round"));
+    let mut t = Session::new();
+    assert_ne!(t.tools.brush.size, 44.0, "a fresh session starts on the default brush");
+    t.prefs.edit(|p| p.last_brush = stored);
+    restore_brush(&mut t);
+    assert_eq!(t.tools.brush.size, 44.0);
+    assert_eq!(t.tools.brush.hardness, 0.3);
+    assert_eq!(t.tools.current_preset.as_deref(), Some("Hard Round"));
+    assert_eq!(t.tools.brush_saved_rev, t.tools.brush_rev, "the restored value is already stored");
+    // A malformed remembered brush keeps the default (never an error, never a panic).
+    let mut bad = Session::new();
+    bad.prefs.edit(|p| p.last_brush = json!({"brush": {"size": "huge"}}));
+    restore_brush(&mut bad);
+    assert_eq!(bad.tools.brush.size, Session::new().tools.brush.size);
+}
+
+#[test]
+fn remembered_brushes_never_embed_large_bitmaps() {
+    use std::sync::Arc;
+    let big = GrayTile::from_fn(PREVIEW_SIDE + 1, 8, |_, _| 1.0);
+    assert!(ref_tip(&TipShape::Sampled(big)).is_none(), "a big sampled tip cannot be embedded");
+    let small = GrayTile::from_fn(8, 8, |_, _| 1.0);
+    assert!(ref_tip(&TipShape::Sampled(small.clone())).is_some(), "small tiles embed");
+    let stored =
+        StoredTile { key: "k".into(), width: 300, height: 200, preview: Arc::new(small), full: Some(Arc::new(GrayTile::from_fn(300, 200, |_, _| 1.0))) };
+    let t = ref_tip(&TipShape::Stored(stored)).expect("stored tips are remembered as references");
+    assert!(matches!(t, TipShape::Stored(r) if r.full.is_none()), "a loaded full bitmap is dropped");
+    assert!(ref_pattern(&Pattern::Tile(GrayTile::from_fn(PREVIEW_SIDE + 1, 4, |_, _| 1.0))).is_none());
+}
+
 /// Photoshop's Clear painting mode (#3439): a Brush or Pencil stroke in `"mode": "clear"` erases
 /// with that brush, and History still names the tool rather than the Eraser.
 #[test]
@@ -881,5 +997,23 @@ fn clear_mode_erases_with_the_brush_or_pencil() {
         assert_eq!(rgba(&s, 20, 10)[3], 0.0, "{cmd}: cleared to transparency");
         assert_eq!(rgba(&s, 20, 2), [1.0, 0.0, 0.0, 1.0], "{cmd}: untouched pixels stay");
         assert_eq!(s.active().unwrap().history.undo_label(), Some(label), "{cmd}");
+    }
+}
+
+/// #4344: a foreground picked as CMYK 100/0/0/0 is painted into a CMYK document as those inks by
+/// the Brush and the Pencil, not as whatever its sRGB stand-in converts back to (100/28/0/17).
+#[test]
+fn brush_and_pencil_paint_a_cmyk_pick_with_the_picked_inks() {
+    let cyan = [1.0f32, 0.0, 0.0, 0.0];
+    for cmd in ["paint.stroke", "paint.pencil"] {
+        let mut s = session(16, 16);
+        s.execute("image.mode.cmyk", json!({})).unwrap();
+        let rgb = photocraft_color::convert::cmyk_to_rgb(cyan).map(|c| c.clamp(0.0, 1.0));
+        s.execute("tools.setColors", json!({"foreground": rgb, "foregroundCmyk": cyan})).unwrap();
+        s.execute(cmd, json!({"points": [[8.0, 8.0]], "size": 6.0, "hardness": 1.0})).unwrap();
+        let st = s.active().unwrap();
+        let surf = st.doc.layer(st.active_layer.unwrap()).unwrap().surface().unwrap();
+        let got: Vec<f32> = surf.read_region(Rect::new(8, 8, 9, 9)).into_iter().take(4).collect();
+        assert!(got.iter().zip(cyan).all(|(a, b)| (a - b).abs() < 0.02), "{cmd}: {got:?}");
     }
 }

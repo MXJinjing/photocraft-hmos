@@ -172,11 +172,16 @@ pub fn keys(app: &mut PhotocraftApp, ctx: &egui::Context) -> bool {
         }
         return true;
     }
-    if app.distort.puppet.is_some() {
+    if let Some(p) = app.distort.puppet.as_mut() {
+        let cmd_shift = egui::Modifiers::COMMAND | egui::Modifiers::SHIFT;
         if enter(ctx) {
             crate::puppet_ui::commit(app);
         } else if esc(ctx) {
             app.distort.puppet = None;
+        } else if ctx.input_mut(|i| i.consume_key(cmd_shift, egui::Key::Z)) {
+            p.redo();
+        } else if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::Z)) {
+            p.undo();
         }
         return true;
     }

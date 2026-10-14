@@ -20,6 +20,15 @@ Every route that writes a document to a flat format (Save As, the CLI, MCP `doc_
 - Formats that can't embed an ICC profile (GIF, BMP, TGA, QOI, ICO, Netpbm/PFM) get RGB documents in another profile (linear light, Display P3, …) converted to sRGB through the colour engine (perceptual intent), since an untagged file is read as sRGB. OpenEXR and Radiance HDR get linear sRGB instead (linear gray for a grayscale OpenEXR), which is how they are tagged when opened.
 - TGA, as Photoshop's Targa: an RGB Targa is 24 or 32 bits per pixel. Save As and Save a Copy ask (Targa Options, starting at 32 with an alpha channel, else 24); Export As has a Resolution choice (Auto, 24 or 32 bits/pixel); scripts pass `tgaBits` (`--tga-bits` on the CLI). At 32 bits the document's alpha channel is the file's alpha when it has exactly one (spot channels don't count; with several, none is used), and the colours are written exactly, never premultiplied or cleared where the alpha is 0, so a game texture's mask and its colours both survive. Without a usable alpha channel the layers' transparency is the alpha (opaque without any). 24 bits write no alpha, compositing transparency over white. Without a choice: 32 with an alpha channel or transparency, else 24. A 32-bit Targa opens as an opaque Background with its alpha as "Alpha 1", so it round-trips. Grayscale Targas are 8-bit.
 
+Flat TIFF and JPEG exports of composited CMYK documents convert the RGB composite back through
+the document's CMYK ICC profile (relative colorimetric with black point compensation) and embed
+that exact profile. Untagged composites use and embed PhotoCraft's synthetic coated CMYK profile;
+invalid, non-CMYK or unusable embedded profiles are rejected before compositing. TIFF retains
+8/16/32f depth and straight alpha; JPEG reduces to 8-bit with a warning and mattes transparency
+over zero-ink white. A plain single raster layer retains its native samples. RGB-only formats use
+the RGB composite directly. This RGB composite roundtrip does **not** preserve original ink
+separations, black generation or native CMYK blending, and is not a claim of Photoshop parity.
+
 ## Implemented decode limits
 
 `DecodeOptions::default()` applies `Limits` before decoded pixel allocation:

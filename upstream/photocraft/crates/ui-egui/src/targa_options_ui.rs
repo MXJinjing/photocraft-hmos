@@ -20,9 +20,10 @@ pub struct Prompt {
     pub bits: TgaBits,
     /// Save a Copy: the document keeps its path and unsaved changes.
     pub copy: bool,
-    /// File › Save As: the answered save is recorded as a `file.saveAs` step, so an action being
-    /// recorded keeps it (#2032). The dialog's Save a Copy isn't recorded.
-    pub record: bool,
+    /// The step the answered save is recorded as, so an action being recorded keeps it:
+    /// `file.saveAs` for Save As (#2032, even when a flat Targa is written as a copy) and
+    /// `file.saveACopy` for Save a Copy (#4373).
+    pub record: &'static str,
 }
 
 /// `true` when `path` names a Targa (`.tga`, and the rarer `.icb`, `.vda`, `.vst`).
@@ -43,7 +44,7 @@ pub fn bits_param(params: &serde_json::Value, cmd: &str) -> Result<Option<TgaBit
 
 /// Parks the save behind the prompt, starting at 32 bits when the document has an alpha channel.
 /// A prompt already waiting is never replaced (a shortcut can still reach Save a Copy).
-pub fn park(app: &mut PhotocraftApp, path: String, copy: bool, record: bool) -> Result<(), String> {
+pub fn park(app: &mut PhotocraftApp, path: String, copy: bool, record: &'static str) -> Result<(), String> {
     if app.save_options_open() {
         return Err("Answer TIFF or Targa Options before starting another save".into());
     }
@@ -80,9 +81,9 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
         let settings = ExportSettings { tga_bits: Some(p.bits), ..app.save_settings() };
         let step = serde_json::json!({"path": p.path, "tgaBits": p.bits.bits()});
         let written = app.with_document(p.doc, |app| app.write_document(p.path, &settings, p.copy));
-        if written.is_ok() && p.record {
-            // An action being recorded keeps the Save As with this answer (#2032).
-            app.session.journal.push(("file.saveAs".into(), step));
+        if written.is_ok() {
+            // An action being recorded keeps the Save As or Save a Copy with this answer (#2032).
+            app.session.journal.push((p.record.into(), step));
         }
         match written {
             Err(e) => {

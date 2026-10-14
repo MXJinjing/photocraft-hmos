@@ -72,9 +72,15 @@ fn key(h: &mut Harness<'static, PhotocraftApp>, k: Key, pressed: bool, m: Modifi
     h.run_steps(1);
 }
 
+/// A quick press and release in one frame (a tool letter held across frames springs, #2672).
 fn tap(h: &mut Harness<'static, PhotocraftApp>, k: Key, m: Modifiers) {
-    key(h, k, true, m);
-    key(h, k, false, m);
+    let m = platform(m);
+    h.input_mut().events.extend([
+        Event::ModifiersChanged(m),
+        Event::Key { key: k, physical_key: None, pressed: true, repeat: false, modifiers: m },
+        Event::Key { key: k, physical_key: None, pressed: false, repeat: false, modifiers: m },
+    ]);
+    h.run_steps(1);
     h.event(Event::ModifiersChanged(Modifiers::NONE));
     h.run_steps(1);
 }
@@ -172,6 +178,28 @@ fn space_is_a_temporary_hand_and_gives_the_tool_back() {
     assert_ne!(st.ui.views[0].center, before, "the view panned");
     assert_eq!(st.ui.tool, Tool::Brush, "the brush is back");
     assert!(!st.session.active().unwrap().history.can_undo(), "nothing was painted");
+}
+
+#[test]
+fn space_while_editing_type_is_not_the_hand_tool() {
+    let mut h = harness(Tool::Type);
+    let id = h.state_mut().run("type.create", json!({"text": "ئا", "size": 20, "x": 100, "y": 100})).unwrap()["layer"].as_u64().unwrap();
+    h.state_mut().ui.text_edit = Some(crate::state::TextEdit {
+        layer: id,
+        caret: 2,
+        anchor: 2,
+        session: "t".into(),
+        created: false,
+        mask: false,
+        dragging: false,
+        resize: None,
+        preedit: None,
+    });
+    key(&mut h, Key::Space, true, Modifiers::NONE);
+    assert!(h.state().ui.text_edit.is_some(), "type session stays open");
+    assert_eq!(held_tool(h.state(), &h.ctx), None, "Space types a space while editing");
+    assert!(!reposition_held(h.state(), &h.ctx));
+    key(&mut h, Key::Space, false, Modifiers::NONE);
 }
 
 #[test]

@@ -254,9 +254,33 @@ fn set_clipped(s: &mut Session, p: &Value, clip: bool) -> Result<Value> {
     Ok(json!({"layers": ids.iter().map(|id| id.0).collect::<Vec<_>>()}))
 }
 
+/// The layer a command's `"layer"` param names: an id, or a name (the topmost layer of that
+/// name, as Photoshop's "select layer by name" action step finds it, so a loaded action replays
+/// in another document). `None` when the param is absent.
+pub(crate) fn explicit_layer(s: &Session, p: &Value) -> Result<Option<LayerId>> {
+    match p.get("layer") {
+        Some(Value::Number(n)) => {
+            n.as_u64().map(|id| Some(LayerId(id))).ok_or_else(|| EngineError::Other(format!("layer id {n} is not a non-negative integer")))
+        }
+        Some(Value::String(name)) => {
+            let d = s.active().ok_or(EngineError::NoDocument)?;
+            d.doc
+                .walk()
+                .into_iter()
+                .rev()
+                .find(|(_, _, l)| l.name == *name)
+                .map(|(_, _, l)| Some(l.id))
+                .ok_or_else(|| EngineError::Other(format!("no layer named \"{name}\"")))
+        }
+        Some(Value::Null) | None => Ok(None),
+        Some(other) => Err(EngineError::Other(format!("`layer` must be an id or a name, not {other}"))),
+    }
+}
+
+/// The layer a command targets: [`explicit_layer`], else the active layer.
 pub(crate) fn layer_param(s: &Session, p: &Value) -> Result<LayerId> {
-    match p.get("layer").and_then(Value::as_u64) {
-        Some(id) => Ok(LayerId(id)),
+    match explicit_layer(s, p)? {
+        Some(id) => Ok(id),
         None => s.active().and_then(|d| d.active_layer).ok_or(EngineError::Other("no active layer".into())),
     }
 }
@@ -549,7 +573,7 @@ fn build() -> Vec<CommandSpec> {
             "Layer…",
             ["Layer", "New"],
             Some("Cmd+Shift+N"),
-            r##"{"name":str?,"clipToPrevious":bool=false (Use Previous Layer to Create Clipping Mask; inside a clip group the layer joins it anyway),"color":"none|red|orange|yellow|green|seafoam|blue|indigo|magenta|fuchsia|violet|gray"="none","mode":"Normal|Multiply|…"="Normal","opacity":0..1=1,"fillNeutral":bool=false (fill with the mode's neutral color: modes without one are an error)}"##,
+            r##"{"name":str?,"clipToPrevious":bool=false (Use Previous Layer to Create Clipping Mask; inside a clip group the layer joins it anyway),"color":"none|red|orange|yellow|green|seafoam|blue|indigo|magenta|fuchsia|violet|gray"="none","mode":"Normal|Multiply|…"="Normal","opacity":0..1=1,"fillNeutral":bool=false (fill with the mode's neutral color: modes without one are an error),"position":"above|below"="above" (below: the Layers panel's Cmd/Ctrl-click; never under the Background)}"##,
             has_doc,
             crate::new_layer::run
         ),
@@ -577,9 +601,25 @@ fn build() -> Vec<CommandSpec> {
             "Duplicate Layer…",
             ["Layer"],
             None,
-            r##"{"layer":id?,"inPlace":bool=false (artboards: keep the copy on the original instead of beside it),"name":str? (one layer: the copy's name)} (no layer: every selected layer)"##,
+            r##"{"layer":id?,"inPlace":bool=false (artboards: keep the copy on the original instead of beside it),"name":str? (one layer: the copy's name),"document":index|"new"=same document (Photoshop's Destination: "new" makes a new document the size of this canvas holding just the copies),"documentName":str? (the new document's name)} (no layer: every selected layer)"##,
             has_layer,
             |s, p| {
+                if let Some(d) = p.get("document") {
+                    if d.as_str() == Some("new") {
+                        return crate::layer_copy_cmds::duplicate_to_new_document(s, p);
+                    }
+                    let same = d.as_u64().is_some_and(|i| s.active_index().is_some_and(|a| i == a as u64));
+                    if !same {
+                        return Err(EngineError::BadParams {
+                            cmd: "layer.duplicate".into(),
+                            msg: if d.as_u64().is_some() {
+                                "the destination is another open document (use layer.copyToDocument)".into()
+                            } else {
+                                "`document` must be a document index or \"new\"".into()
+                            },
+                        });
+                    }
+                }
                 let in_place = p.get("inPlace").and_then(Value::as_bool).unwrap_or(false);
                 let name = p.get("name").and_then(Value::as_str).filter(|n| !n.is_empty()).map(str::to_string);
                 if crate::layer_multi_cmds::multi(s, p) {
@@ -628,7 +668,7 @@ fn build() -> Vec<CommandSpec> {
             "Select Layer",
             [],
             None,
-            r##"{"layer":id,"mode":"replace|toggle|range|add"="replace"} (toggle = ⌘-click, range = ⇧-click)"##,
+            r##"{"layer":id,"mode":"replace|toggle|range|add|remove"="replace"} (toggle = ⌘-click, range = ⇧-click, remove = deselect it, keeping at least one)"##,
             has_doc,
             crate::layer_multi_cmds::select
         ),
@@ -677,13 +717,8 @@ fn build() -> Vec<CommandSpec> {
                     if let Some(Value::Object(m)) = p.get("locks") {
                         for (k, v) in m {
                             let v = v.as_bool().unwrap_or(false);
-                            match k.as_str() {
-                                "transparency" => l.locks.transparency = v,
-                                "pixels" => l.locks.pixels = v,
-                                "position" => l.locks.position = v,
-                                "artboard" => l.locks.artboard = v,
-                                "all" => l.locks.all = v,
-                                other => return Err(bad("layer.setProps", format!("unknown lock `{other}`"))),
+                            if !l.locks.set(k, v) {
+                                return Err(bad("layer.setProps", format!("unknown lock `{k}`")));
                             }
                         }
                     }
@@ -898,7 +933,7 @@ fn build() -> Vec<CommandSpec> {
             "Move Layer",
             [],
             None,
-            r##"{"layer":id?,"dx":i32,"dy":i32,"target":"pixels"|"mask"="pixels"} (no layer: every selected layer; linked layers follow; target mask: a layer whose mask is unlinked moves that mask alone, a linked mask moves with the layer)"##,
+            r##"{"layer":id?,"dx":i32,"dy":i32,"units":"px"|"pt"="px" (pt: points, whole pixels at the document's resolution),"target":"pixels"|"mask"="pixels"} (no layer: every selected layer; linked layers follow; target mask: a layer whose mask is unlinked moves that mask alone, a linked mask moves with the layer)"##,
             has_layer,
             crate::layer_multi_cmds::translate
         ),
@@ -942,11 +977,39 @@ fn build() -> Vec<CommandSpec> {
             has_paintable,
             crate::brush_cmds::paint_stroke
         ),
-        cmd!("tools.setColors", "Set Colors", [], None, r##"{"foreground":"#rrggbb"?,"background":"#rrggbb"?}"##, always, |s, p| {
-            s.tools.foreground = color_param(p, "foreground", s.tools.foreground);
-            s.tools.background = color_param(p, "background", s.tools.background);
-            Ok(Value::Null)
-        }),
+        cmd!(
+            "tools.setColors",
+            "Set Colors",
+            [],
+            None,
+            r##"{"foreground":"#rrggbb"|[r,g,b,a?]?,"background":same?,"foregroundCmyk":[c,m,y,k]? (inks 0..1 the foreground was picked as: a CMYK document is filled with exactly these),"backgroundCmyk":same?}"##,
+            always,
+            |s, p| {
+                let cmyk = |key: &str| -> Result<Option<[f32; 4]>> {
+                    let Some(v) = p.get(key).filter(|v| !v.is_null()) else { return Ok(None) };
+                    let inks: Option<Vec<f32>> = v
+                        .as_array()
+                        .filter(|a| a.len() == 4)
+                        .and_then(|a| a.iter().map(|x| x.as_f64().filter(|x| x.is_finite()).map(|x| x.clamp(0.0, 1.0) as f32)).collect());
+                    match inks.as_deref() {
+                        Some(&[c, m, y, k]) => Ok(Some([c, m, y, k])),
+                        _ => Err(bad("tools.setColors", format!("`{key}` must be [c, m, y, k] numbers 0..1"))),
+                    }
+                };
+                let (fg_cmyk, bg_cmyk) = (cmyk("foregroundCmyk")?, cmyk("backgroundCmyk")?);
+                s.tools.foreground = color_param(p, "foreground", s.tools.foreground);
+                s.tools.background = color_param(p, "background", s.tools.background);
+                if let Some(k) = fg_cmyk {
+                    let [r, g, b, _] = s.tools.foreground;
+                    s.tools.remember_cmyk([r, g, b], k);
+                }
+                if let Some(k) = bg_cmyk {
+                    let [r, g, b, _] = s.tools.background;
+                    s.tools.remember_cmyk([r, g, b], k);
+                }
+                Ok(Value::Null)
+            }
+        ),
         cmd!("tools.swapColors", "Switch Foreground and Background Colors", [], Some("X"), "{}", always, |s, _| {
             std::mem::swap(&mut s.tools.foreground, &mut s.tools.background);
             Ok(Value::Null)
@@ -1200,6 +1263,8 @@ fn build() -> Vec<CommandSpec> {
     v.extend(crate::brush_preset_cmds::specs());
     v.extend(crate::eraser_cmds::specs());
     v.extend(crate::preset_import_cmds::specs());
+    v.extend(crate::atn_cmds::specs());
+    v.extend(crate::actions_edit_cmds::specs());
     v.extend(crate::swatch_cmds::specs());
     v.extend(crate::retouch_cmds::specs());
     v.extend(crate::redeye_cmds::specs());
@@ -1245,6 +1310,7 @@ fn build() -> Vec<CommandSpec> {
     v.extend(crate::analysis_cmds::specs());
     v.extend(crate::notes_cmds::specs());
     v.extend(crate::history_cmds::specs());
+    v.extend(crate::history_select_cmds::specs());
     v.extend(crate::proof_sim::specs());
     v.extend(crate::presets::specs());
     v.extend(crate::document_preset_cmds::specs());

@@ -12,7 +12,17 @@
 # Product and technology names (PhotoCraft, ArtCraft, OpenType, CMYK, Lab ...) stay in Latin
 # letters; the trailing … of dialog commands is kept.
 
+# Channel Options and New Spot Channel (#3761)
+	Channel Color	Colore canale
+	Color Indicates:	Il colore indica:
+	Solidity:	Solidità:
+	Ink Characteristics	Caratteristiche inchiostro
+
 # Guide layout dialog
+
+# Custom print paper (#3820)
+	Paper Width	Larghezza della carta
+	Paper Height	Altezza della carta
 	Columns	Colonne
 	Rows	Righe
 	Number	Numero
@@ -70,6 +80,8 @@
 	Save	Salva
 	Save As…	Salva con nome…
 	Save a Copy…	Salva una copia…
+	{name} can't keep everything in this document	{name} non può conservare tutto il contenuto di questo documento
+	Choose a format that keeps it, such as Photoshop (PSD), or save a copy.	Scegli un formato che conservi tutto, come Photoshop (PSD), oppure salva una copia.
 	Revert	Ripristina
 	Export	Esporta
 	Quick Export as PNG	Esportazione rapida come PNG
@@ -87,14 +99,14 @@
 	Generate	Genera
 	Image Assets	Risorse immagine
 	Place Embedded…	Inserisci incorporato…
-	Place Linked…	Inserisci collegato…
+	Place Linked…	Inserisci oggetto collegato…
 	Package…	Crea pacchetto…
 	Automate	Automatizza
 	Batch…	Batch…
 	Create Droplet…	Crea droplet…
 	Crop and Straighten Photos	Ritaglia e raddrizza foto
 	Contact Sheet II…	Provino a contatto II…
-	Conditional Mode Change…	Cambio modo condizionale…
+	Conditional Mode Change…	Cambia metodo condizionale…
 	Fit Image…	Adatta immagine…
 	Lens Correction…	Correzione lente…
 	Merge to HDR Pro…	Unisci in HDR Pro…
@@ -107,6 +119,13 @@
 	Script Events Manager…	Gestore eventi script…
 	Import	Importa
 	Browse…	Sfoglia…
+	Source Files	File di origine
+	Use:	Usa:
+	Files	File
+	Add Open Files	Aggiungi file aperti
+	Sort By Name	Ordina per nome
+	Attempt to Automatically Align Source Images	Prova ad allineare automaticamente le immagini di origine
+	Create Smart Object after Loading Layers	Crea oggetto avanzato dopo il caricamento dei livelli
 	Reveal in Finder	Mostra nel Finder
 	Show in Explorer	Mostra in Esplora file
 	Show in Folder	Mostra nella cartella
@@ -131,6 +150,8 @@
 	Search…	Cerca…
 	Check Spelling…	Controlla ortografia…
 	Find and Replace Text…	Trova e sostituisci testo…
+	Add to Dictionary	Aggiungi al dizionario
+	No Spelling Suggestions	Nessun suggerimento ortografico
 	Fill…	Riempi…
 	Stroke…	Traccia…
 	Content-Aware Fill…	Riempimento in base al contenuto…
@@ -145,6 +166,8 @@
 	Transform Again on a Copy	Trasforma di nuovo su una copia
 	Scale	Scala
 	Rotate	Ruota
+	Set horizontal skew	Imposta inclinazione orizzontale
+	Set vertical skew	Imposta inclinazione verticale
 	Skew	Inclina
 	Distort	Distorci
 	Perspective	Prospettiva
@@ -212,10 +235,10 @@
 	Lab Color	Colore Lab
 	Multichannel	Multicanale
 	8 Bits/Channel	8 bit/canale
-	8 bit	8 bit/canale
+	8 bit	8 bit
 	Integer	Intero
 	16 Bits/Channel	16 bit/canale
-	16 bit	16 bit/canale
+	16 bit	16 bit
 	32 Bits/Channel	32 bit/canale
 	32 bit (float)	32 bit (virgola mobile)
 	Floating point	Virgola mobile
@@ -241,7 +264,7 @@
 	Gradient Map…	Mappa sfumatura…
 	Selective Color…	Colore selettivo…
 	Shadows/Highlights…	Ombre/Luci…
-	HDR Toning…	Viraggio HDR…
+	HDR Toning…	Mappatura tonale HDR…
 	Desaturate	Desatura
 	Match Color…	Corrispondenza colore…
 	Replace Color…	Sostituisci colore…
@@ -265,7 +288,7 @@
 	Data Sets…	Set di dati…
 	Apply Data Set…	Applica set di dati…
 	Variable Data Sets…	Set di dati variabili…
-	Trap…	Sovrastampa…
+	Trap…	Trapping…
 	Analysis	Analisi
 	Set Measurement Scale…	Imposta scala misurazione…
 	Select Data Points…	Seleziona punti dati…
@@ -302,7 +325,7 @@
 	Create Layer	Crea livello
 	Layer Style	Stile livello
 	Blending Options…	Opzioni di fusione…
-	Bevel & Emboss…	Smusso ed effetto rilievo…
+	Bevel & Emboss…	Smusso e rilievo…
 	Use Global Light	Usa luce globale
 	Inner Shadow…	Ombra interna…
 	Inner Glow…	Bagliore interno…
@@ -348,7 +371,7 @@
 	Smart Object	Oggetto avanzato
 	Convert to Smart Object	Converti in oggetto avanzato
 	Convert to Embedded	Converti in incorporato
-	Convert to Linked…	Converti in collegato…
+	Convert to Linked…	Converti in oggetto collegato…
 	Edit Contents	Modifica contenuto
 	Replace Contents…	Sostituisci contenuto…
 	Relink to File…	Ricollega al file…
@@ -356,6 +379,7 @@
 	Update Modified Content	Aggiorna contenuto modificato
 	Update All Modified Content	Aggiorna tutto il contenuto modificato
 	Stack Mode	Modalità pila
+	Choose Stack Mode:	Scegli modalità pila:
 	Entropy	Entropia
 	Kurtosis	Curtosi
 	Maximum	Massimo
@@ -477,8 +501,8 @@
 	Convert to Point Text	Converti in testo a riga
 	Convert to Paragraph Text	Converti in testo a paragrafo
 	Default Features	Funzionalità predefinite
-	East Asian Features	Funzionalità Asia orientale
-	Middle Eastern Features	Funzionalità Medio Oriente
+	East Asian Features	Funzionalità est-asiatiche
+	Middle Eastern Features	Funzionalità mediorientali
 	Middle Eastern & South Asian Composer	Compositore Medio Oriente e Asia meridionale
 	Update All Text Layers	Aggiorna tutti i livelli di testo
 	Replace All Missing Fonts	Sostituisci tutti i font mancanti
@@ -527,6 +551,9 @@
 	Blur	Sfocatura
 	Blur Gallery	Galleria sfocatura
 	Field Blur…	Sfocatura campo…
+# Field Blur pins (#3373)
+	No pin selected	Nessuna puntina selezionata
+	Click the image to add a pin; drag a pin to move it, or its ring to change its blur. Delete removes the selected pin.	Fai clic sull’immagine per aggiungere una puntina; trascina una puntina per spostarla o il suo anello per cambiare la sfocatura. Canc rimuove la puntina selezionata.
 	Iris Blur…	Sfocatura diaframma…
 	Tilt-Shift…	Miniatura…
 	Path Blur…	Sfocatura tracciato…
@@ -724,6 +751,10 @@
 	Breeze Dark Theme	Tema Breeze scuro
 	Breeze light	Breeze chiaro
 	Breeze Light Theme	Tema Breeze chiaro
+	Soft dark	Morbido scuro
+	Soft light	Morbido chiaro
+	Soft Dark Theme	Tema morbido scuro
+	Soft Light Theme	Tema morbido chiaro
 	Next Theme	Tema successivo
 	Actions	Azioni
 	Brush Settings	Impostazioni pennello
@@ -824,6 +855,9 @@
 	Appearance	Aspetto
 	Appearance (Layer Style)	Aspetto (stile livello)
 	Apply Layer Mask	Applica maschera di livello
+	Add Mask to Selection	Aggiungi maschera alla selezione
+	Subtract Mask from Selection	Sottrai maschera dalla selezione
+	Intersect Mask with Selection	Interseca maschera con la selezione
 	Apply Per Tip	Applica per punta
 	Apply next selected layer comp	Applica composizione livelli successiva selezionata
 	Apply previous selected layer comp	Applica composizione livelli precedente selezionata
@@ -839,11 +873,18 @@
 	Background	Sfondo
 	Background Color	Colore sfondo
 	Background Contents	Contenuto sfondo
+	Custom background color	Colore sfondo personalizzato
 	Balance	Bilanciamento
 	Baseline	Linea base
 	Baseline shift	Scostamento linea base
 	Basic	Base
 	Before (Y)	Prima (Y)
+	Save Settings…	Salva impostazioni…
+	Load Settings…	Carica impostazioni…
+	Save these settings as a Camera Raw .xmp file	Salva queste impostazioni come file .xmp di Camera Raw
+	Load settings from a Camera Raw .xmp file	Carica le impostazioni da un file .xmp di Camera Raw
+	Loaded Camera Raw settings from {file}	Impostazioni Camera Raw caricate da {file}
+	Loaded Camera Raw settings from {file} ({n} not supported)	Impostazioni Camera Raw caricate da {file} ({n} non supportate)
 	Begin recording	Inizia registrazione
 	Bend:	Curvatura:
 	Bicubic	Bicubica
@@ -875,6 +916,7 @@
 	Cancel	Annulla
 	Reset	Ripristina
 	Cancel (Esc)	Annulla (Esc)
+	Manage submitted jobs in the system print queue	Gestisci i lavori inviati nella coda di stampa del sistema
 	Cancel any current edits (Esc)	Annulla modifiche correnti (Esc)
 	Cancel current crop operation  (Esc)	Annulla operazione ritaglio corrente (Esc)
 	Cancel transform (Esc)	Annulla trasformazione (Esc)
@@ -1036,7 +1078,7 @@
 	Discord	Discord
 	Dismiss	Chiudi
 	Display P3	Display P3
-	Display Text	Testo display
+	Display Text	Mostra testo
 	Dither	Dithering
 	Divide…	Dividi…
 	Document	Documento
@@ -1146,6 +1188,9 @@
 	Ignore All	Ignora tutto
 	Image Size	Dimensione immagine
 	Import Brushes…	Importa pennelli…
+	Gradient Preset Options	Opzioni predefiniti sfumatura
+	Import .GRD	Importa .GRD
+	Choose a gradient file (.grd).	Scegli un file di sfumature (.grd).
 	Import brushes (.abr)	Importa pennelli (.abr)
 	Import Presets	Importa predefiniti
 	Imported	Importato
@@ -1572,7 +1617,7 @@
 	Art & Illustration	Arte e illustrazione
 	ArtCraft	ArtCraft
 	Background Eraser Tool	Strumento Gomma per sfondo
-	Bevel & Emboss	Smusso ed effetto rilievo
+	Bevel & Emboss	Smusso e rilievo
 	Blend Mode	Metodo di fusione
 	Blues	Blu
 	Blur Tool	Strumento Sfoca
@@ -1776,9 +1821,7 @@
 	Std Dev:	Dev std:
 	Studio (Dark)	Studio (scuro)
 	Studio (Light)	Studio (chiaro)
-	Stylus	Stilo
 	Stylus Wheel	Rotella stilo
-	Block finger input	Blocca input dito
 	Subtract	Sottrai
 	Tabloid	Tabloid
 	Text Replacement	Sostituzione testo
@@ -2085,6 +2128,11 @@
 	Rename Brush…	Rinomina pennello…
 	Delete Brush	Elimina pennello
 	New Brush Preset…	Nuovo predefinito pennello…
+	Capture Brush Size in Preset	Acquisisci dimensione pennello nel predefinito
+	Include Tool Settings	Includi impostazioni strumento
+	Include Color	Includi colore
+	Enter a name for the brush preset	Immetti un nome per il predefinito pennello
+	A brush preset with this name already exists	Esiste già un predefinito pennello con questo nome
 	Brush Preset Options	Opzioni predefiniti pennello
 	Group name	Nome gruppo
 	Brush name	Nome pennello
@@ -2146,6 +2194,10 @@
 	No path to make a selection from: draw one with the Pen tool or select one in the Paths panel.	Nessun tracciato da cui creare selezione: disegnane uno con Penna o selezionane uno nel pannello Tracciati.
 	Cancel opening	Annulla apertura
 	Cancelled opening {name}	Apertura {name} annullata
+	The document “{name}” does not have an embedded {mode} profile.	Il documento “{name}” non ha un profilo {mode} incorporato.
+	The document “{name}” has an embedded color profile that does not match the current {mode} working space.	Il documento “{name}” ha un profilo colore incorporato che non corrisponde allo spazio di lavoro {mode} corrente.
+	Embedded: {embedded}	Incorporato: {embedded}
+	Working: {working}	Di lavoro: {working}
 	Developing {name}	Sviluppo di {name}
 	Cancelled {label}	{label} annullato
 	Esc to cancel	Esc per annullare
@@ -2396,6 +2448,7 @@ cameraRaw	Amount	Quantità
 	Click to pick · Esc to cancel	Clic per scegliere · Esc per annullare
 	Pick a screen pixel or press Esc to cancel	Scegli un pixel dello schermo o premi Esc per annullare
 	Scroll to zoom	Scorri per ingrandire
+	Drag to pan · Scroll to zoom · Double-click to fit	Trascina per spostare · Scorri per ingrandire · Doppio clic per adattare
 	Show/Hide All Panels	Mostra/nascondi tutti i pannelli
 	Show/Hide Panels	Mostra/nascondi pannelli
 	Could not open	Impossibile aprire
@@ -2451,6 +2504,7 @@ cameraRaw	Amount	Quantità
 	Fuchsia	Fucsia
 	Violet	Viola
 	Large document: redrawing on the CPU	Documento grande: ridisegno sulla CPU
+	Redrawing	Ridisegno
 	This redraw took {seconds} s on the CPU.	Questo ridisegno sulla CPU ha richiesto {seconds} s.
 	Edits that change the whole document, such as a layer's blend mode, opacity or visibility, redraw all of it.	Le modifiche che cambiano tutto il documento, come metodo di fusione, opacità o visibilità di un livello, lo ridisegnano per intero.
 	Its layers don't fit the GPU memory budget. Raising Memory usage in Preferences › Performance raises the budget, up to a quarter of this computer's memory.	I livelli non rientrano nel budget di memoria della GPU. Aumentare Uso memoria in Preferenze › Prestazioni alza il budget, fino a un quarto della memoria di questo computer.
@@ -2557,13 +2611,6 @@ fontWeight	Italic	Corsivo
 	XOR	XOR
 	Color Burn (Paint.NET)	Colore brucia (Paint.NET)
 	Color Dodge (Paint.NET)	Colore scherma (Paint.NET)
-	Double-tap pen body	Doppio tocco sul corpo della penna
-	Current tool and Eraser	Strumento attuale e gomma
-	Previous tool	Strumento precedente
-	Long-press pen body	Pressione prolungata sul corpo della penna
-	Show or hide context menu	Mostra o nascondi il menu contestuale
-	Choose printer, copies and duplex in the system print dialog.	Scegli stampante, copie e fronte-retro nella finestra di stampa del sistema.
-	System print preview opened	Anteprima di stampa del sistema aperta
 	Stroke Options	Opzioni traccia
 	Solid	Continuo
 	Dashed	Tratteggiato
@@ -2692,6 +2739,7 @@ curves	Smooth	Leviga
 	Paint over hair or fur on the image; Alt paints the other mode	Dipingi su capelli o pelo nell'immagine; Alt dipinge nell'altra modalità
 	Clear Brush Strokes	Cancella tracce del pennello
 	Show rulers	Mostra righelli
+	Presentation	Presentazione
 
 # Color Sampler (added with the i18n coverage repair)
 	Click to place · Alt-click or drag off-canvas to remove	Fai clic per posizionare · Alt-clic o trascina fuori dal quadro per rimuovere
@@ -2972,8 +3020,7 @@ curves	Smooth	Leviga
 	Web Photo Gallery…	Galleria fotografica web…
 	Choose…	Scegli…
 	Select Folder…	Seleziona cartella…
-	Override Action "Save" Commands	Ignora i comandi "Salva" dell'azione
-	File Naming	Denominazione file
+	Override Action "Save" Commands	Sostituisci i comandi "Salva" dell'azione
 	Compatibility	Compatibilità
 	Mac OS	Mac OS
 	Unix	Unix
@@ -3335,7 +3382,7 @@ layerLabel	No Color	Nessun colore
 	Frame	Cornice
 	Arrangement	Disposizione
 	Thickness	Spessore
-	Vine Color	Colore rampicante
+	Vine Color	Colore del rampicante
 	Flower Color	Colore fiori
 	Leaf Color	Colore foglie
 	Base Tree Type	Tipo di albero base
@@ -3704,9 +3751,9 @@ layerLabel	No Color	Nessun colore
 	Color Lookup Tables	Tabelle ricerca colore
 	Color Settings	Impostazioni colore
 	Color Table	Tabella colori
-	Conditional Mode Change	Cambio modo condizionale
+	Conditional Mode Change	Cambia metodo condizionale
 	Content-Aware Fill	Riempimento in base al contenuto
-	Convert to Linked	Converti in collegato
+	Convert to Linked	Converti in oggetto collegato
 	Convert to Profile	Converti in profilo
 	Crystallize	Cristallizza
 	Data	Dati
@@ -3736,7 +3783,7 @@ layerLabel	No Color	Nessun colore
 	Gaussian Blur	Sfocatura gaussiana
 	Global Light	Luce globale
 	Group from Layers	Gruppo da livelli
-	HDR Toning	Viraggio HDR
+	HDR Toning	Mappatura tonale HDR
 	High Pass	Passa alto
 	Highlight	Luci
 	Image Processor	Elaborazione immagini
@@ -3778,7 +3825,7 @@ layerLabel	No Color	Nessun colore
 	Picture Frame	Cornice immagine
 	Pinch	Pizzica
 	Place Embedded	Inserisci incorporato
-	Place Linked	Inserisci collegato
+	Place Linked	Inserisci oggetto collegato
 	Place Scale Marker	Inserisci indicatore scala
 	Plastic Wrap	Pellicola plastica
 	Pointillize	Puntinatura
@@ -3826,7 +3873,7 @@ layerLabel	No Color	Nessun colore
 	Tiles	Mattonelle
 	Tilt-Shift	Miniatura
 	Trace Contour	Traccia contorno
-	Trap	Sovrastampa
+	Trap	Trapping
 	Tree	Albero
 	Trim	Elimina bordi
 	Turbulent	Turbolento
@@ -4003,13 +4050,12 @@ layerLabel	No Color	Nessun colore
 	Monitor profile on {display}: {profile}	Profilo monitor su {display}: {profile}
 	manual	manuale
 	fallback	ripiego
-	The document does not have an embedded colour profile. Working space: {working}.	Il documento non ha un profilo colore incorporato. Spazio di lavoro: {working}.
-	The document has an embedded colour profile that does not match the working space.\nEmbedded: {embedded}\nWorking: {working}	Il documento ha un profilo colore incorporato che non corrisponde allo spazio di lavoro.\nIncorporato: {embedded}\nDi lavoro: {working}
 	Importing {what} from {file}…	Importazione di {what} da {file}…
 	brushes	pennelli
 	gradients	sfumature
 @plural	Imported {n} brush from {file}|Imported {n} brushes from {file}	{n} pennello importato da {file}|{n} pennelli importati da {file}
 @plural	Imported {n} gradient from {file}|Imported {n} gradients from {file}	{n} sfumatura importata da {file}|{n} sfumature importate da {file}
+@plural	Imported {n} pattern from {file}|Imported {n} patterns from {file}	{n} pattern importato da {file}|{n} pattern importati da {file}
 	Data Set: {name}  ({index}/{total})	Set di dati: {name}  ({index}/{total})
 	(none)	(nessuno)
 navigator	Zoom	Zoom
@@ -4021,6 +4067,60 @@ navigator	Zoom	Zoom
 	{index} of {total}	{index} di {total}
 	{shortcut} assigned.	{shortcut} assegnata.
 	{shortcut} is already in use by {commands} and will be removed from it when you click OK.	{shortcut} è già usata da {commands} e verrà rimossa quando fai clic su OK.
+	Object Finder	Ricerca oggetti
+	No object found there — drag a rectangle around it	Nessun oggetto trovato lì: trascina un rettangolo intorno
 	Remove after each stroke	Rimuovi dopo ogni tratto
 	Apply the removal ({key})	Applica la rimozione ({key})
 	Strokes to remove: {n} (Enter applies, Esc cancels)	Tratti da rimuovere: {n} (Invio applica, Esc annulla)
+	Clear Brush Controls	Cancella controlli pennello
+	Reset All Locked Settings	Ripristina tutte le impostazioni bloccate
+	Copy Texture to Other Tools	Copia texture su altri strumenti
+
+# Actions panel: Load/Save Actions (.atn) and kept Photoshop steps
+	Load Actions…	Carica azioni…
+	Save Actions…	Salva azioni…
+	{name} (Photoshop)	{name} (Photoshop)
+	{message} ({note})	{message} ({note})
+@plural	Loaded {n} action from {file}|Loaded {n} actions from {file}	Caricata {n} azione da {file}|Caricate {n} azioni da {file}
+@plural	{n} step has no PhotoCraft equivalent yet|{n} steps have no PhotoCraft equivalent yet	{n} passaggio non ha ancora un equivalente in PhotoCraft|{n} passaggi non hanno ancora un equivalente in PhotoCraft
+@plural	Saved {n} action to {file}|Saved {n} actions to {file}	Salvata {n} azione in {file}|Salvate {n} azioni in {file}
+@plural	{n} step with no Photoshop equivalent left out|{n} steps with no Photoshop equivalent left out	Omesso {n} passaggio senza equivalente in Photoshop|Omessi {n} passaggi senza equivalente in Photoshop
+
+	File Naming	Denominazione file
+	Starting serial	Numero di serie iniziale
+# Actions panel: set folders, dialog toggle, Insert Stop
+	Insert Stop…	Inserisci interruzione…
+	Save Set…	Salva set…
+	Message:	Messaggio:
+	Allow Continue	Consenti di continuare
+	Show dialog during playback	Mostra la finestra di dialogo durante l’esecuzione
+	Select an action first	Seleziona prima un’azione
+	Action playback stopped	Esecuzione dell’azione interrotta
+	Step {step} is waiting for its dialog	Il passaggio {step} attende la sua finestra di dialogo
+@plural	{n} action|{n} actions	{n} azione|{n} azioni
+	Auto Add/Delete	Aggiungi/elimina automaticamente
+
+# Native Windows printing qualification
+	Don't also tick Mirror Image in Print Settings…: the two flips cancel out.	Non attivare anche Immagine speculare nelle impostazioni di stampa: le due inversioni si annullano.
+	Print Settings…	Impostazioni di stampa…
+	Remember to turn off the printer's own colour management in Print Settings…	Ricorda di disattivare la gestione del colore della stampante nelle impostazioni di stampa…
+	Sent to {printer}	Inviato a {printer}
+	set in Print Settings…	impostato nelle impostazioni di stampa…
+	ICO is limited to 256 × 256 pixels	ICO è limitato a 256 × 256 pixel
+
+# HarmonyOS host additions retained during upstream sync
+	Stylus	Stilo
+	Block finger input	Blocca input dito
+	Double-tap pen body	Doppio tocco sul corpo della penna
+	Current tool and Eraser	Strumento attuale e gomma
+	Previous tool	Strumento precedente
+	Long-press pen body	Pressione prolungata sul corpo della penna
+	Show or hide context menu	Mostra o nascondi il menu contestuale
+	Choose printer, copies and duplex in the system print dialog.	Scegli stampante, copie e fronte-retro nella finestra di stampa del sistema.
+	System print preview opened	Anteprima di stampa del sistema aperta
+	Only show canvas	Mostra solo la tela
+	Right sidebar	Barra laterale destra
+	Connected pen	Penna connessa
+	No pen connected	Nessuna penna connessa
+	Battery unavailable	Batteria non disponibile
+	Battery: {percent}%	Batteria: {percent}%

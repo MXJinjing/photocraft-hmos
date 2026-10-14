@@ -592,6 +592,7 @@ fn gradient_map_picker_offers_the_gradient_library() {
     let mut h = app_harness("gradientMap", "rgb", 8);
     // A short library so every row fits the popup: Basics, Blues and a user-saved group.
     let mut lib: Vec<_> = gradients::builtin().into_iter().take(2).collect();
+    lib[1].items.truncate(3);
     lib.push(Group::new("Mine", vec![gradients::GradientPreset::new("My Teal", &["#008080", "#ffee00"])]));
     h.state_mut().session.presets.gradients = lib;
     h.run_steps(2);
@@ -609,6 +610,101 @@ fn gradient_map_picker_offers_the_gradient_library() {
         assert_eq!(map_stops(&layer(&h).1), want, "{name}");
         assert_eq!(steps(&h), before + 1, "{name}: one history step");
     }
+}
+
+fn import_gradients_from_picker(h: &mut Harness<'_, PhotocraftApp>) {
+    let preset = label_rect(h, "Preset:").unwrap();
+    click(h, Pos2::new(preset.right() + 60.0, preset.center().y));
+    h.get_by_label("Gradient Preset Options").click();
+    h.run_steps(2);
+    h.get_by_label("Import .GRD").click();
+    h.run_steps(3);
+}
+
+#[test]
+fn gradient_map_picker_imports_grd_without_editing_the_map() {
+    use photocraft_psd::grd::{GrdColor, GrdGradient, GrdStop};
+    let mut h = app_harness("gradientMap", "rgb", 16);
+    h.state_mut().session.presets.gradients.truncate(1);
+    let before = layer(&h);
+    let history = h.state().session.active().unwrap().history.past_len();
+    let tool = h.state().session.presets.gradient.clone();
+    let bytes = photocraft_psd::grd::write(&[GrdGradient {
+        name: "Imported Teal".into(),
+        stops: vec![
+            GrdStop { location: 0.0, midpoint: 0.5, color: GrdColor::Rgb([0.0, 0.5, 0.5]) },
+            GrdStop { location: 1.0, midpoint: 0.5, color: GrdColor::Rgb([1.0, 1.0, 0.0]) },
+        ],
+        ..Default::default()
+    }]);
+    h.state_mut().services.file_dialog = Some(Box::new(move |request, _, reply| {
+        assert!(matches!(request, crate::FileDialogRequest::Open { multiple: false, extensions: Some(ref exts), .. } if exts == &["grd"]));
+        reply.send(Some(crate::FileDialogAnswer::Contents("My Gradients.GRD".into(), bytes.clone())));
+    }));
+    import_gradients_from_picker(&mut h);
+    assert_eq!(layer(&h), before, "import does not edit the adjustment");
+    assert_eq!(h.state().session.active().unwrap().history.past_len(), history);
+    assert_eq!(h.state().session.presets.gradient, tool);
+    assert!(!h.state().ui.status_error);
+    assert!(h.state().ui.status.contains("Imported 1 gradient"));
+    let preset = label_rect(&h, "Preset:").unwrap();
+    click(&mut h, Pos2::new(preset.right() + 60.0, preset.center().y));
+    h.get_by_label("My Gradients");
+    h.get_by_label("Imported Teal").click();
+    h.run_steps(3);
+    assert_eq!(map_stops(&layer(&h).1), vec![(0.0, [0, 128, 128]), (1.0, [255, 255, 0])]);
+    assert_eq!(h.state().session.active().unwrap().history.past_len(), history + 1);
+    h.state_mut().run("edit.undo", json!({})).unwrap();
+    assert_eq!(layer(&h), before);
+}
+
+#[test]
+fn gradient_map_picker_import_cancel_and_errors_preserve_state() {
+    use crate::FileDialogAnswer;
+    for answer in [
+        None,
+        Some(FileDialogAnswer::Contents("broken.grd".into(), b"invalid".to_vec())),
+        Some(FileDialogAnswer::Contents("old.grd".into(), b"8BGR\0\x03".to_vec())),
+        Some(FileDialogAnswer::Contents(
+            "noise.grd".into(),
+            photocraft_psd::grd::write(&[photocraft_psd::grd::GrdGradient { noise: true, ..Default::default() }]),
+        )),
+        Some(FileDialogAnswer::Contents("wrong.abr".into(), Vec::new())),
+        Some(FileDialogAnswer::Paths(vec!["/nonexistent/photocraft-gradients.grd".into()])),
+        Some(FileDialogAnswer::Unavailable("dialog unavailable".into())),
+    ] {
+        let mut h = app_harness("gradientMap", "rgb", 8);
+        h.state_mut().session.presets.gradients.truncate(1);
+        let before = layer(&h);
+        let presets = h.state().session.presets.gradients.clone();
+        let history = h.state().session.active().unwrap().history.past_len();
+        let error = answer.is_some();
+        h.state_mut().services.file_dialog = Some(Box::new(move |_, _, reply| reply.send(answer.clone())));
+        import_gradients_from_picker(&mut h);
+        assert_eq!(layer(&h), before);
+        assert_eq!(h.state().session.presets.gradients, presets);
+        assert_eq!(h.state().session.active().unwrap().history.past_len(), history);
+        assert_eq!(h.state().ui.status_error, error);
+        if error {
+            assert!(!h.state().ui.status.is_empty());
+        }
+    }
+}
+
+#[test]
+fn gradient_map_dialog_import_preserves_pending_settings() {
+    let mut h = app_harness("gradientMap", "rgb", 8);
+    let id = crate::adjust_dialog::open(h.state_mut(), "image.adjustments.gradientMap").unwrap();
+    let fields = h.state_mut().ui.dialog_mut(id).unwrap().fields.clone();
+    h.state_mut().services.file_dialog = Some(Box::new(|request, _, reply| {
+        assert!(matches!(request, crate::FileDialogRequest::Open { extensions: Some(ref exts), .. } if exts == &["grd"]));
+        reply.send(None);
+    }));
+    h.run_steps(3);
+    import_gradients_from_picker(&mut h);
+    assert_eq!(h.state_mut().ui.dialog_mut(id).unwrap().fields, fields);
+    assert!(!h.state().file_dialog_open());
+    assert!(!h.state().ui.status_error);
 }
 
 /// Document point (x, y) on screen in the app's first view.
@@ -663,4 +759,90 @@ fn properties_white_point_eyedropper_edits_the_layer(kind: &str) {
     assert!(h.state().ui.layer_picker.is_none(), "Esc disarms");
     h.state_mut().run("edit.undo", json!({})).unwrap();
     assert_eq!(layer(&h).1, before);
+}
+
+/// A bare `kind` editor over `params`, as the Properties panel and the dialog host it.
+fn editor_harness(kind: &'static str, params: serde_json::Value) -> Harness<'static, serde_json::Value> {
+    use crate::adjust_editors::{EditorCx, editor};
+    let mut h = Harness::builder().with_size(vec2(300.0, 400.0)).build_ui_state(
+        move |ui, values: &mut serde_json::Value| {
+            let cx = EditorCx {
+                mem: egui::Id::new("precision"),
+                hist: None,
+                gray: false,
+                swatches: [[0.0; 3], [1.0; 3]],
+                gradients: Vec::new(),
+                dialog: true,
+                dynamic_color_sliders: true,
+            };
+            editor(ui, kind, values, &cx);
+        },
+        params,
+    );
+    PhotocraftApp::setup_context(&h.ctx, Default::default());
+    h.run_steps(4);
+    h
+}
+
+/// Types `text` into the `index`th number field and commits it with Enter.
+fn type_into_field(h: &mut Harness<'static, serde_json::Value>, index: usize, text: &str) {
+    h.query_all_by_role(egui::accesskit::Role::SpinButton).nth(index).unwrap().click();
+    h.run_steps(2);
+    h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+    h.run_steps(1);
+    h.event(egui::Event::Text(text.into()));
+    h.run_steps(1);
+    h.key_press(egui::Key::Enter);
+    h.run_steps(3);
+}
+
+/// The text the `index`th number field shows.
+fn field_text(h: &Harness<'static, serde_json::Value>, index: usize) -> String {
+    h.query_all_by_role(egui::accesskit::Role::SpinButton).nth(index).unwrap().value().unwrap_or_default()
+}
+
+/// #4164: Exposure keeps fractional stops (Photoshop: two decimals) and Offset four decimals,
+/// instead of rounding Exposure to whole stops because its range is wider than 10.
+#[test]
+fn exposure_keeps_fractional_stops_and_offset_four_decimals() {
+    let mut h = editor_harness("exposure", json!({}));
+    type_into_field(&mut h, 0, "0.5");
+    assert_eq!(h.state()["exposure"].as_f64(), Some(0.5), "{}", h.state());
+    type_into_field(&mut h, 0, "-1.37");
+    assert!((h.state()["exposure"].as_f64().unwrap() + 1.37).abs() < 1e-4, "{}", h.state());
+    type_into_field(&mut h, 1, "0.0123");
+    assert!((h.state()["offset"].as_f64().unwrap() - 0.0123).abs() < 1e-6, "{}", h.state());
+    type_into_field(&mut h, 2, "1.234");
+    assert!((h.state()["gamma"].as_f64().unwrap() - 1.23).abs() < 1e-4, "Gamma keeps two decimals: {}", h.state());
+    h.run_steps(2);
+    assert_eq!(field_text(&h, 0), "-1.37");
+    assert_eq!(field_text(&h, 1), "0.0123");
+    assert_eq!(field_text(&h, 2), "1.23");
+}
+
+/// #4164: the integer rows that share Exposure's slider code stay whole numbers.
+#[test]
+fn integer_adjustment_rows_stay_whole_numbers() {
+    for (kind, key, typed, want) in [
+        ("posterize", "levels", "4.6", 5.0),
+        ("threshold", "level", "100.4", 100.0),
+        ("brightnessContrast", "brightness", "12.7", 13.0),
+        ("vibrance", "vibrance", "-20.4", -20.0),
+    ] {
+        let mut h = editor_harness(kind, json!({}));
+        type_into_field(&mut h, 0, typed);
+        assert_eq!(h.state()[key].as_f64(), Some(want), "{kind}: {}", h.state());
+    }
+}
+
+/// #4164: a row's own decimals win over the range rule; rows without them keep it.
+#[test]
+fn row_values_round_to_their_own_decimals() {
+    use crate::adjust_editors::row_value;
+    assert_eq!(row_value(0.5, -20.0, 20.0, Some(2)), 0.5);
+    assert_eq!(row_value(-1.374, -20.0, 20.0, Some(2)), -1.37);
+    assert!((row_value(0.012_34, -0.5, 0.5, Some(4)) - 0.0123).abs() < 1e-7);
+    assert_eq!(row_value(4.6, 2.0, 255.0, None), 5.0, "wide ranges stay whole numbers");
+    assert!((row_value(1.234, 0.01, 9.99, None) - 1.23).abs() < 1e-6, "small ranges keep two decimals");
+    assert!(row_value(f32::NAN, -20.0, 20.0, Some(u32::MAX)).is_nan(), "no panic on odd input");
 }

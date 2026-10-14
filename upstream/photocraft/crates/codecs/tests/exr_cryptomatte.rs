@@ -164,6 +164,56 @@ fn short_channel_suffixes_decode_too() {
     assert_eq!(buf.at(3, 3), &[(cube, 1.0)]);
 }
 
+/// A 4x4 layer `crypto` of one RGBA set `crypto00.<r>/<g>/<b>/<a>` with the given suffixes:
+/// rank 0 (red/green) holds `cube` at 0.6 everywhere, rank 1 (blue/alpha) holds `sphere`
+/// at 0.4 everywhere, the second (ID, coverage) pair the specification stores per set.
+fn cryptomatte_file_rgba(suffixes: [&str; 4]) -> Vec<u8> {
+    let (w, h) = (4usize, 4usize);
+    let [r, g, b, a] = suffixes;
+    let mk = |s: &str, v: f32| AnyChannel::new(format!("crypto00.{s}").as_str(), FlatSamples::F32(vec![v; w * h]));
+    let list = vec![mk(r, cryptomatte_id("cube")), mk(g, 0.6), mk(b, cryptomatte_id("sphere")), mk(a, 0.4)];
+    let key = cryptomatte_key("crypto");
+    let mut attrs = LayerAttributes::named("crypto");
+    attrs.other.insert(text(&format!("cryptomatte/{key}/name")), AttributeValue::Text(text("crypto")));
+    let layer = Layer::new(
+        (w, h),
+        attrs,
+        Encoding { compression: Compression::Uncompressed, blocks: Blocks::ScanLines, line_order: LineOrder::Increasing },
+        AnyChannels::sort(list.into_iter().collect()),
+    );
+    let image = exr::image::Image::from_layers(ImageAttributes::new(IntegerBounds::new((0, 0), (w, h))), vec![layer]);
+    let mut out = std::io::Cursor::new(Vec::new());
+    image.write().to_buffered(&mut out).expect("synthetic cryptomatte exr writes");
+    out.into_inner()
+}
+
+#[test]
+fn blue_alpha_rank_of_a_set_decodes_too() {
+    // Each RGBA set holds two ranks: (red, green) and (blue, alpha). Both must come back.
+    let bytes = cryptomatte_file_rgba(["red", "green", "blue", "alpha"]);
+    let found = cryptomatte_layers(&bytes, &Limits::default()).unwrap();
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].channels, ["crypto00"], "one set, listed once");
+    let buf = decode_cryptomatte(&bytes, "crypto", &Limits::default()).unwrap();
+    let (cube, sphere) = (cryptomatte_id("cube"), cryptomatte_id("sphere"));
+    for y in 0..4 {
+        for x in 0..4 {
+            assert_eq!(buf.at(x, y), &[(cube, 0.6), (sphere, 0.4)], "({x}, {y})");
+        }
+    }
+}
+
+#[test]
+fn uppercase_channel_suffixes_decode_both_ranks() {
+    // Blender and others write `.R/.G/.B/.A`; suffixes match regardless of case.
+    for suffixes in [["R", "G", "B", "A"], ["Red", "Green", "Blue", "Alpha"], ["r", "g", "b", "a"]] {
+        let bytes = cryptomatte_file_rgba(suffixes);
+        let buf = decode_cryptomatte(&bytes, "crypto", &Limits::default()).unwrap();
+        let (cube, sphere) = (cryptomatte_id("cube"), cryptomatte_id("sphere"));
+        assert_eq!(buf.at(2, 1), &[(cube, 0.6), (sphere, 0.4)], "{suffixes:?}");
+    }
+}
+
 #[test]
 fn unknown_layer_name_is_unsupported() {
     let bytes = cryptomatte_file("crypto_asset");

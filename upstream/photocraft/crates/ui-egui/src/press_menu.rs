@@ -57,8 +57,20 @@ impl PressMenu {
         self.item_response(ui, text).1
     }
 
+    /// Is the press-drag gesture that opened this menu over `item`, still held? egui doesn't
+    /// hover other widgets while one is dragged, so the item would show no highlight (#4601).
+    fn dragged_over(&self, ui: &Ui, item: &Response) -> bool {
+        item.enabled() && !item.hovered() && item.contains_pointer() && ui.input(|i| i.pointer.primary_down()) && self.owns_gesture(ui.ctx())
+    }
+
     fn item_response(&self, ui: &mut Ui, text: impl Into<egui::WidgetText>) -> (Response, bool) {
+        // Under the item: the highlight it would have if hovered, while the gesture drags over it.
+        let highlight = ui.painter().add(egui::Shape::Noop);
         let response = ui.button(text);
+        if self.dragged_over(ui, &response) {
+            let v = &ui.visuals().widgets.hovered;
+            ui.painter().set(highlight, egui::Shape::rect_filled(response.rect.expand(v.expansion), v.corner_radius, v.weak_bg_fill));
+        }
         let hit = self.chosen(ui, &response);
         if hit {
             ui.close();
@@ -158,6 +170,8 @@ mod tests {
     struct Frame {
         open: bool,
         chosen: Option<&'static str>,
+        /// The items drawn with a (hover) fill under them.
+        highlighted: Vec<&'static str>,
     }
 
     const LABELS: [[&str; 2]; 2] = [["Levels", "Curves"], ["Drop Shadow", "Stroke"]];
@@ -174,6 +188,7 @@ mod tests {
             let mut items = [Vec::new(), Vec::new()];
             let rect = Rect::from_min_size(Pos2::ZERO, vec2(400.0, 400.0));
             let mut buttons = [Rect::NOTHING; 2];
+            let mut labels = Vec::new();
             let mut output = self.ctx.run_ui(egui::RawInput { screen_rect: Some(rect), events, ..Default::default() }, |ui| {
                 ui.add_space(20.0);
                 ui.horizontal(|ui| {
@@ -188,12 +203,21 @@ mod tests {
                                     out.chosen = Some(label);
                                 }
                                 items[m].push(r.rect);
+                                labels.push((label, r.rect));
                             }
                         });
                     }
                 });
             });
             output.textures_delta.clear();
+            for (label, rect) in labels {
+                // An item's own frame is transparent unless hovered; the popup's fade-in can soften
+                // the fill's alpha a little.
+                let lit = output.shapes.iter().any(|c| matches!(&c.shape, egui::Shape::Rect(r) if r.fill.a() > 200 && r.rect.contains_rect(rect)));
+                if lit {
+                    out.highlighted.push(label);
+                }
+            }
             self.buttons = buttons;
             for (m, list) in items.into_iter().enumerate() {
                 if !list.is_empty() {
@@ -226,7 +250,10 @@ mod tests {
         assert!(rig.press(at, true).open, "the menu opens on the press");
         rig.frame(Vec::new());
         let curves = rig.item_center(1);
-        rig.drag_to(at, curves);
+        rig.drag_to(at, rig.item_center(0));
+        assert_eq!(rig.frame(Vec::new()).highlighted, ["Levels"], "the item under the drag is highlighted (#4601)");
+        rig.drag_to(rig.item_center(0), curves);
+        assert_eq!(rig.frame(Vec::new()).highlighted, ["Curves"], "and only that one");
         let f = rig.press(curves, false);
         assert_eq!(f.chosen, Some("Curves"), "releasing on Curves chose it");
         assert!(!rig.frame(Vec::new()).open, "and closed the menu");

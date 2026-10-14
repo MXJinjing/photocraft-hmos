@@ -24,8 +24,11 @@ fn has_doc(s: &Session) -> std::result::Result<(), String> {
     s.active().map(|_| ()).ok_or_else(|| "no document open".into())
 }
 
-/// Naive device CMYK (no ICC profile), in percent, as the Info panel shows it.
+/// Naive device CMYK (no ICC profile), in percent, as the Info panel shows it. 32-bit samples can
+/// lie outside 0..1, so each channel is clamped first (NaN reads as 0), like the RGB readout.
 pub fn device_cmyk(r: f32, g: f32, b: f32) -> [i32; 4] {
+    let unit = |v: f32| if v.is_nan() { 0.0 } else { v.clamp(0.0, 1.0) };
+    let (r, g, b) = (unit(r), unit(g), unit(b));
     let k = 1.0 - r.max(g).max(b);
     let f = |v: f32| if k >= 1.0 { 0.0 } else { (1.0 - v - k) / (1.0 - k) };
     [f(r), f(g), f(b), k].map(|v| (v * 100.0).round() as i32)
@@ -416,6 +419,36 @@ mod tests {
         assert_eq!(device_cmyk(0.0, 0.0, 0.0), [0, 0, 0, 100]);
         assert_eq!(device_cmyk(1.0, 0.0, 0.0), [0, 100, 100, 0]);
         assert_eq!(device_cmyk(0.5, 0.5, 0.5), [0, 0, 0, 50]);
+    }
+
+    /// 32-bit samples can lie outside 0..1 (or be NaN); the CMYK readout clamps them like the RGB
+    /// readout does instead of reporting K:-50% or C:120% (#4191).
+    #[test]
+    fn device_cmyk_clamps_out_of_range_and_nan_samples() {
+        assert_eq!(device_cmyk(1.5, 1.5, 1.5), [0, 0, 0, 0]);
+        assert_eq!(device_cmyk(2.0, 0.0, 0.0), [0, 100, 100, 0]);
+        let in_range = |c: [i32; 4]| c.iter().all(|v| (0..=100).contains(v));
+        for (r, g, b) in [(-0.2, 0.5, 0.5), (-1.0, -1.0, -1.0), (f32::NAN, 0.5, 0.5), (f32::NAN, f32::NAN, f32::NAN), (f32::INFINITY, f32::NEG_INFINITY, 0.5)] {
+            let c = device_cmyk(r, g, b);
+            assert!(in_range(c), "{r} {g} {b} -> {c:?}");
+        }
+        assert_eq!(device_cmyk(f32::NAN, f32::NAN, f32::NAN), [0, 0, 0, 100]);
+    }
+
+    #[test]
+    fn hdr_pixel_on_a_32_bit_document_reads_in_range() {
+        let mut s = Session::new();
+        s.execute("file.new", json!({"width": 8, "height": 8, "depth": 32, "background": "white"})).unwrap();
+        s.edit("paint", |doc, _| {
+            let surf = doc.layers[0].surface_mut().unwrap();
+            let hdr = photocraft_raster::from_rgba(&surf.format(), [2.0, 2.0, 2.0, 1.0]);
+            surf.fill_rect(Rect::new(3, 3, 4, 4), &hdr);
+            Ok(())
+        })
+        .unwrap();
+        let r = s.execute("view.colorSamplers.add", json!({"x": 3, "y": 3})).unwrap();
+        assert_eq!(r["point"]["rgb"], json!([255, 255, 255]));
+        assert_eq!(r["point"]["cmyk"], json!([0, 0, 0, 0]));
     }
 
     #[test]

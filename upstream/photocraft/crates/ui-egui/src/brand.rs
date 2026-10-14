@@ -6,6 +6,9 @@
 use egui::{Color32, Context, Id, Rect, TextureHandle, TextureOptions, Ui, pos2};
 use photocraft_codecs::{ChannelLayout, SampleType};
 
+/// The HarmonyOS distribution's user-facing product name.
+pub const APP_NAME: &str = if cfg!(feature = "harmonyos-ui") { "PhotoCraft For HarmonyOS" } else { "PhotoCraft" };
+
 /// 128 px: sharp at 20 pt on a 3× display, and the mipmaps keep it clean at 1×.
 const ICON_PNG: &[u8] = include_bytes!("../../../assets/app-icon/hicolor/128x128/apps/ai.storyteller.photocraft.png");
 

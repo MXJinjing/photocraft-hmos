@@ -261,7 +261,7 @@ fn imported_type_layers_keep_their_full_bounds() {
         // Model: size in points at the document resolution, transform and shape as written.
         assert!((t.runs[0].style.size_pt - c.size_pt).abs() < 0.01, "{}: size {} pt, want {}", c.name, t.runs[0].style.size_pt, c.size_pt);
         assert_eq!(t.transform, c.transform, "{}", c.name);
-        match (c.box_bounds, t.shape) {
+        match (c.box_bounds, t.shape.clone()) {
             (None, TextShape::Point) => {}
             (Some(b), TextShape::Box { x, y, width, height }) => {
                 assert_eq!([x, y, x + width, y + height].map(f64::from), b, "{}", c.name)

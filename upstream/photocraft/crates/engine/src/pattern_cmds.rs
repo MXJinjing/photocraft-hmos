@@ -268,8 +268,12 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn import(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "pattern.import";
-    let path = p.get("path").and_then(Value::as_str).ok_or_else(|| bad(cmd, "missing `path` (.pat file)"))?;
-    let bytes = std::fs::read(path).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+    // A file on disk, or its bytes (a dropped file, the web build).
+    let bytes = match (p.get("path").and_then(Value::as_str), p.get("data").and_then(Value::as_str)) {
+        (Some(path), _) => std::fs::read(path).map_err(|e| EngineError::Other(format!("{path}: {e}")))?,
+        (None, Some(b64)) => photocraft_paint::tile::b64_decode(b64).ok_or_else(|| bad(cmd, "`data` is not base64"))?,
+        (None, None) => return Err(bad(cmd, "missing `path` (.pat file) or `data`")),
+    };
     let pats = photocraft_io::pattern_map::read_pat(&bytes).map_err(EngineError::Other)?;
     let mut ids = Vec::new();
     for pat in pats {
@@ -279,7 +283,7 @@ fn import(s: &mut Session, p: &Value) -> Result<Value> {
             None => s.patterns.items.push(pat),
         }
     }
-    Ok(json!({"imported": ids}))
+    Ok(json!({"imported": ids, "count": ids.len()}))
 }
 
 fn export(s: &mut Session, p: &Value) -> Result<Value> {
@@ -409,7 +413,7 @@ pub fn specs() -> Vec<CommandSpec> {
             label: "Import Patterns…",
             menu: &[],
             shortcut: None,
-            params: r##"{"path":".pat file"}"##,
+            params: r##"{"path":".pat file"?,"data":base64 bytes? (instead of a path)} → {imported:[ids],count}"##,
             enabled: always,
             journal: true,
             run: import,
@@ -500,8 +504,17 @@ mod tests {
         let v = s.execute("pattern.import", json!({"path": path})).unwrap();
         assert!(v["imported"].as_array().unwrap().iter().any(|x| x == id.as_str()));
         assert_eq!(resolve(&s, &id).unwrap().surface.read_region(Rect::new(0, 0, 5, 4)), pat.surface.read_region(Rect::new(0, 0, 5, 4)));
+        // The same file as bytes (a dropped file, the web build).
+        let bytes = std::fs::read(path).unwrap();
+        s.execute("pattern.delete", json!({"pattern": "Crimson"})).unwrap();
+        let v = s.execute("pattern.import", json!({"data": photocraft_paint::tile::b64_encode(&bytes)})).unwrap();
+        assert_eq!(v["count"], v["imported"].as_array().unwrap().len());
+        assert_eq!(resolve(&s, "Crimson").unwrap().id, id);
         std::fs::remove_dir_all(dir).ok();
         assert!(s.execute("pattern.import", json!({"path": "/nonexistent.pat"})).is_err());
+        for bad in [json!({}), json!({"data": "not base64!"}), json!({"data": "aGVsbG8="})] {
+            assert!(s.execute("pattern.import", bad.clone()).is_err(), "{bad}");
+        }
     }
 
     #[test]

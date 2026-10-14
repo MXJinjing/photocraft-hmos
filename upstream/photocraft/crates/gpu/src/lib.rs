@@ -178,6 +178,13 @@ type ResKey = (LayerId, Role, Cell);
 /// larger than the texture limit.
 type FxKey = (LayerId, Option<Cell>);
 
+struct CachedPattern {
+    fingerprint: u64,
+    format: PixelFormat,
+    default_bits: Vec<u32>,
+    texture: Tex,
+}
+
 struct Resident {
     texture: wgpu::Texture,
     view: wgpu::TextureView,
@@ -412,7 +419,7 @@ pub struct Compositor {
     prefix: prefix::Prefix,
     /// Effect temporaries (R32F, region sized) and the frame they were last used.
     temps: Vec<(Tex, u64)>,
-    patterns: HashMap<String, (u64, Tex)>,
+    patterns: HashMap<String, CachedPattern>,
     /// The colour mode of the document being encoded: patterns paint in it
     /// (`photocraft_compose::pattern::pattern_rgba`).
     pattern_mode: photocraft_color::ColorMode,
@@ -510,6 +517,31 @@ fn grid_rects(r: Rect, step: u32) -> Vec<Rect> {
     out
 }
 
+/// Number of rectangles `grid_rects` would produce, without allocating them during preflight.
+fn grid_rect_count(r: Rect, step: u32) -> Result<usize, Unsupported> {
+    if r.is_empty() {
+        return Ok(0);
+    }
+    let s = i64::from(step.max(1));
+    let axis = |lo: i32, hi: i32| usize::try_from((i64::from(hi) - 1).div_euclid(s) - i64::from(lo).div_euclid(s) + 1).ok();
+    axis(r.x0, r.x1).and_then(|x| axis(r.y0, r.y1).and_then(|y| x.checked_mul(y))).ok_or_else(|| Unsupported("GPU compositor chunk count is too large".into()))
+}
+
+/// Host length and GPU capacity for the chunk/pass uniform records, including their u32
+/// dynamic binding offsets. Decline unsupported stacks before an invalid buffer faults the device.
+fn uniform_buffer_len(chunks: usize, passes: usize, limit: u64) -> Result<usize, Unsupported> {
+    let too_large = || Unsupported("GPU compositor uniform buffer is too large".into());
+    let records = chunks.checked_add(passes).and_then(|n| u64::try_from(n).ok()).ok_or_else(too_large)?;
+    let bytes = records.checked_mul(STRIDE).ok_or_else(too_large)?;
+    if bytes > limit {
+        return Err(Unsupported(format!("GPU compositor uniform buffer requires {bytes} bytes; device limit is {limit}")));
+    }
+    if bytes.saturating_sub(STRIDE) > u64::from(u32::MAX) {
+        return Err(Unsupported("GPU compositor uniform offsets exceed u32".into()));
+    }
+    usize::try_from(bytes).map_err(|_| too_large())
+}
+
 /// The reach up to which each distance field must be exact (the largest any program asks for).
 fn field_reaches(progs: &[fx::MapProgram]) -> HashMap<FieldKind, i32> {
     let mut want: HashMap<FieldKind, i32> = HashMap::new();
@@ -520,22 +552,38 @@ fn field_reaches(progs: &[fx::MapProgram]) -> HashMap<FieldKind, i32> {
     want
 }
 
-/// Runs `f` inside validation and internal-error scopes and returns the first error raised.
+/// Runs `f` inside GPU error scopes and returns the first error raised.
 /// Native wgpu reports errors synchronously; where they only arrive asynchronously (WebGPU) none
 /// is reported.
 fn first_error<T>(device: &wgpu::Device, f: impl FnOnce() -> T) -> (T, Option<wgpu::Error>) {
     let validation = device.push_error_scope(wgpu::ErrorFilter::Validation);
     let internal = device.push_error_scope(wgpu::ErrorFilter::Internal);
+    let memory = device.push_error_scope(wgpu::ErrorFilter::OutOfMemory);
     let out = f();
     let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
     let mut error = None;
     // Scopes pop in reverse order.
-    for pop in [internal.pop(), validation.pop()] {
+    for pop in [memory.pop(), internal.pop(), validation.pop()] {
         if let std::task::Poll::Ready(Some(e)) = std::pin::pin!(pop).poll(&mut cx) {
             error.get_or_insert(e);
         }
     }
     (out, error)
+}
+
+/// Unwatched native callers need GPU errors to become `Unsupported` instead of reaching wgpu's
+/// default panic handler. Watched callers keep their fault callbacks, which stop work promptly
+/// and update the health flag shared with the canvas.
+fn scoped_work<T>(device: &wgpu::Device, watched: bool, f: impl FnOnce() -> Result<T, Unsupported>) -> Result<T, Unsupported> {
+    // WebGPU errors arrive asynchronously; its callers still use the health callbacks.
+    if watched || cfg!(target_arch = "wasm32") {
+        return f();
+    }
+    let (result, error) = first_error(device, f);
+    match error {
+        Some(error) => Err(Unsupported(format!("GPU work failed: {error}"))),
+        None => result,
+    }
 }
 
 impl Compositor {
@@ -820,6 +868,26 @@ impl Compositor {
         self.prefix.forget(doc);
     }
 
+    /// [`Self::forget_doc`] for every document `keep` rejects: what the compositor holds for
+    /// documents that were closed, however their canvas entry went (#4529).
+    pub fn retain_docs(&mut self, keep: impl Fn(DocId) -> bool) {
+        let mut gone: Vec<DocId> =
+            self.residents.values().map(|r| r.doc).chain(self.fx.values().map(|e| e.doc)).chain(self.prefix.doc()).filter(|d| !keep(*d)).collect();
+        gone.sort_by_key(|d| d.0);
+        gone.dedup();
+        for d in gone {
+            self.forget_doc(d);
+        }
+    }
+
+    /// Documents the compositor holds pages, effect maps or a lower-stack composite for.
+    pub fn held_docs(&self) -> Vec<DocId> {
+        let mut docs: Vec<DocId> = self.residents.values().map(|r| r.doc).chain(self.fx.values().map(|e| e.doc)).chain(self.prefix.doc()).collect();
+        docs.sort_by_key(|d| d.0);
+        docs.dedup();
+        docs
+    }
+
     /// GPU memory held by cached effect maps (bytes).
     pub fn fx_cache_bytes(&self) -> usize {
         self.fx.values().map(FxEntry::bytes).sum()
@@ -850,16 +918,16 @@ impl Compositor {
         region: Rect,
         mut sink: impl FnMut(&mut wgpu::CommandEncoder, ChunkOut<'_>),
     ) -> Result<Stats, Unsupported> {
-        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("pc_compose") });
-        let stats = match self.encode_inner(device, queue, &mut encoder, doc, region, &mut sink, true) {
-            Ok(stats) => stats,
-            Err(error) => {
-                self.prefix.clear();
-                return Err(error);
-            }
-        };
-        queue.submit([encoder.finish()]);
-        Ok(stats)
+        let result = scoped_work(device, self.health.is_some(), || {
+            let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("pc_compose") });
+            let stats = self.encode_inner(device, queue, &mut encoder, doc, region, &mut sink, true)?;
+            queue.submit([encoder.finish()]);
+            Ok(stats)
+        });
+        if result.is_err() {
+            self.discard_failed_work();
+        }
+        result
     }
 
     /// Like [`Self::render`] but records into `encoder` without submitting.
@@ -872,7 +940,22 @@ impl Compositor {
         region: Rect,
         sink: &mut dyn FnMut(&mut wgpu::CommandEncoder, ChunkOut<'_>),
     ) -> Result<Stats, Unsupported> {
-        self.encode_inner(device, queue, encoder, doc, region, sink, false)
+        let result = scoped_work(device, self.health.is_some(), || self.encode_inner(device, queue, encoder, doc, region, sink, false));
+        if result.is_err() {
+            self.discard_failed_work();
+        }
+        result
+    }
+
+    fn discard_failed_work(&mut self) {
+        // Cache metadata advances while recording. A failed encoder may never execute its
+        // texture uploads or effect maps, so none of those cached pixels can be trusted.
+        self.prefix.clear();
+        self.residents.clear();
+        self.fx.clear();
+        self.patterns.clear();
+        self.temps.clear();
+        self.pool.clear();
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -915,6 +998,14 @@ impl Compositor {
         if region.is_empty() {
             return Ok(stats);
         }
+        let page = self.page;
+        let mut cells = grid_rects(region, page);
+        // Check every actual page cell before uploads, submissions or sink output. A later
+        // cell can need more chunk records than the first; a failure must leave the device healthy.
+        let buffer_limit = device.limits().max_buffer_size;
+        for part in &cells {
+            uniform_buffer_len(grid_rect_count(*part, self.chunk)?, plan.passes.len(), buffer_limit)?;
+        }
         if self.frame == 0 {
             // The first submission after device creation is dropped on some drivers (RADV),
             // which would render the first frame black; land it on an empty buffer instead.
@@ -942,8 +1033,6 @@ impl Compositor {
 
         // Page cells; every other frame in reverse, so a repeated full refresh of a document
         // larger than the budget starts with the pages still resident.
-        let page = self.page;
-        let mut cells = grid_rects(region, page);
         if self.frame.is_multiple_of(2) {
             cells.reverse();
         }
@@ -1168,7 +1257,8 @@ impl Compositor {
             self.pool.push((t, v));
         }
 
-        // Uniforms: chunk records, then one record per pass.
+        // Uniforms: chunk records, then one record per pass. encode_scoped preflight checked
+        // the length, device capacity and dynamic offsets before any GPU work for this frame.
         let op_base = chunks.len() as u64 * STRIDE;
         let mut data = vec![0u8; (op_base + plan.passes.len() as u64 * STRIDE) as usize];
         for (i, c) in chunks.iter().enumerate() {
@@ -1486,10 +1576,15 @@ impl Compositor {
         });
         let mode = self.pattern_mode;
         let key = format!("{}\u{0}{}\u{0}{mode:?}", pat.id, pat.name);
-        if let Some((f, t)) = self.patterns.get(&key)
-            && *f == fp
+        let format = pat.surface.format();
+        // Unstored tiles read the default pixel, interpreted in the source format.
+        let default_bits: Vec<u32> = pat.surface.default_pixel().iter().map(|v| v.to_bits()).collect();
+        if let Some(cached) = self.patterns.get(&key)
+            && cached.fingerprint == fp
+            && cached.format == format
+            && cached.default_bits == default_bits
         {
-            return t.view.clone();
+            return cached.texture.view.clone();
         }
         let (w, h) = (pat.width, pat.height);
         let px = photocraft_compose::pattern::pattern_rgba(pat, mode);
@@ -1502,7 +1597,7 @@ impl Compositor {
             wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
         );
         let v = t.view.clone();
-        self.patterns.insert(key, (fp, t));
+        self.patterns.insert(key, CachedPattern { fingerprint: fp, format, default_bits, texture: t });
         v
     }
 
@@ -2256,6 +2351,17 @@ pub fn render_to_vec_stats(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn uniform_buffer_sizes_are_checked_before_allocation() {
+        assert_eq!(uniform_buffer_len(1, 255, 65_536).unwrap(), 65_536);
+        assert!(uniform_buffer_len(1, 255, 65_535).is_err());
+        assert!(uniform_buffer_len(usize::MAX, 1, u64::MAX).is_err());
+        assert!(uniform_buffer_len(usize::MAX, 0, u64::MAX).is_err());
+        assert!(uniform_buffer_len(1, 16_777_216, u64::MAX).is_err(), "the last record offset cannot be represented by u32");
+        #[cfg(target_pointer_width = "64")]
+        assert_eq!(uniform_buffer_len(1, 16_777_215, u64::MAX).unwrap(), 4_294_967_296, "the last valid u32 dynamic offset is accepted");
+    }
 
     #[test]
     fn half_roundtrip() {

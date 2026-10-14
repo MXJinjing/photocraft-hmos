@@ -16,8 +16,9 @@ PhotoCraft's own source specific guidance is in `upstream/photocraft/AGENTS.md`;
 - The `upstream` remote points to `https://github.com/storytold/photocraft.git`; tag `v0.3.0` is an ancestor of this repository through the subtree merge.
 - Git remotes are local configuration and do not travel with clones. In a fresh clone, run `git remote add upstream https://github.com/storytold/photocraft.git` before fetching updates; the imported commit ancestry remains in the repository.
 - Do not replace the subtree with a tarball, initialize another `.git` inside it, shallow fetch it, squash its history, or force push the upstream remote.
-- **Upstream PhotoCraft syncs land on the remote `0.7.0` branch**, not on `main`. The `0.6.0` tracking line (through upstream `953390a3`, parent of `v0.7.0`) has been merged into `main`. Further upstream syncs track `0.7.0` and should not be folded into `main` by default until that line is closed.
-- For upstream changes: check out / branch from `origin/0.7.0`, fetch from `upstream`, review the range, then `git subtree pull --prefix=upstream/photocraft upstream <reviewed-ref>` **without `--squash`**. Open a PR **into `0.7.0`**. Recheck HarmonyOS compatibility and the vendored dependency after each update.
+- **Upstream PhotoCraft syncs land on the long-lived `upstream-track` branch** (on this fork's `origin`), not on `main`. Do not create a new version-named tracking branch per release (`0.6.0` / `0.7.0`); keep one `upstream-track` line. Historical `0.6.0` / `0.7.0` branches may remain as archives. Syncs should not be folded into `main` by default until deliberately reviewed.
+- Distinguish names: the **remote** `upstream` is `https://github.com/storytold/photocraft.git`; the **branch** `upstream-track` is our fork's subtree tracking line (never name that branch `upstream`).
+- For upstream changes: check out / branch from `origin/upstream-track`, fetch from the `upstream` remote, review the range, then `git subtree pull --prefix=upstream/photocraft upstream <reviewed-ref>` **without `--squash`**. Open a PR **into `upstream-track`**. Recheck HarmonyOS compatibility and the vendored dependency after each update.
 - **HarmonyOS host features and fixes** (ArkTS/native adapter, Hmos-only UI wiring, etc.) keep using topic branches and PRs **into `main`**.
 - The root `build-profile.json5` contains local signing material and is ignored. `build-profile.example.json5` is the safe template. Never commit signing certificates, private keys or passwords.
 
@@ -25,9 +26,10 @@ PhotoCraft's own source specific guidance is in `upstream/photocraft/AGENTS.md`;
 
 | Role | Work dir | Branch / PR target | Notes |
 |------|----------|--------------------|-------|
-| Coding Man | `/workspace/photocraft-hmos-coding-man` | `sync/upstream-YYYYMMDD` → PR into **`0.7.0`** | Daily upstream subtree sync; x86-64 native build OK; do not merge; no device tests |
+| Coding Man | `/workspace/photocraft-hmos-coding-man` | `sync/upstream-YYYYMMDD` → PR into **`upstream-track`** | Daily upstream subtree sync; x86-64 native build OK; do not merge; no device tests |
 | Prominent Coder | `/workspace/photocraft-hmos-prominent-coder` | `fix/…` or `feat/…` → PR into **`main`** | Issues/PRs/host fixes; tests when possible; do not merge |
-| Project Manager | `/workspace/photocraft-hmos` | Reviews and merges PRs; pushes `main` and `0.7.0` | Only agent that merges; never delete the repo; never push unreviewed code |
+| Programmer | `/workspace/photocraft-hmos-programmer` | `fix/…` or `feat/…` → PR into **`main`** | Host features/fixes as assigned; tests when possible; do not merge |
+| Project Manager | `/workspace/photocraft-hmos` | Reviews and merges PRs; pushes `main` and `upstream-track` | Only agent that merges; never delete the repo; never push unreviewed code |
 
 Do not share checkouts. After cloning, add the `upstream` remote if missing. Prefer `gh` / existing GitHub login; do not force-push shared branches.
 
@@ -38,6 +40,27 @@ Do not share checkouts. After cloning, add the `upstream` remote if missing. Pre
 3. Run `scripts/dev.sh build` for a ARM64 native HAP, `scripts/dev.sh run` to build/install/launch on exactly one connected simulator/device, or `scripts/dev.sh launch` for an already installed HAP. Tool paths remain in ignored `scripts/dev.local.env`.
 4. Rust and ArkTS/C++ edits require HAP rebuild/deployment. All builds and launches use the native host; there is no ArkWeb page, Trunk server, Web build command or hdc reverse-port mapping. Save documents before scripted relaunch/deployment.
 5. `scripts/package_offline.sh` builds the native HAP; `--install` also installs it. Verify with `scripts/verify_native.py <HAP>`. Preserve imported upstream Web sources and history; they are not part of the HarmonyOS build/development workflow.
+
+After every successful `scripts/build_native.sh` invocation, `scripts/clean_rust_debug.py`
+clears native host/ARM64 intermediate caches and the separate upstream UI Rust caches.
+The ARM64 `libphotocraft_hmos.a` files needed by CMake/HAP stay in place. Busy Cargo
+profile locks are skipped; lock files keep their inodes. Failed Rust builds retain
+caches. This favors disk space over incremental compilation speed. Use `--dry-run`
+with the cleanup script to preview the deletion scope.
+
+## Platform cfg (HarmonyOS / OHOS)
+
+Judge the HarmonyOS native target with Rust cfg, the same way wasm uses the target rather than a business Cargo feature:
+
+| Platform | Preferred cfg | Notes |
+|----------|---------------|-------|
+| HarmonyOS / OHOS | `cfg!(target_env = "ohos")` / `#[cfg(target_env = "ohos")]` | Official triples are `*-linux-ohos` (`aarch64-unknown-linux-ohos`, …). `target_os` is still `"linux"`. |
+| Desktop Linux | `cfg!(all(target_os = "linux", not(target_env = "ohos")))` | X11/Wayland and other desktop-only paths. |
+| Web / wasm | `cfg!(target_arch = "wasm32")` | Existing PhotoCraft pattern; do not reinvent with features. |
+
+Preferences marked `LINUX_ONLY` (e.g. `performance.linuxDisplayServer`) and similar platform gates must follow this rule via `prefs::is_desktop_linux()` / `is_hidden` / `is_hidden_for`. Do **not** hide them behind the `harmonyos-ui` Cargo feature (that feature is for Hmos-only UI chrome such as links/menus). Cross-compile the engine into the HAP with an **ohos triple** so `target_env = "ohos"` is set; a plain `*-linux-gnu` target will incorrectly look like desktop Linux.
+
+Reference implementations: `fonts.rs` (system font scan), `prefs::is_desktop_linux`.
 
 ## Version numbers
 

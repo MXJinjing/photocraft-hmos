@@ -10,7 +10,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use photocraft_color::{BlendMode, PixelFormat, SampleType};
+use photocraft_color::{BlendMode, ColorMode, PixelFormat, SampleType};
 use photocraft_geom::Rect;
 use photocraft_raster::{Surface, from_rgba_into, to_rgba};
 
@@ -19,7 +19,7 @@ use crate::dynamics::DabGenerator;
 use crate::retouch::{Footprint, alpha_index, over_native};
 use crate::rng::hash2;
 use crate::tile::{Mips, PatternImage};
-use crate::{Dab, StrokePoint, dab_coverage, tip_falloff};
+use crate::{Dab, StrokePoint, dab_coverage, tip_falloff, tip_reach};
 
 /// Salt of the 8-bit dither's per-pixel noise.
 const DITHER_SALT: u64 = 0x0000_6469_7468_6572;
@@ -213,7 +213,16 @@ impl BrushContext {
     /// Bounding rectangle of a dab (rotated sampled tips need the corner reach).
     pub fn dab_rect(&self, d: &Dab, dual: bool) -> Rect {
         let sampled = if dual { self.dual_tip.is_some() } else { self.tip.is_some() };
-        let reach = if sampled { d.radius * std::f32::consts::SQRT_2 } else { d.radius };
+        let hardness = if dual { self.brush.dual_brush.hardness } else { self.brush.hardness };
+        // A computed soft tip paints past its nominal radius (see `tip_shape`).
+        let aliased = self.brush.aliased && !dual;
+        let reach = if sampled {
+            d.radius * std::f32::consts::SQRT_2
+        } else if aliased {
+            d.radius
+        } else {
+            crate::tip_reach(d.radius, hardness).max(d.radius)
+        };
         rect_around(d, reach)
     }
 
@@ -225,7 +234,7 @@ impl BrushContext {
 
     /// [`rasterize`](Self::rasterize); with `depth`, Wet Edges is left out of `out` and each
     /// painted pixel's depth inside the dab (`1 − rn`) goes to `depth`, for the stroke to apply it.
-    fn rasterize_into(&self, d: &Dab, dual: bool, rect: Rect, out: &mut Vec<f32>, mut depth: Option<&mut Vec<f32>>) {
+    pub fn rasterize_into(&self, d: &Dab, dual: bool, rect: Rect, out: &mut Vec<f32>, mut depth: Option<&mut Vec<f32>>) {
         let (w, h) = (rect.width() as usize, rect.height() as usize);
         out.clear();
         out.resize(w * h, 0.0);
@@ -251,7 +260,8 @@ impl BrushContext {
         let r = d.radius;
         let ro = d.roundness.max(0.5 / r).min(1.0);
         let rm = (r * ro).max(0.5);
-        let reach2 = (rm + 0.5) * (rm + 0.5);
+        let reach = if aliased || mips.is_some() { rm } else { crate::tip_reach(rm, hardness).max(rm) };
+        let reach2 = (reach + 0.5) * (reach + 0.5);
         // Sampled-tip mapping.
         let (level, inv_scale, tw, th) = match mips {
             Some(m) => {
@@ -275,7 +285,7 @@ impl BrushContext {
         // sampling only the pixel centre made a tiny dab's total coverage swing with its sub-pixel
         // position, and thin lines beaded.
         let small = mips.is_none() && !aliased && rm < SMALL_TIP_RADIUS;
-        let small_reach2 = (rm + 0.75) * (rm + 0.75);
+        let small_reach2 = (reach + 0.75) * (reach + 0.75);
         // Keep ordinary computed tips separate from the feature loop, so their dense rows
         // can be vectorised without the per-pixel sampled-mask and stroke-depth branches.
         if !(mips.is_some() || small || (aliased && b.square) || noise || tex_tip || wet)
@@ -319,12 +329,9 @@ impl BrushContext {
                             for sx in SUBPIXEL {
                                 let (su, sv) = to_tip(dx + sx, dy + sy);
                                 let sd = ((su * ro).powi(2) + sv * sv).sqrt();
-                                // Each sample anti-aliases over its own quarter pixel, so the
-                                // covered area changes smoothly with the dab's position.
-                                let inside = ((rm - sd) * 4.0 + 0.5).clamp(0.0, 1.0);
-                                if inside > 0.0 {
-                                    sum += inside * tip_falloff(sd.min(rm), rm, hardness);
-                                }
+                                // Each sample takes the tip's own edge, so the covered area
+                                // changes smoothly with the dab's position.
+                                sum += tip_falloff(sd, rm, hardness);
                             }
                         }
                         (sum / (SUBPIXEL.len() * SUBPIXEL.len()) as f32, d2.sqrt() / rm)
@@ -387,7 +394,7 @@ impl BrushContext {
     /// [`stroke_mask`](Self::stroke_mask) with Wet Edges from the stroke's depth at the pixel
     /// (the deepest any dab reaches it, see [`CoverageMap::depth`]).
     #[inline]
-    fn stroke_mask_wet(&self, c: f32, depth: Option<f32>, dual: Option<f32>, x: i32, y: i32) -> f32 {
+    pub fn stroke_mask_wet(&self, c: f32, depth: Option<f32>, dual: Option<f32>, x: i32, y: i32) -> f32 {
         let b = &self.brush;
         let mut m = match depth {
             Some(dp) => c * wet_factor(1.0 - dp),
@@ -966,12 +973,21 @@ impl StrokeRenderer {
         let opacity = b.opacity.clamp(0.0, 1.0);
         let mut src = [0.0f32; 8];
         from_rgba_into(&fmt, b.color, &mut src);
+        // A colour picked as CMYK paints its inks as they are in a CMYK target (#4344).
+        if let (ColorMode::Cmyk, Some((rgb, inks))) = (fmt.mode, b.color_cmyk)
+            && rgb == [b.color[0], b.color[1], b.color[2]]
+        {
+            src[..4].copy_from_slice(&inks);
+        }
         if let Some(a) = a_idx {
             src[a] = b.color[3];
         }
         // 8-bit targets: the pixels the stroke changes are dithered as they are quantised, so
-        // soft, low-flow strokes don't band (see `dither8`).
-        let dither = fmt.sample == SampleType::U8;
+        // soft, low-flow strokes don't band (see `dither8`). Aliased strokes (the Pencil, the
+        // Eraser's Pencil and Block modes) paint every pixel by the same amount, so they have no
+        // gradient to band and are not dithered: a Pencil line at partial opacity is one flat
+        // colour, as in Photoshop, not grain that a tolerance-0 Magic Wand or Paint Bucket trips on.
+        let dither = fmt.sample == SampleType::U8 && !b.aliased;
         let mut dmg = Rect::EMPTY;
         let mut region = Vec::new();
         for (tx, ty) in keys {
@@ -1073,8 +1089,8 @@ fn rasterize_round(d: &Dab, rect: Rect, out: &mut [f32], hardness: f32, aliased:
     let ro = d.roundness.max(0.5 / d.radius).min(1.0);
     let rm = (d.radius * ro).max(0.5);
     let w = rect.width() as usize;
-    let reach2 = (rm + 0.5) * (rm + 0.5);
-    let inner = rm * hardness.clamp(0.0, 1.0);
+    let reach = if aliased { rm } else { tip_reach(rm, hardness).max(rm) };
+    let reach2 = (reach + 0.5) * (reach + 0.5);
     for (yy, row) in out.chunks_exact_mut(w).enumerate() {
         let dy = (rect.y0 + yy as i32) as f32 + 0.5 - cy;
         if aliased {
@@ -1083,25 +1099,12 @@ fn rasterize_round(d: &Dab, rect: Rect, out: &mut [f32], hardness: f32, aliased:
                 let d2 = (dx * ro).powi(2) + dy * dy;
                 *dst = if d2 < reach2 && d2.sqrt() <= rm { d.alpha } else { 0.0 };
             }
-        } else if rm - inner < 1e-3 {
-            for (xx, dst) in row.iter_mut().enumerate() {
-                let dx = (rect.x0 + xx as i32) as f32 + 0.5 - cx;
-                let d2 = (dx * ro).powi(2) + dy * dy;
-                let edge = ((rm + 0.5 - d2.sqrt()).clamp(0.0, 1.0)).min(1.0);
-                *dst = if d2 >= reach2 || edge <= 0.0 { 0.0 } else { edge * d.alpha };
-            }
         } else {
             for (xx, dst) in row.iter_mut().enumerate() {
                 let dx = (rect.x0 + xx as i32) as f32 + 0.5 - cx;
                 let d2 = (dx * ro).powi(2) + dy * dy;
-                let dd = d2.sqrt();
-                let edge = ((rm + 0.5 - dd).clamp(0.0, 1.0)).min(1.0);
-                let t = ((dd - inner) / (rm - inner)).clamp(0.0, 1.0);
-                let s = 1.0 - t * t;
-                let s2 = s * s;
-                let falloff = if dd <= inner { 1.0 } else { s2 * s2 };
-                let val = edge * falloff;
-                *dst = if d2 >= reach2 || val <= 0.0 { 0.0 } else { val * d.alpha };
+                let val = if d2 >= reach2 { 0.0 } else { tip_falloff(d2.sqrt(), rm, hardness) };
+                *dst = if val <= 0.0 { 0.0 } else { val * d.alpha };
             }
         }
     }

@@ -89,9 +89,14 @@ fn dynamic(ui: &mut egui::Ui, id: &str, label: &str, d: &mut Dynamic, max: f32, 
     pct(ui, label, &mut d.jitter, max);
     control_row(ui, id, d, angle);
     if let Some(m) = minimum {
-        pct(ui, m, &mut d.minimum, 1.0);
+        minimum_row(ui, m, d);
     }
     ui.add_space(6.0);
+}
+
+/// Minimum belongs to the control. Off disables editing without discarding its saved value.
+fn minimum_row(ui: &mut egui::Ui, label: &str, d: &mut Dynamic) {
+    ui.add_enabled_ui(d.control != Control::Off, |ui| pct(ui, label, &mut d.minimum, 1.0));
 }
 
 /// Size: a value field over a logarithmic slider (small sizes get most of the travel).
@@ -332,7 +337,7 @@ fn shape_dynamics(ui: &mut egui::Ui, b: &mut BrushSettings) {
     let sd = &mut b.shape_dynamics;
     pct(ui, tl!("Size Jitter"), &mut sd.size.jitter, 1.0);
     control_row(ui, "brush-size-ctl", &mut sd.size, false);
-    pct(ui, tl!("Minimum Diameter"), &mut sd.size.minimum, 1.0);
+    minimum_row(ui, tl!("Minimum Diameter"), &mut sd.size);
     // Tilt Scale applies with the size control on Pen Tilt (greyed out otherwise, like Photoshop).
     let tilt = sd.size.control == Control::PenTilt;
     ui.add_enabled_ui(tilt, |ui| pct(ui, tl!("Tilt Scale"), &mut sd.tilt_scale, 2.0));
@@ -507,10 +512,7 @@ fn color_dynamics(ui: &mut egui::Ui, b: &mut BrushSettings) {
     widgets::checkbox(ui, &mut c.per_tip, tl!("Apply Per Tip"));
     ui.add_space(6.0);
     dynamic(ui, "brush-fgbg-ctl", tl!("Foreground/Background Jitter"), &mut c.fg_bg, 1.0, None, false);
-    let mut h = (c.hue_jitter * 100.0).round();
-    if widgets::slider_row(ui, tl!("Hue Jitter"), &mut h, 0.0..=100.0, "%", Some(&widgets::hue_stops())).changed() {
-        c.hue_jitter = (h.round() / 100.0).clamp(0.0, 1.0);
-    }
+    pct(ui, tl!("Hue Jitter"), &mut c.hue_jitter, 1.0);
     pct(ui, tl!("Saturation Jitter"), &mut c.saturation_jitter, 1.0);
     pct(ui, tl!("Brightness Jitter"), &mut c.brightness_jitter, 1.0);
     signed_pct(ui, tl!("Purity"), &mut c.purity, -1.0, 1.0);
@@ -609,6 +611,150 @@ pub fn section_body(ui: &mut egui::Ui, b: &mut BrushSettings, i: usize, presets:
 #[cfg(test)]
 mod tests {
     use super::*;
+    use egui::accesskit::Role;
+    use egui_kittest::{
+        Harness,
+        kittest::{NodeT, Queryable},
+    };
+
+    fn minimum_brush() -> BrushSettings {
+        let mut b = BrushSettings::default();
+        b.shape_dynamics.size.minimum = 0.2;
+        b.shape_dynamics.roundness.minimum = 0.35;
+        b.transfer.opacity.minimum = 0.4;
+        b.transfer.flow.minimum = 0.55;
+        b.transfer.wetness.minimum = 0.6;
+        b.transfer.mix.minimum = 0.75;
+        b
+    }
+
+    fn section_harness(section: usize, b: BrushSettings) -> Harness<'static, BrushSettings> {
+        let mut ready = false;
+        let mut h = Harness::builder().with_size(vec2(340.0, 1100.0)).build_ui_state(
+            move |ui, b: &mut BrushSettings| {
+                if !ready {
+                    crate::PhotocraftApp::setup_context(ui.ctx(), theme::ThemeKind::ProMedium);
+                    ready = true;
+                    return;
+                }
+                section_body(ui, b, section, &[], None);
+            },
+            b,
+        );
+        h.run_steps(3);
+        h
+    }
+
+    /// #3825: jitter is an amount, not a hue selector; it uses the themed amount track.
+    #[test]
+    fn hue_jitter_paints_an_amount_track_in_every_theme() {
+        for kind in theme::ThemeKind::ALL {
+            let mut b = BrushSettings::default();
+            b.color_dynamics.hue_jitter = 0.37;
+            let mut h = section_harness(5, b.clone());
+            crate::PhotocraftApp::setup_context(&h.ctx, kind);
+            h.run_steps(3);
+            let label = h.get_by_label("Hue Jitter").rect();
+            let t = Tokens::get(&h.ctx);
+            assert!(
+                h.output().shapes.iter().any(|c| matches!(&c.shape, egui::Shape::Rect(r)
+                    if r.rect.width() > 150.0 && (r.rect.height() - 3.0).abs() < 0.1
+                    && r.rect.top() > label.bottom() && r.rect.bottom() < label.bottom() + 30.0
+                    && r.fill == t.field_border)),
+                "{kind:?}: Hue Jitter paints the same neutral track as other percentage amounts"
+            );
+            assert!(h.query_all_by_role(Role::SpinButton).any(|n| n.accesskit_node().numeric_value() == Some(37.0)));
+            assert_eq!(h.state(), &b, "rendering does not change saved brush settings");
+        }
+    }
+
+    fn set_controls(b: &mut BrushSettings, control: Control) {
+        for d in [
+            &mut b.shape_dynamics.size,
+            &mut b.shape_dynamics.roundness,
+            &mut b.transfer.opacity,
+            &mut b.transfer.flow,
+            &mut b.transfer.wetness,
+            &mut b.transfer.mix,
+        ] {
+            d.control = control;
+        }
+    }
+
+    /// #3825: all six minimum fields follow their own Control; jitter remains editable.
+    #[test]
+    fn minimum_fields_are_disabled_only_when_their_control_is_off() {
+        for (section, values) in [(1, vec![20.0, 35.0]), (6, vec![40.0, 55.0, 60.0, 75.0])] {
+            let mut h = section_harness(section, minimum_brush());
+            for (control, _) in CONTROLS {
+                set_controls(h.state_mut(), control);
+                h.run_steps(2);
+                for value in &values {
+                    let field = h.query_all_by_role(Role::SpinButton).find(|n| n.accesskit_node().numeric_value() == Some(*value)).expect("minimum input");
+                    assert_eq!(field.accesskit_node().is_disabled(), control == Control::Off, "section {section}, minimum {value}, {control:?}");
+                }
+                assert!(
+                    h.query_all_by_role(Role::SpinButton).any(|n| n.accesskit_node().numeric_value() == Some(0.0) && !n.accesskit_node().is_disabled()),
+                    "jitter stays editable"
+                );
+            }
+            set_controls(h.state_mut(), Control::PenPressure);
+            if section == 1 {
+                h.state_mut().shape_dynamics.size.control = Control::Off;
+            } else {
+                h.state_mut().transfer.opacity.control = Control::Off;
+            }
+            h.run_steps(2);
+            for (index, value) in values.iter().enumerate() {
+                let field = h.query_all_by_role(Role::SpinButton).find(|n| n.accesskit_node().numeric_value() == Some(*value)).unwrap();
+                assert_eq!(field.accesskit_node().is_disabled(), index == 0, "each minimum follows its own control");
+            }
+        }
+    }
+
+    fn drag(h: &mut Harness<'static, BrushSettings>, from: egui::Pos2, to: egui::Pos2) {
+        h.event(egui::Event::PointerMoved(from));
+        h.run_steps(1);
+        h.event(egui::Event::PointerButton { pos: from, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE });
+        h.run_steps(1);
+        h.event(egui::Event::PointerMoved(to));
+        h.run_steps(1);
+        h.event(egui::Event::PointerButton { pos: to, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::NONE });
+        h.run_steps(2);
+    }
+
+    #[test]
+    fn disabled_minimum_ignores_input_and_keeps_its_value_for_reactivation() {
+        let mut h = section_harness(1, minimum_brush());
+        let before = h.state().clone();
+        let field = h.query_all_by_role(Role::SpinButton).find(|n| n.accesskit_node().numeric_value() == Some(20.0)).unwrap();
+        let center = field.rect().center();
+        field.click();
+        h.key_press(egui::Key::ArrowUp);
+        h.event(egui::Event::Text("99".into()));
+        h.key_press(egui::Key::Enter);
+        // The slider below the number and its scrubby label are disabled too.
+        let track = pos2(300.0, center.y + 24.0);
+        drag(&mut h, track, track);
+        let label = h.get_by_label("Minimum Diameter").rect().center();
+        drag(&mut h, label, label + vec2(60.0, 0.0));
+        assert_eq!(h.state(), &before, "disabled interactions never rewrite brush settings");
+
+        h.state_mut().shape_dynamics.size.control = Control::PenPressure;
+        h.run_steps(2);
+        let field = h.query_all_by_role(Role::SpinButton).find(|n| n.accesskit_node().numeric_value() == Some(20.0)).unwrap();
+        assert!(!field.accesskit_node().is_disabled());
+        field.click();
+        h.key_press(egui::Key::ArrowUp);
+        h.run_steps(2);
+        assert_eq!(h.state().shape_dynamics.size.minimum, 0.21, "active minimum is editable");
+        drag(&mut h, track, track);
+        let minimum = h.state().shape_dynamics.size.minimum;
+        assert!(minimum > 0.8, "the active slider accepts the same pointer position: {minimum}");
+        h.state_mut().shape_dynamics.size.control = Control::Off;
+        h.run_steps(2);
+        assert_eq!(h.state().shape_dynamics.size.minimum, minimum, "Off keeps the saved minimum");
+    }
 
     #[test]
     fn ellipse_widget_drags_angle_and_roundness() {

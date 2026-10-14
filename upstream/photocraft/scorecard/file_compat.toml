@@ -43,9 +43,9 @@ note = "smart_ui.rs:31 rows + visibility + editor; no collapse, drag or context 
 [[item]]
 id = "FILE-215-6"
 target = "Smart Object corner skew and perspective (quad or homography transform)"
-status = "missing"
+status = "done"
 issue = 215
-note = "doc lib.rs:312 SmartObject.transform is an Affine"
+note = "#426: SmartObject.perspective holds the projective map (transform keeps its affine approximation); Distort / Perspective on a smart object set it (transform_cmds.rs, smart_cmds::set_placement), it re-renders from the source through the homography, Warp composes with it, and the PSD placement reads and writes nonAffineTransform / Trnf (io/blocks.rs placed_projective, smart_map.rs); tests distort_survives_edit_contents, warp_on_a_distorted_smart_object_follows_the_corners, placement survives the save"
 
 [[item]]
 id = "FILE-215-7"
@@ -129,7 +129,7 @@ id = "FILE-215-18"
 target = "Save for Web per-slice settings remembered; Export As remembers and offers nearest scaling"
 status = "partial"
 issue = 215
-note = "file_ui.rs:188 last_web in-session only; export_dialog.rs:16 fixed defaults"
+note = "Save for Web settings survive a restart through the remembered dialog settings in prefs.dialogs (web_cmds::remember_web_settings stores them on a complete export, never the destination; file_ui.rs open_web seeds from the session's last export, else the preferences). export_dialog seeds Export As the same way (seed_remembered: format, quality, transparency, scale, metadata, TGA bits) and confirm remembers them as used. Missing: Export As nearest-neighbour scaling"
 
 [[item]]
 id = "FILE-215-19"
@@ -185,7 +185,7 @@ id = "FILE-216-5"
 target = "Save-path tests: layered TIFF, PDF, SVG, ACO/ASE, .shc, Smart Filters, atomic-save failure"
 status = "partial"
 issue = 216
-note = "Every save path that exists is tested by saving and reading back: layered TIFF io tests/tiff_layers.rs (every_compression_keeps_the_layers, advanced_blending_survives_layered_tiff_in_both_byte_orders), print PDF engine print_cmds/tests.rs (print_dry_run_renders_a_pdf_and_reports_lp decodes the image back), ACO/ASE engine swatch_cmds/tests.rs (aco_round_trip_keeps_16_bit_values_and_books, ase_round_trip_keeps_groups_floats_and_kinds), .shc psd shc.rs shc_round_trips_and_rejects_hostile_input and engine layer_style.rs contour_presets_and_custom_curves_apply_in_one_undo_step, Smart Filters engine tests/smart_psd.rs (smart_filters_survive_psd_in_every_colour_model), atomic-save failure format/src/atomic/tests.rs (BUG-203-6). There is no SVG writer (SVG opens only) and no Photoshop PDF save (FILE-215-10), so those have nothing to test yet; the row stays partial until they exist"
+note = "Every save path that exists is tested by saving and reading back: layered TIFF io tests/tiff_layers.rs (every_compression_keeps_the_layers, advanced_blending_survives_layered_tiff_in_both_byte_orders), print PDF engine print_cmds/tests.rs (print_dry_run_renders_a_pdf_and_reports_the_platform_backend decodes the image back), ACO/ASE engine swatch_cmds/tests.rs (aco_round_trip_keeps_16_bit_values_and_books, ase_round_trip_keeps_groups_floats_and_kinds), .shc psd shc.rs shc_round_trips_and_rejects_hostile_input and engine layer_style.rs contour_presets_and_custom_curves_apply_in_one_undo_step, Smart Filters engine tests/smart_psd.rs (smart_filters_survive_psd_in_every_colour_model), atomic-save failure format/src/atomic/tests.rs (BUG-203-6). There is no SVG writer (SVG opens only) and no Photoshop PDF save (FILE-215-10), so those have nothing to test yet; the row stays partial until they exist"
 
 [[item]]
 id = "FILE-216-6"

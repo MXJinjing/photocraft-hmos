@@ -151,14 +151,14 @@ fn surface_of(doc: &Document, id: LayerId, mask: bool) -> Option<&Surface> {
 
 /// Blend `after` back towards `before` over `area`: `before + opacity × (B(before, after) − before)`
 /// with blend mode `mode` (premultiplied, so alpha changes fade too).
-pub fn fade_surface(before: &Surface, after: &mut Surface, area: Rect, mode: BlendMode, opacity: f32) {
+pub fn fade_surface(before: &Surface, after: &mut Surface, area: Rect, mode: BlendMode, opacity: f32) -> Result<()> {
     let fmt = after.format();
     let n = fmt.channels();
     if area.is_empty() || n == 0 {
-        return;
+        return Ok(());
     }
-    let b = before.read_region(area);
-    let mut a = after.read_region(area);
+    let b = crate::allocation::read_region(before, area, "fading pixels")?;
+    let mut a = crate::allocation::read_region(after, area, "fading pixels")?;
     let k = opacity.clamp(0.0, 1.0);
     let lerp_premul = |pb: &[f32], pa: &[f32], out: &mut [f32], alpha: bool| {
         let m = out.len();
@@ -176,7 +176,7 @@ pub fn fade_surface(before: &Surface, after: &mut Surface, area: Rect, mode: Ble
         }
         out[m - 1] = ao;
     };
-    let mut tmp = vec![0.0f32; n];
+    let mut tmp = crate::allocation::filled(n, 0.0f32, "fading pixels")?;
     for (pa, pb) in a.chunks_exact_mut(n).zip(b.chunks_exact(n)) {
         if mode == BlendMode::Normal || n == 1 {
             lerp_premul(pb, pa, &mut tmp, fmt.alpha);
@@ -192,7 +192,8 @@ pub fn fade_surface(before: &Surface, after: &mut Surface, area: Rect, mode: Ble
             pa.copy_from_slice(&enc[..n]);
         }
     }
-    after.write_region(area, &a);
+    after.try_write_region(area, &a)?;
+    Ok(())
 }
 
 fn fade(s: &mut Session, p: &Value) -> Result<Value> {
@@ -212,7 +213,7 @@ fn fade(s: &mut Session, p: &Value) -> Result<Value> {
     s.edit(&label, |doc, _| {
         let l = doc.layer_mut(src.layer).ok_or(EngineError::NoLayer(src.layer))?;
         let surf = if src.mask { l.mask.as_mut().map(|m| &mut m.surface) } else { l.surface_mut() }.ok_or(EngineError::NoLayer(src.layer))?;
-        fade_surface(&before, surf, area, mode, opacity);
+        fade_surface(&before, surf, area, mode, opacity)?;
         surf.prune();
         Ok(())
     })?;
@@ -273,6 +274,11 @@ fn purge(s: &mut Session, what: &str) -> Result<Value> {
         if stages > 0 {
             freed = freed.saturating_add(stages);
             items.push("smart filter cache");
+        }
+        let strokes = photocraft_compose::shape_split::purge_cache();
+        if strokes > 0 {
+            freed = freed.saturating_add(strokes);
+            items.push("shape stroke cache");
         }
     }
     s.edit_state.fade = None;
@@ -391,6 +397,13 @@ fn content_aware_fill_as(s: &mut Session, p: &Value, cmd: &'static str, label: &
     }
     let surf = doc.layer(id).and_then(|l| l.surface()).ok_or(EngineError::NoLayer(id))?;
     let fmt = surf.format();
+    // Photoshop's Sample All Layers checkbox is off unless the caller asks. When the active
+    // layer has no pixels in the window there is nothing to sample, so that case uses the
+    // visible composite (#4026). An explicit false still reads only this layer.
+    let sample_all = match p.get("sampleAllLayers").and_then(Value::as_bool) {
+        Some(v) => v,
+        None => surf.content_bounds().intersect(&window).is_empty(),
+    };
     let n = fmt.channels();
     // Refuse a window too large to read before allocating for it, whatever the sampling (#963).
     let (w, h) = crate::fill_cmds::window_size(window)?;
@@ -407,7 +420,18 @@ fn content_aware_fill_as(s: &mut Session, p: &Value, cmd: &'static str, label: &
             ctx.progress(0.0, label);
             let cancel = || ctx.cancelled();
             let surf = doc.layer(id).and_then(|l| l.surface()).ok_or(EngineError::NoLayer(id))?;
-            let img = read_window(surf, window, &cancel).ok_or(EngineError::Cancelled)?;
+            let img = if sample_all {
+                if cancel() {
+                    return Err(EngineError::Cancelled);
+                }
+                let region = crate::retouch_cmds::composite_region(&doc, None, crate::retouch_cmds::SampleLayers::All, window, fmt);
+                if cancel() {
+                    return Err(EngineError::Cancelled);
+                }
+                region.data
+            } else {
+                read_window(surf, window, &cancel).ok_or(EngineError::Cancelled)?
+            };
             let hole = read_window_cover(&sel, window, &cancel).ok_or(EngineError::Cancelled)?;
             let mut source = match (sampling.as_str(), custom_rect, custom_mask.as_ref()) {
                 ("custom", Some(r), _) => (0..w * h).into_par_iter().map(|i| r.contains(window.x0 + (i % w) as i32, window.y0 + (i / w) as i32)).collect(),
@@ -894,6 +918,7 @@ fn find_replace(s: &mut Session, p: &Value) -> Result<Value> {
                 && let Some((id, a, b)) = cursor
                 && text_of(&doc, id).is_some_and(|t| find_matches(&t, &find, case, whole).contains(&(a, b)))
             {
+                crate::type_cmds::check_text_unlocked(&doc, id)?;
                 s.edit("Replace Text", |doc, _| {
                     let snapshot = doc.clone();
                     if let Some(LayerContent::Text(t)) = doc.layer_mut(id).map(|l| &mut l.content) {
@@ -903,7 +928,10 @@ fn find_replace(s: &mut Session, p: &Value) -> Result<Value> {
                     Ok(())
                 })?;
                 let end = a + replace.len();
-                s.edit_state.find_cursor = Some((id, end, end));
+                // Collapse the cursor on the side the search moves away from, so the next search
+                // skips the replaced text even when the replacement still matches.
+                let c = if forward { end } else { a };
+                s.edit_state.find_cursor = Some((id, c, c));
                 changed = Some((id, a, end));
                 if action == "change" {
                     return Ok(json!({"changed": {"layer": id.0, "start": a, "end": end}}));
@@ -1135,7 +1163,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Content-Aware Fill…",
             ["Edit"],
             None,
-            r##"{"sampling":"auto|rectangular|custom","margin":px?,"area":[x,y,w,h]?,"channel":index|name?,"colorAdaptation":"default|none|high|veryHigh","rotationAdaptation":"none|low|medium|high|full","scale":bool=false,"mirror":bool=false,"output":"current|new|duplicate","seed":u64=1}"##,
+            r##"{"sampling":"auto|rectangular|custom","margin":px?,"area":[x,y,w,h]?,"channel":index|name?,"colorAdaptation":"default|none|high|veryHigh","rotationAdaptation":"none|low|medium|high|full","scale":bool=false,"mirror":bool=false,"sampleAllLayers":bool=false,"output":"current|new|duplicate","seed":u64=1}"##,
             can_caf,
             content_aware_fill
         ),

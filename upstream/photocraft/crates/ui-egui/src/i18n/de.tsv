@@ -15,7 +15,19 @@
 # way. Product and technology names (PhotoCraft, ArtCraft, OpenType, CMYK, Lab ...) stay in Latin
 # letters; the trailing "…" of dialog commands is kept. Plural rule: one|other (n != 1 -> other).
 
+# Channel Options and New Spot Channel (#3761)
+	Channel Color	Kanalfarbe
+	Color Indicates:	Farbe kennzeichnet:
+	Solidity:	Solidität:
+	Masked Areas	Maskierte Bereiche
+	Selected Areas	Ausgewählte Bereiche
+	Ink Characteristics	Farbeigenschaften
+
 # Guide layout dialog
+
+# Custom print paper (#3820)
+	Paper Width	Papierbreite
+	Paper Height	Papierhöhe
 	Columns	Spalten
 	Rows	Zeilen
 	Number	Anzahl
@@ -73,6 +85,8 @@
 	Save	Speichern
 	Save As…	Speichern unter…
 	Save a Copy…	Kopie speichern…
+	{name} can't keep everything in this document	{name} kann nicht alles in diesem Dokument erhalten
+	Choose a format that keeps it, such as Photoshop (PSD), or save a copy.	Wählen Sie ein Format, das alles erhält, etwa Photoshop (PSD), oder speichern Sie eine Kopie.
 	Revert	Zurücksetzen
 	Export	Exportieren
 	Quick Export as PNG	Schnellexport als PNG
@@ -110,6 +124,14 @@
 	Script Events Manager…	Skriptereignis-Manager…
 	Import	Importieren
 	Browse…	Durchsuchen…
+	Source Files	Quelldateien
+	Use:	Verwenden:
+	Files	Dateien
+	Folder	Ordner
+	Add Open Files	Geöffnete Dateien hinzufügen
+	Sort By Name	Nach Namen sortieren
+	Attempt to Automatically Align Source Images	Quellbilder nach Möglichkeit automatisch ausrichten
+	Create Smart Object after Loading Layers	Nach dem Laden der Ebenen Smart-Objekt erstellen
 	Reveal in Finder	Im Finder anzeigen
 	Show in Explorer	Im Explorer anzeigen
 	Show in Folder	Im Ordner anzeigen
@@ -134,6 +156,8 @@
 	Search…	Suchen…
 	Check Spelling…	Rechtschreibung prüfen…
 	Find and Replace Text…	Text suchen und ersetzen…
+	Add to Dictionary	Zum Wörterbuch hinzufügen
+	No Spelling Suggestions	Keine Rechtschreibvorschläge
 	Fill…	Füllen…
 	Stroke…	Nachziehen…
 	Content-Aware Fill…	Inhaltsbasiert füllen…
@@ -148,6 +172,8 @@
 	Transform Again on a Copy	Erneut auf Kopie transformieren
 	Scale	Skalieren
 	Rotate	Drehen
+	Set horizontal skew	Horizontale Neigung festlegen
+	Set vertical skew	Vertikale Neigung festlegen
 	Skew	Neigen
 	Distort	Verzerren
 	Perspective	Perspektive
@@ -360,6 +386,7 @@
 	Update Modified Content	Geänderten Inhalt aktualisieren
 	Update All Modified Content	Alle geänderten Inhalte aktualisieren
 	Stack Mode	Stapelmodus
+	Choose Stack Mode:	Stapelmodus auswählen:
 	Entropy	Entropie
 	Kurtosis	Kurtosis
 	Maximum	Maximum
@@ -531,6 +558,9 @@
 	Blur	Weichzeichnen
 	Blur Gallery	Weichzeichnen-Galerie
 	Field Blur…	Feldweichzeichner…
+# Field Blur pins (#3373)
+	No pin selected	Kein Pin ausgewählt
+	Click the image to add a pin; drag a pin to move it, or its ring to change its blur. Delete removes the selected pin.	Klicken Sie ins Bild, um einen Pin hinzuzufügen; ziehen Sie einen Pin, um ihn zu verschieben, oder seinen Ring, um die Unschärfe zu ändern. Entf entfernt den ausgewählten Pin.
 	Iris Blur…	Irisweichzeichner…
 	Tilt-Shift…	Tilt-Shift…
 	Path Blur…	Pfadweichzeichner…
@@ -719,6 +749,10 @@
 	Breeze Dark Theme	Breeze-Design (Dunkel)
 	Breeze light	Breeze hell
 	Breeze Light Theme	Breeze-Design (Hell)
+	Soft dark	Weich dunkel
+	Soft light	Weich hell
+	Soft Dark Theme	Weiches Design (Dunkel)
+	Soft Light Theme	Weiches Design (Hell)
 	Next Theme	Nächstes Design
 	Actions	Aktionen
 	Brush Settings	Pinseleinstellungen
@@ -817,6 +851,9 @@
 	Appearance	Erscheinungsbild
 	Appearance (Layer Style)	Erscheinungsbild (Ebenenstil)
 	Apply Layer Mask	Ebenenmaske anwenden
+	Add Mask to Selection	Maske zur Auswahl hinzufügen
+	Subtract Mask from Selection	Maske von Auswahl subtrahieren
+	Intersect Mask with Selection	Schnittmenge von Maske und Auswahl
 	Apply Per Tip	Pro Pinselspitze anwenden
 	Apply next selected layer comp	Nächste ausgewählte Ebenenkomposition anwenden
 	Apply previous selected layer comp	Vorherige ausgewählte Ebenenkomposition anwenden
@@ -832,11 +869,18 @@
 	Background	Hintergrund
 	Background Color	Hintergrundfarbe
 	Background Contents	Hintergrundinhalte
+	Custom background color	Benutzerdefinierte Hintergrundfarbe
 	Balance	Balance
 	Baseline	Grundlinie
 	Baseline shift	Grundlinienverschiebung
 	Basic	Grundeinstellungen
 	Before (Y)	Davor (Y)
+	Save Settings…	Einstellungen speichern…
+	Load Settings…	Einstellungen laden…
+	Save these settings as a Camera Raw .xmp file	Diese Einstellungen als Camera-Raw-.xmp-Datei speichern
+	Load settings from a Camera Raw .xmp file	Einstellungen aus einer Camera-Raw-.xmp-Datei laden
+	Loaded Camera Raw settings from {file}	Camera-Raw-Einstellungen aus {file} geladen
+	Loaded Camera Raw settings from {file} ({n} not supported)	Camera-Raw-Einstellungen aus {file} geladen ({n} nicht unterstützt)
 	Begin recording	Aufnahme starten
 	Bend:	Biegung:
 	Bicubic	Bikubisch
@@ -868,6 +912,7 @@
 	Cancel	Abbrechen
 	Reset	Zurücksetzen
 	Cancel (Esc)	Abbrechen (Esc)
+	Manage submitted jobs in the system print queue	Übermittelte Aufträge in der Druckwarteschlange des Systems verwalten
 	Cancel any current edits (Esc)	Aktuelle Bearbeitungen abbrechen (Esc)
 	Cancel current crop operation  (Esc)	Aktuelle Freistellung abbrechen  (Esc)
 	Cancel transform (Esc)	Transformation abbrechen (Esc)
@@ -1141,6 +1186,9 @@
 	Ignore All	Alle ignorieren
 	Image Size	Bildgröße
 	Import Brushes…	Pinsel importieren…
+	Gradient Preset Options	Verlaufsvorgabenoptionen
+	Import .GRD	.GRD importieren
+	Choose a gradient file (.grd).	Wählen Sie eine Verlaufsdatei (.grd).
 	Import brushes (.abr)	Pinsel (.abr) importieren
 	Import Presets	Vorgaben importieren
 	Imported	Importiert
@@ -1663,7 +1711,7 @@
 	Layer Knocks Out Drop Shadow	Ebene stanzt den Schlagschatten aus
 	Legal	Legal
 	Letter	Letter
-	Light	Light
+	Light	Hell
 	Line Tool	Linien-Werkzeug
 	Linear	Linear
 	Linear Burn	Linear nachbelichten
@@ -1769,9 +1817,7 @@
 	Std Dev:	Std.-Abw.:
 	Studio (Dark)	Studio (Dunkel)
 	Studio (Light)	Studio (Hell)
-	Stylus	Stift
 	Stylus Wheel	Stiftrad
-	Block finger input	Fingereingabe blockieren
 	Subtract	Subtrahieren
 	Tabloid	Tabloid
 	Text Replacement	Textersatz
@@ -2070,6 +2116,11 @@
 	Rename Brush…	Pinsel umbenennen…
 	Delete Brush	Pinsel löschen
 	New Brush Preset…	Neue Pinselvorgabe…
+	Capture Brush Size in Preset	Pinselgröße in Vorgabe erfassen
+	Include Tool Settings	Werkzeugeinstellungen einschließen
+	Include Color	Farbe einschließen
+	Enter a name for the brush preset	Geben Sie einen Namen für die Pinselvorgabe ein
+	A brush preset with this name already exists	Eine Pinselvorgabe mit diesem Namen ist bereits vorhanden
 	Brush Preset Options	Pinselvorgaben-Optionen
 	Group name	Gruppenname
 	Brush name	Pinselname
@@ -2131,6 +2182,10 @@
 	No path to make a selection from: draw one with the Pen tool or select one in the Paths panel.	Kein Pfad für eine Auswahl vorhanden: zeichne einen mit dem Stift-Werkzeug oder wähle einen im Pfade-Bedienfeld.
 	Cancel opening	Öffnen abbrechen
 	Cancelled opening {name}	Öffnen von {name} abgebrochen
+	The document “{name}” does not have an embedded {mode} profile.	Das Dokument „{name}“ hat kein eingebettetes {mode}-Profil.
+	The document “{name}” has an embedded color profile that does not match the current {mode} working space.	Das Dokument „{name}“ hat ein eingebettetes Farbprofil, das nicht zum aktuellen {mode}-Arbeitsfarbraum passt.
+	Embedded: {embedded}	Eingebettet: {embedded}
+	Working: {working}	Arbeitsfarbraum: {working}
 	Developing {name}	{name} wird entwickelt
 	Cancelled {label}	{label} abgebrochen
 	Esc to cancel	Esc zum Abbrechen
@@ -2361,6 +2416,7 @@
 	Click to pick · Esc to cancel	Klicken zum Auswählen · Esc zum Abbrechen
 	Pick a screen pixel or press Esc to cancel	Ein Bildschirmpixel auswählen oder mit Esc abbrechen
 	Scroll to zoom	Zum Zoomen scrollen
+	Drag to pan · Scroll to zoom · Double-click to fit	Ziehen zum Verschieben · Scrollen zum Zoomen · Doppelklick zum Einpassen
 	Show/Hide All Panels	Alle Bedienfelder ein-/ausblenden
 	Show/Hide Panels	Bedienfelder ein-/ausblenden
 	Could not open	Öffnen nicht möglich
@@ -2418,6 +2474,7 @@ layerLabel	No Color	Keine Farbe
 	Fuchsia	Fuchsia
 	Violet	Violett
 	Large document: redrawing on the CPU	Großes Dokument: Neuzeichnen auf der CPU
+	Redrawing	Neuzeichnen
 	This redraw took {seconds} s on the CPU.	Dieses Neuzeichnen auf der CPU dauerte {seconds} s.
 	Edits that change the whole document, such as a layer's blend mode, opacity or visibility, redraw all of it.	Änderungen, die das ganze Dokument betreffen, etwa Füllmethode, Deckkraft oder Sichtbarkeit einer Ebene, zeichnen es vollständig neu.
 	Its layers don't fit the GPU memory budget. Raising Memory usage in Preferences › Performance raises the budget, up to a quarter of this computer's memory.	Die Ebenen passen nicht in das GPU-Speicherbudget. Eine höhere Speichernutzung unter Voreinstellungen › Leistung erhöht das Budget, bis zu einem Viertel des Arbeitsspeichers dieses Computers.
@@ -2525,13 +2582,6 @@ fontWeight	Italic	Kursiv
 	XOR	XOR
 	Color Burn (Paint.NET)	Farbig nachbelichten (Paint.NET)
 	Color Dodge (Paint.NET)	Farbig abwedeln (Paint.NET)
-	Double-tap pen body	Stiftgehäuse doppeltippen
-	Current tool and Eraser	Aktuelles Werkzeug und Radierer
-	Previous tool	Vorheriges Werkzeug
-	Long-press pen body	Stiftgehäuse lange drücken
-	Show or hide context menu	Kontextmenü ein- oder ausblenden
-	Choose printer, copies and duplex in the system print dialog.	Drucker, Kopien und Duplex im Systemdruckdialog auswählen.
-	System print preview opened	Systemdruckvorschau geöffnet
 	Stroke Options	Konturoptionen
 	Solid	Durchgezogen
 	Dashed	Gestrichelt
@@ -2660,6 +2710,7 @@ curves	Smooth	Glätten
 	Paint over hair or fur on the image; Alt paints the other mode	Über Haare oder Fell im Bild malen; Alt malt im anderen Modus
 	Clear Brush Strokes	Pinselstriche löschen
 	Show rulers	Lineale anzeigen
+	Presentation	Präsentation
 
 # Color Sampler (added with the i18n coverage repair)
 	Click to place · Alt-click or drag off-canvas to remove	Klicken zum Platzieren · Alt-Klick oder Ziehen außerhalb der Arbeitsfläche zum Entfernen
@@ -2697,6 +2748,414 @@ curves	Smooth	Glätten
 	Light Red	Hellrot
 	Medium Blue	Mittelblau
 	Light Gray	Hellgrau
+# Status messages, system info and tool names
+	Join the ArtCraft Discord ({url})	Dem ArtCraft-Discord beitreten ({url})
+	Nothing to paste: the clipboard holds no image	Nichts einzufügen: Die Zwischenablage enthält kein Bild
+	Graphics adapter: {adapter}	Grafikadapter: {adapter}
+	Backend: {backend} ({type})	Backend: {backend} ({type})
+	Driver: {driver}	Treiber: {driver}
+	GPU backend preference: {backend}	Bevorzugtes GPU-Backend: {backend}
+	Selected at launch: {backend}	Beim Start gewählt: {backend}
+	Image compositor: {processor}	Bildkompositor: {processor}
+	Window renderer: {renderer}	Fensterdarstellung: {renderer}
+	Graphics adapter	Grafikadapter
+	Platform: {os} {arch}	Plattform: {os} {arch}
+	Monitor profile: {profile}	Monitorprofil: {profile}
+	Opened {url}	{url} geöffnet
+	{index} of {total}	{index} von {total}
+	Export As: {name}	Exportieren als: {name}
+	Color Sampler Tool	Farbaufnahme-Werkzeug
+	Vertical Type Tool	Vertikales Text-Werkzeug
+	Patch Tool	Ausbessern-Werkzeug
+	Grid view	Rasteransicht
+	List view	Listenansicht
+	Proof Setup…	Proof einrichten…
+	32-bit Preview Options	32-Bit-Vorschauoptionen
+# Shortcut editor commands without a menu item
+	Toggle Layer Mask Overlay	Ebenenmasken-Überlagerung umschalten
+	Increase Type Size	Schriftgröße erhöhen
+	Decrease Type Size	Schriftgröße verringern
+	Increase Type Size by 10	Schriftgröße um 10 erhöhen
+	Decrease Type Size by 10	Schriftgröße um 10 verringern
+	Make Selection from Path	Auswahl aus Pfad erstellen
+	Target Composite Channel	Gesamtkanal als Ziel festlegen
+	Target Channel 3	Kanal 3 als Ziel festlegen
+	Target Channel 4	Kanal 4 als Ziel festlegen
+	Target Channel 5	Kanal 5 als Ziel festlegen
+	Target Channel 6	Kanal 6 als Ziel festlegen
+	Target Channel 7	Kanal 7 als Ziel festlegen
+	Target Channel 8	Kanal 8 als Ziel festlegen
+	Target Channel 9	Kanal 9 als Ziel festlegen
+	Switch Foreground and Background Colors	Vorder- und Hintergrundfarbe vertauschen
+	Default Foreground and Background Colors	Standardfarben für Vorder- und Hintergrund
+	Fill with Foreground Color	Mit Vordergrundfarbe füllen
+	Fill with Background Color	Mit Hintergrundfarbe füllen
+	Fill with Foreground Color, Preserve Transparency	Mit Vordergrundfarbe füllen, Transparenz erhalten
+	Fill with Background Color, Preserve Transparency	Mit Hintergrundfarbe füllen, Transparenz erhalten
+	Decrease Brush Size	Pinselgröße verringern
+	Increase Brush Size	Pinselgröße erhöhen
+	Decrease Brush Hardness	Pinselhärte verringern
+	Increase Brush Hardness	Pinselhärte erhöhen
+	Temporary	Vorübergehend
+	Space	Leertaste
+	Hand Tool (hold)	Hand-Werkzeug (gedrückt halten)
+	Zoom In (hold, drag to scrub)	Vergrößern (gedrückt halten, zum Zoomen ziehen)
+	Zoom Out (hold)	Verkleinern (gedrückt halten)
+	Erase with Brush or Pencil (hold)	Mit Pinsel oder Buntstift radieren (gedrückt halten)
+# Document Info and color profiles
+	Author Title	Position des Urhebers
+	Copyright Status	Urheberrechtsstatus
+	Unknown	Unbekannt
+	Copyrighted	Urheberrechtlich geschützt
+	Public Domain	Gemeinfrei
+	Copyright Url	Urheberrechts-URL
+	Keywords	Stichwörter
+	Title	Titel
+	Profile	Profil
+	Working	Arbeitsfarbraum
+	Working-cmyk	Arbeits-CMYK
+	Coated-cmyk	CMYK (gestrichen)
+	Linear-srgb	Lineares sRGB
+	Gray-gamma-2.2	Grau (Gamma 2,2)
+	Adobe-rgb-compat	Adobe-RGB-kompatibel
+	Prophoto-compat	ProPhoto-kompatibel
+	Display-p3	Display P3
+	Intent	Renderpriorität
+	Bpc	Schwarzpunktkompensierung
+	Simulate Paper	Papierfarbe simulieren
+# Color Lookup, Shadows/Highlights, channels and Calculations
+	Warming Filter (85)	Wärmefilter (85)
+	Lut	LUT
+	Cool	Kühl
+	Teal Orange	Türkis-Orange
+	Faded Film	Verblasster Film
+	Day For Night	Tag für Nacht
+	Mono Contrast	Mono-Kontrast
+	Cross Process	Kreuzentwicklung
+	Shadow Amount	Stärke der Tiefen
+	Shadow Tone	Tonbreite der Tiefen
+	Shadow Radius	Radius der Tiefen
+	Highlight Amount	Stärke der Lichter
+	Highlight Tone	Tonbreite der Lichter
+	Highlight Radius	Radius der Lichter
+	Midtone	Mitteltöne
+	Black Clip	Schwarz beschneiden
+	White Clip	Weiß beschneiden
+	Strength	Stärke
+	Shadow	Schatten
+	Highlight	Lichter
+	Intensity	Intensität
+	Neutralize	Neutralisieren
+	Use Selection In Source	Auswahl in der Quelle verwenden
+	Use Selection In Target	Auswahl im Ziel verwenden
+	Cw	Im Uhrzeigersinn
+	Ccw	Gegen den Uhrzeigersinn
+	Nearest	Nächster Nachbar
+	Linear Dodge	Linear abwedeln
+	Mask Channel	Maskenkanal
+	R G B	RGB
+	Source Channel	Quellkanal
+	Source Invert	Quelle invertieren
+	Result	Ergebnis
+	Source1 Channel	Kanal der Quelle 1
+	Source1 Invert	Quelle 1 invertieren
+	Source2 Channel	Kanal der Quelle 2
+	Source2 Invert	Quelle 2 invertieren
+	Channel1	Kanal 1
+	Channel2	Kanal 2
+	Channel3	Kanal 3
+	Channel4	Kanal 4
+# Measurement log
+	Label	Beschriftung
+	Date and Time	Datum und Uhrzeit
+	Scale Units	Maßstabseinheiten
+	Scale Factor	Maßstabsfaktor
+	Area	Fläche
+	Perimeter	Umfang
+	Circularity	Kreisförmigkeit
+	Gray Value (Minimum)	Grauwert (Minimum)
+	Gray Value (Maximum)	Grauwert (Maximum)
+	Gray Value (Mean)	Grauwert (Mittelwert)
+	Gray Value (Median)	Grauwert (Median)
+	Integrated Density	Integrierte Dichte
+	Length	Länge
+	W:	B:
+	A:	Wi:
+# Lens Correction, Blur Gallery and distortion filters
+	Pattern Fill…	Musterfüllung…
+	Generic	Allgemein
+	Correct Distortion	Verzerrung korrigieren
+	Correct Vignette	Vignette korrigieren
+	Correct C A	Chromatische Aberration korrigieren
+	Auto Scale	Automatisch skalieren
+	Distortion	Verzerrung
+	Red Cyan	Rot/Cyan
+	Blue Yellow	Blau/Gelb
+	Vignette Amount	Stärke der Vignette
+	Vignette Midpoint	Mittelpunkt der Vignette
+	Edge Extension	Kantenerweiterung
+	Hexagon	Sechseck
+	Pentagon	Fünfeck
+	Heptagon	Siebeneck
+	Octagon	Achteck
+	Blade Curvature	Krümmung der Blendenlamellen
+	Depth Map	Tiefenkarte
+	Focal Distance	Fokusabstand
+	Distribution	Verteilung
+	Uniform	Gleichmäßig
+	Monochromatic	Monochrom
+	Seed	Startwert
+	Spin	Drehen
+	Draft	Entwurf
+	Good	Gut
+	Best	Beste
+	Center X	Mitte X
+	Center Y	Mitte Y
+	Circle	Kreis
+	Star	Stern
+	Cross	Kreuz
+	High	Hoch
+	Low	Niedrig
+	Edge Only	Nur Kanten
+	Overlay Edge	Kante überlagern
+	Focus	Fokus
+	Transition	Übergang
+	Speed	Geschwindigkeit
+	Taper	Verjüngung
+	End X	Ende X
+	End Y	Ende Y
+	Blur Angle	Weichzeichnungswinkel
+	Rectangular To Polar	Rechteckig zu Polar
+	Polar To Rectangular	Polar zu Rechteckig
+	Undefined Areas	Undefinierte Bereiche
+	Wrap	Umbrechen
+	Repeat	Wiederholen
+	Horizontal Only	Nur horizontal
+	Vertical Only	Nur vertikal
+	Generators	Generatoren
+	Wavelength Min	Wellenlänge min.
+	Wavelength Max	Wellenlänge max.
+	Amplitude Min	Amplitude min.
+	Amplitude Max	Amplitude max.
+	Sine	Sinus
+	Ridges	Grate
+	Pond Ripples	Teichwellen
+	Out From Center	Von der Mitte nach außen
+	Around Center	Um die Mitte
+	Reduce Color Noise	Farbrauschen reduzieren
+	Sharpen Details	Details schärfen
+	Remove Jpeg Artifact	JPEG-Artefakte entfernen
+	Max Radius	Maximaler Radius
+	Cell Size	Zellengröße
+	Fine Dots	Feine Punkte
+	Medium Dots	Mittlere Punkte
+	Grainy Dots	Körnige Punkte
+	Coarse Dots	Grobe Punkte
+	Short Lines	Kurze Linien
+	Medium Lines	Mittlere Linien
+	Long Lines	Lange Linien
+	Short Strokes	Kurze Striche
+	Medium Strokes	Mittlere Striche
+	Long Strokes	Lange Striche
+# Render filters: Flame, Picture Frame, Tree
+	Flame Type	Flammentyp
+	One Flame Along Path	Eine Flamme entlang des Pfads
+	Multiple Flames Along Path	Mehrere Flammen entlang des Pfads
+	Multiple Flames Path Directions	Mehrere Flammen, Pfadrichtungen
+	Multiple Flames Various Length	Mehrere Flammen, unterschiedliche Längen
+	Candle Light	Kerzenlicht
+	Multiple Flames One Direction	Mehrere Flammen, eine Richtung
+	Randomize Length	Länge zufällig variieren
+	Interval	Abstand
+	Adjust Interval For Loops	Abstand für Schleifen anpassen
+	Use Custom Color	Eigene Farbe verwenden
+	Jag	Zacken
+	Flame Lines	Flammenlinien
+	Flame Bottom Alignment	Ausrichtung des Flammenfußes
+	Flame Style	Flammenstil
+	Violent	Heftig
+	Flat	Flach
+	Flame Shape	Flammenform
+	To Center	Zur Mitte
+	Pointed	Spitz
+	Randomize Shapes	Formen zufällig variieren
+	Fine	Fein
+	Frame	Rahmen
+	Vine With Flowers	Ranke mit Blumen
+	Vine With Leaves	Ranke mit Blättern
+	Ivy	Efeu
+	Roses	Rosen
+	Daisies	Gänseblümchen
+	Berries	Beeren
+	Bamboo	Bambus
+	Waves	Wellen
+	Zigzag	Zickzack
+	Rope	Seil
+	Scallops	Muschelrand
+	Double Line	Doppellinie
+	Snowflakes	Schneeflocken
+	Stars	Sterne
+	Hearts	Herzen
+	Arrangement	Anordnung
+	Thickness	Dicke
+	Vine Color	Rankenfarbe
+	Flower Color	Blütenfarbe
+	Leaf Color	Blattfarbe
+	Base Tree Type	Baumtyp
+	Light Direction	Lichtrichtung
+	Leaves Amount	Blattmenge
+	Leaves Size	Blattgröße
+	Branches Height	Asthöhe
+	Branches Thickness	Aststärke
+	Default Leaves	Standardblätter
+	Leaves Color	Blattfarbe
+	Custom Branch Color	Eigene Astfarbe
+	Branches Color	Astfarbe
+	Flat Shading	Flächige Schattierung
+# Lens, Lighting Effects, depth and mosaic filters
+	Lens	Objektiv
+	Prime35	Festbrennweite 35
+	Prime105	Festbrennweite 105
+	Movie Prime	Film-Festbrennweite
+	Light Type	Lichttyp
+	Point	Punkt
+	Infinite	Unendlich
+	Light X	Licht X
+	Light Y	Licht Y
+	Light Z	Licht Z
+	Target X	Ziel X
+	Target Y	Ziel Y
+	Elevation	Höhe
+	Gloss	Glanz
+	Metallic	Metallisch
+	Ambience	Umgebungslicht
+	White Is High	Weiß ist hoch
+	Ambient	Umgebung
+	Warmth	Wärme
+	Softness	Weichheit
+	Reduce Noise	Rauschen reduzieren
+	Darken Only	Nur abdunkeln
+	Lighten Only	Nur aufhellen
+	Anisotropic	Anisotrop
+	Blocks	Blöcke
+	Pyramids	Pyramiden
+	Depth Mode	Tiefenmodus
+	Random	Zufällig
+	Level Based	Stufenbasiert
+	Solid Front Faces	Einfarbige Vorderseiten
+	Mask Incomplete Blocks	Unvollständige Blöcke maskieren
+	Stylization	Stilisierung
+	Cleanliness	Sauberkeit
+	Bristle Detail	Borstendetail
+	Lighting	Beleuchtung
+	Shine	Glanz
+	Max Offset	Maximaler Versatz
+	Unaltered	Unverändert
+	Lower	Untere
+	Upper	Obere
+	Blast	Böe
+	Stagger	Versetzt
+	From Right	Von rechts
+	From Left	Von links
+	Eliminate	Entfernen
+	Odd Fields	Ungerade Halbbilder
+	Even Fields	Gerade Halbbilder
+	Create By	Erzeugen durch
+	Duplication	Duplizieren
+	Kernel	Kern
+	Input Mode	Eingabemodus
+	Rgb	RGB
+	Hsb	HSB
+	Hsl	HSL
+	Row Order	Zeilenreihenfolge
+	Preserve	Erhalten
+	Squareness	Rechteckigkeit
+# Find and Replace, image size, Warp and Layer Style blending options
+	Any	Beliebig
+	Cmyk	CMYK
+	To	Nach
+	Dont Enlarge	Nicht vergrößern
+	Find	Suchen
+	Replace	Ersetzen
+	Change Find	Ersetzen und suchen
+	Case Sensitive	Groß-/Kleinschreibung beachten
+	Whole Word	Ganzes Wort
+	Forward	Vorwärts
+	Based On	Basierend auf
+	General Blending	Allgemeine Füllmethode
+	Advanced Blending	Erweiterte Füllmethode
+	Blend Interior Effects as Group	Innere Effekte als Gruppe überblenden
+	Blend Clipped Layers as Group	Ebenen der Schnittmaske als Gruppe überblenden
+	Transparency Shapes Layer	Transparenz bestimmt die Ebenenform
+	Layer Mask Hides Effects	Ebenenmaske blendet Effekte aus
+	Vector Mask Hides Effects	Vektormaske blendet Effekte aus
+	This Layer:	Diese Ebene:
+	Underlying Layer:	Darunterliegende Ebene:
+	Up	Nach oben
+	Checkerboard	Schachbrett
+	Arc Lower	Bogen unten
+	Arc Upper	Bogen oben
+	Bend	Biegen
+	Horizontal Distortion	Horizontale Verzerrung
+	Vertical Distortion	Vertikale Verzerrung
+	Stretch	Strecken
+	Map Document	Dokument zuordnen
+	Map Path	Pfad zuordnen
+	Fuzziness	Toleranz
+	Object Finder	Objektsucher
+	No object found there — drag a rectangle around it	Dort wurde kein Objekt gefunden — ziehen Sie ein Rechteck darum
 	Remove after each stroke	Nach jedem Strich entfernen
 	Apply the removal ({key})	Entfernen anwenden ({key})
 	Strokes to remove: {n} (Enter applies, Esc cancels)	Striche zum Entfernen: {n} (Eingabe wendet an, Esc bricht ab)
+	Clear Brush Controls	Pinselsteuerungen löschen
+	Reset All Locked Settings	Alle gesperrten Einstellungen zurücksetzen
+	Copy Texture to Other Tools	Struktur auf andere Werkzeuge kopieren
+
+# Actions panel: Load/Save Actions (.atn) and kept Photoshop steps
+	Load Actions…	Aktionen laden…
+	Save Actions…	Aktionen speichern…
+	{name} (Photoshop)	{name} (Photoshop)
+	{message} ({note})	{message} ({note})
+@plural	Loaded {n} action from {file}|Loaded {n} actions from {file}	{n} Aktion aus {file} geladen|{n} Aktionen aus {file} geladen
+@plural	{n} step has no PhotoCraft equivalent yet|{n} steps have no PhotoCraft equivalent yet	{n} Schritt hat noch keine Entsprechung in PhotoCraft|{n} Schritte haben noch keine Entsprechung in PhotoCraft
+@plural	Saved {n} action to {file}|Saved {n} actions to {file}	{n} Aktion in {file} gespeichert|{n} Aktionen in {file} gespeichert
+@plural	{n} step with no Photoshop equivalent left out|{n} steps with no Photoshop equivalent left out	{n} Schritt ohne Photoshop-Entsprechung ausgelassen|{n} Schritte ohne Photoshop-Entsprechung ausgelassen
+
+	File Naming	Dateibenennung
+	Starting serial	Startnummer
+# Actions panel: set folders, dialog toggle, Insert Stop
+	Insert Stop…	Stopp einfügen…
+	Save Set…	Set speichern…
+	Message:	Meldung:
+	Allow Continue	Fortsetzen erlauben
+	Show dialog during playback	Dialog bei der Wiedergabe anzeigen
+	Select an action first	Wählen Sie zuerst eine Aktion aus
+	Action playback stopped	Aktionswiedergabe angehalten
+	Step {step} is waiting for its dialog	Schritt {step} wartet auf seinen Dialog
+@plural	{n} action|{n} actions	{n} Aktion|{n} Aktionen
+	Auto Add/Delete	Autom. hinzuf./löschen
+
+# Native Windows printing qualification
+	Don't also tick Mirror Image in Print Settings…: the two flips cancel out.	Aktiviere nicht zusätzlich das Spiegelbild in den Druckeinstellungen: Die beiden Spiegelungen heben sich auf.
+	Print Settings…	Druckeinstellungen…
+	Remember to turn off the printer's own colour management in Print Settings…	Denke daran, die eigene Farbverwaltung des Druckers in den Druckeinstellungen auszuschalten…
+	Sent to {printer}	An {printer} gesendet
+	set in Print Settings…	in den Druckeinstellungen festlegen…
+	ICO is limited to 256 × 256 pixels	ICO ist auf 256 × 256 Pixel begrenzt
+
+# HarmonyOS host additions retained during upstream sync
+	Stylus	Stift
+	Block finger input	Fingereingabe blockieren
+	Double-tap pen body	Stiftgehäuse doppeltippen
+	Current tool and Eraser	Aktuelles Werkzeug und Radierer
+	Previous tool	Vorheriges Werkzeug
+	Long-press pen body	Stiftgehäuse lange drücken
+	Show or hide context menu	Kontextmenü ein- oder ausblenden
+	Choose printer, copies and duplex in the system print dialog.	Drucker, Kopien und Duplex im Systemdruckdialog auswählen.
+	System print preview opened	Systemdruckvorschau geöffnet
+	Only show canvas	Nur Leinwand anzeigen
+	Right sidebar	Rechte Seitenleiste
+	Connected pen	Verbundener Stift
+	No pen connected	Kein Stift verbunden
+	Battery unavailable	Akkustand nicht verfügbar
+	Battery: {percent}%	Akku: {percent}%

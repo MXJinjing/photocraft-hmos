@@ -7,6 +7,10 @@
 # entries the same way. Product and technology names (PhotoCraft, ArtCraft, OpenType, CMYK, Lab ...)
 # stay as they are; the trailing "…" of dialog commands is kept.
 #
+# Custom paper dimensions in Print Settings.
+	Paper Width	Kağıt Genişliği
+	Paper Height	Kağıt Yüksekliği
+
 	Rows	Satırlar
 	Number	Sayı
 	Top:	Üst:
@@ -60,6 +64,8 @@
 	Save	Kaydet
 	Save As…	Farklı Kaydet…
 	Save a Copy…	Bir Kopyasını Kaydet…
+	{name} can't keep everything in this document	{name} bu belgedeki her şeyi koruyamaz
+	Choose a format that keeps it, such as Photoshop (PSD), or save a copy.	Photoshop (PSD) gibi her şeyi koruyan bir biçim seçin ya da bir kopyasını kaydedin.
 	Revert	Geri Döndür
 	Export	Dışa Aktar
 	Quick Export as PNG	PNG Olarak Hızlı Dışa Aktarma
@@ -97,6 +103,13 @@
 	Script Events Manager…	Komut Dosyası Olay Yöneticisi…
 	Import	İthalat
 	Browse…	Göz at…
+	Source Files	Kaynak Dosyalar
+	Use:	Kullan:
+	Files	Dosyalar
+	Add Open Files	Açık Dosyaları Ekle
+	Sort By Name	Ada Göre Sırala
+	Attempt to Automatically Align Source Images	Kaynak Görüntüleri Otomatik Hizalamayı Dene
+	Create Smart Object after Loading Layers	Katmanları Yükledikten Sonra Akıllı Nesne Oluştur
 	Reveal in Finder	Finder'da Göster
 	Show in Explorer	Explorer'da Göster
 	Show in Folder	Klasörde Göster
@@ -121,6 +134,8 @@
 	Search…	Ara…
 	Check Spelling…	Yazımı Denetle…
 	Find and Replace Text…	Metni Bul ve Değiştir…
+	Add to Dictionary	Sözlüğe Ekle
+	No Spelling Suggestions	Yazım Önerisi Yok
 	Fill…	Doldur…
 	Stroke…	Kontur…
 	Content-Aware Fill…	İçeriğe Uygun Dolgu…
@@ -135,6 +150,8 @@
 	Transform Again on a Copy	Bir Kopyada Yeniden Dönüştür
 	Scale	Ölçekle
 	Rotate	Döndür
+	Set horizontal skew	Yatay eğmeyi ayarla
+	Set vertical skew	Dikey eğmeyi ayarla
 	Skew	Eğ
 	Distort	Çarpıt
 	Perspective	Perspektif
@@ -202,12 +219,12 @@
 	Lab Color	Laboratuvar Rengi
 	Multichannel	Çok kanallı
 	8 Bits/Channel	8 Bit/Kanal
-	8 bit	8 bit
+	8 bit	8 bitlik
 	Integer	Tamsayı
 	16 Bits/Channel	16 Bit/Kanal
-	16 bit	16 bit
+	16 bit	16 bitlik
 	32 Bits/Channel	32 Bit/Kanal
-	32 bit (float)	32 bit (kayan)
+	32 bit (float)	32 bitlik (kayan noktalı)
 	Floating point	Kayan nokta
 	Color Table…	Renk Tablosu…
 	Bitmap…	Bit eşlem…
@@ -346,6 +363,7 @@
 	Update Modified Content	Değiştirilen İçeriği Güncelle
 	Update All Modified Content	Değiştirilen Tüm İçeriği Güncelle
 	Stack Mode	Yığın Modu
+	Choose Stack Mode:	Yığın Modunu Seçin:
 	Entropy	Entropi
 	Kurtosis	Basıklık
 	Maximum	Maksimum
@@ -514,6 +532,8 @@
 	Blur	Bulanıklaştırma
 	Blur Gallery	Bulanıklaştırma Galerisi
 	Field Blur…	Alan Bulanıklığı…
+	No pin selected	Seçili pim yok
+	Click the image to add a pin; drag a pin to move it, or its ring to change its blur. Delete removes the selected pin.	Pim eklemek için görüntüye tıklayın; taşımak için pimi, bulanıklığını değiştirmek için halkasını sürükleyin. Delete seçili pimi siler.
 	Iris Blur…	İris Bulanıklığı…
 	Tilt-Shift…	Tilt-Shift…
 	Path Blur…	Yol Bulanıklığı…
@@ -700,6 +720,10 @@
 	Breeze Dark Theme	Esinti Koyu Tema
 	Breeze light	Esinti ışığı
 	Breeze Light Theme	Esinti Işık Teması
+	Soft dark	Yumuşak koyu
+	Soft light	Yumuşak açık
+	Soft Dark Theme	Yumuşak koyu tema
+	Soft Light Theme	Yumuşak açık tema
 	Adwaita Light Theme	Adwaita Işık Teması
 	Adwaita Dark Theme	Adwaita Karanlık Tema
 	Adwaita	Adwaita
@@ -792,7 +816,7 @@
 	Alt	Alternatif
 	Always use pressure for opacity	Opaklık için her zaman baskıyı kullanın
 	Always use pressure for size	Her zaman boyuta göre baskı kullanın
-	Amount	Tutar
+	Amount	Miktar
 	Anchor:	Çapa:
 	Angle	Açı
 	Angle Gradient	Açı Gradyanı
@@ -802,6 +826,9 @@
 	Appearance	Görünüm
 	Appearance (Layer Style)	Görünüm (Katman Stili)
 	Apply Layer Mask	Katman Maskesini Uygula
+	Add Mask to Selection	Maskeyi Seçime Ekle
+	Subtract Mask from Selection	Maskeyi Seçimden Çıkar
+	Intersect Mask with Selection	Maskeyi Seçimle Kesiştir
 	Apply Per Tip	İpucu Başına Uygula
 	Apply next selected layer comp	Sonraki seçilen katman kompozisyonunu uygula
 	Apply previous selected layer comp	Önceki seçilen katman kompozisyonunu uygula
@@ -817,6 +844,7 @@
 	Background	Arka plan
 	Background Color	Arka Plan Rengi
 	Background Contents	Arka Plan İçeriği
+	Custom background color	Özel Arka Plan Rengi
 	Balance	Bakiye
 	Baseline	Temel
 	Baseline shift	Taban çizgisi kayması
@@ -852,6 +880,7 @@
 	Cancel	İptal
 	Reset	Sıfırla
 	Cancel (Esc)	İptal (Esc)
+	Manage submitted jobs in the system print queue	Gönderilen işleri sistem yazdırma kuyruğunda yönetin
 	Cancel any current edits (Esc)	Mevcut düzenlemeleri iptal et (Esc)
 	Cancel current crop operation  (Esc)	Geçerli kırpma işlemini iptal et (Esc)
 	Cancel transform (Esc)	Dönüşümü iptal et (Esc)
@@ -2042,6 +2071,11 @@
 	Rename Brush…	Fırçayı Yeniden Adlandır…
 	Delete Brush	Fırçayı Sil
 	New Brush Preset…	Yeni Fırça Ön Ayarı…
+	Capture Brush Size in Preset	Fırça Boyutunu Ön Ayara Kaydet
+	Include Tool Settings	Araç Ayarlarını Dahil Et
+	Include Color	Rengi Dahil Et
+	Enter a name for the brush preset	Fırça ön ayarı için bir ad girin
+	A brush preset with this name already exists	Bu adda bir fırça ön ayarı zaten var
 	Brush Preset Options	Fırça Ön Ayarı Seçenekleri
 	Group name	Grup adı
 	Brush name	Fırça adı
@@ -2100,6 +2134,10 @@
 	No path to make a selection from: draw one with the Pen tool or select one in the Paths panel.	Seçim yapılabilecek yol yok: Kalem aracıyla bir yol çizin veya Yollar panelinden birini seçin.
 	Cancel opening	Açılışı iptal et
 	Cancelled opening {name}	{name} açılışı iptal edildi
+	The document “{name}” does not have an embedded {mode} profile.	'{name}' belgesinde gömülü bir {mode} profili yok.
+	The document “{name}” has an embedded color profile that does not match the current {mode} working space.	'{name}' belgesinin gömülü renk profili geçerli {mode} çalışma alanıyla eşleşmiyor.
+	Embedded: {embedded}	Gömülü: {embedded}
+	Working: {working}	Çalışma alanı: {working}
 	Developing {name}	{name} geliştiriliyor
 	Cancelled {label}	{label} iptal edildi
 	Esc to cancel	İptal etmek için Esc
@@ -2313,6 +2351,7 @@
 	Color Picker (Stroke Color)	Renk Seçici (Kontur Rengi)
 	Stroke color	Kontur rengi
 	Pick screen color	Ekran rengini seç
+	Pick Color From Image	Görüntüden Renk Seç
 	Sample a pixel anywhere on the screen	Ekranın herhangi bir yerinde bir pikseli örnekleyin
 	Click to pick · Esc to cancel	Seçmek için tıklayın · İptal etmek için Esc
 	Pick a screen pixel or press Esc to cancel	Bir ekran pikseli seçin veya iptal etmek için Esc tuşuna basın
@@ -2422,6 +2461,7 @@ cameraRaw	Color	Renk
 	Remove All	Tümünü Kaldır
 	Unlock	Kilidi aç
 	Enable	Etkinleştir
+	Enable animations	Animasyonları etkinleştir
 	Disable	Devre dışı bırak
 	On	Açık
 	Selected	Seçilen
@@ -2669,7 +2709,7 @@ cameraRaw	Color	Renk
 	Alternative	Alternatif
 	Extra Light	Ekstra Işık
 	Extra Bold	Ekstra Kalın
-	Sharpen Amount	Keskinleştirme Tutarı
+	Sharpen Amount	Keskinleştirme Miktarı
 	Sharpen Radius	Yarıçapı Keskinleştir
 	Sharpen Detail	Detayı Keskinleştir
 	Sharpen Masking	Maskelemeyi Keskinleştir
@@ -2690,7 +2730,7 @@ cameraRaw	Color	Renk
 	Shadow Amount	Gölge Miktarı
 	Shadow Tone	Gölge Tonu
 	Shadow Radius	Gölge Yarıçapı
-	Highlight Amount	Tutarı Vurgula
+	Highlight Amount	Vurgu Miktarı
 	Highlight Tone	Vurgu Tonu
 	Highlight Radius	Yarıçapı Vurgula
 	Midtone	Orta ton
@@ -2720,7 +2760,7 @@ cameraRaw	Color	Renk
 	Leaf Color	Yaprak Rengi
 	Base Tree Type	Temel Ağaç Türü
 	Light Direction	Işık Yönü
-	Leaves Amount	Yaprak Tutarı
+	Leaves Amount	Yaprak Miktarı
 	Leaves Size	Yaprak Boyutu
 	Branches Height	Dal Yüksekliği
 	Branches Thickness	Dal Kalınlığı
@@ -3095,7 +3135,7 @@ cameraRaw	Color	Renk
 	Stroke Direction	Strok Yönü
 	Graininess	Taneciklilik
 	Glow Amount	Işıma Miktarı
-	Clear Amount	Tutarı Temizle
+	Clear Amount	Temizleme Miktarı
 	Distortion	Bozulma
 	Ripple Size	Dalgalanma Boyutu
 	Ripple Magnitude	Dalgalanma Büyüklüğü
@@ -3124,7 +3164,7 @@ cameraRaw	Color	Renk
 	Auto Scale	Otomatik Ölçeklendirme
 	Red Cyan	Kırmızı Camgöbeği
 	Blue Yellow	Mavi Sarı
-	Vignette Amount	Vinyet Tutarı
+	Vignette Amount	Vinyet Miktarı
 	Vignette Midpoint	Vinyet Orta Noktası
 	Constraints	Kısıtlamalar
 	Curve Highlights	Eğrinin Öne Çıkan Noktaları
@@ -3603,6 +3643,7 @@ cameraRaw	Whites	Beyazlar
 	Auto Hide Notifications	Bildirimleri Otomatik Gizle
 	Notification Duration (seconds)	Bildirim Süresi (saniye)
 	Appearance Mode	Görünüm Modu
+	Presentation	Sunum
 	Next Appearance Mode	Sonraki Görünüm Modu
 	Sync with system	Sistemle senkronizasyon
 	Active	Aktif
@@ -3782,3 +3823,73 @@ cameraData	Lens	Lens
 @plural	{n} step|{n} steps	{n} adım
 @plural	{warning} (+{n} more brush preset warning)|{warning} (+{n} more brush preset warnings)	{warning} (+{n} fırça ön ayarı uyarısı daha)
 @plural	{what} with {n} warning|{what} with {n} warnings	{what}, {n} uyarı ile
+	Clear Brush Controls	Fırça Denetimlerini Temizle
+	Reset All Locked Settings	Tüm Kilitli Ayarları Sıfırla
+	Copy Texture to Other Tools	Dokuyu Diğer Araçlara Kopyala
+
+# Actions panel: Load/Save Actions (.atn) and kept Photoshop steps
+	Load Actions…	Eylemleri Yükle…
+	Save Actions…	Eylemleri Kaydet…
+	{name} (Photoshop)	{name} (Photoshop)
+	{message} ({note})	{message} ({note})
+@plural	Loaded {n} action from {file}|Loaded {n} actions from {file}	{file} dosyasından {n} eylem yüklendi
+@plural	{n} step has no PhotoCraft equivalent yet|{n} steps have no PhotoCraft equivalent yet	{n} adımın PhotoCraft’ta henüz karşılığı yok
+@plural	Saved {n} action to {file}|Saved {n} actions to {file}	{n} eylem {file} dosyasına kaydedildi
+@plural	{n} step with no Photoshop equivalent left out|{n} steps with no Photoshop equivalent left out	Photoshop karşılığı olmayan {n} adım atlandı
+
+	Starting serial	Başlangıç sıra numarası
+# Actions panel: set folders, dialog toggle, Insert Stop
+	Insert Stop…	Durdurma Ekle…
+	Save Set…	Seti Kaydet…
+	Message:	İleti:
+	Allow Continue	Devam Etmeye İzin Ver
+	Show dialog during playback	Oynatma sırasında iletişim kutusunu göster
+	Select an action first	Önce bir eylem seçin
+	Action playback stopped	Eylem oynatma durduruldu
+	Step {step} is waiting for its dialog	{step}. adım iletişim kutusunu bekliyor
+@plural	{n} action|{n} actions	{n} eylem
+	Object Finder	Nesne Bulucu
+	No object found there — drag a rectangle around it	Orada nesne bulunamadı — çevresine bir dikdörtgen sürükleyin
+	Drag to pan · Scroll to zoom · Double-click to fit	Kaydırmak için sürükleyin · Yakınlaştırmak için kaydırın · Sığdırmak için çift tıklayın
+	Gradient Preset Options	Gradyan Ön Ayarı Seçenekleri
+	Import .GRD	.GRD İçe Aktar
+	Choose a gradient file (.grd).	Bir gradyan dosyası (.grd) seçin.
+	Save Settings…	Ayarları Kaydet…
+	Load Settings…	Ayarları Yükle…
+	Save these settings as a Camera Raw .xmp file	Bu ayarları Camera Raw .xmp dosyası olarak kaydet
+	Load settings from a Camera Raw .xmp file	Ayarları bir Camera Raw .xmp dosyasından yükle
+	Loaded Camera Raw settings from {file}	Camera Raw ayarları {file} dosyasından yüklendi
+	Loaded Camera Raw settings from {file} ({n} not supported)	Camera Raw ayarları {file} dosyasından yüklendi ({n} desteklenmiyor)
+	Auto Add/Delete	Otomatik Ekle/Sil
+
+# Native Windows printing qualification
+	Don't also tick Mirror Image in Print Settings…: the two flips cancel out.	Yazdırma Ayarlarında ayrıca Ayna Görüntüsünü açmayın: iki yansıtma birbirini iptal eder.
+	Print Settings…	Yazdırma Ayarları…
+	Remember to turn off the printer's own colour management in Print Settings…	Yazdırma Ayarlarında yazıcının kendi renk yönetimini kapatmayı unutmayın…
+	Sent to {printer}	{printer} yazıcısına gönderildi
+	set in Print Settings…	Yazdırma Ayarlarında belirlenir…
+	ICO is limited to 256 × 256 pixels	ICO 256 × 256 piksel ile sınırlıdır
+
+# Channel Options and New Spot Channel (#3761)
+	Channel Color	Kanal Rengi
+	Color Indicates:	Rengin Gösterdiği:
+	Ink Characteristics	Mürekkep Özellikleri
+	Solidity:	Doluluk:
+	Redrawing	Yeniden çiziliyor
+
+# HarmonyOS native controls
+	Battery unavailable	Pil bilgisi kullanılamıyor
+	Battery: {percent}%	Pil: {percent}%
+	Block finger input	Parmak girişini engelle
+	Choose printer, copies and duplex in the system print dialog.	Sistem yazdırma iletişim kutusunda yazıcıyı, kopya sayısını ve çift taraflı yazdırmayı seçin.
+	Connected pen	Bağlı kalem
+	Double-tap pen body	Kalem gövdesine çift dokunma
+	Long-press pen body	Kalem gövdesine uzun basma
+	No pen connected	Bağlı kalem yok
+	Only show canvas	Yalnızca tuvali göster
+	Right sidebar	Sağ kenar çubuğu
+	Stylus	Dijital kalem
+	System print preview opened	Sistem yazdırma önizlemesi açıldı
+	Current tool and Eraser	Geçerli araç ve Silgi
+	Previous tool	Önceki araç
+	Show or hide context menu	Bağlam menüsünü göster veya gizle

@@ -18,11 +18,16 @@ pub fn open(app: &mut PhotocraftApp) -> Result<Value, String> {
     fields.insert(MARK.into(), json!(true));
     fields.insert("__command".into(), json!("layer.duplicate"));
     fields.insert("destination".into(), json!(index));
+    // Photoshop's document-`Name` starts empty; the engine defaults it when empty.
+    fields.insert("documentName".into(), json!(""));
     fields.insert("document".into(), json!(st.doc.id.0));
     fields.insert("selected".into(), json!(selected.iter().map(|id| id.0).collect::<Vec<_>>()));
     // Several selected layers keep their names, as in Photoshop's Duplicate Layers.
     if selected.len() > 1 {
         fields.insert("__label".into(), json!("Duplicate Layers…"));
+    } else if layer.is_group() {
+        fields.insert("__label".into(), json!("Duplicate Group…"));
+        fields.insert("name".into(), json!(st.doc.copy_name(&layer.name)));
     } else {
         fields.insert("__label".into(), json!("Duplicate Layer…"));
         fields.insert("name".into(), json!(st.doc.copy_name(&layer.name)));
@@ -32,9 +37,14 @@ pub fn open(app: &mut PhotocraftApp) -> Result<Value, String> {
 }
 
 pub fn body(app: &PhotocraftApp, ui: &mut egui::Ui, fields: &mut Map<String, Value>) {
-    let documents: Vec<(usize, String)> = app.session.documents().iter().enumerate().map(|(i, d)| (i, d.doc.name.clone())).collect();
-    let options: Vec<(usize, &str)> = documents.iter().map(|(i, n)| (*i, n.as_str())).collect();
-    let mut destination = fields.get("destination").and_then(Value::as_u64).and_then(|i| usize::try_from(i).ok()).unwrap_or(0);
+    let documents: Vec<(String, String)> = app.session.documents().iter().enumerate().map(|(i, d)| (i.to_string(), d.doc.name.clone())).collect();
+    let mut options: Vec<(String, &str)> = documents.iter().map(|(k, n)| (k.clone(), n.as_str())).collect();
+    options.push(("new".to_string(), tl!("New")));
+    let mut destination = match fields.get("destination") {
+        Some(Value::String(s)) if s == "new" => "new".to_string(),
+        Some(Value::Number(n)) => n.to_string(),
+        _ => String::new(),
+    };
     egui::Grid::new("duplicate-layer").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| {
         if let Some(name) = fields.get("name").and_then(Value::as_str) {
             let mut name = name.to_string();
@@ -48,8 +58,20 @@ pub fn body(app: &PhotocraftApp, ui: &mut egui::Ui, fields: &mut Map<String, Val
         ui.label(tl!("Document"));
         crate::widgets::dropdown(ui, "duplicate-layer-document", &mut destination, &options, 260.0);
         ui.end_row();
+        // Photoshop's document-`Name` is only there when the destination is a new document.
+        if destination == "new" {
+            let mut doc_name = fields.get("documentName").and_then(Value::as_str).unwrap_or("").to_string();
+            ui.label(tl!("Name:"));
+            ui.add(egui::TextEdit::singleline(&mut doc_name).desired_width(260.0));
+            fields.insert("documentName".into(), json!(doc_name));
+            ui.end_row();
+        }
     });
-    fields.insert("destination".into(), json!(destination));
+    if destination == "new" {
+        fields.insert("destination".into(), json!("new"));
+    } else if let Ok(i) = destination.parse::<u64>() {
+        fields.insert("destination".into(), json!(i));
+    }
 }
 
 pub fn confirm(app: &mut PhotocraftApp, fields: &Map<String, Value>) -> Result<Value, String> {
@@ -60,16 +82,29 @@ pub fn confirm(app: &mut PhotocraftApp, fields: &Map<String, Value>) -> Result<V
     {
         return Err("The document or selected layers changed. Choose Duplicate Layer again.".into());
     }
-    let destination = fields.get("destination").and_then(Value::as_u64).and_then(|i| usize::try_from(i).ok()).ok_or("no destination document")?;
     let mut params = Map::new();
     if let Some(name) = fields.get("name").and_then(Value::as_str) {
         params.insert("name".into(), json!(name));
     }
-    if destination == index {
-        app.run_command("layer.duplicate", Value::Object(params))
-    } else {
-        params.insert("document".into(), json!(destination));
-        app.run_command("layer.copyToDocument", Value::Object(params))
+    match fields.get("destination") {
+        Some(Value::String(s)) if s == "new" => {
+            if let Some(doc_name) = fields.get("documentName").and_then(Value::as_str).filter(|n| !n.is_empty()) {
+                params.insert("documentName".into(), json!(doc_name));
+            }
+            params.insert("document".into(), json!("new"));
+            app.run_command("layer.duplicate", Value::Object(params))
+        }
+        Some(Value::Number(n)) => {
+            let destination =
+                n.as_u64().and_then(|i| usize::try_from(i).ok()).filter(|i| *i < app.session.documents().len()).ok_or("no destination document")?;
+            if destination == index {
+                app.run_command("layer.duplicate", Value::Object(params))
+            } else {
+                params.insert("document".into(), json!(destination));
+                app.run_command("layer.copyToDocument", Value::Object(params))
+            }
+        }
+        _ => Err("no destination document".into()),
     }
 }
 
@@ -112,6 +147,42 @@ mod tests {
         crate::dialogs::confirm(&mut app, dialog).unwrap();
         assert_eq!(app.session.documents()[0].doc.layer_count(), 2);
         assert!(names(&app, 1).contains(&"Ink copy".to_string()));
+    }
+
+    #[test]
+    fn a_new_destination_makes_a_named_document_holding_just_the_copy() {
+        let mut app = make_app();
+        let dialog = invoke(&mut app);
+        let fields = &mut app.ui.dialog_mut(dialog).unwrap().fields;
+        fields.insert("destination".into(), json!("new"));
+        fields.insert("documentName".into(), json!("Card"));
+        crate::dialogs::confirm(&mut app, dialog).unwrap();
+        assert_eq!(app.session.documents().len(), 2);
+        assert_eq!(app.session.active_index(), Some(1));
+        assert_eq!(app.session.documents()[1].doc.name, "Card");
+        assert_eq!(app.session.documents()[0].doc.layer_count(), 2, "the source is untouched");
+        assert!(names(&app, 1).contains(&"Ink copy".to_string()));
+    }
+
+    #[test]
+    fn a_new_destination_without_a_name_defaults_it_and_refuses_a_dead_index() {
+        let mut app = make_app();
+        let dialog = invoke(&mut app);
+        app.ui.dialog_mut(dialog).unwrap().fields.insert("destination".into(), json!("new"));
+        crate::dialogs::confirm(&mut app, dialog).unwrap();
+        assert_eq!(app.session.documents()[1].doc.name, "Poster copy");
+        let dialog = invoke(&mut app);
+        app.ui.dialog_mut(dialog).unwrap().fields.insert("destination".into(), json!(7));
+        assert!(crate::dialogs::confirm(&mut app, dialog).is_err());
+        assert_eq!(app.session.documents().len(), 2);
+    }
+
+    #[test]
+    fn a_single_group_gets_the_group_title() {
+        let mut app = make_app();
+        app.session.execute("layer.new.group", json!({"name": "Pack"})).unwrap();
+        let _dialog = invoke(&mut app);
+        assert_eq!(app.ui.dialogs[0].fields["__label"], "Duplicate Group…");
     }
 
     #[test]

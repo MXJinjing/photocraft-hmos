@@ -213,3 +213,43 @@ fn refine_row_opens_the_select_and_mask_and_color_range_dialogs() {
         }
     }
 }
+
+/// A Studio-layout theme's floating Properties card, with no mask targeted.
+fn card_harness(new_layer: bool, theme: crate::theme::ThemeKind) -> Harness<'static, PhotocraftApp> {
+    let mut session = photocraft_engine::Session::new();
+    session.execute("file.new", json!({"width": 64, "height": 64, "background": "white"})).unwrap();
+    if new_layer {
+        session.execute("layer.new.layer", json!({})).unwrap();
+    }
+    let mut app = PhotocraftApp::new(session, crate::Services::default());
+    app.ui.panels.properties = true;
+    app.last_canvas_rect = Rect::from_min_size(egui::Pos2::ZERO, vec2(800.0, 600.0));
+    let mut h = Harness::builder().with_size(vec2(800.0, 600.0)).with_step_dt(1.0 / 60.0).build_ui_state(
+        |ui, app: &mut PhotocraftApp| {
+            if ui.ctx().fonts(|f| f.families().contains(&egui::FontFamily::Name("semibold".into()))) {
+                properties_window(app, ui.ctx());
+            }
+        },
+        app,
+    );
+    PhotocraftApp::setup_context(&h.ctx, theme);
+    h.run_steps(4);
+    h
+}
+
+#[test]
+fn floating_properties_card_shows_document_properties_for_the_background() {
+    for theme in [crate::theme::ThemeKind::Studio, crate::theme::ThemeKind::BreezeDark] {
+        let h = card_harness(false, theme);
+        assert!(h.query_all_by_label("Document").next().is_some(), "{theme:?}: Document properties in the card");
+    }
+}
+
+#[test]
+fn floating_properties_card_shows_pixel_layer_properties() {
+    for theme in [crate::theme::ThemeKind::Studio, crate::theme::ThemeKind::BreezeDark] {
+        let h = card_harness(true, theme);
+        assert!(h.query_all_by_label("Opacity").next().is_some(), "{theme:?}: layer controls in the card");
+        assert!(h.query_all_by_label("Document").next().is_none());
+    }
+}

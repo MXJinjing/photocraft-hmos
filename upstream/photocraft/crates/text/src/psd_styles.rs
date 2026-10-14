@@ -38,7 +38,12 @@ pub struct PsdStyleSheets {
 }
 
 fn k_of(dpi: f32) -> f32 {
-    72.0 / if dpi > 0.0 { dpi } else { 72.0 }
+    72.0 / if dpi.is_finite() && dpi > 0.0 { dpi } else { 72.0 }
+}
+
+/// A sheet index from EngineData. A negative or overflowing index is not a slot (#4429).
+fn sheet_index(v: i64) -> Option<usize> {
+    usize::try_from(v).ok()
 }
 
 fn names(set: Option<&E>) -> Vec<String> {
@@ -48,7 +53,7 @@ fn names(set: Option<&E>) -> Vec<String> {
 /// Index a run's sheet dictionary refers to (`Parent` index, else `Name`), skipping `normal`.
 fn reference(sheet: Option<&E>, set_names: &[String], normal: usize) -> Option<usize> {
     let s = sheet?;
-    let i = s.get("Parent").and_then(E::as_i64).map(|i| i as usize).or_else(|| {
+    let i = s.get("Parent").and_then(E::as_i64).and_then(sheet_index).or_else(|| {
         let n = s.get("Name").and_then(E::as_str)?;
         set_names.iter().position(|x| x == n)
     })?;
@@ -78,8 +83,8 @@ pub fn read_style_sheets(tysh: &[u8], dpi: f32) -> Option<PsdStyleSheets> {
     let fonts: Vec<String> = names(res.get("FontSet"));
     let sset = res.get("StyleSheetSet").and_then(E::as_array).unwrap_or(&[]);
     let pset = res.get("ParagraphSheetSet").and_then(E::as_array).unwrap_or(&[]);
-    let normal_c = res.get("TheNormalStyleSheet").and_then(E::as_i64).unwrap_or(0) as usize;
-    let normal_p = res.get("TheNormalParagraphSheet").and_then(E::as_i64).unwrap_or(0) as usize;
+    let normal_c = res.get("TheNormalStyleSheet").and_then(E::as_i64).and_then(sheet_index).unwrap_or(0);
+    let normal_p = res.get("TheNormalParagraphSheet").and_then(E::as_i64).and_then(sheet_index).unwrap_or(0);
     let empty = E::dict();
     let base_data = sset.get(normal_c).and_then(|s| s.get("StyleSheetData"));
     let normal_char = char_style(None, base_data.unwrap_or(&empty), &fonts, k);
@@ -100,7 +105,7 @@ pub fn read_style_sheets(tysh: &[u8], dpi: f32) -> Option<PsdStyleSheets> {
         }
         let name = s.get("Name").and_then(E::as_str).unwrap_or("").to_string();
         let props = s.get("Properties").unwrap_or(&empty);
-        let dss = s.get("DefaultStyleSheet").and_then(E::as_i64).map(|i| i as usize).filter(|i| *i != normal_c);
+        let dss = s.get("DefaultStyleSheet").and_then(E::as_i64).and_then(sheet_index).filter(|i| *i != normal_c);
         let cs = dss.and_then(|d| sset.get(d)).map(|d| char_style(base_data, d.get("StyleSheetData").unwrap_or(&empty), &fonts, k));
         out.para_sheets.push((i, name, para_style(base_props, props, k), cs));
     }
@@ -144,8 +149,8 @@ pub fn write_style_sheets(tysh: &[u8], layer: &TextLayer, styles: &TextStyles, d
     for key in ["ResourceDict", "DocumentResources"] {
         let Some(rd) = e.get_mut(key) else { continue };
         let mut fonts = names(rd.get("FontSet"));
-        let normal_c = rd.get("TheNormalStyleSheet").and_then(E::as_i64).unwrap_or(0) as usize;
-        let normal_p = rd.get("TheNormalParagraphSheet").and_then(E::as_i64).unwrap_or(0) as usize;
+        let normal_c = rd.get("TheNormalStyleSheet").and_then(E::as_i64).and_then(sheet_index).unwrap_or(0);
+        let normal_p = rd.get("TheNormalParagraphSheet").and_then(E::as_i64).and_then(sheet_index).unwrap_or(0);
         let keep_c = rd.get("StyleSheetSet").and_then(E::as_array).and_then(|a| a.get(normal_c).or(a.first())).cloned();
         let keep_p = rd.get("ParagraphSheetSet").and_then(E::as_array).and_then(|a| a.get(normal_p).or(a.first())).cloned();
         let mut font_index = |s: &CharStyle| {
@@ -249,6 +254,14 @@ mod tests {
     use super::*;
     use photocraft_doc::text::{TextAlign, TextRun};
     use photocraft_doc::text_styles::{CharacterStyleDef, ParagraphStyleDef, diff_attrs};
+
+    #[test]
+    fn a_negative_sheet_index_is_not_a_slot_and_infinite_dpi_uses_72() {
+        assert_eq!(sheet_index(-1), None);
+        assert_eq!(sheet_index(2), Some(2));
+        assert_eq!(k_of(f32::INFINITY), 1.0);
+        assert_eq!(k_of(144.0), 0.5);
+    }
 
     #[test]
     fn named_sheets_round_trip() {

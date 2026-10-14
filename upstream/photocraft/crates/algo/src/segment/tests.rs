@@ -345,6 +345,45 @@ fn quick_select_with_points_far_off_canvas_selects_nothing() {
 }
 
 #[test]
+fn quick_select_cuts_window_sizes_in_parallel_with_the_same_result() {
+    // Soft gradients and faint blobs let a selection spread, so most strokes need more than one
+    // window size; cutting several at once must keep exactly what one-after-another keeps.
+    let (w, h) = (1200usize, 900usize);
+    let img = RgbImage::from_fn(w, h, |x, y| {
+        let (fx, fy) = (x as f32 / w as f32, y as f32 / h as f32);
+        let blob = (((fx * 9.0).sin() * (fy * 7.0).cos()) * 0.5 + 0.5) * 0.06;
+        [0.3 + 0.4 * fx + blob, 0.5 + 0.2 * fy, 0.7 - 0.3 * fx + blob]
+    });
+    let s = ImageSampler { img: &img, origin: (0, 0) };
+    let canvas = Rect::new(0, 0, w as i32, h as i32);
+    let t = quick::Tuning::default();
+    let strokes: [(&[(f32, f32)], f32); 4] = [
+        (&[(300.0, 300.0)], 30.0),
+        (&[(500.0, 400.0), (580.0, 400.0), (660.0, 420.0)], 60.0),
+        (&[(200.0, 700.0), (260.0, 650.0), (320.0, 700.0), (380.0, 650.0)], 30.0),
+        (&[(900.0, 200.0)], 120.0),
+    ];
+    let mut most = 0;
+    for (pts, size) in strokes {
+        let one = quick::quick_select_batched::<true>(&s, canvas, pts, size, &t, 1);
+        let many = quick::quick_select_batched::<true>(&s, canvas, pts, size, &t, 4);
+        assert_eq!(one.as_ref().map(|(r, n)| (r.bbox, &r.mask, n)), many.as_ref().map(|(r, n)| (r.bbox, &r.mask, n)), "{pts:?} size {size}");
+        most = most.max(one.map_or(0, |(_, n)| n));
+    }
+    assert!(most > 1, "no stroke needed a larger window, so the test exercises nothing");
+}
+
+#[test]
+fn quick_select_window_sizes_stop_at_the_canvas() {
+    let canvas = Rect::new(0, 0, 1000, 800);
+    let bbox = Rect::new(400, 300, 460, 360);
+    assert_eq!(quick::margins_to_try(96, bbox, canvas, 4), vec![96, 192, 384, 768]);
+    // 768 already covers the canvas: no larger (identical) window is cut.
+    assert_eq!(quick::margins_to_try(384, bbox, canvas, 4), vec![384, 768]);
+    assert_eq!(quick::margins_to_try(96, bbox, canvas, 0), vec![96]);
+}
+
+#[test]
 fn quick_select_grows_without_leaking() {
     let img = two_regions(140, 100);
     let s = ImageSampler { img: &img, origin: (0, 0) };
@@ -526,6 +565,87 @@ fn select_subject_finds_centred_object() {
     assert!(v > 0.9, "IoU {v}");
 }
 
+/// Counts full-resolution reads; the working copy goes through `rgb_scaled` uncounted, so each
+/// read is one band tile of the full-resolution re-cut.
+struct TileReads<'a>(ImageSampler<'a>, std::sync::atomic::AtomicUsize);
+
+impl Sampler for TileReads<'_> {
+    fn rgba(&self, r: Rect) -> Vec<[f32; 4]> {
+        self.1.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.0.rgba(r)
+    }
+    fn rgb_scaled(&self, r: Rect, step: usize) -> RgbImage {
+        self.0.rgb_scaled(r, step)
+    }
+}
+
+#[test]
+fn finish_region_cancel_stops_inside_the_band_cut() {
+    use photocraft_raster::{Cancelled, Interrupt};
+    use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
+    // One 180-pixel window is one band tile, and nothing asks after the band re-cut, so a cancel
+    // seen after the tile's own check can only have been seen inside its min cut.
+    let (n, step) = (180, 3);
+    let (img, truth) = disc_scene(n, n, 90.0, 90.0, 55.0, 4);
+    let s = ImageSampler { img: &img, origin: (0, 0) };
+    let ln = n / step;
+    let low: Vec<bool> = (0..ln * ln).map(|i| truth[((i / ln) * step + 1) * n + (i % ln) * step + 1]).collect();
+    let (fs, bs): (Vec<_>, Vec<_>) = img.px.iter().zip(&truth).partition(|(_, t)| **t);
+    let fit = |v: Vec<(&[f32; 3], &bool)>| Gmm::fit(&v.iter().map(|(p, _)| **p).collect::<Vec<_>>(), 5, gmm::DEFAULT_REG).unwrap();
+    let (fg, bg) = (fit(fs), fit(bs));
+    let window = Rect::new(0, 0, n as i32, n as i32);
+    let polls = AtomicUsize::new(0);
+    let finish = |cancel_from: usize| {
+        polls.store(0, SeqCst);
+        let cancel = || polls.fetch_add(1, SeqCst) + 1 >= cancel_from;
+        finish_region_with(&s, window, step, &low, ln, ln, Some((&fg, &bg)), &Interrupt::cancel_only(&cancel))
+    };
+    let reg = finish(usize::MAX).unwrap().unwrap();
+    assert!(polls.load(SeqCst) >= 2, "the cut polls too ({} polls)", polls.load(SeqCst));
+    assert!(iou(&reg, &truth, n, n) > 0.95);
+    assert_eq!(finish_region(&s, window, step, &low, ln, ln, Some((&fg, &bg))), Some(reg));
+    // Cancelled at the cut's first poll (the second in all): no region.
+    assert_eq!(finish(2), Err(Cancelled));
+    assert_eq!(polls.load(SeqCst), 2);
+    assert_eq!(finish(1), Err(Cancelled), "cancelled before the tile");
+}
+
+#[test]
+fn select_subject_cancelled_in_the_band_recut_reads_no_more_tiles() {
+    use photocraft_raster::{Cancelled, Interrupt};
+    use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
+    let (w, h) = (3000, 2000);
+    let (img, truth) = disc_scene(w, h, 1500.0, 1000.0, 700.0, 6);
+    let canvas = Rect::new(0, 0, w as i32, h as i32);
+    let sampler = || TileReads(ImageSampler { img: &img, origin: (0, 0) }, AtomicUsize::new(0));
+
+    // Not cancelled: the same region as `select_subject`, and the band cuts themselves ask
+    // (more polls once tiles are read than the one check before each tile).
+    let s = sampler();
+    let band_polls = AtomicUsize::new(0);
+    let count = || {
+        if s.1.load(SeqCst) > 0 {
+            band_polls.fetch_add(1, SeqCst);
+        }
+        false
+    };
+    let reg = subject::select_subject_with(&s, canvas, &Interrupt::cancel_only(&count)).unwrap().unwrap();
+    let tiles = s.1.load(SeqCst);
+    assert!(tiles > 4, "{tiles} band tiles");
+    assert!(band_polls.load(SeqCst) > tiles, "{} polls over {tiles} tiles", band_polls.load(SeqCst));
+    assert!(iou(&reg, &truth, w, h) > 0.9);
+    assert_eq!(subject::select_subject(&sampler(), canvas), Some(reg));
+
+    // Cancelled once the first tile is read: the run stops there instead of re-cutting every
+    // tile. One thread, so no other tile is already in flight.
+    let s = sampler();
+    let cancel = || s.1.load(SeqCst) > 0;
+    let pool = rayon::ThreadPoolBuilder::new().num_threads(1).build().unwrap();
+    let r = pool.install(|| subject::select_subject_with(&s, canvas, &Interrupt::cancel_only(&cancel)));
+    assert_eq!(r, Err(Cancelled));
+    assert_eq!(s.1.load(SeqCst), 1, "tiles read after the cancel");
+}
+
 #[test]
 fn saliency_highlights_the_object() {
     let (img, truth) = disc_scene(120, 90, 60.0, 45.0, 22.0, 8);
@@ -619,4 +739,25 @@ fn dump_quick_scenes() {
     });
     save("thin_line", &line);
     save("disc_scene", &disc_scene(600, 500, 300.0, 250.0, 180.0, 4).0);
+}
+
+#[test]
+fn object_at_finds_the_disc_under_the_cursor() {
+    let (img, truth) = disc_scene(320, 240, 160.0, 120.0, 70.0, 7);
+    let s = ImageSampler { img: &img, origin: (0, 0) };
+    let canvas = Rect::new(0, 0, 320, 240);
+    let reg = grabcut::object_at(&s, canvas, 165.0, 118.0, 20_000).unwrap();
+    let v = iou(&reg, &truth, 320, 240);
+    assert!(v > 0.9, "IoU {v}");
+}
+
+#[test]
+fn object_at_on_the_background_or_off_canvas_finds_nothing() {
+    let (img, _) = disc_scene(320, 240, 160.0, 120.0, 70.0, 7);
+    let s = ImageSampler { img: &img, origin: (0, 0) };
+    let canvas = Rect::new(0, 0, 320, 240);
+    assert!(grabcut::object_at(&s, canvas, 10.0, 10.0, 20_000).is_none());
+    assert!(grabcut::object_at(&s, canvas, -5.0, 10.0, 20_000).is_none());
+    assert!(grabcut::object_at(&s, canvas, f32::NAN, 10.0, 20_000).is_none());
+    assert!(grabcut::object_at(&s, canvas, 400.0, 10.0, 0).is_none());
 }

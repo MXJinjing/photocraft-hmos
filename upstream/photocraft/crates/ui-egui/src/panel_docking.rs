@@ -404,7 +404,9 @@ pub(crate) fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> bool {
         style.tab_height = if t.pro { 28.0 } else { 40.0 };
         style.min_pane = 0.0;
         style.background = t.card;
-        style.tab_background = t.tab_strip;
+        // Studio themes leave the strip transparent over the dock's card; a floating group has no
+        // card behind it, so the canvas showed through its titles (#4509).
+        style.tab_background = if t.tab_strip.a() == 0 { t.card } else { t.tab_strip };
         style.active_background = t.card;
         style.text = t.text;
         style.inactive_text = t.text_dim;
@@ -841,6 +843,14 @@ fn panel_menu(app: &mut PhotocraftApp, ui: &mut egui::Ui, panel: &str) {
         }
         "swatches" => {
             crate::swatches_ui::panel_menu(app, ui);
+            ui.separator();
+        }
+        "brushSettings" | "brush_settings" => {
+            crate::brush_panel::panel_menu(app, ui);
+            ui.separator();
+        }
+        "actions" => {
+            crate::actions::panel_menu(app, ui);
             ui.separator();
         }
         _ => {}

@@ -17,6 +17,10 @@ on:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
+  # No test or fuzz run may print a page: the engine refuses to spool, and if something ever
+  # bypasses that, lp fails loudly on a printer that does not exist.
+  PHOTOCRAFT_NO_PRINT: "1"
+  LPDEST: photocraft-no-such-printer
   # Debug and test builds keep line tables (file:line in panic backtraces) but drop the rest of the
   # debug info: faster codegen and links (Windows PDBs most of all), and a target dir small enough
   # for the Linux job's second, craft-fonts build (it ran out of disk with full debug info).

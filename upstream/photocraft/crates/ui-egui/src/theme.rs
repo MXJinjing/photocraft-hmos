@@ -48,10 +48,14 @@ pub enum ThemeKind {
     BreezeLight,
     /// An adaptation of KDE Plasma's Breeze Dark look.
     BreezeDark,
+    /// A low-contrast dark theme: muted violet-grey surfaces, softened text and a periwinkle accent.
+    SoftDark,
+    /// A low-contrast light theme: pale violet-grey surfaces, softened dark text and a periwinkle accent.
+    SoftLight,
 }
 
 impl ThemeKind {
-    pub const ALL: [ThemeKind; 12] = [
+    pub const ALL: [ThemeKind; 14] = [
         ThemeKind::Pro,
         ThemeKind::ProMedium,
         ThemeKind::ProLightGray,
@@ -64,6 +68,8 @@ impl ThemeKind {
         ThemeKind::AdwaitaDark,
         ThemeKind::BreezeLight,
         ThemeKind::BreezeDark,
+        ThemeKind::SoftDark,
+        ThemeKind::SoftLight,
     ];
     pub fn label(self) -> &'static str {
         match self {
@@ -79,6 +85,8 @@ impl ThemeKind {
             ThemeKind::SolarizedDark => "Solarized Dark",
             ThemeKind::BreezeLight => "Breeze Light",
             ThemeKind::BreezeDark => "Breeze Dark",
+            ThemeKind::SoftDark => "Soft Dark",
+            ThemeKind::SoftLight => "Soft Light",
         }
     }
     /// The canonical name: `ui.set {theme}` accepts it and the Window › Theme commands are
@@ -97,6 +105,8 @@ impl ThemeKind {
             ThemeKind::SolarizedDark => "solarizedDark",
             ThemeKind::BreezeLight => "breezeLight",
             ThemeKind::BreezeDark => "breezeDark",
+            ThemeKind::SoftDark => "softDark",
+            ThemeKind::SoftLight => "softLight",
         }
     }
     /// Photoshop-grammar layout (tab strips, flat panels): the four Pro brightness levels.
@@ -118,15 +128,17 @@ impl ThemeKind {
             "pro" | "prodark" | "photoshop" | "dark" => Some(ThemeKind::Pro),
             "promedium" | "promediumgray" | "medium" | "mediumgray" => Some(ThemeKind::ProMedium),
             "prolightgray" | "lightgray" | "mediumlight" => Some(ThemeKind::ProLightGray),
-            "prolight" | "prolightest" | "lightest" => Some(ThemeKind::ProLight),
+            "prolight" | "prolightest" | "lightest" | "light" => Some(ThemeKind::ProLight),
             "studio" | "studiodark" => Some(ThemeKind::Studio),
-            "studiolight" | "light" => Some(ThemeKind::StudioLight),
+            "studiolight" => Some(ThemeKind::StudioLight),
             "classic" | "win2000" | "retro" => Some(ThemeKind::Classic),
             "adwaita" | "adwaitalight" | "gnome" | "gnomelight" => Some(ThemeKind::Adwaita),
             "adwaitadark" | "gnomedark" => Some(ThemeKind::AdwaitaDark),
             "solarizeddark" | "solarized" => Some(ThemeKind::SolarizedDark),
             "breezelight" | "breeze" | "kde" | "kdelight" | "plasma" | "plasmalight" => Some(ThemeKind::BreezeLight),
             "breezedark" | "kdedark" | "plasmadark" => Some(ThemeKind::BreezeDark),
+            "softdark" => Some(ThemeKind::SoftDark),
+            "softlight" => Some(ThemeKind::SoftLight),
             _ => None,
         }
     }
@@ -618,6 +630,93 @@ impl Tokens {
                 caption_close_text: Color32::WHITE,
                 scrim: Color32::from_black_alpha(110),
             },
+            // Soft Dark: our own low-contrast palette on the Studio layout. Muted violet-grey
+            // surfaces (never near-black), softened off-white text and a periwinkle accent; the
+            // text colours still hold 4.5:1 on every surface (checked by the tests).
+            ThemeKind::SoftDark => Tokens {
+                online: Color32::from_rgb(80, 190, 125),
+                kind,
+                chrome: Color32::from_rgb(58, 58, 68),
+                canvas: Color32::from_rgb(40, 40, 48),
+                canvas_dot: Color32::from_rgb(40, 40, 48),
+                dock: Color32::from_rgb(47, 47, 56),
+                card: Color32::from_rgb(54, 54, 64),
+                card_border: Color32::from_rgb(70, 70, 82),
+                field: Color32::from_rgb(64, 64, 75),
+                field_border: Color32::from_rgb(84, 84, 98),
+                hover: Color32::from_rgb(68, 68, 80),
+                pressed: Color32::from_rgb(74, 74, 88),
+                text: Color32::from_rgb(238, 238, 246),
+                text_dim: Color32::from_rgb(212, 212, 224),
+                text_faint: Color32::from_rgb(190, 190, 206),
+                icon: Color32::from_rgb(214, 214, 226),
+                accent: Color32::from_rgb(138, 154, 232),
+                accent_soft: Color32::from_rgba_unmultiplied(138, 154, 232, 48),
+                accent_border: Color32::from_rgba_unmultiplied(138, 154, 232, 150),
+                accent_text: Color32::from_rgb(190, 200, 252),
+                separator: Color32::from_rgb(36, 36, 44),
+                shadow: Color32::from_black_alpha(110),
+                primary_bg: Color32::from_rgb(86, 104, 196),
+                primary_text: Color32::WHITE,
+                danger: Color32::from_rgb(250, 160, 172),
+                warning: Color32::from_rgb(240, 200, 130),
+                radius_sm: 7.0,
+                radius: 10.0,
+                radius_lg: 14.0,
+                bevel: false,
+                pro: false,
+                round_chips: true,
+                tab_strip: Color32::TRANSPARENT,
+                row_selected: Color32::TRANSPARENT,
+                histogram_bg: Color32::from_rgb(40, 40, 48),
+                histogram_level: 220,
+                caption_close: Color32::from_rgb(200, 72, 86),
+                caption_close_text: Color32::WHITE,
+                scrim: Color32::from_black_alpha(100),
+            },
+            // Soft Light: pale violet-grey surfaces, softened dark-violet text (not black) and a
+            // periwinkle accent, with the same generous radii as Soft Dark.
+            ThemeKind::SoftLight => Tokens {
+                online: Color32::from_rgb(30, 140, 80),
+                kind,
+                chrome: Color32::from_rgb(232, 230, 236),
+                canvas: Color32::from_rgb(218, 216, 224),
+                canvas_dot: Color32::from_rgb(218, 216, 224),
+                dock: Color32::from_rgb(226, 224, 231),
+                card: Color32::from_rgb(240, 238, 243),
+                card_border: Color32::from_rgb(208, 205, 215),
+                field: Color32::from_rgb(250, 249, 252),
+                field_border: Color32::from_rgb(190, 187, 201),
+                hover: Color32::from_rgb(228, 226, 234),
+                pressed: Color32::from_rgb(212, 209, 221),
+                text: Color32::from_rgb(44, 42, 56),
+                text_dim: Color32::from_rgb(62, 60, 76),
+                text_faint: Color32::from_rgb(80, 78, 96),
+                icon: Color32::from_rgb(64, 62, 80),
+                accent: Color32::from_rgb(110, 128, 216),
+                accent_soft: Color32::from_rgba_unmultiplied(110, 128, 216, 44),
+                accent_border: Color32::from_rgba_unmultiplied(110, 128, 216, 170),
+                accent_text: Color32::from_rgb(46, 58, 146),
+                separator: Color32::from_rgb(210, 207, 218),
+                shadow: Color32::from_black_alpha(40),
+                primary_bg: Color32::from_rgb(80, 98, 190),
+                primary_text: Color32::WHITE,
+                danger: Color32::from_rgb(166, 44, 62),
+                warning: Color32::from_rgb(140, 72, 0),
+                radius_sm: 7.0,
+                radius: 10.0,
+                radius_lg: 14.0,
+                bevel: false,
+                pro: false,
+                round_chips: true,
+                tab_strip: Color32::TRANSPARENT,
+                row_selected: Color32::TRANSPARENT,
+                histogram_bg: Color32::from_rgb(44, 42, 56),
+                histogram_level: 240,
+                caption_close: Color32::from_rgb(200, 60, 72),
+                caption_close_text: Color32::WHITE,
+                scrim: Color32::from_black_alpha(90),
+            },
             // Ethan Schoonover's Solarized Dark palette: base03 canvas, base02 surfaces, base0
             // body text and the Solarized blue accent. https://ethanschoonover.com/solarized/
             // (MIT; see LICENSE-solarized.txt)
@@ -731,7 +830,13 @@ impl Tokens {
     pub fn dark(&self) -> bool {
         matches!(
             self.kind,
-            ThemeKind::Studio | ThemeKind::Pro | ThemeKind::ProMedium | ThemeKind::SolarizedDark | ThemeKind::AdwaitaDark | ThemeKind::BreezeDark
+            ThemeKind::Studio
+                | ThemeKind::Pro
+                | ThemeKind::ProMedium
+                | ThemeKind::SolarizedDark
+                | ThemeKind::AdwaitaDark
+                | ThemeKind::BreezeDark
+                | ThemeKind::SoftDark
         )
     }
 }
@@ -954,7 +1059,15 @@ pub fn apply(ctx: &egui::Context, kind: ThemeKind) {
         s.visuals.indent_has_left_vline = false;
         s.interaction.tooltip_delay = TOOLTIP_DELAY;
         // Thin overlay scrollbars that appear on hover (Photoshop/macOS style).
-        s.spacing.scroll = if t.bevel { egui::style::ScrollStyle::solid() } else { egui::style::ScrollStyle::thin() };
+        // Thin bars stay visible, including while the pointer is on them. The stock thin
+        // style fades the handle to the same opacity as the track, so the thumb disappears (#4611).
+        let mut scroll = if t.bevel { egui::style::ScrollStyle::solid() } else { egui::style::ScrollStyle::thin() };
+        if scroll.floating {
+            scroll.interact_handle_opacity = 1.0;
+            scroll.interact_background_opacity = 0.4;
+            scroll.floating_width = 4.0;
+        }
+        s.spacing.scroll = scroll;
         s.spacing.tooltip_width = 280.0;
     });
     // egui selects its style branch using OS appearance, independently of PhotoCraft's fixed
@@ -1110,6 +1223,7 @@ mod tests {
         assert_eq!(ThemeKind::from_name("Classic"), Some(ThemeKind::Classic));
         assert_eq!(ThemeKind::from_name("studio (light)"), Some(ThemeKind::StudioLight));
         assert_eq!(ThemeKind::from_name("dark"), Some(ThemeKind::Pro));
+        assert_eq!(ThemeKind::from_name("light"), Some(ThemeKind::ProLight));
         assert_eq!(ThemeKind::from_name("studio"), Some(ThemeKind::Studio));
         assert_eq!(ThemeKind::from_name("Pro (Medium Gray)"), Some(ThemeKind::ProMedium));
         assert_eq!(ThemeKind::from_name("Solarized Dark"), Some(ThemeKind::SolarizedDark));
@@ -1190,6 +1304,42 @@ mod tests {
             assert!(contrast(t.primary_text, t.primary_bg) >= 3.0, "{kind:?}: suggested-action button label");
         }
         assert_eq!(ThemeKind::from_name("gnome dark"), Some(ThemeKind::AdwaitaDark));
+    }
+
+    #[test]
+    fn soft_themes_parse_and_hold_text_contrast() {
+        for (kind, alias) in [(ThemeKind::SoftDark, "soft dark"), (ThemeKind::SoftLight, "Soft_Light")] {
+            assert_eq!(ThemeKind::from_name(kind.id()), Some(kind));
+            assert_eq!(ThemeKind::from_name(kind.label()), Some(kind));
+            assert_eq!(ThemeKind::from_name(alias), Some(kind));
+            assert!(ThemeKind::ALL.contains(&kind));
+            let t = Tokens::for_kind(kind);
+            assert_eq!(t.kind, kind);
+            assert_eq!(t.dark(), kind == ThemeKind::SoftDark);
+            assert!(!t.pro && !t.bevel);
+            // Soft means no extremes: surfaces stay off black and white.
+            for c in [t.chrome, t.canvas, t.dock, t.card, t.field] {
+                let (hi, lo) = (c.r().max(c.g()).max(c.b()), c.r().min(c.g()).min(c.b()));
+                assert!(if t.dark() { (32..96).contains(&hi) } else { hi < 255 && lo > 200 }, "{kind:?}: {c:?}");
+            }
+            let tint = |under: Color32| {
+                let k = f32::from(t.accent_soft.a()) / 255.0;
+                let ch = |over: u8, under: u8| (f32::from(over) * k + f32::from(under) * (1.0 - k)).round() as u8;
+                Color32::from_rgb(ch(t.accent.r(), under.r()), ch(t.accent.g(), under.g()), ch(t.accent.b(), under.b()))
+            };
+            let surfaces = [t.chrome, t.canvas, t.dock, t.card, t.field, t.hover, t.pressed, tint(t.dock), tint(t.card)];
+            for (i, surface) in surfaces.into_iter().enumerate() {
+                for (name, colour) in [("text", t.text), ("dim", t.text_dim), ("faint", t.text_faint), ("accent text", t.accent_text)] {
+                    assert!(contrast(colour, surface) >= 4.5, "{kind:?}: {name} on {surface:?}");
+                }
+                // Status colours are marks on hovered or selected surfaces (3:1), text on resting ones.
+                let floor = if i < 5 { 4.5 } else { 3.0 };
+                assert!(contrast(t.danger, surface) >= floor && contrast(t.warning, surface) >= floor, "{kind:?}: status on {surface:?}");
+            }
+            for k in [1.0, 0.93, 0.85] {
+                assert!(contrast(t.primary_text, t.primary_bg.gamma_multiply(k)) >= 4.5, "{kind:?}: primary at {k}");
+            }
+        }
     }
 
     #[test]

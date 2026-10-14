@@ -39,6 +39,8 @@ void pc_close();
 void pc_input(const uint8_t*,size_t);
 void pc_reply(uint64_t,bool,const uint8_t*,size_t,const uint8_t*,size_t);
 void pc_open(const uint8_t*,size_t,const uint8_t*,size_t);
+void pc_reply_file(uint64_t,const uint8_t*,size_t,int32_t);
+void pc_open_file(const uint8_t*,size_t,int32_t);
 void pc_command(const uint8_t*,size_t);
 }
 namespace {
@@ -175,6 +177,11 @@ void Mouse(OH_NativeXComponent* c,void* window) {
     if(penContact || fingerContact)return;
     OH_NativeXComponent_MouseEvent e{};
     if(OH_NativeXComponent_GetMouseEvent(c,window,&e)!=OH_NATIVEXCOMPONENT_RESULT_SUCCESS)return;
+    if(e.action==OH_NATIVEXCOMPONENT_MOUSE_CANCEL){Json("{\"kind\":\"pointer\",\"action\":3}");return;}
+    // Proximity callbacks can expose a cached mouse event with action NONE.
+    // Only actual movement or button events may make the brush tip visible again.
+    if(e.action!=OH_NATIVEXCOMPONENT_MOUSE_PRESS && e.action!=OH_NATIVEXCOMPONENT_MOUSE_RELEASE &&
+       e.action!=OH_NATIVEXCOMPONENT_MOUSE_MOVE)return;
     int action=e.action==OH_NATIVEXCOMPONENT_MOUSE_PRESS?0:e.action==OH_NATIVEXCOMPONENT_MOUSE_RELEASE?1:2;
     int button=e.button==OH_NATIVEXCOMPONENT_RIGHT_BUTTON?1:e.button==OH_NATIVEXCOMPONENT_MIDDLE_BUTTON?2:0;
     Json("{\"kind\":\"pointer\",\"action\":"+std::to_string(action)+",\"button\":"+std::to_string(button)+",\"x\":"+std::to_string(e.x)+",\"y\":"+std::to_string(e.y)+"}");
@@ -224,7 +231,10 @@ void Axis(OH_NativeXComponent*,ArkUI_UIInputEvent* event,ArkUI_UIInputEvent_Type
          ",\"dy\":"+std::to_string(y)+",\"zoom\":"+std::to_string(zoom)+"}");
 }
 void Blur(OH_NativeXComponent*,void*) {touchId=-1;penContact=false;fingerContact=false;Json("{\"kind\":\"blur\"}");}
-void Hover(OH_NativeXComponent*,bool isHover) {if(!isHover && !penContact && !fingerContact)Json("{\"kind\":\"blur\"}");}
+void Hover(OH_NativeXComponent*,bool isHover) {
+    // Entry has no position to replay; the next real movement resumes the preview.
+    if(!isHover && !penContact && !fingerContact)Json("{\"kind\":\"hover_leave\"}");
+}
 OH_NativeXComponent_Callback callbacks{SurfaceCreated,SurfaceChanged,SurfaceDestroyed,Touch};
 OH_NativeXComponent_MouseEvent_Callback mouseCallbacks{Mouse,Hover};
 
@@ -276,6 +286,24 @@ napi_value Open(napi_env env,napi_callback_info info) {
     auto name=String(env,args[0]);void* data=nullptr;size_t size=0;napi_get_arraybuffer_info(env,args[1],&data,&size);
     pc_open(reinterpret_cast<const uint8_t*>(name.data()),name.size(),static_cast<uint8_t*>(data),size);return Undefined(env);
 }
+napi_value ReplyFile(napi_env env,napi_callback_info info) {
+    size_t n=3;napi_value args[3];napi_get_cb_info(env,info,&n,args,nullptr,nullptr);
+    if(n!=3)return Undefined(env);
+    double id=0;int32_t fd=-1;
+    napi_get_value_double(env,args[0],&id);napi_get_value_int32(env,args[2],&fd);
+    auto name=String(env,args[1]);
+    // Rust duplicates fd before returning; ArkTS still owns and closes the original.
+    pc_reply_file(static_cast<uint64_t>(id),reinterpret_cast<const uint8_t*>(name.data()),name.size(),fd);
+    return Undefined(env);
+}
+napi_value OpenFile(napi_env env,napi_callback_info info) {
+    size_t n=2;napi_value args[2];napi_get_cb_info(env,info,&n,args,nullptr,nullptr);
+    if(n!=2)return Undefined(env);
+    int32_t fd=-1;napi_get_value_int32(env,args[1],&fd);
+    auto name=String(env,args[0]);
+    pc_open_file(reinterpret_cast<const uint8_t*>(name.data()),name.size(),fd);
+    return Undefined(env);
+}
 napi_value Active(napi_env env,napi_callback_info info) {
     size_t n=1;napi_value arg;bool active=false;napi_get_cb_info(env,info,&n,&arg,nullptr,nullptr);
     if(n)napi_get_value_bool(env,arg,&active);pc_active(active);return Undefined(env);
@@ -293,6 +321,8 @@ napi_value Init(napi_env env,napi_value exports) {
         {"input",nullptr,Input,nullptr,nullptr,nullptr,napi_default,nullptr},
         {"reply",nullptr,Reply,nullptr,nullptr,nullptr,napi_default,nullptr},
         {"open",nullptr,Open,nullptr,nullptr,nullptr,napi_default,nullptr},
+        {"replyFile",nullptr,ReplyFile,nullptr,nullptr,nullptr,napi_default,nullptr},
+        {"openFile",nullptr,OpenFile,nullptr,nullptr,nullptr,napi_default,nullptr},
         {"active",nullptr,Active,nullptr,nullptr,nullptr,napi_default,nullptr},
         {"close",nullptr,Close,nullptr,nullptr,nullptr,napi_default,nullptr},
         {"command",nullptr,Command,nullptr,nullptr,nullptr,napi_default,nullptr}

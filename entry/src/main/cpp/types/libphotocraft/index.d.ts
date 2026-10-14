@@ -2,6 +2,9 @@ export const init: (config: string, callback: (id: number, message: string, data
 export const input: (event: string) => void;
 export const reply: (id: number, ok: boolean, text: string, data: ArrayBuffer) => void;
 export const open: (name: string, data: ArrayBuffer) => void;
+// The native side retains a duplicate synchronously; the caller closes its File.
+export const replyFile: (id: number, name: string, fd: number) => void;
+export const openFile: (name: string, fd: number) => void;
 export const active: (active: boolean) => void;
 export const close: () => void;
 export const command: (command: string) => void;

@@ -59,6 +59,7 @@ fn default_build_formats_all_symmetric() {
         Format::OpenExr,
         Format::Hdr,
         Format::Fits,
+        Format::Dpx,
     ];
     for f in expected {
         assert!(caps(f).read && caps(f).write, "{f:?}");

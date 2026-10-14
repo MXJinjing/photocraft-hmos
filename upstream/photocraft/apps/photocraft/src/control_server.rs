@@ -12,7 +12,7 @@ use photocraft_automation::security::{
     ConnectionLimiter, LineRead, MAX_CONNECTIONS, MAX_REQUEST_BYTES, authentication_reply, configure_stream, read_bounded_line, repeat_auth_reply,
 };
 use photocraft_ui_egui::ControlRequest;
-use photocraft_ui_egui::control::{REPLY_DEADLINE, timeout_error};
+use photocraft_ui_egui::control::REPLY_DEADLINE;
 use serde_json::{Value, json};
 
 pub fn start(port: u16, token: String, ctx: egui::Context) -> Receiver<ControlRequest> {
@@ -93,12 +93,13 @@ fn serve(stream: TcpStream, token: &str, tx: Sender<ControlRequest>, ctx: egui::
                 let deadline = Instant::now() + REPLY_DEADLINE;
                 let (mut req, rrx) = ControlRequest::new(method, params);
                 req.deadline = Some(deadline);
+                let dispatch = req.dispatch.clone();
                 if tx.send(req).is_err() {
                     break;
                 }
                 ctx.request_repaint();
                 let mut r =
-                    rrx.recv_timeout(deadline.saturating_duration_since(Instant::now())).unwrap_or_else(|_| json!({"ok": false, "error": timeout_error()}));
+                    rrx.recv_timeout(deadline.saturating_duration_since(Instant::now())).unwrap_or_else(|_| json!({"ok": false, "error": dispatch.give_up()}));
                 if let Some(o) = r.as_object_mut() {
                     o.insert("id".into(), id);
                 }

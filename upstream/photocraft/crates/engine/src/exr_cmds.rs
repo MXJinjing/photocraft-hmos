@@ -210,6 +210,46 @@ mod tests {
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
+    /// A single-part EXR with no part name (the usual render output) plus an AOV group.
+    fn write_unnamed_grouped(path: &std::path::Path) {
+        use exr::prelude::*;
+        let (w, h) = (4usize, 4usize);
+        let mk = |n: &str, v: f32| AnyChannel::new(n, FlatSamples::F32(vec![v; w * h]));
+        let list = vec![mk("R", 0.7), mk("G", 0.7), mk("B", 0.7), mk("diffuse.R", 0.3), mk("diffuse.G", 0.3), mk("diffuse.B", 0.3)];
+        let layer = Layer::new(
+            (w, h),
+            LayerAttributes::default(),
+            Encoding { compression: Compression::Uncompressed, blocks: Blocks::ScanLines, line_order: LineOrder::Increasing },
+            AnyChannels::sort(list.into_iter().collect()),
+        );
+        let image = Image::from_layers(ImageAttributes::new(IntegerBounds::new((0, 0), (w, h))), vec![layer]);
+        image.write().to_buffered(&mut std::io::BufWriter::new(std::fs::File::create(path).expect("create fixture"))).expect("write fixture");
+    }
+
+    #[test]
+    fn an_unnamed_part_opens_by_the_name_the_listing_gives_it() {
+        // #4210: the listing names an unnamed part "part 0"; feeding that name back must open it.
+        let dir = std::env::temp_dir().join(format!("pcraft-exr-unnamed-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("unnamed.exr");
+        write_unnamed_grouped(&path);
+        let info = entries_json(path.to_str().unwrap()).unwrap();
+        let part = info.as_array().unwrap().iter().find(|e| e["kind"] == "part").expect("a part entry");
+        let name = part["name"].as_str().unwrap();
+        assert_eq!(name, "part 0", "{info}");
+        let key = format!("part/{name}");
+        let mut s = session();
+        s.execute("file.openExrParts", json!({"path": path.to_str().unwrap(), key: true})).unwrap();
+        let doc = &s.active().unwrap().doc;
+        assert_eq!(doc.layers.len(), 1);
+        assert_eq!(doc.layers[0].name, "part 0");
+        if let photocraft_doc::LayerContent::Raster(surface) = &doc.layers[0].content {
+            let px = surface.pixel(0, 0);
+            assert!((px[0] - 0.7).abs() < 1e-4, "{:?}", px);
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
     #[test]
     fn precomp_sums_the_light_path_set_and_refuses_an_incomplete_one() {
         let dir = std::env::temp_dir().join(format!("pcraft-exr-precomp-{}", std::process::id()));

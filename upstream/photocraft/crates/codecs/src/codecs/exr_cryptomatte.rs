@@ -1,7 +1,8 @@
 //! Cryptomatte (specification 1.2): per-pixel object/material IDs with coverage in EXR
 //! channels, as written by Arnold, V-Ray, Redshift, Mantra/Karma and Cycles. Layers are
 //! announced by `cryptomatte/<key>/name|hash|conversion|manifest` header attributes; the
-//! samples live in `<name>NN.red` (ID) / `<name>NN.green` (coverage) channel pairs.
+//! samples live in `<name>NN` RGBA channel sets, each holding two (ID, coverage) ranks:
+//! `.red`/`.green` (rank 2·NN) and `.blue`/`.alpha` (rank 2·NN+1).
 //!
 //! IDs are the float *values*: MurmurHash3 x86-32 (seed 0) of the object name, its
 //! exponent fixed away from 0/255 so no ID is denormal, infinite or NaN, read as an f32
@@ -20,21 +21,26 @@ use crate::options::Limits;
 const F: Format = Format::OpenExr;
 
 /// A Cryptomatte stream channel (`crypto_asset00.red`) splits into its stream name
-/// (`crypto_asset00`), the layer prefix without digits (`crypto_asset`), the stream index,
-/// and whether it is the coverage (green) channel instead of the ID (red).
+/// (`crypto_asset00`), the stream index, whether it is a coverage channel (green/alpha)
+/// instead of an ID (red/blue), and its rank within the set (0 for red/green, 1 for
+/// blue/alpha).
 pub(crate) struct StreamChannel {
     pub stream: String,
     pub index: u32,
     pub coverage: bool,
+    pub rank: usize,
 }
 
 /// `<name>NN` where NN is one or more digits (the reference readers match `\d+`), with a
-/// `.red`/`.r` (ID) or `.green`/`.g` (coverage) suffix.
+/// `.red`/`.r` or `.blue`/`.b` (ID) or `.green`/`.g` or `.alpha`/`.a` (coverage) suffix,
+/// in any case (Blender writes `.R`/`.G`/`.B`/`.A`).
 pub(crate) fn split_stream(channel: &str) -> Option<StreamChannel> {
     let (stream, suffix) = channel.rsplit_once('.')?;
-    let coverage = match suffix {
-        "red" | "r" => false,
-        "green" | "g" => true,
+    let (coverage, rank) = match suffix.to_ascii_lowercase().as_str() {
+        "red" | "r" => (false, 0),
+        "green" | "g" => (true, 0),
+        "blue" | "b" => (false, 1),
+        "alpha" | "a" => (true, 1),
         _ => return None,
     };
     let digits = stream.chars().rev().take_while(|c| c.is_ascii_digit()).count();
@@ -43,7 +49,7 @@ pub(crate) fn split_stream(channel: &str) -> Option<StreamChannel> {
     }
     let split = stream.len() - digits;
     let index = stream[split..].parse().ok()?;
-    Some(StreamChannel { stream: stream.to_string(), index, coverage })
+    Some(StreamChannel { stream: stream.to_string(), index, coverage, rank })
 }
 
 /// MurmurHash3, x86-32 bit variant, seed 0 (public-domain algorithm, Austin Appleby).
@@ -210,14 +216,17 @@ pub(crate) fn decode(bytes: &[u8], layer_name: &str, limits: &Limits) -> Result<
     let npx = w.checked_mul(h).ok_or_else(|| CodecError::malformed(F, "the layer is too large"))?;
     let too_large = || CodecError::malformed(F, "the layer is too large");
     let (w32, h32) = (u32::try_from(w).map_err(|_| too_large())?, u32::try_from(h).map_err(|_| too_large())?);
-    // Each pixel also gets a pair list, so count its header with the channel samples.
-    let per_pixel = (layer.channels.len().max(1) as u64).saturating_mul(8).saturating_add(std::mem::size_of::<Vec<(f32, f32)>>() as u64);
+    // Each pixel also gets a pair list, so count its header with the channel samples (four
+    // f32 channels per set: two ranks of ID and coverage).
+    let per_pixel = (layer.channels.len().max(1) as u64).saturating_mul(16).saturating_add(std::mem::size_of::<Vec<(f32, f32)>>() as u64);
     limits.check_bytes(w32, h32, per_pixel)?;
 
     let ex_layer = super::exr::read_layer(bytes, layer.part)?;
 
-    let mut ids: Vec<Vec<f32>> = vec![Vec::new(); layer.channels.len()];
-    let mut coverages: Vec<Vec<f32>> = vec![Vec::new(); layer.channels.len()];
+    // Two (ID, coverage) ranks per set: rank `slot * 2 + stream.rank`.
+    let ranks = layer.channels.len().saturating_mul(2);
+    let mut ids: Vec<Vec<f32>> = vec![Vec::new(); ranks];
+    let mut coverages: Vec<Vec<f32>> = vec![Vec::new(); ranks];
     for c in &ex_layer.channel_data.list {
         let Some(stream) = split_stream(&c.name.to_string()) else { continue };
         let Some(slot) = layer.channels.iter().position(|s| *s == stream.stream) else { continue };
@@ -226,7 +235,8 @@ pub(crate) fn decode(bytes: &[u8], layer_name: &str, limits: &Limits) -> Result<
             return Err(CodecError::malformed(F, "a Cryptomatte channel is smaller than its layer"));
         }
         let bucket = if stream.coverage { &mut coverages } else { &mut ids };
-        bucket[slot] = values;
+        let Some(dst) = slot.checked_mul(2).and_then(|r| r.checked_add(stream.rank)).and_then(|r| bucket.get_mut(r)) else { continue };
+        *dst = values;
     }
 
     let mut pixels = vec![Vec::new(); npx];

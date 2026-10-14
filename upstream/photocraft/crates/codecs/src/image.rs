@@ -150,12 +150,40 @@ pub enum DecodeWarning {
     MorePages { total: Option<u32> },
     /// Only one part of a multi-part file was decoded; `total` counts every part when known.
     MoreParts { total: Option<u32> },
+    /// The image opened on the full `display_window` stage; the data region sits at `origin`.
+    DisplayWindowStage { stage: (u32, u32), origin: (i32, i32) },
     /// The image data ends early (truncated or damaged file); the decoder filled in the rest
     /// (a baseline JPEG's missing rows come out grey).
     Truncated { format: Format },
     /// Deep image data (per-pixel sample lists) was composited into the flat image; the samples
     /// themselves (Z and other deep channels) are not part of the flat result.
     DeepFlattened { format: Format, max_samples_per_pixel: u32 },
+    /// Only the first image element of a DPX file was decoded; `total` counts them all.
+    MoreElements { total: u32 },
+    /// A DPX element's transfer characteristic and colorimetric specification (SMPTE 268M codes,
+    /// 255 when undefined). The code values are imported as stored, without a colour transform.
+    DpxEncoding { transfer: u8, colorimetric: u8 },
+}
+
+/// The SMPTE 268M name of a transfer characteristic or colorimetric code.
+fn dpx_code_name(code: u8) -> &'static str {
+    match code {
+        0 => "user-defined",
+        1 => "printing density",
+        2 => "linear",
+        3 => "logarithmic",
+        4 => "unspecified video",
+        5 => "SMPTE 274M",
+        6 => "ITU-R BT.709",
+        7 => "ITU-R BT.601 625-line",
+        8 => "ITU-R BT.601 525-line",
+        9 => "NTSC composite video",
+        10 => "PAL composite video",
+        11 => "Z linear",
+        12 => "Z homogeneous",
+        255 => "undefined",
+        _ => "unknown",
+    }
 }
 
 impl fmt::Display for DecodeWarning {
@@ -167,6 +195,9 @@ impl fmt::Display for DecodeWarning {
             DecodeWarning::MorePages { total: None } => write!(f, "only the first page of the file was imported"),
             DecodeWarning::MoreParts { total: Some(n) } => write!(f, "only one of {n} EXR parts was imported"),
             DecodeWarning::MoreParts { total: None } => write!(f, "only one EXR part of the file was imported"),
+            DecodeWarning::DisplayWindowStage { stage, origin } => {
+                write!(f, "opened on the full display window stage ({}x{}); the data sits at ({}, {})", stage.0, stage.1, origin.0, origin.1)
+            }
             DecodeWarning::Truncated { format } => {
                 write!(f, "{} data ends early (the file is truncated or damaged); part of the image is missing", format.name())
             }
@@ -174,6 +205,13 @@ impl fmt::Display for DecodeWarning {
                 f,
                 "{format} deep data was composited into a flat image (up to {max_samples_per_pixel} samples per pixel); per-pixel depth is not kept",
                 format = format.name()
+            ),
+            DecodeWarning::MoreElements { total } => write!(f, "only the first of {total} image elements was imported"),
+            DecodeWarning::DpxEncoding { transfer, colorimetric } => write!(
+                f,
+                "DPX transfer characteristic: {} ({transfer}), colorimetric: {} ({colorimetric}); the code values were imported as stored, without a colour transform",
+                dpx_code_name(*transfer),
+                dpx_code_name(*colorimetric)
             ),
         }
     }
@@ -199,6 +237,13 @@ pub struct DeepChannel {
 pub struct DeepImage {
     pub width: u32,
     pub height: u32,
+    /// The full stage the image opens on: the EXR `display_window` size, when the file declares
+    /// one the data region fits into and the limits allow. `None` when absent, absurd or not
+    /// containing the data region — then the image opens on the data window alone, as before.
+    pub stage: Option<(u32, u32)>,
+    /// Where this image's (0, 0) sits on the stage: `data_window.position - display_window.position`.
+    /// `(0, 0)` when [`Self::stage`] is `None`.
+    pub origin: (i32, i32),
     /// The sample channels in file order.
     pub channels: Vec<DeepChannel>,
     /// Cumulative sample counts, `len == width as usize * height as usize + 1`: pixel `i`

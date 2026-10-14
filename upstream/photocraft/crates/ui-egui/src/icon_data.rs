@@ -54,6 +54,8 @@ pub static ICONS: &[(&str, &[u8])] = &[
     ("folder-plus", include_bytes!("../../../assets/icons/folder-plus.svg")),
     ("frame-placeholder", include_bytes!("../../../assets/icons/frame-placeholder.svg")),
     ("gauge", include_bytes!("../../../assets/icons/gauge.svg")),
+    // PhotoCraft original: the Gradient tool glyph (a rectangle filled with a linear ramp).
+    ("gradient", include_bytes!("../../../assets/icons/gradient.svg")),
     ("grid-2x2", include_bytes!("../../../assets/icons/grid-2x2.svg")),
     ("grid-3x3", include_bytes!("../../../assets/icons/grid-3x3.svg")),
     ("hand", include_bytes!("../../../assets/icons/hand.svg")),

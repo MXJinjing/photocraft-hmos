@@ -1,6 +1,6 @@
 # Brush and painting parity
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-11 · **Change:** minor (`~` held with the Brush or Pencil erases with its brush; Clear painting mode) · **Target:** Adobe Photoshop 2026
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-13 · **Change:** minor (Hue Jitter amount track; Brush Settings minimum fields follow their Control; checkbox-only rows and non-destructive Smoothing switch; shaped-tip cursor follows the view) · **Target:** Adobe Photoshop 2026
 
 Painting is where Photoshop users notice differences first, so it gets its own checklist: the
 brush engine (`crates/paint/src/brush.rs`), the Brush Settings UI
@@ -24,11 +24,14 @@ tablets against Photoshop side by side.
 | Texture (pattern, scale, brightness, contrast, mode, depth, each tip) | done | |
 | Dual Brush | done | |
 | Color Dynamics (FG/BG, hue/sat/brightness jitter, purity, per tip) | done | |
+| Hue Jitter uses a standard percentage-amount track instead of a hue spectrum | done | #3825 (Hue Jitter appearance only); rendered track checked in all 14 themes; numeric and pointer edits retain percentage units and engine command routing. |
 | Transfer (opacity/flow/wetness/mix jitter and controls) | done | |
+| Shape Dynamics and Transfer minimum fields disabled when their Control is Off, retaining their values | done | #3825 (minimum-field interaction only); `brush_sections.rs` UI regressions cover all six fields, reactivation and disabled input |
 | Brush Pose (tilt, rotation, pressure overrides) | done | |
 | Noise, Wet Edges, Build-up, Protect Texture | done | |
 | Smoothing: amount, Pulled String, Stroke Catch-up, Catch-up on End, Adjust for Zoom | done | `brush.rs:428-438` |
 | Section locks | done | #174 |
+| Noise, Wet Edges, Build-up, Smoothing and Protect Texture: checkbox-only rows keep the selected controls open | done | `brush_panel_tests.rs`, #4283; Smoothing enable/disable preserves its amount and options, including imported ABR tool settings |
 | Brush tip from an image file | missing | TOOL-213-12 |
 | Erodible, Airbrush and Bristle tips (Photoshop's special tips) | partial | not audited in detail; "3D-based brushes don't work" (#1660) |
 | Anti-aliasing off for brushes | missing | #1666 (Pencil is the aliased path) |
@@ -54,7 +57,7 @@ tablets against Photoshop side by side.
 | Interpolation and smoothing match Photoshop | partial | #2138, #2057 |
 | Soft-edge falloff matches Photoshop's curve | partial | #2149, #1619 |
 | Brush preview and cursor crisp, not pixelated | partial | #1433 |
-| Cursor outline equals the painted footprint at every zoom | partial | #1761, #2364 |
+| Cursor outline equals the painted footprint at every zoom | partial | #1761, #2364; shaped tips trace their outline (#3467), turned and flipped with a rotated or flipped view |
 | Latency: dab to screen within a frame | partial | budgets P13/P16/P33 over (scorecard); big-brush lag #2619, #1994; cursor lag #2566, #1343 |
 | No hitch at mouse-up on a long stroke | not measurable | P32 needs a frame harness |
 | Live stroke for Brush and Eraser | done | |
@@ -114,3 +117,7 @@ tablets against Photoshop side by side.
 |---|---|---|
 | 2026-10-10 | major | First version, from a source audit and the open issues |
 | 2026-10-11 | minor | `~` held with the Brush or Pencil erases with that tool's brush, and Clear joins their Mode menus (#3439) |
+| 2026-10-12 | minor | Five Brush Settings switch rows toggle without selecting a properties pane; Smoothing has a default-on switch and retains its settings while disabled (#4283). No brush-feel estimate changed. |
+| 2026-10-12 | minor | A shaped tip's cursor outline turns and flips with a rotated or flipped view, and follows pixel aspect correction |
+| 2026-10-13 | minor | Shape Dynamics and Transfer minimum inputs follow their Control and retain their values while disabled (#3825, partial). No brush-feel estimate changed. |
+| 2026-10-13 | minor | Hue Jitter uses the same themed amount slider as other jitter controls (#3825, partial). No brush-feel estimate changed. |
