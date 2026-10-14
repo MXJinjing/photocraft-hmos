@@ -30,6 +30,10 @@ pub(crate) fn surfaces(doc: &Document, mut visit: impl FnMut(&Surface)) {
     for channel in doc.channels.iter().chain(&doc.quick_mask) {
         visit(&channel.surface);
     }
+    // A pattern fill or layer style copies its pattern into the document.
+    for pattern in &doc.patterns {
+        visit(&pattern.surface);
+    }
     if let Some(selection) = &doc.selection {
         visit(selection);
     }

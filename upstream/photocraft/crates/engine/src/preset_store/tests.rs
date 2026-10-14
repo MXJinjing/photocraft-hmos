@@ -45,7 +45,7 @@ fn tip16(w: u32, h: u32, seed: u32) -> GrayTile {
 
 fn sampled(name: &str, group: &str, tip: GrayTile) -> BrushPreset {
     let brush = BrushSettings { size: 42.0, spacing: 0.1, tip: TipShape::Sampled(tip), ..Default::default() };
-    BrushPreset { name: name.into(), brush, builtin: false, group: group.into(), folder: Vec::new() }
+    BrushPreset { name: name.into(), brush, builtin: false, group: group.into(), folder: Vec::new(), captures: Default::default() }
 }
 
 fn user(s: &Session) -> Vec<BrushPreset> {
@@ -166,6 +166,22 @@ fn commands_persist_and_delete_removes_from_disk() {
     assert_eq!(dir.files(), [INDEX_FILE], "the group file and its tip are gone");
     let (t, _) = session(&dir);
     assert!(photocraft_paint::presets::find(&t.tools.presets, "Doodle").is_none());
+}
+
+/// The New Brush Preset dialog's boxes (#4490) are saved with the preset and come back with it;
+/// a preset saved without them reloads with the default captures and writes no field for them.
+#[test]
+fn preset_captures_persist() {
+    let dir = TempDir::new("captures");
+    let (mut s, _) = session(&dir);
+    s.execute("brush.presets.save", json!({"name": "Bare", "captureSize": false, "toolSettings": false, "color": true})).unwrap();
+    s.execute("brush.presets.save", json!({"name": "Plain"})).unwrap();
+    let (t, _) = session(&dir);
+    let find = |n: &str| photocraft_paint::presets::find(&t.tools.presets, n).expect("reloads").captures.clone();
+    assert_eq!(find("Bare"), PresetCaptures { size: false, tool_settings: false, color: true });
+    assert!(find("Plain").is_default());
+    let written: String = dir.files().iter().filter(|f| !f.starts_with("tips/")).map(|f| std::fs::read_to_string(dir.0.join(f)).unwrap_or_default()).collect();
+    assert_eq!(written.matches("\"captures\"").count(), 1, "only the preset with boxes records them");
 }
 
 #[test]

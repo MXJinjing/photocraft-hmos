@@ -15,6 +15,7 @@ harmonyos-ui = []
 workspace = true
 
 [dependencies]
+craft-print = { workspace = true }
 craft-ui = { workspace = true }
 photocraft-geom = { workspace = true }
 photocraft-color = { workspace = true }

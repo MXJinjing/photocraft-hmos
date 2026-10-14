@@ -72,6 +72,17 @@ fn has_doc(s: &Session) -> std::result::Result<(), String> {
     s.active().map(|_| ()).ok_or_else(|| "no document".into())
 }
 
+/// Grow the timeline to at least `frames` frames (never shrink it). Only a work area that reached
+/// the old end follows the new end; a narrowed one stays where the user put it (#4170).
+fn grow_duration(t: &mut Timeline, frames: usize) {
+    let old = t.duration;
+    t.duration = t.duration.max(frames.max(1));
+    if t.work_end >= old {
+        t.work_end = t.duration;
+    }
+    t.clamp();
+}
+
 /// Edit the active video layer's [`VideoData`] at the playhead, then re-sync the displayed frame.
 fn edit_video(s: &mut Session, label: &str, f: impl FnOnce(&mut VideoData, usize) -> Result<()>) -> Result<Value> {
     let count = s.edit(label, |doc, active| {
@@ -83,9 +94,7 @@ fn edit_video(s: &mut Session, label: &str, f: impl FnOnce(&mut VideoData, usize
         f(v, cur)?;
         let n = v.frames.len();
         if let Some(t) = &mut doc.timeline {
-            t.duration = t.duration.max(n.max(1));
-            t.work_end = t.work_end.max(t.duration);
-            t.clamp();
+            grow_duration(t, n);
         }
         sync(doc);
         Ok(n)
@@ -295,8 +304,7 @@ fn new_from_file(s: &mut Session, p: &Value) -> Result<Value> {
         if doc.timeline.is_none() {
             doc.timeline = Some(Timeline::new(n, fps));
         } else if let Some(t) = &mut doc.timeline {
-            t.duration = t.duration.max(n);
-            t.clamp();
+            grow_duration(t, n);
         }
         let name = doc.next_layer_name(std::path::Path::new(&path).file_stem().and_then(|s| s.to_str()).unwrap_or("Video"));
         let mut l = Layer::raster(name, fmt);

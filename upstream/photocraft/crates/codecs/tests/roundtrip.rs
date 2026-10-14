@@ -134,6 +134,9 @@ mod pnm {
 mod fits {
     cases!(Format::Fits);
 }
+mod dpx {
+    cases!(Format::Dpx);
+}
 mod qoi {
     cases!(Format::Qoi);
 }

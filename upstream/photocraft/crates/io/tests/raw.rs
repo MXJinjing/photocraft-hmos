@@ -95,6 +95,18 @@ fn unsupported_raw_without_preview_is_a_clear_error() {
 }
 
 #[test]
+fn cr3_opens_its_upright_camera_jpeg_with_explicit_preview_warning() {
+    let img = Image::from_u8(32, 20, ChannelLayout::Rgb, vec![180; 32 * 20 * 3]).unwrap();
+    let jpeg = photocraft_codecs::encode(&img, Format::Jpeg, &EncodeOptions::default()).unwrap();
+    let raw = photocraft_raw::testgen::cr3_preview(&jpeg, 6);
+    let r = import("shot.cr3", &raw).unwrap();
+    assert_eq!((r.document.size.width, r.document.size.height), (20, 32));
+    assert_eq!(r.document.depth, SampleType::U8);
+    assert!(r.warnings[0].contains("8-bit, not the raw sensor data"));
+    assert!(r.warnings[0].contains("CR3"));
+}
+
+#[test]
 fn truncated_raws_do_not_panic() {
     let b = nef_with_preview();
     for n in (0..b.len()).step_by(7) {

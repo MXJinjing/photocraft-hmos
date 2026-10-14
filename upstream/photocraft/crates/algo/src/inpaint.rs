@@ -508,6 +508,9 @@ struct Solver<'a> {
     ctl: photocraft_raster::Interrupt<'a>,
 }
 
+/// A channel deviation under which a patch counts as flat for [`fit`] (about 5 levels of 255).
+const FLAT: f32 = 0.02;
+
 /// Gain and bias of one channel for target moments `(Σt, Σt²)` and source moments `(Σs, Σs²)`
 /// over `n` samples, within the limits.
 #[inline]
@@ -516,7 +519,20 @@ pub(crate) fn fit(a: Adapt, n: f32, st: f32, stt: f32, ss: f32, sss: f32) -> (f3
     let vt = (stt / n - mt * mt).max(0.0);
     let vs = (sss / n - ms * ms).max(0.0);
     let g = if vs > 1e-10 { (vt / vs).sqrt() } else { 1.0 };
-    let g = g.clamp(a.gain.0, a.gain.1);
+    let (mut lo, mut hi) = a.gain;
+    // Nearly flat patches of about the same colour (their means within the bias of each other):
+    // the ratio of their deviations is noise, so match the mean first, keeping the gain where the
+    // bias can still bring the source's mean to the target's. Gained about zero, a gain at its
+    // limit moved bright means further than the bias could bring back, and each channel by a
+    // different amount: a tinted blotch in a smooth gradient. Textured patches, and flat ones
+    // whose colours differ more (Content-Aware Move's Color), are fitted as before.
+    if vt.max(vs) < FLAT * FLAT && (mt - ms).abs() <= a.bias && ms > 1e-6 {
+        let (glo, ghi) = ((mt - a.bias) / ms, (mt + a.bias) / ms);
+        if glo.max(lo) <= ghi.min(hi) {
+            (lo, hi) = (glo.max(lo), ghi.min(hi));
+        }
+    }
+    let g = g.clamp(lo, hi);
     let b = (mt - g * ms).clamp(-a.bias, a.bias);
     (g, b)
 }
@@ -1958,6 +1974,21 @@ fn min_cut(across: usize, along: usize, err: impl Fn(usize, usize) -> f32) -> Ve
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The mean is matched first: on a nearly flat bright patch with a noisy deviation ratio the
+    /// gain stays where the bias can still reach the target's mean.
+    #[test]
+    fn fit_matches_the_mean_before_the_contrast() {
+        let a = Adapt { gain: (0.9, 1.1), bias: 0.04 };
+        // Target mean 0.70, source mean 0.70; deviations 0.01 vs 0.004 (ratio 2.5).
+        let n = 25.0;
+        let (mt, ms, sdt, sds) = (0.70f32, 0.70f32, 0.01f32, 0.004f32);
+        let (g, b) = fit(a, n, mt * n, (sdt * sdt + mt * mt) * n, ms * n, (sds * sds + ms * ms) * n);
+        assert!((g * ms + b - mt).abs() < 1e-5, "mean {} vs {mt} (g {g}, b {b})", g * ms + b);
+        // Where the mean can't be reached anyway, the limits hold as before.
+        let (g, b) = fit(a, n, 0.2 * n, 0.04 * n, 0.9 * n, 0.81 * n);
+        assert!((a.gain.0..=a.gain.1).contains(&g) && b.abs() <= a.bias + 1e-6);
+    }
 
     /// Smooth gradient plus deterministic fine noise.
     fn texture(w: usize, h: usize) -> Vec<f32> {

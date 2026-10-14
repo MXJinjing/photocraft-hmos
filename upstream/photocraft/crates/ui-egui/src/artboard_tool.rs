@@ -417,7 +417,11 @@ mod tests {
         let press = |app: &mut PhotocraftApp, modifiers| {
             let key = egui::Key::V;
             let raw = egui::RawInput {
-                events: vec![egui::Event::ModifiersChanged(modifiers), egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers }],
+                events: vec![
+                    egui::Event::ModifiersChanged(modifiers),
+                    egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers },
+                    egui::Event::Key { key, physical_key: None, pressed: false, repeat: false, modifiers },
+                ],
                 ..Default::default()
             };
             ctx.begin_pass(raw);

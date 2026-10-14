@@ -612,8 +612,14 @@ fn blend_range(v: &Value) -> Option<BlendRange> {
 
 fn global_light(s: &mut Session, p: &Value) -> Result<Value> {
     let cur = s.active().ok_or(EngineError::NoDocument)?.doc.global_light;
-    let angle = num(p, "angle", cur.angle);
-    let altitude = num(p, "altitude", cur.altitude).clamp(0.0, 90.0);
+    // Read as f64 and reject what f32 can't hold: 1e39 would become inf, and rem_euclid NaN.
+    let f32_param = |key: &str, default: f32| match p.get(key).and_then(Value::as_f64) {
+        None => Ok(default),
+        Some(v) if v.is_finite() && v.abs() <= f64::from(f32::MAX) => Ok(v as f32),
+        Some(_) => Err(bad("layer.layerStyle.globalLight", format!("{key} must be a finite number"))),
+    };
+    let angle = f32_param("angle", cur.angle)?;
+    let altitude = f32_param("altitude", cur.altitude)?.clamp(0.0, 90.0);
     let angle = (angle + 180.0).rem_euclid(360.0) - 180.0;
     s.edit("Global Light", |doc, _| {
         doc.global_light.angle = angle;

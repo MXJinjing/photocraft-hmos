@@ -344,7 +344,15 @@ fn build_mask(layer: &Layer, canvas: Rect) -> Surface {
     // mask's painted tiles when the vector mask lets them through outside the path, each grown
     // by its feather.
     let mut area = match vm.and_then(|vm| vm.path.control_bounds()) {
-        Some((x0, y0, x1, y1)) => grow(Rect::new(x0.floor() as i32 - 2, y0.floor() as i32 - 2, x1.ceil() as i32 + 2, y1.ceil() as i32 + 2), sv),
+        Some((x0, y0, x1, y1)) => grow(
+            Rect::new(
+                (x0.floor() as i32).saturating_sub(2),
+                (y0.floor() as i32).saturating_sub(2),
+                (x1.ceil() as i32).saturating_add(2),
+                (y1.ceil() as i32).saturating_add(2),
+            ),
+            sv,
+        ),
         None => Rect::EMPTY,
     };
     if let Some(m) = pixel
@@ -760,5 +768,15 @@ mod tests {
         assert!(s.tiles().zip(again.tiles()).all(|(a, b)| Arc::ptr_eq(a.1, b.1)));
         l.vector_mask = None;
         assert!(combined_mask(&l, canvas).is_none());
+    }
+
+    #[test]
+    fn hostile_path_coordinates_do_not_overflow() {
+        let mut l = Layer::raster("l", PixelFormat::RGBA8);
+        let knots = [(-1.0e30, -1.0e30), (1.0e30, 0.0), (0.0, 1.0e30)].iter().map(|&(x, y)| Knot::corner(x, y)).collect();
+        let mut path = Path::default();
+        path.subpaths.push(Subpath { knots, closed: true, ..Default::default() });
+        l.vector_mask = Some(VectorMask::new(path));
+        let _ = combined_mask(&l, Rect::new(0, 0, 8, 8));
     }
 }

@@ -61,11 +61,8 @@ fn layers_hit(doc: &Document, x: i32, y: i32, type_bounds: bool) -> Vec<LayerId>
                 None => 0.0,
             },
         };
-        let mask = l.mask.as_ref().filter(|m| m.enabled).map_or(1.0, |m| {
-            let mut v = [0.0f32];
-            m.surface.read_pixel(x, y, &mut v);
-            v[0]
-        });
+        // As the compositor sees it: density applied, all ones when the mask is disabled.
+        let mask = l.mask.as_ref().map_or(1.0, |m| m.value(x, y));
         if alpha * mask > 0.0 {
             out.push(l.id);
         }
@@ -95,9 +92,9 @@ fn pick(s: &mut Session, p: &Value) -> Result<Value> {
     let x = p.get("x").and_then(Value::as_f64).ok_or_else(|| EngineError::BadParams { cmd: "layer.pickAt".into(), msg: "missing `x`".into() })?.floor() as i32;
     let y = p.get("y").and_then(Value::as_f64).ok_or_else(|| EngineError::BadParams { cmd: "layer.pickAt".into(), msg: "missing `y`".into() })?.floor() as i32;
     let doc = s.active().ok_or(EngineError::NoDocument)?.doc.clone();
-    // The right-click list names the layers with pixels under the pointer.
+    // The right-click list includes type layers between glyphs, like Auto-Select.
     if p.get("list").and_then(Value::as_bool).unwrap_or(false) {
-        let hits = layers_hit(&doc, x, y, false);
+        let hits = layers_hit(&doc, x, y, true);
         let names: Vec<Value> = hits.iter().filter_map(|id| doc.layer(*id)).map(|l| json!({"layer": l.id.0, "name": l.name})).collect();
         return Ok(json!({ "layers": names }));
     }
@@ -193,7 +190,7 @@ pub fn specs() -> Vec<CommandSpec> {
             label: "Auto-Select Layer",
             menu: &[],
             shortcut: None,
-            params: r##"{"x":px,"y":px,"target":"layer|group"="layer","select":bool=true,"mode":"replace|toggle|add"="replace","list":bool=false (return every layer with pixels there, topmost first)} → {layer} | {layers}"##,
+            params: r##"{"x":px,"y":px,"target":"layer|group"="layer","select":bool=true,"mode":"replace|toggle|add"="replace","list":bool=false (return visible layers at the point, including text bounds, topmost first)} → {layer} | {layers}"##,
             enabled: has_doc,
             journal: false,
             run: pick,
@@ -375,9 +372,10 @@ mod tests {
         assert_eq!(pick(&mut s, 12, 15), t.0, "on a glyph");
         assert_eq!(pick(&mut s, 17, 15), t.0, "between the glyphs: the type layer, not the one under it");
         assert_eq!(pick(&mut s, 17, 20), bg.0, "below the text bounds");
-        // The right-click list still names only the layers with pixels under the pointer.
+        // The context menu also reaches this type layer between the glyphs (#4259).
         let list = s.execute("layer.pickAt", json!({"x": 17, "y": 15, "list": true})).unwrap();
-        assert_eq!(list["layers"].as_array().unwrap().len(), 1);
+        assert_eq!(list["layers"][0]["layer"], t.0);
+        assert_eq!(list["layers"][1]["layer"], bg.0);
     }
 
     #[test]
@@ -401,6 +399,9 @@ mod tests {
         let Some(x) = gap else { return };
         assert_eq!(layers_at(&doc, x, y), vec![bg], "no type pixels at the gap");
         assert_eq!(s.execute("layer.pickAt", json!({"x": x, "y": y, "select": false})).unwrap()["layer"], t);
+        let menu = s.execute("layer.pickAt", json!({"x": x, "y": y, "list": true})).unwrap();
+        assert_eq!(menu["layers"][0]["layer"], t, "type layer stays above its background in the menu");
+        assert_eq!(menu["layers"][1]["layer"], bg.0);
     }
 
     #[test]
@@ -444,5 +445,25 @@ mod tests {
         }
         let mut empty = Session::new();
         assert!(empty.execute("layer.pickAt", json!({"x": 1, "y": 1})).is_err());
+    }
+
+    /// A hide-all mask at density 0 hides nothing (the compositor applies density through
+    /// `LayerMask::value`), so the layer stays pickable; at full density it is clicked through.
+    #[test]
+    fn mask_density_is_honoured_when_picking() {
+        let mut s = Session::new();
+        s.execute("file.new", json!({"width": 20, "height": 20})).unwrap();
+        let bg = s.active().unwrap().doc.layers[0].id;
+        s.execute("layer.new.layer", json!({"name": "Red"})).unwrap();
+        s.execute("edit.fill", json!({"color": "#ff0000"})).unwrap();
+        let red = s.active().unwrap().active_layer.unwrap();
+        s.execute("layer.layerMask.hideAll", json!({})).unwrap();
+        // Full density: the mask hides the layer, so the click reaches the Background.
+        assert_eq!(s.execute("layer.pickAt", json!({"x": 5, "y": 5, "select": false})).unwrap()["layer"], bg.0);
+        s.execute("layer.layerMask.edit", json!({"density": 0})).unwrap();
+        assert_eq!(s.execute("layer.pickAt", json!({"x": 5, "y": 5, "select": false})).unwrap()["layer"], red.0);
+        let list = s.execute("layer.pickAt", json!({"x": 5, "y": 5, "list": true})).unwrap();
+        let ids: Vec<_> = list["layers"].as_array().unwrap().iter().map(|l| l["layer"].clone()).collect();
+        assert_eq!(ids, vec![json!(red.0), json!(bg.0)]);
     }
 }

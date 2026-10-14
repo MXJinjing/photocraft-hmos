@@ -27,7 +27,9 @@ fn flag(p: &Value, k: &str, d: bool) -> bool {
 }
 
 /// A finite number param clamped to `range`, `default` when absent; non-numbers are an error.
-fn number(p: &Value, cmd: &str, k: &str, default: f64, range: std::ops::RangeInclusive<f64>) -> Result<f64> {
+/// A numeric param clamped to `range`; missing or null gives `default`, anything else not a
+/// finite number is BadParams. Shared with the Paint Bucket and Gradient opacity.
+pub(crate) fn number(p: &Value, cmd: &str, k: &str, default: f64, range: std::ops::RangeInclusive<f64>) -> Result<f64> {
     match p.get(k) {
         None | Some(Value::Null) => Ok(default),
         Some(v) => {

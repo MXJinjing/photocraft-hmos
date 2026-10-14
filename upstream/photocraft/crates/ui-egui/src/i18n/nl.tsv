@@ -8,7 +8,17 @@
 # stay as they are; the trailing "…" of dialog commands is kept. UI text addresses the user
 # informally ("je") and uses sentence case.
 
+# Channel Options and New Spot Channel (#3761)
+	Channel Color	Kanaalkleur
+	Color Indicates:	Kleur geeft aan:
+	Solidity:	Soliditeit:
+	Ink Characteristics	Inktkenmerken
+
 # Guide layout dialog
+
+# Custom print paper (#3820)
+	Paper Width	Papierbreedte
+	Paper Height	Papierhoogte
 	Rows	Rijen
 	Number	Aantal
 	Top:	Boven:
@@ -63,6 +73,8 @@
 	Save	Opslaan
 	Save As…	Opslaan als…
 	Save a Copy…	Kopie opslaan…
+	{name} can't keep everything in this document	{name} kan niet alles in dit document bewaren
+	Choose a format that keeps it, such as Photoshop (PSD), or save a copy.	Kies een indeling die alles bewaart, zoals Photoshop (PSD), of sla een kopie op.
 	Revert	Terugzetten
 	Export	Exporteren
 	Quick Export as PNG	Snel exporteren als PNG
@@ -100,6 +112,13 @@
 	Script Events Manager…	Beheer scriptgebeurtenissen…
 	Import	Importeren
 	Browse…	Bladeren…
+	Source Files	Bronbestanden
+	Use:	Gebruiken:
+	Files	Bestanden
+	Add Open Files	Geopende bestanden toevoegen
+	Sort By Name	Sorteren op naam
+	Attempt to Automatically Align Source Images	Proberen bronafbeeldingen automatisch uit te lijnen
+	Create Smart Object after Loading Layers	Slim object maken na laden van lagen
 	Reveal in Finder	Weergeven in Finder
 	Show in Explorer	Weergeven in Verkenner
 	Show in Folder	Weergeven in map
@@ -124,6 +143,8 @@
 	Search…	Zoeken…
 	Check Spelling…	Spelling controleren…
 	Find and Replace Text…	Tekst zoeken en vervangen…
+	Add to Dictionary	Aan woordenboek toevoegen
+	No Spelling Suggestions	Geen spellingsuggesties
 	Fill…	Vullen…
 	Stroke…	Omlijnen…
 	Content-Aware Fill…	Inhoudsbewust vullen…
@@ -138,6 +159,8 @@
 	Transform Again on a Copy	Opnieuw transformeren op een kopie
 	Scale	Schalen
 	Rotate	Roteren
+	Set horizontal skew	Horizontale schuinte instellen
+	Set vertical skew	Verticale schuinte instellen
 	Skew	Schuintrekken
 	Distort	Vervormen
 	Perspective	Perspectief
@@ -349,6 +372,7 @@
 	Update Modified Content	Gewijzigde inhoud bijwerken
 	Update All Modified Content	Alle gewijzigde inhoud bijwerken
 	Stack Mode	Stapelmodus
+	Choose Stack Mode:	Stapelmodus kiezen:
 	Entropy	Entropie
 	Kurtosis	Kurtosis
 	Maximum	Maximum
@@ -519,6 +543,9 @@
 	Blur	Vervagen
 	Blur Gallery	Vervagingsgalerie
 	Field Blur…	Veldvervaging…
+# Field Blur pins (#3373)
+	No pin selected	Geen speld geselecteerd
+	Click the image to add a pin; drag a pin to move it, or its ring to change its blur. Delete removes the selected pin.	Klik in de afbeelding om een speld toe te voegen; sleep een speld om hem te verplaatsen, of zijn ring om de vervaging te wijzigen. Delete verwijdert de geselecteerde speld.
 	Iris Blur…	Irisvervaging…
 	Tilt-Shift…	Tilt-shift…
 	Path Blur…	Padvervaging…
@@ -705,6 +732,10 @@
 	Breeze Dark Theme	Breeze-thema donker
 	Breeze light	Breeze licht
 	Breeze Light Theme	Breeze-thema licht
+	Soft dark	Zacht donker
+	Soft light	Zacht licht
+	Soft Dark Theme	Zacht donker thema
+	Soft Light Theme	Zacht licht thema
 	Adwaita Light Theme	Adwaita-thema licht
 	Adwaita Dark Theme	Adwaita-thema donker
 	Adwaita	Adwaita
@@ -807,6 +838,9 @@
 	Appearance	Weergave
 	Appearance (Layer Style)	Weergave (laagstijl)
 	Apply Layer Mask	Laagmasker toepassen
+	Add Mask to Selection	Masker aan selectie toevoegen
+	Subtract Mask from Selection	Masker van selectie aftrekken
+	Intersect Mask with Selection	Masker met selectie laten snijden
 	Apply Per Tip	Per punt toepassen
 	Apply next selected layer comp	Volgende geselecteerde laagcompositie toepassen
 	Apply previous selected layer comp	Vorige geselecteerde laagcompositie toepassen
@@ -822,11 +856,18 @@
 	Background	Achtergrond
 	Background Color	Achtergrondkleur
 	Background Contents	Achtergrondinhoud
+	Custom background color	Aangepaste achtergrondkleur
 	Balance	Balans
 	Baseline	Basislijn
 	Baseline shift	Basislijnverschuiving
 	Basic	Basis
 	Before (Y)	Voor (Y)
+	Save Settings…	Instellingen opslaan…
+	Load Settings…	Instellingen laden…
+	Save these settings as a Camera Raw .xmp file	Deze instellingen opslaan als Camera Raw-.xmp-bestand
+	Load settings from a Camera Raw .xmp file	Instellingen laden uit een Camera Raw-.xmp-bestand
+	Loaded Camera Raw settings from {file}	Camera Raw-instellingen geladen uit {file}
+	Loaded Camera Raw settings from {file} ({n} not supported)	Camera Raw-instellingen geladen uit {file} ({n} niet ondersteund)
 	Begin recording	Opname starten
 	Bend:	Buiging:
 	Bicubic	Bicubisch
@@ -857,6 +898,7 @@
 	Cancel	Annuleren
 	Reset	Herstellen
 	Cancel (Esc)	Annuleren (Esc)
+	Manage submitted jobs in the system print queue	Beheer verzonden taken in de afdrukwachtrij van het systeem
 	Cancel any current edits (Esc)	Huidige bewerkingen annuleren (Esc)
 	Cancel current crop operation  (Esc)	Huidige bijsnijbewerking annuleren  (Esc)
 	Cancel transform (Esc)	Transformatie annuleren (Esc)
@@ -1130,6 +1172,9 @@
 	Ignore All	Alles negeren
 	Image Size	Afbeeldingsgrootte
 	Import Brushes…	Penselen importeren…
+	Gradient Preset Options	Opties voor verloopvoorinstellingen
+	Import .GRD	.GRD importeren
+	Choose a gradient file (.grd).	Kies een verloopbestand (.grd).
 	Import brushes (.abr)	Penselen (.abr) importeren
 	Import Presets	Voorinstellingen importeren
 	Imported	Geïmporteerd
@@ -2051,6 +2096,11 @@
 	Rename Brush…	Penseel hernoemen…
 	Delete Brush	Penseel verwijderen
 	New Brush Preset…	Nieuwe penseelvoorinstelling…
+	Capture Brush Size in Preset	Penseelgrootte vastleggen in voorinstelling
+	Include Tool Settings	Gereedschapsinstellingen opnemen
+	Include Color	Kleur opnemen
+	Enter a name for the brush preset	Voer een naam in voor de penseelvoorinstelling
+	A brush preset with this name already exists	Er bestaat al een penseelvoorinstelling met deze naam
 	Brush Preset Options	Opties penseelvoorinstelling
 	Group name	Groepsnaam
 	Brush name	Penseelnaam
@@ -2110,6 +2160,10 @@
 	No path to make a selection from: draw one with the Pen tool or select one in the Paths panel.	Geen pad om een selectie van te maken: teken er een met het pengereedschap of selecteer er een in het paneel Paden.
 	Cancel opening	Openen annuleren
 	Cancelled opening {name}	Openen van {name} geannuleerd
+	The document “{name}” does not have an embedded {mode} profile.	Het document “{name}” heeft geen ingesloten {mode}-profiel.
+	The document “{name}” has an embedded color profile that does not match the current {mode} working space.	Het document “{name}” heeft een ingesloten kleurprofiel dat niet overeenkomt met de huidige {mode}-werkruimte.
+	Embedded: {embedded}	Ingesloten: {embedded}
+	Working: {working}	Werkruimte: {working}
 	Developing {name}	{name} wordt ontwikkeld
 	Cancelled {label}	{label} geannuleerd
 	Esc to cancel	Esc om te annuleren
@@ -2330,6 +2384,7 @@
 	Click to pick · Esc to cancel	Klik om te kiezen · Esc om te annuleren
 	Pick a screen pixel or press Esc to cancel	Kies een schermpixel of druk op Esc om te annuleren
 	Scroll to zoom	Scrollen om te zoomen
+	Drag to pan · Scroll to zoom · Double-click to fit	Sleep om te pannen · Scroll om te zoomen · Dubbelklik om passend te maken
 	Show/Hide All Panels	Alle panelen tonen/verbergen
 	Show/Hide Panels	Panelen tonen/verbergen
 	Could not open	Kan niet openen
@@ -2379,6 +2434,7 @@ layerLabel	No Color	Geen kleur
 	Fuchsia	Fuchsia
 	Violet	Violet
 	Large document: redrawing on the CPU	Groot document: opnieuw tekenen op de CPU
+	Redrawing	Opnieuw tekenen
 	This redraw took {seconds} s on the CPU.	Opnieuw tekenen duurde {seconds} s op de CPU.
 	Edits that change the whole document, such as a layer's blend mode, opacity or visibility, redraw all of it.	Bewerkingen die het hele document veranderen, zoals de overvloeimodus, dekking of zichtbaarheid van een laag, tekenen alles opnieuw.
 	Its layers don't fit the GPU memory budget. Raising Memory usage in Preferences › Performance raises the budget, up to a quarter of this computer's memory.	De lagen passen niet binnen het GPU-geheugenbudget. Door Geheugengebruik te verhogen in Voorkeuren › Prestaties wordt het budget groter, tot een kwart van het geheugen van deze computer.
@@ -2804,7 +2860,6 @@ cameraRaw	Color	Kleur
 	Choose…	Kiezen…
 	Select Folder…	Map selecteren…
 	Override Action "Save" Commands	Opdrachten "Opslaan" in actie negeren
-	File Naming	Bestandsnamen
 	Compatibility	Compatibiliteit
 	Include ICC Profile	ICC-profiel opnemen
 	Error File	Foutbestand
@@ -3656,15 +3711,6 @@ cameraRaw	Whites	Witten
 	Color Dodge (Paint.NET)	Kleur tegenhouden (Paint.NET)
 	Pro Medium	Pro Medium
 	Studio Light	Studio Light
-	Double-tap pen body	Dubbeltik op de pen
-	Current tool and Eraser	Huidig gereedschap en Gum
-	Previous tool	Vorig gereedschap
-	Long-press pen body	Lang indrukken op de pen
-	Show or hide context menu	Contextmenu tonen of verbergen
-	Choose printer, copies and duplex in the system print dialog.	Kies printer, aantal exemplaren en dubbelzijdig afdrukken in het systeemvenster voor afdrukken.
-	System print preview opened	Afdrukvoorbeeld van het systeem geopend
-	Stylus	Styluspen
-	Block finger input	Vingerinvoer blokkeren
 	Stroke Options	Lijnopties
 	Solid	Ononderbroken
 	Dashed	Gestreept
@@ -3781,6 +3827,7 @@ curves	Smooth	Vloeiend maken
 	Include in playback	Opnemen in afspelen
 	Scale:	Schaal:
 	Snap to Origin	Uitlijnen op oorsprong
+	Presentation	Presentatie
 
 # Color Sampler (added with the i18n coverage repair)
 	Click to place · Alt-click or drag off-canvas to remove	Klik om te plaatsen · Alt-klik of sleep buiten het canvas om te verwijderen
@@ -3817,12 +3864,57 @@ curves	Smooth	Vloeiend maken
 	Light Red	Lichtrood
 	Medium Blue	Middelblauw
 	Light Gray	Lichtgrijs
+	Object Finder	Objectzoeker
+	No object found there — drag a rectangle around it	Daar is geen object gevonden — sleep er een rechthoek omheen
 	Remove after each stroke	Verwijderen na elke streek
 	Apply the removal ({key})	Verwijdering toepassen ({key})
 	Strokes to remove: {n} (Enter applies, Esc cancels)	Streken om te verwijderen: {n} (Enter past toe, Esc annuleert)
+	Clear Brush Controls	Penseelbesturing wissen
+	Reset All Locked Settings	Alle vergrendelde instellingen opnieuw instellen
+	Copy Texture to Other Tools	Structuur kopiëren naar andere gereedschappen
 
+# Actions panel: Load/Save Actions (.atn) and kept Photoshop steps
+	Load Actions…	Handelingen laden…
+	Save Actions…	Handelingen opslaan…
+	{name} (Photoshop)	{name} (Photoshop)
+	{message} ({note})	{message} ({note})
+@plural	Loaded {n} action from {file}|Loaded {n} actions from {file}	{n} handeling geladen uit {file}|{n} handelingen geladen uit {file}
+@plural	{n} step has no PhotoCraft equivalent yet|{n} steps have no PhotoCraft equivalent yet	{n} stap heeft nog geen equivalent in PhotoCraft|{n} stappen hebben nog geen equivalent in PhotoCraft
+@plural	Saved {n} action to {file}|Saved {n} actions to {file}	{n} handeling opgeslagen in {file}|{n} handelingen opgeslagen in {file}
+@plural	{n} step with no Photoshop equivalent left out|{n} steps with no Photoshop equivalent left out	{n} stap zonder Photoshop-equivalent weggelaten|{n} stappen zonder Photoshop-equivalent weggelaten
 
-# Status bar panel controls
+	File Naming	Bestandsnamen
+	Starting serial	Beginnummer
+# Actions panel: set folders, dialog toggle, Insert Stop
+	Insert Stop…	Stop invoegen…
+	Save Set…	Set opslaan…
+	Message:	Bericht:
+	Allow Continue	Doorgaan toestaan
+	Show dialog during playback	Dialoogvenster tonen tijdens afspelen
+	Select an action first	Selecteer eerst een handeling
+	Action playback stopped	Afspelen van de handeling gestopt
+	Step {step} is waiting for its dialog	Stap {step} wacht op zijn dialoogvenster
+@plural	{n} action|{n} actions	{n} handeling|{n} handelingen
+	Auto Add/Delete	Automatisch toevoegen/verwijderen
+
+# Native Windows printing qualification
+	Don't also tick Mirror Image in Print Settings…: the two flips cancel out.	Schakel niet ook Spiegelbeeld in bij de afdrukinstellingen: de twee spiegelingen heffen elkaar op.
+	Print Settings…	Afdrukinstellingen…
+	Remember to turn off the printer's own colour management in Print Settings…	Vergeet niet het eigen kleurbeheer van de printer uit te schakelen in de afdrukinstellingen…
+	Sent to {printer}	Verzonden naar {printer}
+	set in Print Settings…	instellen in de afdrukinstellingen…
+	ICO is limited to 256 × 256 pixels	ICO is beperkt tot 256 × 256 pixels
+
+# HarmonyOS host additions retained during upstream sync
+	Double-tap pen body	Dubbeltik op de pen
+	Current tool and Eraser	Huidig gereedschap en Gum
+	Previous tool	Vorig gereedschap
+	Long-press pen body	Lang indrukken op de pen
+	Show or hide context menu	Contextmenu tonen of verbergen
+	Choose printer, copies and duplex in the system print dialog.	Kies printer, aantal exemplaren en dubbelzijdig afdrukken in het systeemvenster voor afdrukken.
+	System print preview opened	Afdrukvoorbeeld van het systeem geopend
+	Stylus	Styluspen
+	Block finger input	Vingerinvoer blokkeren
 	Only show canvas	Alleen canvas tonen
 	Right sidebar	Rechterzijbalk
 	Connected pen	Verbonden pen

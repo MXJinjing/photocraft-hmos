@@ -14,8 +14,9 @@
 
 use photocraft_color::{Color, ColorMode};
 
+/// Photoshop's gradient interpolation methods.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum Method {
+pub enum Method {
     Classic,
     Perceptual,
     Linear,
@@ -23,6 +24,16 @@ pub(crate) enum Method {
 }
 
 impl Method {
+    /// The method a command names (`classic`, `perceptual`, `linear`, `smooth`); `None` otherwise.
+    pub fn from_name(name: &str) -> Option<Method> {
+        match name.to_ascii_lowercase().as_str() {
+            "classic" => Some(Method::Classic),
+            "perceptual" => Some(Method::Perceptual),
+            "linear" => Some(Method::Linear),
+            "smooth" => Some(Method::Smooth),
+            _ => None,
+        }
+    }
     pub(crate) fn from_code(code: Option<&[u8]>) -> Method {
         match code {
             Some(b"Perc") => Method::Perceptual,
@@ -140,7 +151,7 @@ fn eval(stops: &[(f32, [f32; 3])], mids: &[f32], smooth: f32, t: f32, m: Method)
 
 /// Dense linear stops reproducing Photoshop's interpolation. Returns the input unchanged when it
 /// already interpolates linearly in sRGB.
-pub(crate) fn bake(stops: Vec<(f32, Color)>, midpoints: &[f32], smoothness: f32, method: Method) -> Vec<(f32, Color)> {
+pub fn bake(stops: Vec<(f32, Color)>, midpoints: &[f32], smoothness: f32, method: Method) -> Vec<(f32, Color)> {
     let plain_mids = midpoints.iter().all(|m| (m - 0.5).abs() < 1e-3);
     // Classic interpolates in the stops' own model: Lab stops (Lab documents) blend in L*a*b*, which the
     // compositors' sRGB interpolation can't reproduce (psd-tools 4x4_16bit_lab).

@@ -86,7 +86,7 @@ pub fn map_file_with(f: &AbrFile, group: &str, ctl: &photocraft_raster::Interrup
                 }
             };
             let name = if b.name.trim().is_empty() { default_name } else { b.name.trim().to_string() };
-            out.presets.push(BrushPreset { name, brush, builtin: false, group: group.to_string(), folder: Vec::new() });
+            out.presets.push(BrushPreset { name, brush, builtin: false, group: group.to_string(), folder: Vec::new(), captures: Default::default() });
         }
     } else if f.presets.is_empty() {
         // Tips without a settings section (early v6 files): one preset per tip.
@@ -94,7 +94,14 @@ pub fn map_file_with(f: &AbrFile, group: &str, ctl: &photocraft_raster::Interrup
             step(i)?;
             let (tip, size) = m.tip(s);
             let brush = BrushSettings { pressure_size: false, spacing: 0.25, size, tip, ..Default::default() };
-            out.presets.push(BrushPreset { name: format!("Sampled Brush {}", i + 1), brush, builtin: false, group: group.to_string(), folder: Vec::new() });
+            out.presets.push(BrushPreset {
+                name: format!("Sampled Brush {}", i + 1),
+                brush,
+                builtin: false,
+                group: group.to_string(),
+                folder: Vec::new(),
+                captures: Default::default(),
+            });
         }
     } else {
         for (i, d) in f.presets.iter().enumerate() {
@@ -105,7 +112,7 @@ pub fn map_file_with(f: &AbrFile, group: &str, ctl: &photocraft_raster::Interrup
                 // named after the imported file.
                 Some(brush) => {
                     let folder = f.folders.get(i).cloned().unwrap_or_default();
-                    out.presets.push(BrushPreset { name, brush, builtin: false, group: group.to_string(), folder });
+                    out.presets.push(BrushPreset { name, brush, builtin: false, group: group.to_string(), folder, captures: Default::default() });
                 }
                 None => {
                     m.warnings.insert(format!("\"{name}\": its sampled tip is missing from the file; skipped"));
@@ -422,7 +429,12 @@ impl Mapper<'_> {
             }
             dual.mode = mask_mode(enum_value(db, "BlnM")).unwrap_or(MaskMode::Multiply);
             dual.flip = boolean(db, "Flip").unwrap_or(false);
-            if let Some(v) = pct(db, "Spcn") {
+            // The dual tip's own spacing (`Brsh › Spcn`) is what Photoshop's Dual Brush panel
+            // shows. The `Spcn` beside it on the `dualBrush` object reads 100 % in Photoshop CC
+            // presets whatever the panel says (#4809), so it only stands in for a tip without one.
+            if obj(db, "Brsh").and_then(|t| pct(t, "Spcn")).is_none()
+                && let Some(v) = pct(db, "Spcn")
+            {
                 dual.spacing = v.clamp(0.01, 10.0);
             }
             dual.scatter = self.dynamic(obj(db, "scatterDynamics")).jitter;
@@ -478,9 +490,8 @@ impl Mapper<'_> {
             }
             b.pressure_size = boolean(to, "usePressureOverridesSize").unwrap_or(false);
             b.pressure_opacity = boolean(to, "usePressureOverridesOpacity").unwrap_or(false);
-            if boolean(to, "smoothing").unwrap_or(true)
-                && let Some(v) = pct(to, "smoothingValue")
-            {
+            b.smoothing.enabled = boolean(to, "smoothing").unwrap_or(true);
+            if let Some(v) = pct(to, "smoothingValue") {
                 b.smoothing.amount = v.clamp(0.0, 1.0);
             }
             if let Some(v) = boolean(to, "smoothingRadiusMode") {

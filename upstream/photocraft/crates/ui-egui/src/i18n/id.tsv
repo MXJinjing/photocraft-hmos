@@ -12,7 +12,17 @@
 # Product and technology names (PhotoCraft, ArtCraft, OpenType, CMYK, Lab ...) stay in Latin
 # letters; the trailing "…" of dialog commands is kept.
 
+# Channel Options and New Spot Channel (#3761)
+	Channel Color	Warna Saluran
+	Color Indicates:	Warna Menunjukkan:
+	Solidity:	Soliditas:
+	Ink Characteristics	Karakteristik Tinta
+
 # Guide layout dialog
+
+# Custom print paper (#3820)
+	Paper Width	Lebar kertas
+	Paper Height	Tinggi kertas
 	Rows	Baris
 	Number	Jumlah
 	Margin	Margin
@@ -68,6 +78,8 @@
 	Save	Simpan
 	Save As…	Simpan Sebagai…
 	Save a Copy…	Simpan Salinan…
+	{name} can't keep everything in this document	{name} tidak dapat menyimpan semua isi dokumen ini
+	Choose a format that keeps it, such as Photoshop (PSD), or save a copy.	Pilih format yang menyimpan semuanya, seperti Photoshop (PSD), atau simpan salinan.
 	Revert	Kembalikan
 	Export	Ekspor
 	Quick Export as PNG	Ekspor Cepat ke PNG
@@ -105,6 +117,14 @@
 	Script Events Manager…	Pengelola Event Skrip…
 	Import	Impor
 	Browse…	Telusuri…
+	Source Files	File Sumber
+	Use:	Gunakan:
+	Files	File
+	Folder	Folder
+	Add Open Files	Tambahkan File Terbuka
+	Sort By Name	Urutkan Menurut Nama
+	Attempt to Automatically Align Source Images	Coba Sejajarkan Gambar Sumber Secara Otomatis
+	Create Smart Object after Loading Layers	Buat Smart Object setelah Memuat Layer
 	Reveal in Finder	Tampilkan di Finder
 	Show in Explorer	Tampilkan di Explorer
 	Show in Folder	Tampilkan di Folder
@@ -129,6 +149,8 @@
 	Search…	Cari…
 	Check Spelling…	Periksa Ejaan…
 	Find and Replace Text…	Cari dan Ganti Teks…
+	Add to Dictionary	Tambahkan ke Kamus
+	No Spelling Suggestions	Tidak Ada Saran Ejaan
 	Fill…	Isi…
 	Stroke…	Stroke…
 	Content-Aware Fill…	Isi Content-Aware…
@@ -141,6 +163,8 @@
 	Again	Lagi
 	Scale	Skala
 	Rotate	Putar
+	Set horizontal skew	Atur kemiringan horizontal
+	Set vertical skew	Atur kemiringan vertikal
 	Skew	Miringkan
 	Distort	Distorsi
 	Perspective	Perspektif
@@ -346,6 +370,7 @@
 	Update Modified Content	Perbarui Isi yang Diubah
 	Update All Modified Content	Perbarui Semua Isi yang Diubah
 	Stack Mode	Mode Stack
+	Choose Stack Mode:	Pilih Mode Stack:
 	Entropy	Entropi
 	Kurtosis	Kurtosis
 	Maximum	Maksimum
@@ -511,6 +536,9 @@
 	Blur	Blur
 	Blur Gallery	Galeri Blur
 	Field Blur…	Field Blur…
+# Field Blur pins (#3373)
+	No pin selected	Tidak ada pin yang dipilih
+	Click the image to add a pin; drag a pin to move it, or its ring to change its blur. Delete removes the selected pin.	Klik gambar untuk menambah pin; seret pin untuk memindahkannya, atau cincinnya untuk mengubah blur. Delete menghapus pin yang dipilih.
 	Iris Blur…	Iris Blur…
 	Tilt-Shift…	Tilt-Shift…
 	Path Blur…	Path Blur…
@@ -709,6 +737,10 @@
 	Breeze Dark Theme	Tema Breeze Gelap
 	Breeze light	Breeze terang
 	Breeze Light Theme	Tema Breeze Terang
+	Soft dark	Lembut gelap
+	Soft light	Lembut terang
+	Soft Dark Theme	Tema lembut gelap
+	Soft Light Theme	Tema lembut terang
 	Next Theme	Tema Berikutnya
 	Actions	Action
 	Brush Settings	Pengaturan Kuas
@@ -808,6 +840,9 @@
 	Appearance	Tampilan
 	Appearance (Layer Style)	Tampilan (Gaya Layer)
 	Apply Layer Mask	Terapkan Mask Layer
+	Add Mask to Selection	Tambahkan Mask ke Seleksi
+	Subtract Mask from Selection	Kurangi Mask dari Seleksi
+	Intersect Mask with Selection	Iriskan Mask dengan Seleksi
 	Apply Per Tip	Terapkan Per Ujung
 	Apply next selected layer comp	Terapkan layer comp terpilih berikutnya
 	Apply previous selected layer comp	Terapkan layer comp terpilih sebelumnya
@@ -823,11 +858,18 @@
 	Background	Background
 	Background Color	Warna Background
 	Background Contents	Isi Background
+	Custom background color	Warna background kustom
 	Balance	Keseimbangan
 	Baseline	Baseline
 	Baseline shift	Geser baseline
 	Basic	Dasar
 	Before (Y)	Sebelum (Y)
+	Save Settings…	Simpan Pengaturan…
+	Load Settings…	Muat Pengaturan…
+	Save these settings as a Camera Raw .xmp file	Simpan pengaturan ini sebagai berkas .xmp Camera Raw
+	Load settings from a Camera Raw .xmp file	Muat pengaturan dari berkas .xmp Camera Raw
+	Loaded Camera Raw settings from {file}	Pengaturan Camera Raw dimuat dari {file}
+	Loaded Camera Raw settings from {file} ({n} not supported)	Pengaturan Camera Raw dimuat dari {file} ({n} tidak didukung)
 	Begin recording	Mulai merekam
 	Bend:	Lengkung:
 	Bicubic	Bicubic
@@ -858,6 +900,7 @@
 	Camera Raw isn't open	Camera Raw tidak terbuka
 	Cancel	Batal
 	Cancel (Esc)	Batal (Esc)
+	Manage submitted jobs in the system print queue	Kelola pekerjaan yang dikirim dalam antrean cetak sistem
 	Cancel any current edits (Esc)	Batalkan semua pengeditan saat ini (Esc)
 	Cancel current crop operation  (Esc)	Batalkan operasi crop saat ini  (Esc)
 	Cancel transform (Esc)	Batalkan transformasi (Esc)
@@ -1123,6 +1166,9 @@
 	Ignore All	Abaikan Semua
 	Image Size	Ukuran Gambar
 	Import Brushes…	Impor Kuas…
+	Gradient Preset Options	Opsi Preset Gradien
+	Import .GRD	Impor .GRD
+	Choose a gradient file (.grd).	Pilih file gradien (.grd).
 	Import brushes (.abr)	Impor kuas (.abr)
 	Import Presets	Impor Preset
 	Imported	Diimpor
@@ -1749,9 +1795,7 @@
 	Std Dev:	Std Dev:
 	Studio (Dark)	Studio (Gelap)
 	Studio (Light)	Studio (Terang)
-	Stylus	Stylus
 	Stylus Wheel	Stylus Wheel
-	Block finger input	Blokir masukan jari
 	Subtract	Kurangi
 	Tabloid	Tabloid
 	Text Replacement	Penggantian Teks
@@ -2046,6 +2090,11 @@
 	Rename Brush…	Ganti Nama Kuas…
 	Delete Brush	Hapus Kuas
 	New Brush Preset…	Preset Kuas Baru…
+	Capture Brush Size in Preset	Simpan Ukuran Kuas di Preset
+	Include Tool Settings	Sertakan Pengaturan Alat
+	Include Color	Sertakan Warna
+	Enter a name for the brush preset	Masukkan nama untuk preset kuas
+	A brush preset with this name already exists	Preset kuas dengan nama ini sudah ada
 	Brush Preset Options	Opsi Preset Kuas
 	Group name	Nama grup
 	Brush name	Nama kuas
@@ -2102,6 +2151,10 @@
 	No path to make a selection from: draw one with the Pen tool or select one in the Paths panel.	Tidak ada path untuk dibuat seleksi: gambar dengan alat Pen atau pilih salah satu di panel Path.
 	Cancel opening	Batalkan pembukaan
 	Cancelled opening {name}	Pembukaan {name} dibatalkan
+	The document “{name}” does not have an embedded {mode} profile.	Dokumen “{name}” tidak memiliki profil {mode} tertanam.
+	The document “{name}” has an embedded color profile that does not match the current {mode} working space.	Dokumen “{name}” memiliki profil warna tertanam yang tidak cocok dengan working space {mode} saat ini.
+	Embedded: {embedded}	Tertanam: {embedded}
+	Working: {working}	Working space: {working}
 	Developing {name}	Mengembangkan {name}
 	Cancelled {label}	{label} dibatalkan
 	Esc to cancel	Esc untuk batal
@@ -2415,7 +2468,6 @@
 	Choose…	Pilih…
 	Select Folder…	Pilih Folder…
 	Override Action "Save" Commands	Timpa Perintah Action "Save"
-	File Naming	Penamaan Berkas
 	Compatibility	Kompatibilitas
 	Mac OS	Mac OS
 	Unix	Unix
@@ -2733,6 +2785,7 @@ cameraRaw	Blending	Pembauran
 	Click to pick · Esc to cancel	Klik untuk memilih · Esc untuk membatalkan
 	Pick a screen pixel or press Esc to cancel	Pilih piksel layar atau tekan Esc untuk membatalkan
 	Scroll to zoom	Gulir untuk memperbesar
+	Drag to pan · Scroll to zoom · Double-click to fit	Seret untuk menggeser · Gulir untuk memperbesar · Klik dua kali untuk menyesuaikan
 	Show/Hide All Panels	Tampilkan/Sembunyikan Semua Panel
 	Show/Hide Panels	Tampilkan/Sembunyikan Panel
 	Could not open	Tidak dapat membuka
@@ -2788,6 +2841,7 @@ cameraRaw	Blending	Pembauran
 	Fuchsia	Fuksia
 	Violet	Ungu
 	Large document: redrawing on the CPU	Dokumen besar: menggambar ulang di CPU
+	Redrawing	Menggambar ulang
 	This redraw took {seconds} s on the CPU.	Penggambaran ulang di CPU ini memakan waktu {seconds} dtk.
 	Edits that change the whole document, such as a layer's blend mode, opacity or visibility, redraw all of it.	Suntingan yang mengubah seluruh dokumen, seperti mode campuran, opasitas, atau visibilitas layer, menggambar ulang semuanya.
 	Its layers don't fit the GPU memory budget. Raising Memory usage in Preferences › Performance raises the budget, up to a quarter of this computer's memory.	Layer tidak muat dalam anggaran memori GPU. Menaikkan Pemakaian memori di Preferensi › Performa menaikkan anggaran, hingga seperempat memori komputer ini.
@@ -2892,13 +2946,6 @@ fontWeight	Italic	Miring
 	XOR	XOR
 	Color Burn (Paint.NET)	Color Burn (Paint.NET)
 	Color Dodge (Paint.NET)	Color Dodge (Paint.NET)
-	Double-tap pen body	Ketuk dua kali badan stylus
-	Current tool and Eraser	Alat saat ini dan penghapus
-	Previous tool	Alat sebelumnya
-	Long-press pen body	Tekan lama badan stylus
-	Show or hide context menu	Tampilkan atau sembunyikan menu konteks
-	Choose printer, copies and duplex in the system print dialog.	Pilih printer, jumlah salinan dan dupleks di dialog cetak sistem.
-	System print preview opened	Pratinjau cetak sistem dibuka
 	Stroke Options	Opsi goresan
 	Solid	Utuh
 	Dashed	Putus-putus
@@ -3023,6 +3070,7 @@ curves	Smooth	Haluskan
 	Paint over hair or fur on the image; Alt paints the other mode	Lukis di atas rambut atau bulu pada gambar; Alt melukis dalam mode lainnya
 	Clear Brush Strokes	Hapus Goresan Kuas
 	Show rulers	Tampilkan Penggaris
+	Presentation	Presentasi
 
 # Color Sampler (added with the i18n coverage repair)
 	Click to place · Alt-click or drag off-canvas to remove	Klik untuk menempatkan · Alt-klik atau seret ke luar kanvas untuk menghapus
@@ -3045,12 +3093,57 @@ curves	Smooth	Haluskan
 	Light Red	Merah Terang
 	Medium Blue	Biru Sedang
 	Light Gray	Abu-abu Muda
+	Object Finder	Pencari Objek
+	No object found there — drag a rectangle around it	Tidak ada objek ditemukan di sana — seret persegi panjang di sekelilingnya
 	Remove after each stroke	Hapus setelah setiap goresan
 	Apply the removal ({key})	Terapkan penghapusan ({key})
 	Strokes to remove: {n} (Enter applies, Esc cancels)	Goresan untuk dihapus: {n} (Enter menerapkan, Esc membatalkan)
+	Clear Brush Controls	Hapus Kontrol Kuas
+	Reset All Locked Settings	Atur Ulang Semua Pengaturan Terkunci
+	Copy Texture to Other Tools	Salin Tekstur ke Alat Lain
 
+# Actions panel: Load/Save Actions (.atn) and kept Photoshop steps
+	Load Actions…	Muat Tindakan…
+	Save Actions…	Simpan Tindakan…
+	{name} (Photoshop)	{name} (Photoshop)
+	{message} ({note})	{message} ({note})
+@plural	Loaded {n} action from {file}|Loaded {n} actions from {file}	{n} tindakan dimuat dari {file}
+@plural	{n} step has no PhotoCraft equivalent yet|{n} steps have no PhotoCraft equivalent yet	{n} langkah belum memiliki padanan di PhotoCraft
+@plural	Saved {n} action to {file}|Saved {n} actions to {file}	{n} tindakan disimpan ke {file}
+@plural	{n} step with no Photoshop equivalent left out|{n} steps with no Photoshop equivalent left out	{n} langkah tanpa padanan Photoshop dilewati
 
-# Status bar panel controls
+	File Naming	Penamaan Berkas
+	Starting serial	Nomor urut awal
+# Actions panel: set folders, dialog toggle, Insert Stop
+	Insert Stop…	Sisipkan Berhenti…
+	Save Set…	Simpan Set…
+	Message:	Pesan:
+	Allow Continue	Izinkan Lanjut
+	Show dialog during playback	Tampilkan dialog saat pemutaran
+	Select an action first	Pilih tindakan terlebih dahulu
+	Action playback stopped	Pemutaran tindakan dihentikan
+	Step {step} is waiting for its dialog	Langkah {step} menunggu dialognya
+@plural	{n} action|{n} actions	{n} tindakan
+	Auto Add/Delete	Tambah/Hapus Otomatis
+
+# Native Windows printing qualification
+	Don't also tick Mirror Image in Print Settings…: the two flips cancel out.	Jangan aktifkan juga Gambar Cermin di Pengaturan Cetak: kedua pembalikan saling meniadakan.
+	Print Settings…	Pengaturan Cetak…
+	Remember to turn off the printer's own colour management in Print Settings…	Ingat untuk menonaktifkan pengelolaan warna milik printer di Pengaturan Cetak…
+	Sent to {printer}	Dikirim ke {printer}
+	set in Print Settings…	diatur di Pengaturan Cetak…
+	ICO is limited to 256 × 256 pixels	ICO dibatasi hingga 256 × 256 piksel
+
+# HarmonyOS host additions retained during upstream sync
+	Stylus	Stylus
+	Block finger input	Blokir masukan jari
+	Double-tap pen body	Ketuk dua kali badan stylus
+	Current tool and Eraser	Alat saat ini dan penghapus
+	Previous tool	Alat sebelumnya
+	Long-press pen body	Tekan lama badan stylus
+	Show or hide context menu	Tampilkan atau sembunyikan menu konteks
+	Choose printer, copies and duplex in the system print dialog.	Pilih printer, jumlah salinan dan dupleks di dialog cetak sistem.
+	System print preview opened	Pratinjau cetak sistem dibuka
 	Only show canvas	Tampilkan kanvas saja
 	Right sidebar	Bilah sisi kanan
 	Connected pen	Pena terhubung

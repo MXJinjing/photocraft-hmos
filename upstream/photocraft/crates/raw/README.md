@@ -45,6 +45,10 @@ Implemented only from public specifications, papers and observation of files:
   by observation of sample files (bit packing, page layout, sample justification; for RAF the
   three sample storages and the reversed order of the X-Trans / Bayer layout records, each
   verified by developing with every candidate phase against the camera's preview).
+* Panasonic RW2 RawFormat 3/4 (vendor-compressed): the fixed-rate 16 bytes per 14 pixels, the
+  predictor groups with per-parity predictors, the 2/4/8-bit field widths, the page-permuted
+  downward bit order and the black level sitting 15 counts above the recorded tags were all
+  established by observation of sample files.
 * Demosaicing: Malvar, He & Cutler (ICASSP 2004); Hirakawa & Parks, "Adaptive
   homogeneity-directed demosaicing" (IEEE TIP 2005); for X-Trans and other non-Bayer CFAs,
   gradient-weighted green interpolation (Lu & Tan, "Color filter array demosaicking: new method
@@ -71,11 +75,12 @@ camera colour tables were copied.
 | Nikon compressed NEF (compression 34713): lossless and lossy type 1 / 2, 12 and 14 bit | Decoded: fixed Huffman tables + maker-note `0x0096` seeds and curve (see `src/nefc.rs`). BlackLevel `0x003d` is read in 14-bit units. "Lossy after split" files are unsupported (preview fallback) |
 | Sony compressed ARW ("cRAW", SonyRawFileType 2) | Decoded: 11-bit min/max + 7-bit delta blocks, SonyToneCurve to 14 bits, the curve's 512 black level when no BlackLevel tag is written (the first-generation bodies, e.g. the ILCE-7) |
 | Panasonic / Leica RW2, RawFormat 5 (12- and 14-bit packed) | Decoded, with PanasonicRaw black / white / WB / sensor borders |
+| Panasonic / Leica RW2, RawFormat 3 and 4 (vendor-compressed, 12-bit) | Decoded; the black level is read 15 counts above the recorded tag; PanasonicRaw white / WB / sensor borders |
 | Olympus ORF, uncompressed 16-bit (E-1, E-400…) | Decoded, with ImageProcessing black / WB / ValidBits / crop |
-| Nikon "lossy after split" NEF, Sony "Compressed RAW 2", Pentax compressed PEF, RW2 RawFormat 4 and older, Olympus compressed ORF | Unsupported: no public description of these codes was found apart from GPL decoder source, which this crate may not use (clean-room). `photocraft-io` opens the embedded JPEG preview instead |
+| Nikon "lossy after split" NEF, Sony "Compressed RAW 2", Pentax compressed PEF, RW2 RawFormat 6 and newer, Olympus compressed ORF | Unsupported: no public description of these codes was found apart from GPL decoder source, which this crate may not use (clean-room). `photocraft-io` opens the embedded JPEG preview instead |
 | Fujifilm RAF, uncompressed (X-Trans I–V, GFX and Bayer bodies since about 2010) | Decoded: 16-bit containers (either byte order), 12-bit LSB-first packing, 14-bit packing in 32-bit words; X-Trans 6×6 or Bayer 2×2 layout, black, as-shot WB, crop, RawExposureBias, orientation from the preview's EXIF |
 | Fujifilm compressed RAF, early FinePix / SuperCCD RAF (no CFA TIFF) | Unsupported (no public description of the compression); preview fallback |
-| CR3 | Recognised, unsupported (preview fallback where a preview is found) |
+| CR3 | Native CRX unsupported; bounded JPEG-track/PRVW preview fallback with CMT1 orientation. I/O labels the result as an 8-bit camera preview |
 | X-Trans and other periodic non-Bayer CFAs (up to 16×16) | Demosaiced by one pattern-agnostic edge-directed method, whatever `Demosaic` is chosen |
 
 ## Development pipeline
@@ -90,6 +95,11 @@ camera colour tables were copied.
    → linear ProPhoto; exposure (BaselineExposure + user EV); the look's tone curve; gamma 1.8;
    16 bits.
 5. Orientation.
+
+Development validates public sensor/crop/CFA metadata before allocation. The working-memory
+limit checks peak live development buffers instead of summing disjoint phases. AHD limits
+simultaneous scratch bands only when required; normal load balancing and pixels are preserved.
+The default 2 GiB limit is unchanged and excludes caller-owned sensor/document storage.
 
 Files without colour calibration (CR2, NEF, ARW, RW2, ORF, RAF…) have no camera matrix. Every one of
 them carries a JPEG the camera rendered from the same sensor data, so `fit_look` estimates the
@@ -109,6 +119,10 @@ then applies the user's Exposure, Temperature and Tint to that same rendering.
 The D5100's measured image area is 4928 × 3264 at (8, 8) in a 4992 × 3280
 sensor plane; it removes the border without changing levels, WB or calibration.
 Measured image areas preserve an explicit file crop.
+
+For a slightly tighter camera JPEG, fitting can align the reference proxy using a bounded
+90–100% centred search on training cells. It requires a strong correlation improvement and
+retains the held-out colour gates; the developed crop and camera calibration are unchanged.
 
 Without a usable fit (no preview, an unrelated, monochrome or differently shaped one, or a fit that
 does not clearly help) the documented neutral fallback stays: the white-balanced camera channels are

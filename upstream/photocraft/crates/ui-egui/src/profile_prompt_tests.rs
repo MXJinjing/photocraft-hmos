@@ -1,6 +1,6 @@
-//! Embedded Profile Mismatch prompts when several files open at once (File › Open with several
-//! selected): every prompt can be answered with a real click, one after another, even when the
-//! user clicks while the next file's prompt is appearing.
+//! Stacked dialogs of the same size in the same place (Embedded Profile Mismatch prompts used to
+//! stack like this when several files opened at once): each can be answered with a real click,
+//! one after another, even when an older one has been raised above the live one.
 
 use crate::{PhotocraftApp, Services};
 use egui::{Modifiers, PointerButton, Pos2, vec2};
@@ -8,15 +8,7 @@ use egui_kittest::{
     Harness,
     kittest::{NodeT, Queryable},
 };
-use photocraft_doc::{Color, ColorMode, Document, SampleType, Size};
 use photocraft_engine::Session;
-
-/// A PNG tagged with Adobe RGB, which doesn't match the sRGB working space.
-fn adobe_png() -> Vec<u8> {
-    let mut d = Document::with_background("t", Size::new(8, 8), ColorMode::Rgb, SampleType::U8, Color::rgba(0.2, 0.6, 0.9, 1.0));
-    d.icc_profile = Some(photocraft_cms::Builtin::from_id("adobe-rgb-compat").unwrap().profile().to_bytes());
-    photocraft_io::export(&d, "t.png", &Default::default()).unwrap().bytes
-}
 
 fn harness(background: bool) -> Harness<'static, PhotocraftApp> {
     let mut h = Harness::builder().with_size(vec2(1400.0, 900.0)).with_max_steps(64).build_eframe(|cc| {
@@ -36,11 +28,13 @@ fn harness(background: bool) -> Harness<'static, PhotocraftApp> {
     h
 }
 
-/// Open `n` mismatched files in one go and wait until their prompts are up and laid out.
+/// Stack `n` identical Embedded Profile Mismatch dialogs (same size, same place; only the newest
+/// is live) and wait until they are up and laid out. Opening files no longer stacks them (they ask
+/// one at a time, `profile_open_tests`), so they are opened directly.
 fn open_together(h: &mut Harness<'static, PhotocraftApp>, n: usize) {
-    let png = adobe_png();
-    for i in 0..n {
-        h.state_mut().open_file(&format!("shot{i}.png"), &png).unwrap();
+    let message = "The document “shot.png” has an embedded color profile that does not match the current RGB working space.";
+    for _ in 0..n {
+        crate::prefs_ui::open_mismatch(h.state_mut(), message, "preserve", false, "__stacked");
     }
     for _ in 0..100 {
         h.run_steps(2);

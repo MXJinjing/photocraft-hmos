@@ -349,3 +349,113 @@ mod archive {
         }
     }
 }
+
+mod shapes {
+    use crate::container::Limits;
+    use crate::model::{Document, Kind, Path, Point, SubPath};
+    use crate::stream::Tag;
+    use crate::synth::{self, F, Method, tag};
+
+    fn shape(id: u32, class: &[u8; 4], parameters: Vec<(Tag, F)>) -> F {
+        F::Def(
+            id,
+            vec![tag(b"ShpN")],
+            vec![(tag(b"ShpB"), F::F64s(vec![0.0, 0.0, 10.0, 20.0])), (tag(b"Shpe"), F::Def(id + 10_000, vec![tag(class)], parameters))],
+        )
+    }
+
+    /// Reads a document whose one page holds the object `top` from `definitions`, on a thread of
+    /// its own, and fails the test when reading takes more than 20 s.
+    fn read(definitions: Vec<F>, top: u32) -> Document {
+        let data = synth::stream(&[
+            (tag(b"Defs"), F::Shared(definitions)),
+            (
+                tag(b"DocR"),
+                F::Def(
+                    1,
+                    vec![tag(b"DocN")],
+                    vec![(
+                        tag(b"Chld"),
+                        F::Shared(vec![F::Def(
+                            2,
+                            vec![tag(b"Sprd")],
+                            vec![(tag(b"SprB"), F::F64s(vec![0.0, 0.0, 400.0, 300.0])), (tag(b"Chld"), F::Shared(vec![F::Ref(top)]))],
+                        )]),
+                    )],
+                ),
+            ),
+        ]);
+        let bytes = synth::container(&[("doc.dat", &data, Method::Zlib)], None);
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || tx.send(crate::model::read(&bytes, Limits::default())).ok());
+        rx.recv_timeout(std::time::Duration::from_secs(20)).unwrap_or_else(|_| panic!("reading the document did not finish")).unwrap()
+    }
+
+    fn path(document: &Document) -> &Path {
+        match &document.spreads[0].nodes[0].kind {
+            Kind::Shape { path, .. } => path,
+            other => panic!("expected shape, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn pie_angles_with_huge_finite_values_do_not_loop_or_emit_nonfinite_points() {
+        let document = read(vec![shape(100, b"ShPi", vec![(tag(b"AngS"), F::F64(1.0e308)), (tag(b"AngE"), F::F64(-1.0e308))])], 100);
+        for subpath in &path(&document).subpaths {
+            assert!(subpath.start.x.is_finite() && subpath.start.y.is_finite());
+            assert!(subpath.segments.len() <= 20);
+            assert!(subpath.segments.iter().flatten().all(|point| point.x.is_finite() && point.y.is_finite()));
+        }
+    }
+
+    #[test]
+    fn wrapped_pie_angles_keep_the_same_geometry_as_the_positive_span() {
+        let make = |end| read(vec![shape(100, b"ShPi", vec![(tag(b"AngS"), F::F64(0.0)), (tag(b"AngE"), F::F64(end))])], 100);
+        assert_eq!(path(&make(-std::f64::consts::FRAC_PI_2)), path(&make(3.0 * std::f64::consts::FRAC_PI_2)));
+    }
+
+    /// A 10×20 rectangle (`ShNR`) with the given parameters, read back as its outline.
+    fn rectangle(parameters: Vec<(Tag, F)>) -> (SubPath, Vec<String>) {
+        let node =
+            F::Def(3, vec![tag(b"ShpN")], vec![(tag(b"ShpB"), F::F64s(vec![0.0, 0.0, 10.0, 20.0])), (tag(b"Shpe"), F::Def(4, vec![tag(b"ShNR")], parameters))]);
+        let spread = F::Def(2, vec![tag(b"Sprd")], vec![(tag(b"SprB"), F::F64s(vec![0.0, 0.0, 400.0, 300.0])), (tag(b"Chld"), F::Shared(vec![node]))]);
+        let data = synth::stream(&[(tag(b"DocR"), F::Def(1, vec![tag(b"DocN")], vec![(tag(b"Chld"), F::Shared(vec![spread]))]))]);
+        let doc = crate::read(&synth::container(&[("doc.dat", &data, Method::Zlib)], None), Limits::default()).unwrap();
+        let Kind::Shape { path, .. } = &doc.spreads[0].nodes[0].kind else { panic!("expected a shape") };
+        (path.subpaths[0].clone(), doc.warnings)
+    }
+
+    /// `CTyp`: an array of corner-type enums (top left, top right, bottom right, bottom left).
+    fn corner_types(ids: [u16; 4]) -> F {
+        let mut raw = vec![0xaa];
+        raw.extend(tag(b"CTyp").0.to_le_bytes());
+        raw.extend(4u32.to_le_bytes());
+        raw.extend(0u16.to_le_bytes());
+        raw.extend(ids.iter().flat_map(|id| id.to_le_bytes()));
+        F::Raw(raw)
+    }
+
+    #[test]
+    fn unlocked_rectangle_corners_keep_their_own_radius_and_type() {
+        let p = |x: f64, y: f64| Point { x, y };
+        // Relative radii scale by 10. Round 5, round 1, straight 3, none.
+        let corners = |lock: Option<bool>| {
+            let mut fields = vec![(tag(b"ShCR"), F::F64s(vec![0.5, 0.1, 0.3, 0.0])), (tag(b"CTyp"), corner_types([0, 0, 1, 4]))];
+            fields.extend(lock.map(|l| (tag(b"Lock"), F::Bool(l))));
+            rectangle(fields)
+        };
+
+        let (sub, warnings) = corners(Some(false));
+        assert!(warnings.is_empty(), "{warnings:?}");
+        assert_eq!(sub.start, p(5.0, 0.0));
+        let ends: Vec<Point> = sub.segments.iter().map(|s| s[2]).collect();
+        assert_eq!(ends, [p(9.0, 0.0), p(10.0, 1.0), p(10.0, 17.0), p(7.0, 20.0), p(0.0, 20.0), p(0.0, 5.0), p(5.0, 0.0)]);
+        assert_eq!(sub.segments[3], [p(7.0, 20.0); 3], "the straight corner is a line");
+        assert_ne!(sub.segments[1][0], p(9.0, 0.0), "the round corner is a curve");
+
+        // Locked (the default): every corner follows the top left one.
+        let (sub, _) = corners(None);
+        assert_eq!(sub.segments.len(), 8);
+        assert_eq!(sub.segments[3][2], p(5.0, 20.0));
+    }
+}

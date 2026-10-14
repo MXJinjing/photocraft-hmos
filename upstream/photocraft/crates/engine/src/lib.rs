@@ -8,12 +8,14 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 pub mod actions_cmds;
+pub mod actions_edit_cmds;
 pub mod adjust_cmds;
 pub mod adjust_params;
 pub mod align_cmds;
 mod allocation;
 pub mod analysis_cmds;
 pub mod artboard_cmds;
+pub mod atn_cmds;
 pub mod automate_cmds;
 pub mod background_cmds;
 pub mod brush_cmds;
@@ -52,6 +54,7 @@ pub mod group_view_cmds;
 pub mod guide_layout;
 pub mod hidden_target;
 pub mod history_cmds;
+pub mod history_select_cmds;
 pub mod image_cmds;
 pub mod inspect;
 pub mod installed_profiles;
@@ -74,6 +77,7 @@ pub mod multichannel_cmds;
 pub mod new_layer;
 pub mod notes_cmds;
 pub mod paint_cmds;
+mod param_check;
 mod path_edit_cmds;
 pub mod pattern_cmds;
 pub mod pattern_fill_cmds;
@@ -194,6 +198,8 @@ pub struct DocState {
     /// Increments on every change; UIs re-render when it moves.
     pub revision: u64,
     pub saved_revision: u64,
+    /// How much of `revision` came from view-only changes (channel eyes, targeting): pixel caches can ignore those.
+    pub view_revision: u64,
     /// Area changed by the latest revision (None = assume everything changed).
     pub last_damage: Option<photocraft_geom::Rect>,
     /// Coalescing key of the latest history step (see [`Session::execute`]'s `coalesce` param).
@@ -239,6 +245,7 @@ impl DocState {
             source_read_only: false,
             revision: 1,
             saved_revision: 1,
+            view_revision: 0,
             last_damage: None,
             coalesce: None,
             channel_view: Default::default(),
@@ -292,17 +299,53 @@ pub struct ToolState {
     /// preset stays "the current brush" so `brush.presets.update` can overwrite it); cleared when
     /// the brush is reset or the preset is gone.
     pub current_preset: Option<String>,
+    /// Bumped whenever `brush` or `current_preset` changes ([`ToolState::brush_changed`]). The
+    /// last-brush persistence watches it instead of comparing the brush itself, so an unchanged
+    /// brush costs a counter compare per frame, not a clone and serialise.
+    pub brush_rev: u64,
+    /// The revision whose value is in `Preferences::last_brush` (a restored one counts as saved):
+    /// [`brush_rev`](Self::brush_rev) == `brush_saved_rev` means there is nothing new to write.
+    pub brush_saved_rev: u64,
     /// A layer mask is the edit target ([`ToolState::target_mask`]).
     pub mask_targeted: bool,
     /// The foreground/background pair of the edit target that isn't current: the layer pixels'
     /// colours while a mask is targeted, the mask's while the pixels are (#2166).
     pub other_colors: [[f32; 4]; 2],
+    /// Colours picked as CMYK, newest last: the sRGB colour that stands for them and the ink
+    /// values chosen. The tool colours are stored as sRGB, and an sRGB round trip does not give
+    /// back what was typed (100/0/0/0 cyan is outside sRGB), so a CMYK document is filled with
+    /// the inks the person picked (#4196). Matched by colour, so it follows a swap, a reset or a
+    /// mask pair without bookkeeping.
+    pub cmyk_picks: Vec<([f32; 3], [f32; 4])>,
 }
 
 impl ToolState {
+    /// How many CMYK picks are remembered.
+    const CMYK_PICKS: usize = 8;
+
+    /// Remember that sRGB colour `rgb` was picked as the inks `cmyk` (each 0..1).
+    pub fn remember_cmyk(&mut self, rgb: [f32; 3], cmyk: [f32; 4]) {
+        self.cmyk_picks.retain(|(c, _)| *c != rgb);
+        self.cmyk_picks.push((rgb, cmyk));
+        let extra = self.cmyk_picks.len().saturating_sub(Self::CMYK_PICKS);
+        self.cmyk_picks.drain(..extra);
+    }
+
+    /// The inks `rgb` was picked as, if it was picked as CMYK.
+    pub fn picked_cmyk(&self, rgb: [f32; 3]) -> Option<[f32; 4]> {
+        self.cmyk_picks.iter().rev().find(|(c, _)| *c == rgb).map(|(_, k)| *k)
+    }
+
     /// Photoshop's colour pair for a layer mask that has none yet: white foreground, black
     /// background (reveal-paint first).
     pub const MASK_COLORS: [[f32; 4]; 2] = [[1.0, 1.0, 1.0, 1.0], [0.0, 0.0, 0.0, 1.0]];
+
+    /// Note that `brush` or `current_preset` changed. Every setter of either (commands and the
+    /// shell's tool-switch paths) calls this; the last-brush persistence only serialises when the
+    /// revision has moved since the stored value ([`Self::brush_saved_rev`]).
+    pub fn brush_changed(&mut self) {
+        self.brush_rev = self.brush_rev.wrapping_add(1);
+    }
 
     /// Switch the edit target between layer pixels and a layer mask. Like Photoshop, the mask and
     /// the pixels keep separate app-wide foreground/background pairs: changing the target puts
@@ -336,8 +379,11 @@ impl Default for ToolState {
             mixer: Default::default(),
             brush_gesture: None,
             current_preset: None,
+            brush_rev: 0,
+            brush_saved_rev: 0,
             mask_targeted: false,
             other_colors: Self::MASK_COLORS,
+            cmyk_picks: Vec::new(),
         }
     }
 }
@@ -416,9 +462,17 @@ pub struct Session {
     pub link_scan: Option<link_watch::LinkScan>,
     /// Select Subject's last result, reused while the pixels are unchanged (#2865).
     subject_cache: smartselect_cmds::SubjectCache,
+    /// Object Selection's Object Finder results (#4087), shared by the hover preview and the
+    /// click that commits it; valid while the pixels are unchanged.
+    pub object_finder: smartselect_cmds::ObjectFinderCache,
     /// A finished live stroke offered to the `paint.stroke` / `paint.pencil` that commits it
     /// ([`Session::offer_live_stroke`]).
     pub(crate) live_commit: Option<brush_cmds::LiveCommit>,
+    /// Documents a background open decoded but held back until the user answers the profile
+    /// prompt ([`ColorState::open_question`](color_cmds::ColorState::open_question)): `(id,
+    /// document, source read-only)`. The shell takes them with [`Session::take_held_open`].
+    held_opens: Vec<(u64, Document, bool)>,
+    next_held_open: u64,
 }
 
 /// Move item `i` of `v` to position `to`, clamped to the end. Returns where it went; `None` when
@@ -504,6 +558,21 @@ impl Session {
         i
     }
 
+    /// Holds a decoded document back from opening (see `held_opens`); returns its id.
+    pub(crate) fn hold_open(&mut self, doc: Document, source_read_only: bool) -> u64 {
+        self.next_held_open = self.next_held_open.wrapping_add(1);
+        self.held_opens.push((self.next_held_open, doc, source_read_only));
+        self.next_held_open
+    }
+
+    /// Takes a document a background open held back for the profile prompt: the document and
+    /// whether its source is read-only. `None` when there is no such document (already taken).
+    pub fn take_held_open(&mut self, id: u64) -> Option<(Document, bool)> {
+        let i = self.held_opens.iter().position(|(h, _, _)| *h == id)?;
+        let (_, doc, read_only) = self.held_opens.remove(i);
+        Some((doc, read_only))
+    }
+
     pub fn close(&mut self, index: usize) -> Option<DocState> {
         if index >= self.docs.len() {
             return None;
@@ -512,6 +581,7 @@ impl Session {
         if let Some(id) = self.docs.get(index).map(|d| d.doc.id) {
             self.cancel_jobs_on(id);
             self.subject_cache.forget_doc(id);
+            self.object_finder.forget_doc(id);
         }
         let d = self.docs.remove(index);
         self.active = if self.docs.is_empty() {
@@ -551,6 +621,15 @@ impl Session {
         Ok(())
     }
 
+    /// [`Self::offer_live_stroke`] for a live Clone Stamp or History Brush stroke, taken by the
+    /// `paint.cloneStamp` / `paint.historyBrush` it was drawn for. Refused for the Healing Brush
+    /// (it blends on release) and when the brush, layer or clone source changed during the stroke.
+    pub fn offer_live_retouch(&mut self, live: retouch_cmds::LiveRetouch) -> Result<()> {
+        let commit = live.into_commit(self)?;
+        self.live_commit = Some(commit);
+        Ok(())
+    }
+
     /// Withdraw an offer the command didn't take.
     pub fn clear_live_stroke(&mut self) {
         self.live_commit = None;
@@ -583,6 +662,10 @@ impl Session {
     fn precondition(&self, spec: &commands::CommandSpec, params: &Value) -> std::result::Result<(), String> {
         if self.names_existing_layer(spec.id, params) {
             return Ok(());
+        }
+        // `ifPresent`: with no Background there is nothing to do, which isn't an error.
+        if spec.id == "layer.new.layerFromBackground" && params.get("ifPresent").and_then(Value::as_bool) == Some(true) {
+            return self.active().map(|_| ()).ok_or_else(|| "no document open".into());
         }
         channel_cmds::mask_target_enabled(self, spec.id, params).unwrap_or_else(|| (spec.enabled)(self))
     }
@@ -676,6 +759,7 @@ impl Session {
         if damage.is_none_or(|d| !d.is_empty()) {
             // Free the mask early; a stale entry would only miss (it is keyed by pixels).
             self.subject_cache = Default::default();
+            self.object_finder = Default::default();
         }
         Ok(r)
     }

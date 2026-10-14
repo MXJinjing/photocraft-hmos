@@ -106,9 +106,7 @@ fn topmost(doc: &Document, x: f64, y: f64) -> Option<Frame> {
     let mut ids: Vec<LayerId> = doc
         .walk()
         .into_iter()
-        .filter(|(path, _, layer)| {
-            matches!(layer.content, LayerContent::Text(_)) && (1..=path.len()).all(|n| doc.layer_at(&path[..n]).is_some_and(|ancestor| ancestor.visible))
-        })
+        .filter(|(path, _, layer)| matches!(layer.content, LayerContent::Text(_)) && doc.shown_at(path))
         .map(|(_, _, layer)| layer.id)
         .collect();
     ids.reverse();

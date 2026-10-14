@@ -3,13 +3,13 @@
 //! A transform is described by where the four corners of a source rectangle land (a quad). Scale,
 //! rotate, skew and flips are affine special cases; Distort and Perspective use the full
 //! homography. Warping is an inverse mapping with premultiplied-alpha sampling (nearest, bilinear
-//! or Catmull-Rom bicubic), processed per destination tile (in parallel on native) so memory stays
+//! or Photoshop's Keys bicubic), processed per destination tile (in parallel on native) so memory stays
 //! bounded by the tile working set. Large reductions are pre-filtered with a proper resize first,
 //! so shrinking a layer doesn't alias.
 
 use photocraft_color::PixelFormat;
 use photocraft_geom::Rect;
-use photocraft_raster::Surface;
+use photocraft_raster::{Interrupt, Surface};
 use serde::{Deserialize, Serialize};
 
 use crate::resample::{Resample, resize_surface};
@@ -41,6 +41,27 @@ impl Homography {
         let m = &self.0;
         let w = m[6] * x + m[7] * y + m[8];
         ((m[0] * x + m[1] * y + m[2]) / w, (m[3] * x + m[4] * y + m[5]) / w)
+    }
+
+    /// The homogeneous `w` of `(x, y)`: its sign is the side of the horizon the point maps to
+    /// (0 on the horizon itself).
+    pub fn w(&self, x: f64, y: f64) -> f64 {
+        let m = &self.0;
+        m[6] * x + m[7] * y + m[8]
+    }
+
+    /// The side of the horizon (+1 or −1) that most corners of `r` (`[x0, y0, x1, y1]`) map to,
+    /// the centre's on a tie. A Distort dragged past the horizon maps the rest of the source to the
+    /// far side, where it would show as a mirrored copy wrapped round infinity; drawing keeps to
+    /// this side, as Photoshop's does (#4863).
+    pub fn front_side(&self, r: [f64; 4]) -> f64 {
+        let ahead = [(r[0], r[1]), (r[2], r[1]), (r[2], r[3]), (r[0], r[3])].iter().filter(|(x, y)| self.w(*x, *y) > 0.0).count();
+        match ahead {
+            3 | 4 => 1.0,
+            0 | 1 => -1.0,
+            _ if self.w((r[0] + r[2]) / 2.0, (r[1] + r[3]) / 2.0) >= 0.0 => 1.0,
+            _ => -1.0,
+        }
     }
 
     pub fn mul(&self, o: &Homography) -> Homography {
@@ -133,24 +154,40 @@ impl Interp {
     }
 }
 
-fn catmull_rom(t: f64) -> [f64; 4] {
-    let t2 = t * t;
-    let t3 = t2 * t;
-    [-0.5 * t3 + t2 - 0.5 * t, 1.5 * t3 - 2.5 * t2 + 1.0, -1.5 * t3 + 2.0 * t2 + 0.5 * t, 0.5 * t3 - 0.5 * t2]
+/// Photoshop's Bicubic: the Keys cubic at a = −0.75 (Catmull-Rom is −0.5), the weights of the
+/// four source pixels around a sample `t` (0..1) past the second. Measured on Photoshop 27.11's
+/// Free Transform: a 200 % step edge matches within 0.5 levels; Catmull-Rom was 6 off.
+pub(crate) fn bicubic(t: f64) -> [f64; 4] {
+    const A: f64 = -0.75;
+    let near = |x: f64| (A + 2.0) * x * x * x - (A + 3.0) * x * x + 1.0;
+    let far = |x: f64| A * (x * x * x - 5.0 * x * x + 8.0 * x - 4.0);
+    [far(1.0 + t), near(t), near(1.0 - t), far(2.0 - t)]
 }
 
 /// Warp `src` (its content inside `src_rect`) by `h` (source → destination document space).
 /// The result has the same format as `src`, with alpha added if `src` had none; pixels outside
 /// the warped quad are transparent.
 pub fn warp_surface(src: &Surface, src_rect: Rect, h: &Homography, interp: Interp) -> Result<Surface, photocraft_raster::AllocationError> {
-    warp(src, src_rect, h, interp, None)
+    warp(src, src_rect, h, interp, None, &Interrupt::NONE)
+}
+
+/// [`warp_surface`] reporting progress per destination tile; `Ok(None)` once `ctl` is cancelled.
+pub fn warp_surface_with(
+    src: &Surface,
+    src_rect: Rect,
+    h: &Homography,
+    interp: Interp,
+    ctl: &Interrupt,
+) -> Result<Option<Surface>, photocraft_raster::AllocationError> {
+    let out = warp(src, src_rect, h, interp, None, ctl)?;
+    Ok((!ctl.cancelled()).then_some(out))
 }
 
 /// [`warp_surface`] keeping only the destination pixels inside `clip`. The work is bounded by
 /// `clip` even when part of the source lies at or beyond the map's horizon (a Perspective Crop of a
 /// layer that reaches far past the crop quad), which would make the full warped extent unbounded.
 pub fn warp_surface_clipped(src: &Surface, src_rect: Rect, h: &Homography, interp: Interp, clip: Rect) -> Result<Surface, photocraft_raster::AllocationError> {
-    warp(src, src_rect, h, interp, Some(clip))
+    warp(src, src_rect, h, interp, Some(clip), &Interrupt::NONE)
 }
 
 /// Is `q` (TL, TR, BR, BL) a usable Perspective Crop quad: finite, strictly convex with every
@@ -192,7 +229,39 @@ pub fn quad_to_rect(q: &[[f64; 2]; 4], w: f64, h: f64) -> Option<Homography> {
     Homography::rect_to_quad([0.0, 0.0, w, h], *q)?.inverse()
 }
 
-fn warp(src: &Surface, src_rect: Rect, h: &Homography, interp: Interp, clip: Option<Rect>) -> Result<Surface, photocraft_raster::AllocationError> {
+/// The destination rectangle [`warp_surface`] fills for `src_rect` under `h`: the warped corners
+/// plus a pixel for filter support, each side clamped to ±2²⁰. `None` when a corner maps to
+/// infinity (the result is then empty). Lets a caller price a warp before allocating it.
+pub fn warp_output_bounds(src_rect: Rect, h: &Homography) -> Option<Rect> {
+    if src_rect.is_empty() || h.inverse().is_none() {
+        return None;
+    }
+    let corners = [(src_rect.x0, src_rect.y0), (src_rect.x1, src_rect.y0), (src_rect.x1, src_rect.y1), (src_rect.x0, src_rect.y1)]
+        .map(|(x, y)| h.apply(x as f64, y as f64));
+    corner_bounds(&corners)
+}
+
+fn corner_bounds(corners: &[(f64, f64); 4]) -> Option<Rect> {
+    if !corners.iter().all(|c| c.0.is_finite() && c.1.is_finite()) {
+        return None;
+    }
+    let lim = (1 << 20) as f64;
+    let bx0 = corners.iter().map(|c| c.0).fold(f64::MAX, f64::min).floor().max(-lim) as i32 - 1;
+    let by0 = corners.iter().map(|c| c.1).fold(f64::MAX, f64::min).floor().max(-lim) as i32 - 1;
+    let bx1 = corners.iter().map(|c| c.0).fold(f64::MIN, f64::max).ceil().min(lim) as i32 + 1;
+    let by1 = corners.iter().map(|c| c.1).fold(f64::MIN, f64::max).ceil().min(lim) as i32 + 1;
+    Some(Rect::new(bx0, by0, bx1, by1))
+}
+
+/// A cancelled `ctl` skips the remaining tiles; the caller discards the result.
+fn warp(
+    src: &Surface,
+    src_rect: Rect,
+    h: &Homography,
+    interp: Interp,
+    clip: Option<Rect>,
+    ctl: &Interrupt,
+) -> Result<Surface, photocraft_raster::AllocationError> {
     let mut fmt = src.format();
     let converted;
     let mut src = if fmt.alpha {
@@ -216,8 +285,12 @@ fn warp(src: &Surface, src_rect: Rect, h: &Homography, interp: Interp, clip: Opt
     };
     let scale = h.local_scale(cx, cy);
     let reduced;
-    if interp != Interp::Nearest && scale < 0.5 && scale > 0.0 {
-        let f = 2f64.powf(scale.log2().ceil()).min(1.0); // remaining scale lands in [0.5, 1)
+    // Photoshop reduces with its Bicubic widened by 1 / scale (as Image Size does), so the source is
+    // brought down by the whole local scale first and the warp samples it at about 1:1; a plain
+    // 4×4 kernel at 50 % aliased (Photoshop 27.11 Free Transform, 50 % of an impulse image).
+    // Bilinear samples the source directly, as Photoshop's does (exact at 50 % without a prefilter).
+    if interp == Interp::Bicubic && scale < 0.999 && scale > 0.0 {
+        let f = scale.max(1.0 / 64.0);
         reduced = resize_surface(src, f, f, Resample::Bicubic);
         src = &reduced;
         h = h.mul(&Homography([1.0 / f, 0.0, 0.0, 0.0, 1.0 / f, 0.0, 0.0, 0.0, 1.0]));
@@ -234,21 +307,17 @@ fn warp(src: &Surface, src_rect: Rect, h: &Homography, interp: Interp, clip: Opt
     let fwd_w = [(sx0, sy0), (sx1, sy0), (sx1, sy1), (sx0, sy1)].map(|(x, y)| h.0[6] * x + h.0[7] * y + h.0[8]);
     let side = [1.0, -1.0].into_iter().find(|&s| fwd_w.iter().all(|&c| s * c > 0.0));
     let w_lo = 1.0 / fwd_w.iter().fold(0.0f64, |m, c| m.max(c.abs()));
-    let finite = corners.iter().all(|c| c.0.is_finite() && c.1.is_finite());
-    let lim = 1 << 20;
-    let bounds = || {
-        let bx0 = corners.iter().map(|c| c.0).fold(f64::MAX, f64::min).floor().max(-(lim as f64)) as i32 - 1;
-        let by0 = corners.iter().map(|c| c.1).fold(f64::MAX, f64::min).floor().max(-(lim as f64)) as i32 - 1;
-        let bx1 = corners.iter().map(|c| c.0).fold(f64::MIN, f64::max).ceil().min(lim as f64) as i32 + 1;
-        let by1 = corners.iter().map(|c| c.1).fold(f64::MIN, f64::max).ceil().min(lim as f64) as i32 + 1;
-        Rect::new(bx0, by0, bx1, by1)
-    };
-    let dst = match clip {
+    // A source straddling the horizon draws only its front side: the inverse w at a pixel has the
+    // sign of the forward w at the source point it samples, and the other side would show as a
+    // mirrored copy wrapped round infinity (#4863).
+    let front = side.is_none().then(|| h.front_side([src_rect.x0 as f64, src_rect.y0 as f64, src_rect.x1 as f64, src_rect.y1 as f64]));
+    let bounds = corner_bounds(&corners);
+    let dst = match (clip, bounds) {
         // The warped corners only bound the result while the whole source is in front of the horizon.
-        Some(c) if finite && side.is_some() => bounds().intersect(&c),
-        Some(c) => c,
-        None if finite => bounds(),
-        None => return Ok(out),
+        (Some(c), Some(b)) if side.is_some() => b.intersect(&c),
+        (Some(c), _) => c,
+        (None, Some(b)) => b,
+        (None, None) => return Ok(out),
     };
     if dst.is_empty() {
         return Ok(out);
@@ -261,7 +330,16 @@ fn warp(src: &Surface, src_rect: Rect, h: &Homography, interp: Interp, clip: Opt
     tiles.try_reserve_exact(tile_count).map_err(|_| photocraft_raster::AllocationError::NotEnoughMemory { bytes: tile_bytes })?;
     tiles.extend(dst.tiles().map(|tc| tc.rect().intersect(&dst)).filter(|r| !r.is_empty()));
     let src_ref: &Surface = src;
+    // Tiles finished so far, for progress reported per tile (from any worker thread).
+    let finished = std::sync::atomic::AtomicUsize::new(0);
+    let total = tiles.len().max(1);
     let work = |t: &Rect| -> Result<Option<(Rect, Vec<f32>)>, photocraft_raster::AllocationError> {
+        if ctl.cancelled() {
+            return Ok(None);
+        }
+        let k = finished.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+        // The last few percent are the writes.
+        ctl.progress(0.98 * k as f32 / total as f32);
         // Source footprint of this tile (inverse-mapped corners of its sampled part), padded for the filter.
         let tc = [(t.x0, t.y0), (t.x1, t.y0), (t.x1, t.y1), (t.x0, t.y1)].map(|(x, y)| (x as f64, y as f64));
         let wc = tc.map(|(x, y)| inv.0[6] * x + inv.0[7] * y + inv.0[8]);
@@ -324,6 +402,9 @@ fn warp(src: &Surface, src_rect: Rect, h: &Homography, interp: Interp, clip: Opt
         let mut acc = [0.0f64; 8];
         for y in t.y0..t.y1 {
             for x in t.x0..t.x1 {
+                if front.is_some_and(|s| s * inv.w(x as f64 + 0.5, y as f64 + 0.5) <= 0.0) {
+                    continue;
+                }
                 let (u, v) = inv.apply(x as f64 + 0.5, y as f64 + 0.5);
                 let (u, v) = (u - 0.5, v - 0.5);
                 if u < src_rect.x0 as f64 - 1.0 || v < src_rect.y0 as f64 - 1.0 || u > src_rect.x1 as f64 || v > src_rect.y1 as f64 {
@@ -350,7 +431,7 @@ fn warp(src: &Surface, src_rect: Rect, h: &Homography, interp: Interp, clip: Opt
                     }
                     Interp::Bicubic => {
                         let (ix, iy) = (u.floor() as i32, v.floor() as i32);
-                        let (wx, wy) = (catmull_rom(u - ix as f64), catmull_rom(v - iy as f64));
+                        let (wx, wy) = (bicubic(u - ix as f64), bicubic(v - iy as f64));
                         for (j, wyj) in wy.iter().enumerate() {
                             for (i, wxi) in wx.iter().enumerate() {
                                 let k = wxi * wyj;
@@ -397,6 +478,9 @@ fn warp(src: &Surface, src_rect: Rect, h: &Homography, interp: Interp, clip: Opt
         }
     }
     let done = done.into_inner().unwrap_or_else(std::sync::PoisonError::into_inner);
+    if ctl.cancelled() {
+        return Ok(out);
+    }
     for (r, v) in done {
         out.try_write_region(r, &v)?;
     }
@@ -407,6 +491,25 @@ fn warp(src: &Surface, src_rect: Rect, h: &Homography, interp: Interp, clip: Opt
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_interruptible_warp_reports_progress_and_stops_when_cancelled() {
+        let mut s = Surface::new(PixelFormat::RGBA8);
+        s.fill_rect(Rect::new(0, 0, 600, 400), &[0.2, 0.4, 0.6, 1.0]);
+        let r = s.content_bounds();
+        let h = Homography::rect_to_quad([0.0, 0.0, 600.0, 400.0], [[10.0, 0.0], [590.0, 20.0], [600.0, 400.0], [0.0, 380.0]]).unwrap();
+        let reported = std::sync::Mutex::new(0.0f32);
+        let progress = |p: f32| {
+            let mut m = reported.lock().unwrap();
+            *m = m.max(p);
+        };
+        let never = || false;
+        let out = warp_surface_with(&s, r, &h, Interp::Bicubic, &Interrupt::new(&never, &progress)).unwrap().expect("not cancelled");
+        assert_eq!(out.read_region(r), warp_surface(&s, r, &h, Interp::Bicubic).unwrap().read_region(r));
+        assert!(*reported.lock().unwrap() > 0.9);
+        let always = || true;
+        assert!(warp_surface_with(&s, r, &h, Interp::Bicubic, &Interrupt::cancel_only(&always)).unwrap().is_none());
+    }
 
     /// Perspective Crop's map lands each quad corner exactly on its rectangle corner; degenerate,
     /// self-crossing, counter-clockwise and non-finite quads have none.
@@ -434,6 +537,24 @@ mod tests {
 
     fn rgba() -> Surface {
         Surface::new(PixelFormat::RGBA8)
+    }
+
+    /// Photoshop 27.11's Free Transform, Bicubic, 200 % about the centre of a 64 px image whose left
+    /// half is grey 64 and right half grey 192: the row across the edge, columns 26..36.
+    #[test]
+    fn bicubic_upscale_matches_photoshop() {
+        let mut src = rgba();
+        let g = |v: f32| v / 255.0;
+        src.fill_rect(Rect::new(0, 0, 32, 64), &[g(64.0), g(64.0), g(64.0), 1.0]);
+        src.fill_rect(Rect::new(32, 0, 64, 64), &[g(192.0), g(192.0), g(192.0), 1.0]);
+        let q = [[-32.0, -32.0], [96.0, -32.0], [96.0, 96.0], [-32.0, 96.0]];
+        let h = Homography::rect_to_quad([0.0, 0.0, 64.0, 64.0], q).unwrap();
+        let out = warp_surface(&src, Rect::new(0, 0, 64, 64), &h, Interp::Bicubic).unwrap();
+        let photoshop = [64.0, 64.0, 64.0, 60.0, 51.0, 93.0, 163.0, 206.0, 197.0, 192.0];
+        for (i, want) in photoshop.iter().enumerate() {
+            let got = out.pixel(26 + i as i32, 50)[0] * 255.0;
+            assert!((got - want).abs() <= 1.5, "column {}: {got} vs {want}", 26 + i);
+        }
     }
 
     #[test]
@@ -468,6 +589,44 @@ mod tests {
         for (x, y) in [(200, 200), (280, 100), (100, 280)] {
             assert_eq!(w.read_region(Rect::new(x, y, x + 1, y + 1))[3], 0.0, "({x},{y}) outside the quad is painted");
         }
+    }
+
+    /// #4863: a Distort with the bottom corners pulled in and one dragged past the horizon (a
+    /// concave quad) leaves part of the source behind the horizon. That part maps to the far side,
+    /// where it showed as a mirrored copy wrapped round infinity; only the front side is drawn.
+    #[test]
+    fn a_distort_past_the_horizon_draws_only_its_front_side() {
+        let mut s = rgba();
+        s.fill_rect(Rect::new(0, 0, 100, 100), &[0.0, 0.5, 1.0, 1.0]);
+        let r = s.content_bounds();
+        let h = Homography::rect_to_quad([0.0, 0.0, 100.0, 100.0], [[0.0, 0.0], [300.0, 0.0], [60.0, 60.0], [0.0, 300.0]]).unwrap();
+        let corners = [(0.0, 0.0), (100.0, 0.0), (100.0, 100.0), (0.0, 100.0)].map(|(x, y)| h.w(x, y));
+        assert!(corners.iter().any(|w| *w > 0.0) && corners.iter().any(|w| *w < 0.0), "the source straddles the horizon: {corners:?}");
+        let front = h.front_side([0.0, 0.0, 100.0, 100.0]);
+        let inv = h.inverse().unwrap();
+        let clip = Rect::new(-400, -400, 700, 700);
+        for interp in [Interp::Nearest, Interp::Bilinear] {
+            let w = warp_surface_clipped(&s, r, &h, interp, clip).unwrap();
+            let px = w.read_region(clip);
+            let (mut drawn, mut behind) = (0, 0);
+            for y in clip.y0..clip.y1 {
+                for x in clip.x0..clip.x1 {
+                    let i = ((y - clip.y0) * clip.width() as i32 + (x - clip.x0)) as usize * 4;
+                    if px[i + 3] > 0.0 {
+                        drawn += 1;
+                        // The source point this pixel samples is on the far side of the horizon.
+                        if front * inv.w(x as f64 + 0.5, y as f64 + 0.5) <= 0.0 {
+                            behind += 1;
+                        }
+                    }
+                }
+            }
+            assert!(drawn > 1000, "{interp:?}: the front side is drawn ({drawn} px)");
+            assert_eq!(behind, 0, "{interp:?}: {behind} pixels come from behind the horizon");
+        }
+        // A quad wholly in front of the horizon is drawn exactly as before.
+        let ok = Homography::rect_to_quad([0.0, 0.0, 100.0, 100.0], [[0.0, 0.0], [300.0, 0.0], [155.0, 155.0], [0.0, 300.0]]).unwrap();
+        assert_eq!(ok.front_side([0.0, 0.0, 100.0, 100.0]), ok.w(50.0, 50.0).signum());
     }
 
     #[test]

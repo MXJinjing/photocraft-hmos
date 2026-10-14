@@ -206,6 +206,8 @@ mod tests {
             (vec!["nl-BE", "fr-BE"], "nl"),
             (vec!["hu-HU", "en-US"], "hu"),
             (vec!["tr-TR", "en-US"], "tr"),
+            (vec!["sr-Latn-RS", "en-US"], "sr"),
+            (vec!["sv-SE", "sr_RS@latin", "ru-RU"], "sr"),
             (vec![], "en"),
         ] {
             with_system_tags(&tags, || assert_eq!(system_lang().code(), expected));

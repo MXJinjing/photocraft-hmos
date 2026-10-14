@@ -30,7 +30,8 @@ impl BrushContext {
         let r = d.radius;
         let ro = d.roundness.max(0.5 / r).min(1.0);
         let rm = (r * ro).max(0.5);
-        let reach2 = (rm + 0.5) * (rm + 0.5);
+        let reach = if aliased || mips.is_some() { rm } else { crate::tip_reach(rm, hardness).max(rm) };
+        let reach2 = (reach + 0.5) * (reach + 0.5);
         // Sampled-tip mapping.
         let (level, inv_scale, tw, th) = match mips {
             Some(m) => {
@@ -54,7 +55,7 @@ impl BrushContext {
         // sampling only the pixel centre made a tiny dab's total coverage swing with its sub-pixel
         // position, and thin lines beaded.
         let small = mips.is_none() && !aliased && rm < SMALL_TIP_RADIUS;
-        let small_reach2 = (rm + 0.75) * (rm + 0.75);
+        let small_reach2 = (reach + 0.75) * (reach + 0.75);
         for yy in 0..h {
             let y = rect.y0 + yy as i32;
             let dy = y as f32 + 0.5 - cy;
@@ -80,12 +81,7 @@ impl BrushContext {
                             for sx in SUBPIXEL {
                                 let (su, sv) = to_tip(dx + sx, dy + sy);
                                 let sd = ((su * ro).powi(2) + sv * sv).sqrt();
-                                // Each sample anti-aliases over its own quarter pixel, so the
-                                // covered area changes smoothly with the dab's position.
-                                let inside = ((rm - sd) * 4.0 + 0.5).clamp(0.0, 1.0);
-                                if inside > 0.0 {
-                                    sum += inside * tip_falloff(sd.min(rm), rm, hardness);
-                                }
+                                sum += tip_falloff(sd, rm, hardness);
                             }
                         }
                         (sum / (SUBPIXEL.len() * SUBPIXEL.len()) as f32, d2.sqrt() / rm)

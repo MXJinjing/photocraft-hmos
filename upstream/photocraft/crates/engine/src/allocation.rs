@@ -48,7 +48,7 @@ pub(crate) fn read_region(surface: &photocraft_raster::Surface, area: photocraft
     Ok(out)
 }
 
-fn error(purpose: &str, detail: &str) -> EngineError {
+pub(crate) fn error(purpose: &str, detail: &str) -> EngineError {
     EngineError::Other(format!("not enough memory for {purpose} ({detail}); the document was not changed"))
 }
 

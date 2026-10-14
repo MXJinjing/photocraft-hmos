@@ -247,6 +247,69 @@ fn smart_filter_commands_check_an_explicit_layer_target() {
     assert_eq!(active(&s), curves);
 }
 
+/// #4271: dragging smart filters onto another smart object moves them, ⌥-dragging copies them;
+/// one filter or all of them (with the filter mask), each in one undo step.
+#[test]
+fn smart_filters_move_or_copy_to_another_smart_object() {
+    let mut s = session(8);
+    paint(&mut s);
+    let a = convert(&mut s);
+    s.execute("select.rect", json!({"x": 0, "y": 0, "width": 16, "height": 48})).unwrap();
+    s.execute("filter.other.offset", json!({"horizontal": 5, "undefinedAreas": "transparent"})).unwrap();
+    s.execute("select.deselect", json!({})).unwrap();
+    s.execute("filter.blur.gaussianBlur", json!({"radius": 3})).unwrap();
+    s.execute("layer.new.layer", json!({})).unwrap();
+    paint(&mut s);
+    let b = convert(&mut s);
+    let pixel = s.execute("layer.new.layer", json!({})).unwrap()["layer"].as_u64().unwrap();
+    let so = |s: &Session, id: u64| match &s.active().unwrap().doc.layer(LayerId(id)).unwrap().content {
+        LayerContent::Smart(sm) => sm.clone(),
+        other => panic!("not smart: {}", other.kind_name()),
+    };
+    let commands = |sm: &SmartObject| sm.smart_filters.iter().map(|f| f.command.clone()).collect::<Vec<_>>();
+    let (offset, blur) = ("filter.other.offset", "filter.blur.gaussianBlur");
+    assert_eq!(commands(&so(&s, a)), [offset, blur]);
+    assert!(so(&s, a).filter_mask.is_some());
+    let before = flat(&s);
+
+    // ⌥-drag the blur: B gets a copy (re-rendered), A keeps it.
+    s.execute("layer.smartFilter.transfer", json!({"from": a, "to": b, "filter": 1, "copy": true})).unwrap();
+    assert_eq!(commands(&so(&s, b)), [blur]);
+    assert_eq!(commands(&so(&s, a)), [offset, blur]);
+    assert!(so(&s, b).filter_mask.is_none(), "one filter comes without the mask");
+    assert!(max_diff(&flat(&s), &before) > 1e-3, "B is blurred");
+    s.undo();
+    assert!(so(&s, b).smart_filters.is_empty());
+    assert_eq!(flat(&s), before);
+
+    // Drag the offset: it moves to the top of B's filters.
+    s.redo();
+    s.execute("layer.smartFilter.transfer", json!({"from": a, "to": b, "filter": 0})).unwrap();
+    assert_eq!(commands(&so(&s, a)), [blur]);
+    assert_eq!(commands(&so(&s, b)), [blur, offset]);
+
+    // Drag the Smart Filters row: all of A's filters and its filter mask move to B.
+    let mask = so(&s, a).filter_mask;
+    s.execute("layer.smartFilter.transfer", json!({"from": a, "to": b})).unwrap();
+    assert!(so(&s, a).smart_filters.is_empty() && so(&s, a).filter_mask.is_none());
+    assert_eq!(commands(&so(&s, b)), [blur, offset, blur]);
+    assert_eq!(so(&s, b).filter_mask, mask);
+    s.undo();
+    assert_eq!(so(&s, a).smart_filters.len(), 1);
+    assert_eq!(so(&s, b).smart_filters.len(), 2);
+
+    // Refused: onto itself, onto a layer that isn't a smart object, a bad index, no filters.
+    let transfer = |s: &mut Session, p: Value| s.execute("layer.smartFilter.transfer", p);
+    assert!(transfer(&mut s, json!({"from": a, "to": a})).is_err());
+    assert!(transfer(&mut s, json!({"from": a, "to": pixel})).is_err());
+    assert!(transfer(&mut s, json!({"from": a, "to": b, "filter": 5})).is_err());
+    assert!(transfer(&mut s, json!({"from": a, "to": b, "index": 0})).is_err(), "`index` isn't taken for `filter`");
+    assert!(transfer(&mut s, json!({"from": pixel, "to": b})).is_err());
+    s.execute("layer.smartFilter.clearSmartFilters", json!({"layer": a})).unwrap();
+    assert!(transfer(&mut s, json!({"from": a, "to": b})).is_err());
+    assert_eq!(so(&s, b).smart_filters.len(), 2, "nothing changed");
+}
+
 #[test]
 fn selection_becomes_the_filter_mask() {
     let mut s = session(8);
@@ -466,8 +529,18 @@ fn export_replace_and_linked_contents() {
     paint(&mut s);
     convert(&mut s);
     let out = dir.join("contents.pcraft");
-    s.execute("layer.smartObjects.exportContents", json!({"path": out.to_str().unwrap()})).unwrap();
+    let r = s.execute("layer.smartObjects.exportContents", json!({"path": out.to_str().unwrap()})).unwrap();
     assert!(photocraft_format::is_pcraft(&std::fs::read(&out).unwrap()));
+    assert_eq!(r["converted"], false);
+    // Another extension exports the contents in that format.
+    for (ext, magic) in [("png", &b"\x89PNG"[..]), ("jpeg", &b"\xFF\xD8\xFF"[..]), ("psd", &b"8BPS"[..])] {
+        let other = dir.join(format!("contents.{ext}"));
+        let r = s.execute("layer.smartObjects.exportContents", json!({"path": other.to_str().unwrap()})).unwrap();
+        assert_eq!(r["converted"], true, "{ext}");
+        assert!(std::fs::read(&other).unwrap().starts_with(magic), "{ext}");
+    }
+    let bad = dir.join("contents.nope");
+    assert!(s.execute("layer.smartObjects.exportContents", json!({"path": bad.to_str().unwrap()})).is_err());
     // Replace with a flat PNG.
     let png_doc = Document::with_background(
         "p",
@@ -620,6 +693,30 @@ fn warp_on_a_distorted_smart_object_follows_the_corners() {
     let after = active_smart(&s);
     assert!(after.warp.is_some());
     assert_eq!(after.perspective, before);
+}
+
+/// A `mesh` whose points are exactly the placement leaves a sheared smart object unchanged: its
+/// knots span the contents, not the bounding frame of the warp box seen from the contents (#4113).
+#[test]
+fn identity_mesh_on_a_skewed_smart_object_changes_nothing() {
+    let mut s = session(8);
+    paint(&mut s);
+    let id = convert(&mut s);
+    let r = active_smart(&s).cache.unwrap().content_bounds();
+    let (x0, y0, x1, y1) = (f64::from(r.x0), f64::from(r.y0), f64::from(r.x1), f64::from(r.y1));
+    let quad = [[x0, y0], [x1, y0 + 10.0], [x1, y1 + 10.0], [x0, y1]];
+    s.execute("edit.transform", json!({"layer": id, "rect": [x0, y0, x1, y1], "quad": quad})).unwrap();
+    let before = flat(&s);
+    let sm = active_smart(&s);
+    let (h, b) = (placement(&sm), crate::smart_cmds::source_box(&s.active().unwrap().doc, &sm).unwrap());
+    let place = |u: f64, v: f64| {
+        let (x, y) = h.apply(b[0] + u * (b[2] - b[0]), b[1] + v * (b[3] - b[1]));
+        [x, y]
+    };
+    let mesh = photocraft_geom::warp::BezierMesh::fit(&place, vec![0.0, 1.0], vec![0.0, 0.25, 1.0]);
+    let rect = [x0, y0, x1, y1 + 10.0];
+    s.execute("layer.smartObjects.warp", json!({"layer": id, "style": "custom", "rect": rect, "mesh": mesh})).unwrap();
+    assert!(mean_diff(&before, &flat(&s)) < 0.01, "mean diff {}", mean_diff(&before, &flat(&s)));
 }
 
 fn convert_to_layers(s: &mut Session) -> Value {
@@ -965,6 +1062,10 @@ fn inspect_reports_the_smart_source() {
     let source = |s: &Session| crate::inspect::layer(s.active().unwrap().doc.layer(s.active().unwrap().active_layer.unwrap()).unwrap())["smartSource"].clone();
     let front = source(&s);
     assert_eq!(front, json!({"kind": "linked", "path": "uuid-1"}));
+    // The document's info knows the file is embedded in the PSD (a `liFD` item) and says so,
+    // with its file name; the uuid stays its key.
+    let info = crate::inspect::document(s.active().unwrap());
+    assert_eq!(info["layers"][0]["smartSource"], json!({"kind": "embedded", "fileName": "in.png", "uuid": "uuid-1"}));
     // A duplicate shares the file; New Smart Object via Copy gets its own.
     s.execute("layer.duplicate", json!({})).unwrap();
     assert_eq!(source(&s), front, "a duplicate shares its source");

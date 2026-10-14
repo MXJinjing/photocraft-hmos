@@ -127,7 +127,7 @@ fn exif() -> Vec<u8> {
 }
 
 /// #1545: a layered TIFF carries EXIF as Photoshop resource 1058 and reads it back, so it must
-/// not report a loss it never makes. A flat TIFF really does lose the tags and still says so.
+/// not report a loss it never makes. A flat TIFF writes it as its own tags and keeps it too.
 #[test]
 fn layered_tiff_keeps_exif_without_claiming_a_loss() {
     let mut d = gen_doc(ColorMode::Rgb, SampleType::U8, Features::PIXELS);
@@ -140,9 +140,13 @@ fn layered_tiff_keeps_exif_without_claiming_a_loss() {
     let kept = back.metadata.exif.as_deref().expect("EXIF survives the layered export");
     assert!(kept.windows(ARTIST.len()).any(|w| w == ARTIST), "the Artist tag did not survive: {kept:?}");
 
-    // The control from the issue: the flat path drops it for real, and keeps reporting that.
+    // The flat path writes the EXIF block's tags as the TIFF's own (here IFD0's Artist, which
+    // reads back as the document's Artist text), so it reports no loss either.
     let flat = tiff(&d, false);
-    assert!(flat.warnings.iter().any(|w| w.contains("EXIF")), "a flat TIFF really does lose EXIF: {:?}", flat.warnings);
+    assert!(!flat.warnings.iter().any(|w| w.contains("EXIF")), "a flat TIFF keeps EXIF: {:?}", flat.warnings);
+    let back = import("x.tif", &flat.bytes).unwrap().document;
+    let artist = std::str::from_utf8(ARTIST).unwrap().trim_end_matches('\0');
+    assert!(back.metadata.text.iter().any(|(k, v)| k == "Artist" && v == artist), "{:?}", back.metadata.text);
 }
 
 #[test]

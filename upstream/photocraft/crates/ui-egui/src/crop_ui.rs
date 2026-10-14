@@ -875,7 +875,8 @@ pub(crate) fn resize_ratio(app: &PhotocraftApp, rect: [f64; 4], mods: Modifiers)
     preset_ratio(app).or(if mods.shift { keep } else { None })
 }
 
-/// Cursor over the canvas at document point `p`: resize arrows on the edges, move inside.
+/// Cursor over the canvas at document point `p`: resize arrows on the edges, move inside (the
+/// crosshair inside the untouched default frame, where a drag draws a new one).
 pub fn cursor(app: &PhotocraftApp, p: [f64; 2]) -> Option<CursorIcon> {
     if app.ui.tool != Tool::Crop {
         return None;
@@ -894,6 +895,8 @@ pub fn cursor(app: &PhotocraftApp, p: [f64; 2]) -> Option<CursorIcon> {
     Some(match h {
         // The arrow as the handle faces on screen: the frame's turn plus the view's.
         Hit::Handle(hx, hy) => resize_icon(hx, hy, deg + f64::from(crate::crop_mode::view_rotation(app))),
+        // Inside the untouched default frame a drag draws a new one (`pointer`), so nothing moves (#4461).
+        Hit::Inside if app.crop.default_frame => CursorIcon::Crosshair,
         Hit::Inside => CursorIcon::Move,
         // Photoshop's curved two-headed arrow (`draw_turn_cursor`, from `turn_cursor_dir`).
         Hit::Outside => CursorIcon::None,
@@ -1810,6 +1813,20 @@ mod tests {
         assert_eq!(cursor(&app, [150.0, 40.0]), Some(CursorIcon::None), "outside: the drawn turn cursor");
         app.ui.tool = Tool::Brush;
         assert_eq!(cursor(&app, [60.0, 40.0]), None);
+    }
+
+    /// #4461: inside the untouched default frame a drag draws a new frame, so the pointer is the
+    /// drawing crosshair there, not the move cursor; once the frame is changed a drag moves it.
+    #[test]
+    fn cursor_inside_the_default_frame_draws() {
+        let mut app = app(SampleType::U8);
+        ensure_frame(&mut app);
+        assert!(app.crop.default_frame && app.ui.crop_rect == Some([0.0, 0.0, 200.0, 100.0]));
+        assert_eq!(cursor(&app, [100.0, 50.0]), Some(CursorIcon::Crosshair));
+        assert_eq!(cursor(&app, [200.0, 50.0]), Some(CursorIcon::ResizeHorizontal), "its handles still resize");
+        drag(&mut app, &[[200.0, 50.0], [150.0, 50.0]], NONE);
+        assert!(!app.crop.default_frame && app.ui.crop_rect == Some([0.0, 0.0, 150.0, 100.0]));
+        assert_eq!(cursor(&app, [100.0, 50.0]), Some(CursorIcon::Move));
     }
 
     /// One key press through the app's keyboard handling (`shortcuts::handle`).

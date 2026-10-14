@@ -140,9 +140,9 @@ pub fn guard_window_close(app: &mut PhotocraftApp, ctx: &egui::Context) {
         ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
         return;
     }
-    // A save still writing in the background finishes first (a saved copy, say, leaves nothing
-    // unsaved); `jobs_ui` repeats the close when it ends.
-    if app.saving() {
+    // A save or print worker must finish its external side effect before the process exits;
+    // `jobs_ui` repeats the close after completion and keeps errors visible.
+    if app.saving() || app.printing() {
         ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
         app.jobs.close_after_saves = true;
         return;
@@ -363,7 +363,9 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
     // The answers in the platform's words; `dialog_buttons` puts them in its order. Windows (and
     // Linux) ask Yes / No / Cancel with Y, N and Esc, as Photoshop does there; macOS asks
     // Don't Save / Cancel / Save. Esc always cancels (the modal closes on it).
-    let cancel = (ButtonRole::Cancel, "Cancel", mac.then_some(Key::C), 84.0, Answer::Cancel);
+    // Yes/No already show Y/N. Cancel gets C on every platform (#4582). macOS still hides the
+    // letters and keeps the shortcut.
+    let cancel = (ButtonRole::Cancel, "Cancel", Some(Key::C), 84.0, Answer::Cancel);
     let buttons = if reverts {
         vec![(ButtonRole::Default, "Revert", Some(Key::R), 84.0, Answer::Discard), cancel]
     } else if mac {
@@ -412,6 +414,69 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
         Some(Answer::Save) => accept_save(app, ctx, doc),
         _ => {}
     }
+}
+
+/// Acts on the answer about `doc`, the document the prompt is asking about.
+fn apply(app: &mut PhotocraftApp, ctx: &egui::Context, doc: DocId, answer: Answer) {
+    // A HarmonyOS save picker owns the pending prompt until its write completes. Ignore
+    // repeated Save/Discard answers while it is open; Cancel still dismisses the prompt.
+    if app.discard.as_ref().is_some_and(|p| p.awaiting_save.is_some()) && !matches!(answer, Answer::Cancel) {
+        return;
+    }
+    match answer {
+        Answer::Cancel => app.discard = None,
+        Answer::Discard => advance(app, ctx),
+        Answer::Save => accept_save(app, ctx, doc),
+    }
+}
+
+/// The id `ui.inspect` lists the prompt under; `ui.dialog.confirm` and `ui.dialog.cancel` answer
+/// it by this id, so a control client can see and answer it like the window's buttons (#4920).
+pub const CONTROL_ID: &str = "discard";
+
+/// The prompt as `ui.inspect` lists it among the dialogs: the command waiting on it, the document
+/// it asks about, how many are still to answer, and the choices `ui.dialog.confirm` takes.
+pub fn inspect(app: &PhotocraftApp) -> Option<Value> {
+    let p = app.discard.as_ref()?;
+    let doc = *p.docs.first()?;
+    let name = index_of(app, doc).and_then(|i| app.session.documents().get(i)).map(|d| d.doc.name.clone())?;
+    let reverts = p.id == "file.revert";
+    let (choices, default): (&[&str], _) = if reverts { (&["dontSave", "cancel"], "dontSave") } else { (&["save", "dontSave", "cancel"], "save") };
+    Some(json!({
+        "id": CONTROL_ID,
+        "kind": "unsavedChanges",
+        "title": if reverts { "Revert" } else { "Unsaved changes" },
+        "fields": {"command": p.id, "document": name, "remaining": p.docs.len(), "choices": choices, "default": default},
+    }))
+}
+
+/// The command the prompt holds back and its params, for the automation policy to see before a
+/// control client answers it.
+pub fn pending_command(app: &PhotocraftApp) -> Option<(String, Value)> {
+    app.discard.as_ref().map(|p| (p.id.clone(), p.params.clone()))
+}
+
+/// Answers the prompt for a control client: `save`, `dontSave` or `cancel` (Revert takes
+/// `dontSave` or `cancel`). Like the buttons, Save may first ask for a path in the save dialog.
+pub fn answer_control(app: &mut PhotocraftApp, ctx: &egui::Context, choice: &str) -> Result<Value, String> {
+    let Some(doc) = app.discard.as_ref().and_then(|p| p.docs.first().copied()) else {
+        return Err("no unsaved-changes prompt is open".into());
+    };
+    if app.file_dialog_open() || app.save_options_open() || app.saving() {
+        return Err("the unsaved-changes prompt is waiting for a save to finish".into());
+    }
+    let reverts = app.discard.as_ref().is_some_and(|p| p.id == "file.revert");
+    let answer = match choice {
+        "save" if !reverts => Answer::Save,
+        "dontSave" => Answer::Discard,
+        "cancel" => Answer::Cancel,
+        other => {
+            let choices = if reverts { "dontSave or cancel" } else { "save, dontSave or cancel" };
+            return Err(format!("unknown choice `{other}`: {choices}"));
+        }
+    };
+    apply(app, ctx, doc, answer);
+    Ok(json!({"open": app.discard.is_some(), "fileDialog": app.file_dialog_open()}))
 }
 
 #[derive(Clone, Copy)]
@@ -626,17 +691,13 @@ mod tests {
     fn windows_and_linux_ask_yes_no_cancel_with_the_default_first() {
         for os in [egui::os::OperatingSystem::Windows, egui::os::OperatingSystem::Nix] {
             let mut h = prompt_on(os);
-            let labels = ["(Y)es", "(N)o", "Cancel"];
+            let labels = ["(Y)es", "(N)o", "(C)ancel"];
             assert_eq!(drawn_order(&h, labels), labels, "{os:?}");
             tab_walks(&mut h, labels);
             h.key_press(Key::N);
             h.run_steps(2);
             assert_eq!(docs_left(&h), Some(1), "N answered the first document");
-            // Cancel has no letter here: C does nothing, Esc cancels.
             h.key_press(Key::C);
-            h.run_steps(2);
-            assert_eq!(docs_left(&h), Some(1));
-            h.key_press(Key::Escape);
             h.run_steps(2);
             assert!(h.state().discard.is_none());
             assert_eq!(h.state().session.documents().len(), 1, "Cancel keeps the unanswered document");
@@ -704,6 +765,7 @@ mod tests {
         assert_eq!(button_label(true, "Don't Save", Some(Key::D)), tl!("Don't Save"));
         assert_eq!(button_label(true, "Cancel", Some(Key::C)), tl!("Cancel"));
         assert_eq!(button_label(false, "Don't Save", Some(Key::D)), "(D)on't Save");
+        assert_eq!(button_label(false, "Cancel", Some(Key::C)), "(C)ancel");
     }
 
     #[test]
@@ -947,7 +1009,7 @@ mod tests {
         assert!(gate.finish(&name, true));
         assert!(settle_host_save(&mut app, &ctx));
         assert!(app.allow_close, "quit proceeds once the file has been written");
-        assert!(!app.session.documents()[0].is_dirty());
+        assert!(app.session.documents().is_empty(), "quit closes the saved document before exiting");
     }
 
     #[test]

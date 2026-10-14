@@ -14,7 +14,7 @@
 //!   the page-only `blendIfChannel`; `channelNames`: the document's colour channels.
 
 use egui::{Color32, RichText, Sense, Stroke, StrokeKind, vec2};
-use photocraft_doc::effects::{FxPaint, StrokePosition};
+use photocraft_doc::effects::{FxPaint, GlowSource, StrokePosition};
 use photocraft_doc::{Effect, Layer};
 use serde_json::{Map, Value, json};
 
@@ -247,6 +247,9 @@ fn values_of(e: &Effect, light: f32) -> Value {
             set(&mut v, "contour", photocraft_engine::layer_style::contour_param(&g.contour));
             set(&mut v, "antiAlias", json!(g.anti_alias));
             set(&mut v, "noise", json!((g.noise * 100.0).round()));
+            if matches!(e, Effect::InnerGlow(_)) {
+                set(&mut v, "source", json!(if g.source == GlowSource::Center { "center" } else { "edge" }));
+            }
         }
         Effect::Stroke(s) => {
             set(&mut v, "blend", json!(s.common.blend.label()));
@@ -500,6 +503,14 @@ pub fn initial_fields(layer: &Layer, select: Option<&str>, light: f32) -> Map<St
 }
 
 pub fn open(app: &mut PhotocraftApp, select: Option<&str>) -> Option<u64> {
+    // An open Free Transform box is applied first, as in Photoshop (#4821): the canvas shows the
+    // box's preview while it is open, so the dialog's preview would not show until Enter.
+    if app.ui.transform.is_some() {
+        crate::transform_tool::commit(app);
+        if app.ui.transform.is_some() && crate::transform_tool::committing(app).is_none() {
+            return None; // refused: the box stays open, with the reason in the status bar
+        }
+    }
     let st = app.session.active()?;
     let layer = st.doc.layer(st.active_layer?)?.clone();
     let light = st.doc.global_light.angle;
@@ -510,6 +521,16 @@ pub fn open(app: &mut PhotocraftApp, select: Option<&str>) -> Option<u64> {
     f.insert("__document".into(), json!(st.doc.id));
     f.insert("patternList".into(), pattern_list(app));
     Some(app.ui.open_dialog(crate::state::DialogKind::LayerStyle, f))
+}
+
+/// Double-click on an effect row of the Layers panel: open Layer Style for that row's layer. A
+/// row of another layer selects it first, as its right-click menu does (Photoshop does the same).
+pub fn open_for_layer(app: &mut PhotocraftApp, layer: photocraft_doc::LayerId, select: Option<&str>) -> Option<u64> {
+    let active = app.session.active().is_some_and(|s| s.active_layer == Some(layer));
+    if !active {
+        app.run("layer.select", json!({"layer": layer.0})).ok()?;
+    }
+    open(app, select)
 }
 
 /// `[[id, name], …]` of the patterns a style can use (document's, then the library's).
@@ -1380,6 +1401,30 @@ mod tests {
         assert_eq!(rows, KINDS.len(), "one empty checkbox per effect row");
     }
 
+    /// Double-clicking an effect row of a layer that isn't active selects that layer first, so
+    /// the dialog holds its effects (and OK edits it), not the active layer's.
+    #[test]
+    fn effect_row_of_another_layer_opens_that_layers_style() {
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        app.run("file.new", json!({"width": 32, "height": 32})).unwrap();
+        app.run("layer.new.layer", json!({})).unwrap();
+        let with_fx = app.session.active().unwrap().active_layer.unwrap();
+        app.run("layer.layerStyle.replace", json!({"layer": with_fx.0, "effects": [{"kind": "dropShadow", "params": defaults("dropShadow")}]})).unwrap();
+        app.run("layer.new.layer", json!({})).unwrap();
+        let plain = app.session.active().unwrap().active_layer.unwrap();
+        assert_ne!(plain, with_fx);
+        assert!(app.session.active().unwrap().doc.layer(plain).unwrap().effects.items.is_empty());
+
+        let id = open_for_layer(&mut app, with_fx, Some("dropShadow")).unwrap();
+        assert_eq!(app.session.active().unwrap().active_layer, Some(with_fx), "the row's layer becomes active");
+        let d = app.ui.dialogs.iter().find(|d| d.id == id).unwrap();
+        assert_eq!(d.fields["layer"], json!(with_fx.0));
+        let fx = effects_of(&d.fields);
+        assert_eq!(fx.len(), 1);
+        assert_eq!(fx[0]["kind"], json!("dropShadow"));
+        assert!(fx[0]["fx"].is_object(), "the existing drop shadow, not a new instance");
+    }
+
     #[test]
     fn every_kind_has_spec_and_defaults() {
         for &(kind, _) in KINDS {
@@ -1728,6 +1773,30 @@ mod tests {
         assert_eq!(fx[0]["params"]["spread"], json!(6.0));
         assert_eq!(fx[0]["params"]["range"], json!(40.0));
         assert_eq!(fx[1]["params"]["spread"], json!(12.0));
+    }
+
+    /// OK with no edits used to turn a Center-source Inner Glow into an Edge one: the dialog never
+    /// loaded the source, so it showed the default and applied it.
+    #[test]
+    fn inner_glow_center_source_survives_ok() {
+        let mut s = session();
+        s.execute("layer.layerStyle.innerGlow", json!({"source": "center"})).unwrap();
+        let source = |s: &photocraft_engine::Session| {
+            let d = s.active().unwrap();
+            let id = d.active_layer.unwrap();
+            d.doc.layer(id).unwrap().effects.items.iter().find_map(|e| match e {
+                Effect::InnerGlow(g) => Some(g.source),
+                _ => None,
+            })
+        };
+        assert_eq!(source(&s), Some(GlowSource::Center));
+        let st = s.active().unwrap();
+        let id = st.active_layer.unwrap();
+        let f = initial_fields(st.doc.layer(id).unwrap(), None, st.doc.global_light.angle);
+        let glow = effects_of(&f).iter().find(|e| e["kind"] == json!("innerGlow")).unwrap();
+        assert_eq!(glow["params"]["source"], json!("center"), "the dialog shows the effect's source");
+        apply(&f, |cmd, p| s.execute(cmd, p).map_err(|e| e.to_string())).unwrap();
+        assert_eq!(source(&s), Some(GlowSource::Center), "OK keeps the source");
     }
 
     #[test]

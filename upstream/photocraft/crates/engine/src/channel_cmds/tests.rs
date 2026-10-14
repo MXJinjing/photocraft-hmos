@@ -219,6 +219,20 @@ fn deleting_a_channel_remaps_all_surviving_eyes_and_targets() {
 }
 
 #[test]
+fn targeting_the_composite_hides_the_alpha_overlay() {
+    for (cmd, params) in [("channel.target", json!({"channel": "composite"})), ("channel.target.composite", json!({}))] {
+        let mut s = session();
+        s.execute("channel.new", json!({})).unwrap();
+        assert!(s.active().unwrap().channel_view.alpha_shown(0));
+        s.execute(cmd, params).unwrap();
+        let st = s.active().unwrap();
+        assert_eq!(st.channel_view.visible_colors(3), 3, "{cmd}");
+        assert!(!st.channel_view.alpha_shown(0), "{cmd}: the alpha eye turns off");
+        assert!(st.channel_view.is_plain(&st.doc), "{cmd}: no overlay left on the image (#4538)");
+    }
+}
+
+#[test]
 fn every_colour_channel_can_hide_while_alpha_stays() {
     let mut s = session();
     s.execute("channel.new", json!({"fill": "white", "name": "Alpha"})).unwrap();
@@ -531,6 +545,18 @@ fn apply_image_hand_computed() {
     s.set_active(0);
     assert!(s.execute("image.applyImage", json!({"source": {"document": 2}})).is_err());
     assert!(s.execute("image.applyImage", json!({"blending": "hue"})).is_err());
+}
+
+#[test]
+fn apply_image_subtract_layer_from_itself_is_mid_grey() {
+    // Frequency separation: Subtract, Scale 2, Offset 128, in the flat form the dialog sends.
+    let mut s = session();
+    s.execute("edit.fill", json!({"color": "#c08040"})).unwrap();
+    s.execute("layer.new.layer", json!({"name": "High"})).unwrap();
+    s.execute("edit.fill", json!({"color": "#406080"})).unwrap();
+    s.execute("image.applyImage", json!({"sourceLayer": "High", "blending": "subtract", "scale": 2.0, "offset": 128})).unwrap();
+    let p = px(&s, 3, 3);
+    assert!(p[..3].iter().all(|v| (v - 128.0 / 255.0).abs() < 0.003), "{p:?}");
 }
 
 #[test]

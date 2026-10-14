@@ -241,6 +241,33 @@ fn the_hand_tool_does_not_steal_a_free_transform_drag() {
     assert!(width(&h) > 150, "the committed resize applied: {}", width(&h));
 }
 
+/// With the Zoom tool selected, a Free Transform drag resizes the box rather than zooming the view:
+/// the open box owns the pointer, as it does for the Hand (#4799).
+#[test]
+fn the_zoom_tool_does_not_steal_a_free_transform_drag() {
+    let mut h = harness_tool(Tool::Zoom);
+    begin(&mut h);
+    let q0 = quad(&h);
+    let (zoom0, center0) = (h.state().ui.views[0].zoom, h.state().ui.views[0].center);
+    let inside = screen(&h, [150.0, 130.0]);
+    h.event(egui::Event::PointerMoved(inside));
+    h.run_steps(1);
+    for pressed in [true, false] {
+        h.event(egui::Event::PointerButton { pos: inside, button: PointerButton::Primary, pressed, modifiers: Modifiers::NONE });
+        h.run_steps(1);
+    }
+    h.run_steps(2);
+    assert_eq!(h.state().ui.views[0].zoom, zoom0, "a click inside the box did not zoom");
+    drag(&mut h, q0[2], [300.0, 220.0]);
+    let q1 = quad(&h);
+    assert!(!close(q1, q0), "the drag scaled the box, not the view: {q1:?}");
+    assert_eq!(h.state().ui.views[0].zoom, zoom0, "the Zoom tool did not zoom");
+    assert_eq!(h.state().ui.views[0].center, center0, "the Zoom tool did not move the view");
+    key(&mut h, Modifiers::NONE, Key::Enter);
+    assert!(h.state().ui.transform.is_none(), "the transform committed");
+    assert!(width(&h) > 150, "the committed resize applied: {}", width(&h));
+}
+
 /// With the (freehand) Lasso selected, a Free Transform of a lasso selection follows the drag: the
 /// Lasso reads its own pointer events, and dropped the moves and release of a drag it hadn't
 /// started, so the box never changed (#2153).

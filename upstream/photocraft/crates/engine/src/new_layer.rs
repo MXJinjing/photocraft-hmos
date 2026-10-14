@@ -24,7 +24,8 @@ pub fn neutral_color(mode: BlendMode) -> Option<([f32; 3], &'static str)> {
     }
 }
 
-/// `layer.new.layer`: a pixel layer above the active one, joining the clip group it lands in.
+/// `layer.new.layer`: a pixel layer above the active one (below it with `position: below`, the
+/// Layers panel's ⌘/Ctrl-click), joining the clip group it lands in.
 pub fn run(s: &mut Session, p: &Value) -> Result<Value> {
     let flag = |k: &str| match p.get(k) {
         None | Some(Value::Null) => Ok(false),
@@ -49,6 +50,14 @@ pub fn run(s: &mut Session, p: &Value) -> Result<Value> {
     };
     let neutral =
         if fill_neutral { Some(neutral_color(mode).ok_or_else(|| bad(format!("{} has no neutral color to fill with", mode.label())))?.0) } else { None };
+    let below = match p.get("position") {
+        None | Some(Value::Null) => false,
+        Some(v) => match v.as_str() {
+            Some("above") => false,
+            Some("below") => true,
+            _ => return Err(bad("`position` must be above or below")),
+        },
+    };
     let name = match p.get("name") {
         None | Some(Value::Null) => None,
         Some(v) => Some(v.as_str().ok_or_else(|| bad("`name` must be a string"))?.to_string()),
@@ -65,7 +74,11 @@ pub fn run(s: &mut Session, p: &Value) -> Result<Value> {
             let px = photocraft_raster::from_rgba(&surface.format(), [rgb[0], rgb[1], rgb[2], 1.0]);
             surface.fill_rect(bounds, &px);
         }
-        let id = doc.insert_above(*active, layer);
+        // Nothing may sit under the Background: below it the layer lands above it instead.
+        let id = match *active {
+            Some(a) if below && doc.layer(a).is_some() && !doc.is_background(a) => doc.insert_below(Some(a), layer),
+            _ => doc.insert_above(*active, layer),
+        };
         crate::clip_group::settle(doc, &[id], &Default::default(), clip);
         *active = Some(id);
         Ok(id)
@@ -158,6 +171,24 @@ mod tests {
         assert_eq!(l.surface().unwrap().tile_count(), 0);
     }
 
+    /// `position: below` (⌘/Ctrl-click on the panel button) lands under the active layer; the
+    /// Background stays at the bottom, so below it the layer lands above it.
+    #[test]
+    fn position_below_lands_under_the_active_layer() {
+        let mut s = busy("rgb", 8);
+        let names = |s: &Session| s.active().unwrap().doc.layers.iter().map(|l| l.name.clone()).collect::<Vec<_>>();
+        s.execute("layer.new.layer", json!({"name": "A"})).unwrap();
+        let below = s.execute("layer.new.layer", json!({"name": "Below", "position": "below"})).unwrap()["layer"].as_u64().unwrap();
+        assert_eq!(names(&s), ["Background", "Below", "A"]);
+        assert_eq!(s.active().unwrap().active_layer, Some(photocraft_doc::LayerId(below)));
+        s.execute("layer.new.layer", json!({"name": "Above", "position": "above"})).unwrap();
+        assert_eq!(names(&s), ["Background", "Below", "Above", "A"]);
+        let bg = s.active().unwrap().doc.layers[0].id.0;
+        s.execute("layer.select", json!({"layer": bg})).unwrap();
+        s.execute("layer.new.layer", json!({"name": "OverBg", "position": "below"})).unwrap();
+        assert_eq!(names(&s), ["Background", "OverBg", "Below", "Above", "A"]);
+    }
+
     /// Bad params are errors, never panics, and change nothing.
     #[test]
     fn bad_params_are_errors() {
@@ -175,6 +206,8 @@ mod tests {
             json!({"fillNeutral": "yes"}),
             json!({"clipToPrevious": 1}),
             json!({"name": 7}),
+            json!({"position": "sideways"}),
+            json!({"position": 1}),
         ] {
             assert!(s.execute("layer.new.layer", p.clone()).is_err(), "{p}");
         }

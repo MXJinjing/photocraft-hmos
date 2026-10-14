@@ -509,11 +509,12 @@ fn parse_black_white(d: &[u8]) -> Option<Adjustment> {
 /// (colour space + four u16), version 3 "4 bytes each for XYZ color"; then density (u32 percent)
 /// and preserve luminosity (1 byte).
 ///
-/// The spec gives no scale for the XYZ values. They are read as D50 XYZ (the ICC PCS) with
-/// 1.0 = 32768, the ICC 16-bit PCSXYZ encoding. That is inferred, not documented: the
-/// Photoshop CS2 file in #3777 holds (24191, 25002, 3827), a bright warm yellow at this scale,
-/// and rendering it against Photoshop's export fit best between 30000 and 32768 (1.0 = 65536,
-/// a dull olive, was clearly worse).
+/// The spec gives no scale for the XYZ values. They are read as XYZ relative to the D50 white
+/// (X / 0.9642, Y, Z / 0.8249) with 1.0 = 32768, so white is stored as (32768, 32768, 32768).
+/// That is inferred, not documented: decoded this way, every version 3 colour in the Photoshop
+/// CS2 files of #3777 and #4940 is exactly a Photoshop preset (the Yellow filter holds
+/// (24191, 25002, 3827) and decodes to #F9E31C, Warming Filter (85) holds (15548, 12029, 0)
+/// and decodes to #EC8A00); reading them as absolute XYZ gives #FFE03A and #F18600.
 const PHFL_XYZ_ONE: f32 = 32768.0;
 
 fn parse_photo_filter(d: &[u8]) -> Option<Adjustment> {
@@ -527,11 +528,14 @@ fn parse_photo_filter(d: &[u8]) -> Option<Adjustment> {
             (crate::channel_map::decode_color(space, c).to_rgb(), 12)
         }
         3 => {
-            let xyz = [be32(d, 2)?, be32(d, 6)?, be32(d, 10)?].map(|v| v as f32 / PHFL_XYZ_ONE);
-            // Real colours stay below about 1.0; anything past 2.0 is not an XYZ colour.
-            if xyz.iter().any(|v| *v > 2.0) {
+            let rel = [be32(d, 2)?, be32(d, 6)?, be32(d, 10)?].map(|v| v as f32 / PHFL_XYZ_ONE);
+            // Relative to the white, real colours stay below about 2.0 (Cooling Filter (82)
+            // reaches 1.99 on Z); anything past that is not an XYZ colour.
+            if rel.iter().any(|v| *v > 2.0) {
                 return None;
             }
+            // Relative to the D50 white: bring it back to absolute D50 XYZ before converting.
+            let xyz = [rel[0] * photocraft_color::convert::D50[0], rel[1], rel[2] * photocraft_color::convert::D50[2]];
             let lin = photocraft_color::convert::mat3_mul(&photocraft_color::convert::XYZ_D50_TO_SRGB, xyz);
             (lin.map(|v| photocraft_color::convert::linear_to_srgb(v.clamp(0.0, 1.0))), 14)
         }
@@ -1168,25 +1172,37 @@ mod tests {
         let Adjustment::PhotoFilter { color, density, preserve_luminosity: false } = parse(b"phfl", &lab, None, Channels::Rgb) else { panic!() };
         assert!(color.iter().all(|c| (c - 0.466).abs() < 0.01), "{color:?}");
         assert_eq!(density, 0.25);
-        // Version 3: D50 XYZ, 1.0 = 32768. The ICC sRGB white point (D50) is white.
-        let v3 = phfl_v3([31595, 32768, 27040], 100, true);
+        // Version 3: XYZ relative to the D50 white, 1.0 = 32768. White is (32768, 32768, 32768).
+        let v3 = phfl_v3([32768, 32768, 32768], 100, true);
         let Adjustment::PhotoFilter { color, density, preserve_luminosity: true } = parse(b"phfl", &v3, None, Channels::Rgb) else { panic!() };
         assert!(color.iter().all(|c| (c - 1.0).abs() < 0.005), "{color:?}");
         assert_eq!(density, 1.0);
-        // Photoshop's Warming Filter (85) preset, sRGB #EC8A00, is D50 XYZ (15193, 12086, 1192).
+        // Photoshop's Warming Filter (85) preset, sRGB #EC8A00: the CS2 file of #4940 stores it
+        // relative to the D50 white as (15548, 12029, 0).
         let Adjustment::PhotoFilter { color, density, preserve_luminosity: false } =
-            parse(b"phfl", &phfl_v3([15193, 12086, 1192], 25, false), None, Channels::Rgb)
+            parse(b"phfl", &phfl_v3([15548, 12029, 0], 25, false), None, Channels::Rgb)
         else {
             panic!()
         };
         let expected = [0xecu8, 0x8a, 0x00].map(|v| f32::from(v) / 255.0);
         assert!(color.iter().zip(expected).all(|(got, want)| (got - want).abs() < 1.5 / 255.0), "{color:?}");
         assert_eq!(density, 0.25);
-        // The block from #3777 (Photoshop CS2): a warm yellow, density 63 %, preserve luminosity.
+        // The block from #3777 (Photoshop CS2): the Yellow filter preset, #F9E31C, density 63 %.
         let issue = [0, 3, 0, 0, 0x5e, 0x7f, 0, 0, 0x61, 0xaa, 0, 0, 0x0e, 0xf3, 0, 0, 0, 0x3f, 1, 0];
         let Adjustment::PhotoFilter { color, density, preserve_luminosity: true } = parse(b"phfl", &issue, None, Channels::Rgb) else { panic!() };
-        assert!(color[0] > color[1] && color[1] > color[2] && color[1] > 0.8 && color[2] < 0.3, "{color:?}");
+        let expected = [0xf9u8, 0xe3, 0x1c].map(|v| f32::from(v) / 255.0);
+        assert!(color.iter().zip(expected).all(|(got, want)| (got - want).abs() < 1.5 / 255.0), "{color:?}");
         assert_eq!(density, 0.63);
+        // Cooling Filter (82) from #4940: a deep blue outside sRGB; its Z stays under the 2.0
+        // garbage guard and the colour clamps to (0, 181, 255).
+        let Adjustment::PhotoFilter { color: cooling, density, preserve_luminosity: true } =
+            parse(b"phfl", &phfl_v3([5327, 9584, 65357], 72, true), None, Channels::Rgb)
+        else {
+            panic!("Cooling Filter (82) must parse")
+        };
+        let expected = [0u8, 181, 255].map(|v| f32::from(v) / 255.0);
+        assert!(cooling.iter().zip(expected).all(|(got, want)| (got - want).abs() < 1.5 / 255.0), "{cooling:?}");
+        assert_eq!(density, 0.72);
         // The 19-byte form (no trailing pad) parses the same.
         assert_eq!(parse(b"phfl", &issue[..19], None, Channels::Rgb), parse(b"phfl", &issue, None, Channels::Rgb));
         // Version 3 is read, never written: an edited filter is saved as version 2 and keeps its colour.

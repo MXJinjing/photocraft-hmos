@@ -116,6 +116,7 @@ mod tests {
             revision,
             dialog,
             active: None,
+            target: Default::default(),
             command: "image.mode.indexedColor".into(),
             params: json!({"colors": colors}),
             k: 1,

@@ -133,7 +133,8 @@ impl Default for ColorSettings {
         Self {
             working_rgb: Builtin::Srgb.id().into(),
             working_cmyk: Builtin::CoatedCmyk.id().into(),
-            working_gray: Builtin::SGray.id().into(),
+            // Photoshop's default working gray is Dot Gain 20 %.
+            working_gray: Builtin::DotGain20Compat.id().into(),
             policy_rgb: Policy::Preserve,
             policy_cmyk: Policy::Preserve,
             policy_gray: Policy::Preserve,
@@ -172,12 +173,17 @@ impl ColorSettings {
     }
 }
 
-/// Check that each working space resolves to a profile of the right colour space.
+/// Check that each working space resolves to the right colour space and RGB can be both a
+/// source and editing destination for the configured rendering intent.
 pub fn validate_settings(c: &ColorSettings) -> std::result::Result<(), String> {
     for (space, spec) in [(ColorSpace::Rgb, &c.working_rgb), (ColorSpace::Cmyk, &c.working_cmyk), (ColorSpace::Gray, &c.working_gray)] {
         let p = resolve_profile(spec, None, space_mode(space)).map_err(|e| e.to_string())?;
         if p.color_space != space {
             return Err(format!("working space `{spec}` is {:?}, not {space:?}", p.color_space));
+        }
+        if space == ColorSpace::Rgb {
+            p.pcs_to_device(c.intent()).map_err(|e| format!("working RGB space `{spec}` cannot be a destination for {}: {e}", c.intent().id()))?;
+            p.device_to_pcs(c.intent()).map_err(|e| format!("working RGB space `{spec}` cannot be a source for {}: {e}", c.intent().id()))?;
         }
     }
     let m = c.monitor_profile.as_str();
@@ -215,13 +221,16 @@ pub struct ColorState {
 
 impl ColorState {
     /// The working profile of a mode from Color Settings (the built-in default when the
-    /// setting does not resolve).
+    /// setting does not resolve or cannot be both an RGB source and editing destination).
     pub fn working(&self, mode: ColorMode) -> Arc<Profile> {
         let space = mode_space(mode);
         self.settings
             .working_spec(space)
             .and_then(|spec| resolve_profile(spec, None, Some(mode)).ok())
-            .filter(|p| p.color_space == space)
+            .filter(|p| {
+                p.color_space == space
+                    && (space != ColorSpace::Rgb || (p.pcs_to_device(self.settings.intent()).is_ok() && p.device_to_pcs(self.settings.intent()).is_ok()))
+            })
             .unwrap_or_else(|| working_profile(mode))
     }
 
@@ -303,6 +312,60 @@ impl ColorState {
                 }
                 json!({"action": if assign { "assigned" } else { "untagged" }, "working": working.description, "policy": policy.id(), "ask": self.settings.ask_on_missing, "missing": true})
             }
+        }
+    }
+
+    /// Whether opening `doc` asks about its profile first (Ask When Opening, for a mismatched or
+    /// missing profile), and if so what the prompt shows: the report [`Self::open_policy`]
+    /// would give, with `ask: true` and `action` the answer the policy suggests. Nothing is
+    /// changed: the answer is applied with [`Self::resolve_open`] before the document opens.
+    pub fn open_question(&self, doc: &Document) -> Option<Value> {
+        let space = mode_space(doc.mode);
+        if !matches!(space, ColorSpace::Rgb | ColorSpace::Cmyk | ColorSpace::Gray) {
+            return None;
+        }
+        let working = self.working(doc.mode);
+        let policy = self.settings.policy(doc.mode);
+        let embedded = doc.icc_profile.as_ref().and_then(|b| profile_from_bytes(b).ok()).filter(|p| p.color_space == space);
+        match embedded {
+            Some(emb) => {
+                let linear_hdr =
+                    doc.depth == SampleType::F32 && (emb.same_colors(Builtin::LinearSrgb.profile()) || emb.same_colors(photocraft_cms::builtin::linear_gray()));
+                if !self.settings.ask_on_mismatch || emb.same_colors(&working) || linear_hdr {
+                    return None;
+                }
+                let action = match policy {
+                    Policy::Preserve => "preserve",
+                    Policy::Off => "discard",
+                    Policy::Convert => "convert",
+                };
+                Some(
+                    json!({"embedded": emb.description, "working": working.description, "mismatch": true, "policy": policy.id(), "action": action, "ask": true}),
+                )
+            }
+            None if self.settings.ask_on_missing => {
+                Some(json!({"working": working.description, "policy": policy.id(), "missing": true, "action": "preserve", "ask": true}))
+            }
+            None => None,
+        }
+    }
+
+    /// Applies the answer to an [`Self::open_question`] to a document not opened yet:
+    /// `preserve` (keep the embedded profile, or leave an untagged file as is), `convert` to the
+    /// working space, `discard` the embedded profile, or `assignWorking` (untagged files).
+    pub fn resolve_open(&self, doc: &mut Document, action: &str) -> Result<()> {
+        match action {
+            "preserve" | "useEmbedded" => Ok(()),
+            "convert" | "convertToWorking" => convert_document(doc, &self.working(doc.mode), self.settings.intent(), self.settings.bpc),
+            "discard" | "off" => {
+                doc.icc_profile = None;
+                Ok(())
+            }
+            "assignWorking" => {
+                doc.icc_profile = Some(self.working(doc.mode).to_bytes());
+                Ok(())
+            }
+            other => Err(EngineError::Other(format!("unknown answer `{other}` (preserve|convert|discard|assignWorking)"))),
         }
     }
 
@@ -562,20 +625,41 @@ pub fn convert_surface(s: &Surface, from: ColorMode, to: PixelFormat, t: &Transf
     let mut dpo = vec![0.0f32; ds];
     t.convert_f32(&dp, ss, &mut dpo, ds, true);
     let mut out = Surface::with_default(to, &dpo);
-    // Convert all tiles in one parallel pass into a staging buffer, then store them.
-    let tiles: Vec<_> = s.tiles().map(|(c, t)| (*c, t.clone())).collect();
+    // Convert every distinct tile once, in one parallel pass into a staging buffer, then store
+    // them. Coordinates that share a tile (a filled background) share the converted one (#4531).
+    let mut distinct: Vec<std::sync::Arc<photocraft_raster::Tile>> = Vec::new();
+    let mut slot: std::collections::HashMap<*const photocraft_raster::Tile, usize> = std::collections::HashMap::new();
+    let tiles: Vec<(photocraft_geom::TileCoord, usize)> = s
+        .tiles()
+        .map(|(c, tile)| {
+            let i = *slot.entry(std::sync::Arc::as_ptr(tile)).or_insert_with(|| {
+                distinct.push(tile.clone());
+                distinct.len() - 1
+            });
+            (*c, i)
+        })
+        .collect();
     let tile_px = (photocraft_geom::TILE_SIZE * photocraft_geom::TILE_SIZE) as usize;
     let dst_len = tile_px * to.bytes_per_pixel();
-    let mut staging = vec![0u8; dst_len * tiles.len()];
-    let jobs: Vec<(&[u8], &mut [u8])> = tiles.iter().map(|(_, t)| t.bytes()).zip(staging.chunks_mut(dst_len.max(1))).collect();
+    let mut staging = vec![0u8; dst_len * distinct.len()];
+    let jobs: Vec<(&[u8], &mut [u8])> = distinct.iter().map(|t| t.bytes()).zip(staging.chunks_mut(dst_len.max(1))).collect();
     let kind = match sf.sample {
         SampleType::U8 => SampleKind::U8,
         SampleType::U16 => SampleKind::U16,
         SampleType::F32 => SampleKind::F32,
     };
     t.convert_bytes_many(kind, jobs, ss, ds, true);
-    for ((c, _), bytes) in tiles.iter().zip(staging.chunks(dst_len.max(1))) {
-        out.tile_mut(*c).bytes_mut().copy_from_slice(bytes);
+    let mut converted: Vec<Option<std::sync::Arc<photocraft_raster::Tile>>> = vec![None; distinct.len()];
+    for (c, i) in tiles {
+        if let Some(Some(tile)) = converted.get(i) {
+            out.put_tiles([(c, tile.clone())]);
+            continue;
+        }
+        let Some(bytes) = staging.chunks(dst_len.max(1)).nth(i) else { continue };
+        out.tile_mut(c).bytes_mut().copy_from_slice(bytes);
+        if let Some(slot) = converted.get_mut(i) {
+            *slot = out.tile(c).cloned();
+        }
     }
     out
 }
@@ -1054,7 +1138,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "edit.assignProfile",
             "Assign Profile…",
             ["Edit"],
-            r##"{"profile":"working|srgb|display-p3|adobe-rgb-compat|prophoto-compat|linear-srgb|rec2020|gray-gamma-2.2|sgray|lab-d50|coated-cmyk|none" (or a path to an .icc file)}"##,
+            r##"{"profile":"working|srgb|display-p3|adobe-rgb-compat|prophoto-compat|linear-srgb|rec2020|gray-gamma-2.2|sgray|dot-gain-20-compat|lab-d50|coated-cmyk|none" (or a path to an .icc file)}"##,
             has_doc,
             assign_profile,
             true
@@ -1072,7 +1156,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "edit.colorSettings",
             "Color Settings…",
             ["Edit"],
-            r##"{"workingRgb":"srgb|display-p3|adobe-rgb-compat|prophoto-compat|linear-srgb|rec2020","workingCmyk":"coated-cmyk","workingGray":"sgray|gray-gamma-2.2","policyRgb":"preserve|convert|off","policyCmyk":"preserve|convert|off","policyGray":"preserve|convert|off","askOnMismatch":bool=true,"askOnPaste":bool=true,"askOnMissing":bool=false,"intent":"relative|perceptual|saturation|absolute","blendTextGamma":1.0..2.2|bool=1.45,"bpc":bool=true,"dither":bool=true,"monitorProfile":"auto|srgb|display-p3|adobe-rgb-compat|prophoto-compat|rec2020","reset":bool=false} (working spaces and the monitor profile also accept .icc paths; monitor `auto` = the main display's profile when the platform provides it, else sRGB; the reply's `monitorStatus` says which profile is in use and why: source auto|manual|fallback, reason)"##,
+            r##"{"workingRgb":"srgb|display-p3|adobe-rgb-compat|prophoto-compat|linear-srgb|rec2020","workingCmyk":"coated-cmyk","workingGray":"dot-gain-20-compat|sgray|gray-gamma-2.2","policyRgb":"preserve|convert|off","policyCmyk":"preserve|convert|off","policyGray":"preserve|convert|off","askOnMismatch":bool=true,"askOnPaste":bool=true,"askOnMissing":bool=false,"intent":"relative|perceptual|saturation|absolute","blendTextGamma":1.0..2.2|bool=1.45,"bpc":bool=true,"dither":bool=true,"monitorProfile":"auto|srgb|display-p3|adobe-rgb-compat|prophoto-compat|rec2020","reset":bool=false} (working spaces and the monitor profile also accept .icc paths; monitor `auto` = the main display's profile when the platform provides it, else sRGB; the reply's `monitorStatus` says which profile is in use and why: source auto|manual|fallback, reason)"##,
             always,
             color_settings,
             true,
@@ -1115,6 +1199,29 @@ pub fn specs() -> Vec<CommandSpec> {
 mod tests {
     use super::*;
     use photocraft_geom::Rect;
+
+    /// Image › Mode to CMYK keeps a filled background's shared tile shared (#4531): one
+    /// converted tile for the whole grid, the same colour everywhere.
+    #[test]
+    fn mode_conversion_keeps_shared_tiles_shared() {
+        let mut s = Session::new();
+        s.execute("file.new", json!({"width": 2048, "height": 1024, "background": "white"})).unwrap();
+        let distinct = |s: &Session| {
+            let doc = &s.active().unwrap().doc;
+            let surf = doc.layers[0].surface().unwrap();
+            let mut seen: Vec<_> = surf.tiles().map(|(_, t)| std::sync::Arc::as_ptr(t)).collect();
+            seen.sort();
+            seen.dedup();
+            (seen.len(), surf.tile_count())
+        };
+        let (before, count) = distinct(&s);
+        s.execute("image.mode.cmyk", json!({})).unwrap();
+        let (after, count_after) = distinct(&s);
+        assert_eq!((after, count_after), (before, count), "{before} distinct of {count} before");
+        let doc = &s.active().unwrap().doc;
+        let surf = doc.layers[0].surface().unwrap();
+        assert_eq!(surf.pixel(5, 5), surf.pixel(2000, 1000), "the same converted white everywhere");
+    }
 
     fn session(mode: &str, depth: u32) -> Session {
         let mut s = Session::new();
@@ -1272,7 +1379,10 @@ mod tests {
         let t = s.color.display_transform(doc(&s)).unwrap();
         let mut o = [0.0f32; 3];
         t.eval(&[0.5, 0.5, 0.5], &mut o);
-        assert!(o.iter().all(|v| (v - 0.5).abs() < 2e-3), "sGray displays as sRGB gray: {o:?}");
+        // The default working gray (Dot Gain 20 %-compatible, gamma 1.732) shows gray 0.5 as the
+        // sRGB value of linear 0.5^1.732, as Photoshop does: lighter than sGray's 0.5.
+        let want = photocraft_color::convert::linear_to_srgb(0.5f32.powf(1.732));
+        assert!(o.iter().all(|v| (v - want).abs() < 2e-3), "Dot Gain 20 % gray displays as {want}: {o:?}");
         let s = session("cmyk", 8);
         assert_eq!(composite_profile(doc(&s)).description, "sRGB IEC61966-2.1");
     }
@@ -1341,6 +1451,35 @@ mod settings_tests {
 
     // The Blend Text Colors Using Gamma test is `tests/text_gamma.rs`: it changes the
     // process-wide text gamma, which would race every unit test here that composites type.
+
+    #[test]
+    fn open_question_asks_only_when_set_and_resolve_open_applies_each_answer() {
+        let mut s = Session::new();
+        // Ask When Opening off: nothing to ask, mismatched or missing.
+        s.execute("edit.colorSettings", json!({"askOnMismatch": false, "askOnMissing": false})).unwrap();
+        assert!(s.color.open_question(&tagged("adobe-rgb-compat")).is_none());
+        let mut untagged = tagged("srgb");
+        untagged.icc_profile = None;
+        assert!(s.color.open_question(&untagged).is_none());
+        // On: a mismatch asks, suggesting the policy's answer; a matching profile never asks.
+        s.execute("edit.colorSettings", json!({"askOnMismatch": true, "askOnMissing": true, "policyRgb": "convert"})).unwrap();
+        let q = s.color.open_question(&tagged("adobe-rgb-compat")).unwrap();
+        assert_eq!((q["mismatch"].as_bool(), q["action"].as_str()), (Some(true), Some("convert")));
+        assert!(q["embedded"].as_str().unwrap().starts_with("Adobe RGB"));
+        assert!(s.color.open_question(&tagged("srgb")).is_none());
+        assert_eq!(s.color.open_question(&untagged).unwrap()["missing"], true);
+        // Asking changes nothing; the answer is applied to the document.
+        let mut d = tagged("adobe-rgb-compat");
+        s.color.resolve_open(&mut d, "preserve").unwrap();
+        assert!(desc(&d).unwrap().starts_with("Adobe RGB"));
+        s.color.resolve_open(&mut d, "convert").unwrap();
+        assert_eq!(desc(&d).as_deref(), Some("sRGB IEC61966-2.1"));
+        s.color.resolve_open(&mut d, "discard").unwrap();
+        assert_eq!(desc(&d), None);
+        s.color.resolve_open(&mut d, "assignWorking").unwrap();
+        assert_eq!(desc(&d).as_deref(), Some("sRGB IEC61966-2.1"));
+        assert!(s.color.resolve_open(&mut d, "explode").is_err());
+    }
 
     #[test]
     fn open_policies() {

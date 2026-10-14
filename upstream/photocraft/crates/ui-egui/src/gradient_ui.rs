@@ -13,6 +13,7 @@
 
 use std::sync::Arc;
 
+use egui::emath::GuiRounding;
 use egui::{Color32, Pos2, Rect, Sense, Stroke, StrokeKind, pos2, vec2};
 use photocraft_compose::gradient_fill as gf;
 use photocraft_doc::{Document, Fill, GradientStyle, Layer, LayerContent, LayerId};
@@ -513,6 +514,9 @@ pub fn draw_overlay(app: &PhotocraftApp, painter: &egui::Painter, xf: &ViewXform
 
 /// A ramp of RGBA stops over a checkerboard in `r`.
 fn paint_ramp(p: &egui::Painter, r: Rect, sample: impl Fn(f32) -> [f32; 4]) {
+    // The tessellator snaps the checker's rects to pixels but not the mesh: snap both alike, or a
+    // half-pixel offset leaves a row of checker showing under the ramp (#4577).
+    let r = r.round_to_pixels(p.pixels_per_point());
     widgets::checker(p, r, 5.0);
     let n = 64;
     let mut mesh = egui::Mesh::default();
@@ -677,6 +681,25 @@ pub fn options_changed(app: &mut PhotocraftApp, before: &crate::state::ToolOptio
         p["dither"] = json!(o.gradient_dither);
     }
     let _ = app.run(cmds::SET, p);
+}
+
+/// Live mode: the options bar's Opacity sets a selected gradient fill layer's opacity, as a
+/// drag's `opacity` does, live while it is scrubbed; `drag` numbers the scrub so it is one undo
+/// step, as in the Layers panel (#5012).
+pub fn opacity_changed(app: &mut PhotocraftApp, drag: Option<u64>) {
+    let o = &app.ui.tool_options;
+    if app.ui.tool != Tool::Gradient || o.gradient_classic {
+        return;
+    }
+    let opacity = o.fill_opacity / 100.0;
+    let Some((l, ..)) = active_gradient(app) else { return };
+    if (l.opacity - opacity).abs() > 1e-6 {
+        let mut p = json!({"layer": l.id.0, "opacity": opacity});
+        if let Some(n) = drag {
+            p["coalesce"] = json!(format!("gradient-tool-opacity:{n}"));
+        }
+        let _ = app.run("layer.setProps", p);
+    }
 }
 
 // ---------------------------------------------------------------- Properties panel
@@ -1259,6 +1282,27 @@ mod tests {
     }
 
     #[test]
+    fn changing_live_gradient_opacity_updates_selected_fill_layer() {
+        let mut app = app_with_gradient("linear");
+        drag(&mut app, [20.0, 60.0], [180.0, 60.0]);
+        let past = app.session.active().unwrap().history.past_len();
+        // A scrub is live on every frame and one undo step.
+        for pct in [70.0, 55.0, 40.0] {
+            app.ui.tool_options.fill_opacity = pct;
+            opacity_changed(&mut app, Some(7));
+        }
+        opacity_changed(&mut app, None);
+        let st = app.session.active().unwrap();
+        assert!((st.doc.layers.last().unwrap().opacity - 0.4).abs() < 1e-6);
+        assert_eq!(st.history.past_len(), past + 1, "one undo step, none for an unchanged value");
+        // Classic mode paints pixels: the options bar leaves the layer alone.
+        app.ui.tool_options.gradient_classic = true;
+        app.ui.tool_options.fill_opacity = 80.0;
+        opacity_changed(&mut app, None);
+        assert!((app.session.active().unwrap().doc.layers.last().unwrap().opacity - 0.4).abs() < 1e-6);
+    }
+
+    #[test]
     fn preview_shows_the_drag_before_commit() {
         let mut app = app_with_gradient("radial");
         crate::canvas::tool_event(&mut app, ToolEvent::Down { x: 100.0, y: 60.0, pressure: 1.0 }, mods());
@@ -1394,5 +1438,43 @@ mod tests {
         app.run("layer.setProps", json!({"layer": id.0, "visible": false})).unwrap();
         assert!(active_gradient(&app).is_none(), "the canvas widget skips a hidden layer");
         assert!(selected_gradient(&app).is_some(), "the editor still edits it");
+    }
+
+    /// #4577: the tessellator snaps the checkerboard's rects to whole pixels but leaves the ramp's
+    /// mesh where it was laid out, so at a half-pixel offset the ramp stopped a pixel short of the
+    /// checker and a row of it showed under the gradient. The ramp must cover the checker exactly.
+    #[test]
+    fn the_ramp_covers_its_checkerboard_at_half_pixel_offsets() {
+        let ctx = egui::Context::default();
+        for ppp in [1.0, 2.0] {
+            ctx.set_pixels_per_point(ppp);
+            let r = Rect::from_min_size(pos2(10.0 + 0.5 / ppp, 7.0 + 0.5 / ppp), vec2(96.0, 20.0));
+            // The new scale applies from the next frame.
+            ctx.run_ui(egui::RawInput::default(), |_| {}).textures_delta.clear();
+            let mut painted_at = 0.0;
+            let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
+                painted_at = ui.ctx().pixels_per_point();
+                paint_ramp(ui.painter(), r, |u| [u, u, u, 1.0]);
+            });
+            out.textures_delta.clear();
+            assert_eq!(painted_at, ppp);
+            let checker = out
+                .shapes
+                .iter()
+                .find_map(|s| match &s.shape {
+                    egui::Shape::Rect(rs) if rs.fill == Color32::from_gray(250) => Some(rs.rect),
+                    _ => None,
+                })
+                .expect("the checkerboard's base rect");
+            let ramp = out
+                .shapes
+                .iter()
+                .find_map(|s| match &s.shape {
+                    egui::Shape::Mesh(m) => Some(m.calc_bounds()),
+                    _ => None,
+                })
+                .expect("the ramp mesh");
+            assert_eq!(ramp, checker.round_to_pixels(ppp), "{ppp}x: the ramp covers every pixel of the checker");
+        }
     }
 }

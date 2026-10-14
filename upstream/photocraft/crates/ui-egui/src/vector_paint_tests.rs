@@ -285,3 +285,34 @@ fn selected_shape_colour_drags_apply_live_coalesce_per_gesture_and_keep_tool_def
     h.state_mut().run("edit.redo", json!({})).unwrap();
     assert_eq!(shape(h.state()).fill, first.fill);
 }
+
+/// #3997, #3999: after drawing a shape, the options bar's Fill swatch recolours it, as Stroke
+/// does (in v0.7.0 the Fill swatch was only a preview of the foreground colour).
+#[test]
+fn options_bar_fill_swatch_recolours_the_shape_just_drawn() {
+    let mut app = app("rgb", 8);
+    app.run("tools.setColors", json!({"foreground": "#ff0000", "background": "#0000ff"})).unwrap();
+    app.ui.tool_options.stroke_width = 3.0;
+    finish_shape(&mut app, Tool::Rectangle, [20.0, 20.0], [100.0, 80.0], Modifiers::NONE);
+    let original = shape(&app).clone();
+    let history = app.session.active().unwrap().history.past_len();
+    let mut h = harness(app, false);
+    h.get_by_label("Fill color").click();
+    h.run_steps(4);
+    let rect = popup_rect(&h);
+    let start = rect.min + vec2(55.0, rect.height() * 0.5);
+    h.hover_at(start);
+    h.step();
+    pointer(&mut h, start, true);
+    h.event(Event::PointerMoved(start + vec2(30.0, 6.0)));
+    h.step();
+    pointer(&mut h, start + vec2(30.0, 6.0), false);
+    h.run_steps(2);
+    let edited = shape(h.state()).clone();
+    assert_ne!(edited.fill, original.fill, "the Fill swatch recoloured the shape");
+    assert_eq!(edited.fill.as_ref().and_then(color_of), Some(h.state().session.tools.foreground), "and the next shape's fill");
+    assert_eq!(edited.stroke, original.stroke, "the stroke is untouched");
+    assert_eq!(h.state().session.active().unwrap().history.past_len(), history + 1);
+    h.state_mut().run("edit.undo", json!({})).unwrap();
+    assert_eq!(shape(h.state()).fill, original.fill);
+}

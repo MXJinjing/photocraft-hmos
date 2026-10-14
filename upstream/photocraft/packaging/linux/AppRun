@@ -45,7 +45,9 @@ integrate() {
     external=1
   else
     for f in "$apps"/*.desktop; do
-      [ -f "$f" ] && [ "$f" != "$apps/$DESK_ID.desktop" ] || continue
+      if [ ! -f "$f" ] || [ "$f" = "$apps/$DESK_ID.desktop" ]; then
+        continue
+      fi
       if grep '^Exec=' "$f" 2>/dev/null | grep -Fq "$appimage"; then
         external=1
         break

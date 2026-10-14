@@ -61,7 +61,14 @@ pub use shadows_highlights::shadows_highlights;
 /// Returns the selection mask (what the dialog previews).
 pub fn replace_color(px: &mut [[f32; 4]], color: [f32; 3], fuzziness: f32, hue: f32, saturation: f32, lightness: f32) -> Vec<f32> {
     let mask = crate::selection::color_range(px, color, fuzziness);
-    for (q, &k) in px.iter_mut().zip(&mask) {
+    replace_color_masked(px, &mask, hue, saturation, lightness);
+    mask
+}
+
+/// Replace Color's hue, saturation and lightness shift, applied to each pixel as far as `mask`
+/// (`0..=1`, one per pixel: the colour match, localized or not) covers it.
+pub fn replace_color_masked(px: &mut [[f32; 4]], mask: &[f32], hue: f32, saturation: f32, lightness: f32) {
+    for (q, &k) in px.iter_mut().zip(mask) {
         if k <= 0.0 {
             continue;
         }
@@ -74,7 +81,6 @@ pub fn replace_color(px: &mut [[f32; 4]], color: [f32; 3], fuzziness: f32, hue: 
             q[i] = (c[i] + (o[i] - c[i]) * k).clamp(0.0, 1.0);
         }
     }
-    mask
 }
 
 /// Lab mean and standard deviation of the opaque pixels, `[L, a, b]` each.

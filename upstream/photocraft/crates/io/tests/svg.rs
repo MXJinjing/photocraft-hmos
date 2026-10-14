@@ -148,10 +148,11 @@ fn gradients_are_approximated_with_a_warning() {
 
 #[test]
 fn clip_paths_masks_filters_patterns_and_images_are_rasterised() {
+    // A clip of one path becomes a vector mask (#4266); one of two shapes is still rasterised.
     let r = open(&format!(
         "<svg {NS} width=\"60\" height=\"30\">\
            <defs>\
-             <clipPath id=\"c\"><rect width=\"10\" height=\"30\"/></clipPath>\
+             <clipPath id=\"c\"><rect width=\"10\" height=\"30\"/><rect x=\"26\" width=\"2\" height=\"30\"/></clipPath>\
              <pattern id=\"p\" width=\"4\" height=\"4\" patternUnits=\"userSpaceOnUse\"><rect width=\"2\" height=\"4\" fill=\"black\"/></pattern>\
            </defs>\
            <g id=\"clipped\" clip-path=\"url(#c)\"><rect width=\"30\" height=\"30\" fill=\"#ff0000\"/></g>\

@@ -169,6 +169,29 @@ fn a_new_mask_is_targeted_so_the_next_footer_trash_keeps_its_layer() {
     assert!(h.state().session.active().unwrap().doc.layer(photocraft_doc::LayerId(shape)).is_some());
 }
 
+/// #4728: with a path selected in the Paths panel, the footer's "Add vector mask" makes the vector
+/// mask from that path (Layer › Vector Mask › Current Path) and targets it, so Properties shows
+/// its Density and Feather.
+#[test]
+fn add_vector_mask_uses_the_selected_path_and_targets_the_new_mask() {
+    let (s, _, _) = session();
+    let mut h = harness(s, 0, 1.0, 290.0);
+    h.state_mut().run("layer.new.layer", json!({"name": "Spock"})).unwrap();
+    h.state_mut().run("layer.layerMask.revealAll", json!({})).unwrap();
+    let id = h.state().session.active().unwrap().active_layer.unwrap();
+    let path = json!({"subpaths": [{"closed": true, "knots": [[30, 20], [90, 20], [90, 80], [30, 80]]}]});
+    h.state_mut().run("path.set", json!({"name": "work", "path": path})).unwrap();
+    h.state_mut().ui.selected_path = Some("work".into());
+    let work = h.state().session.active().unwrap().doc.work_path.clone().unwrap();
+    h.run_steps(3);
+    let at = h.get_by_label("Add vector mask").rect().center();
+    click_with(&mut h, at, Modifiers::NONE);
+    let l = h.state().session.active().unwrap().doc.layer(id).unwrap().clone();
+    assert_eq!(l.vector_mask.map(|v| v.path), Some(work), "the vector mask is the selected path, not Reveal All");
+    assert!(h.state().ui.vector_mask_target && !h.state().ui.mask_target, "the new vector mask is targeted");
+    assert_eq!(h.state().ui.selected_path.as_deref(), Some("layer"), "the mask's path becomes the active path");
+}
+
 #[test]
 fn dragging_a_layer_row_to_trash_still_deletes_the_layer_with_a_mask_targeted() {
     let (s, masked, _) = session();
@@ -629,12 +652,13 @@ fn command_i_inverts_the_targeted_mask() {
     let mask = &l.mask.as_ref().unwrap().surface;
     assert_eq!((mask.sample_channel(50, 50, 0), mask.sample_channel(150, 10, 0)), (1.0, 0.0), "the mask inverted");
     assert!(l.content == pixels, "the layer's pixels are untouched");
-    // An adjustment layer's mask: Invert is enabled only through the mask target.
+    // An adjustment layer's mask: with no pixels of its own, Invert edits the mask whether the
+    // panel targets the mask or the icon thumbnail (#4298).
     let app = h.state_mut();
     app.run("layer.newAdjustmentLayer.curves", json!({})).unwrap();
     app.run("layer.layerMask.revealAll", json!({})).unwrap();
     app.ui.mask_target = false;
-    assert!(!crate::menus::is_enabled(app, "image.adjustments.invert"));
+    assert!(crate::menus::is_enabled(app, "image.adjustments.invert"));
     app.ui.mask_target = true;
     assert!(crate::menus::is_enabled(app, "image.adjustments.invert"));
     app.run("image.adjustments.invert", json!({})).unwrap();
@@ -736,4 +760,23 @@ fn a_new_adjustment_or_fill_layer_shows_its_settings_until_the_mask_thumbnail_is
             assert!(h.query_all_by_label(label).next().is_none());
         }
     }
+}
+
+// #4028: with Adjustments showing in a collapsed Properties group, a new adjustment layer brings
+// Properties to the front and expands it, as in Photoshop, so its settings can be edited at once.
+#[test]
+fn a_new_adjustment_layer_brings_properties_to_the_front() {
+    let mut s = photocraft_engine::Session::new();
+    s.execute("file.new", json!({"width": 200, "height": 100})).unwrap();
+    let mut h = harness(s, 0, 1.0, 290.0);
+    let ctx = h.ctx.clone();
+    let (req, _rx) = crate::control::ControlRequest::new("ui.set", json!({"dockTabs": {"properties": 1}}));
+    crate::control::handle(h.state_mut(), &ctx, &req);
+    h.run_steps(2);
+    assert!(h.state().ui.dock.is_collapsed(crate::dock::Group::Properties));
+    h.state_mut().run("layer.newAdjustmentLayer.curves", json!({})).unwrap();
+    h.run_steps(6);
+    assert_eq!(h.state().ui.dock_tabs.properties, 0, "Properties is the group's tab");
+    assert!(!h.state().ui.dock.is_collapsed(crate::dock::Group::Properties), "the group is expanded");
+    assert!(h.query_all_by_label("Reset to defaults").next().is_some(), "the Curves settings show");
 }

@@ -201,7 +201,8 @@ pub(crate) fn export_layered(doc: &Document, opts: &ExportOptions, ctl: &photocr
     let big = doc.size.width > 30_000 || doc.size.height > 30_000;
     // The PSD exporter renders the composite we need for the TIFF itself: unmatted (the TIFF
     // keeps straight alpha) and uncompressed (its planes are interleaved below).
-    let psd_opts = PsdExportOptions { force_psb: opts.force_psb || big, merged_matte: false, merged_compression: Compression::Raw };
+    let psd_opts =
+        PsdExportOptions { force_psb: opts.force_psb || big, merged_matte: false, merged_compression: Compression::Raw, maximize_compatibility: true };
     let (file, w) = crate::with_span(ctl, 0.0, TIFF_MODEL_DONE, |ctl| crate::psd_export::document_to_psd_interruptible(doc, &psd_opts, ctl));
     // A cancelled conversion stops early with an incomplete model: never encode it.
     ctl.check().map_err(|_| IoError::Cancelled)?;
@@ -212,7 +213,8 @@ pub(crate) fn export_layered(doc: &Document, opts: &ExportOptions, ctl: &photocr
     ctl.progress(TIFF_LAYERS_DONE);
     warnings.extend(w.into_iter().map(|w| format!("layer data: {w}")));
     // The profile and XMP are written as TIFF tags, not as resources. EXIF stays a resource
-    // (1058): the TIFF codec has no EXIF directory, and the PSD importer reads it back from there.
+    // (1058), which the PSD importer reads back unchanged; a block rebuilt from the TIFF's own
+    // Exif directory keeps only the Exif, GPS and descriptive tags.
     let resources: Vec<ImageResource> = file.resources.iter().filter(|r| !matches!(r.id, ids::ICC_PROFILE | ids::XMP)).cloned().collect();
     let resources = resources_to_bytes(&resources)?;
 
@@ -234,10 +236,10 @@ pub(crate) fn export_layered(doc: &Document, opts: &ExportOptions, ctl: &photocr
     let mut img = Image::from_raw(w, h, layout, sample, data)?;
     img.icc = doc.icc_profile.as_ref().map(|i| i.to_vec());
     img.meta = codecs::Metadata {
-        // EXIF is deliberately not set here: the TIFF codec has no EXIF directory, so the tags
-        // above carry it as resource 1058 and the importer reads them back from there. Handing the
-        // codec a second copy in `meta.exif` bought nothing and made the export claim it would
-        // drop metadata it had in fact kept (#1545).
+        // EXIF is deliberately not set here: the tags above carry it as resource 1058 and the
+        // importer reads it back from there unchanged. A second copy in `meta.exif` (the codec's
+        // Exif directory) would be read back in its place, rebuilt without the thumbnail and IFD0
+        // orientation (#1545).
         xmp: doc.metadata.xmp.clone().filter(|_| opts.xmp == crate::XmpEmbed::All),
         text: if opts.xmp == crate::XmpEmbed::All { doc.metadata.text.clone() } else { Vec::new() },
         dpi: Some((doc.resolution_dpi, doc.resolution_dpi)),

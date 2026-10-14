@@ -52,9 +52,21 @@ fn color(p: &Value, k: &str, d: [f32; 3]) -> Color {
     let c = color_of(p, k).map_or(d, |c| c.to_rgb());
     Color::rgb(c[0], c[1], c[2])
 }
+/// The stops of a two-colour gradient, baked with Photoshop's interpolation when `method` names
+/// one (`classic`, `perceptual`, `linear`, `smooth`; `smoothness` 0..=100, default 100 as in
+/// Photoshop): the compositors interpolate stops linearly, so the curve becomes dense stops, as on
+/// PSD import. Photoshop 27.11's Classic Gradient Overlay eases (t + smoothstep(t)) / 2 between the
+/// colours: a straight ramp was up to 12 levels off.
+fn gradient_stops(p: &Value, from: Color, to: Color) -> Vec<(f32, Color)> {
+    let stops = vec![(0.0, from), (1.0, to)];
+    match p.get("method").and_then(Value::as_str).and_then(photocraft_io::GradientMethod::from_name) {
+        Some(m) => photocraft_io::bake_gradient(stops, &[0.5], (f(p, "smoothness", 100.0) / 100.0).clamp(0.0, 1.0), m),
+        None => stops,
+    }
+}
 fn gradient(p: &Value) -> Gradient {
     Gradient {
-        stops: vec![(0.0, color(p, "from", [0.0; 3])), (1.0, color(p, "to", [1.0; 3]))],
+        stops: gradient_stops(p, color(p, "from", [0.0; 3]), color(p, "to", [1.0; 3])),
         style: gradient_style(p.get("style").and_then(Value::as_str).unwrap_or("linear")),
         angle: f(p, "angle", 90.0),
         scale: f(p, "scale", 100.0) / 100.0,
@@ -546,6 +558,13 @@ fn fresh_effect(kind: &str) -> Option<Effect> {
 /// Edits an existing gradient in place: only the end colours and geometry.
 /// Intermediate stops, opacity stops, alignment and offset survive a round trip.
 fn overlay_gradient(g: &mut Gradient, p: &Value) {
+    // A method rebuilds the gradient from its end colours (the stops between are the old curve).
+    if p.get("method").and_then(Value::as_str).is_some_and(|m| photocraft_io::GradientMethod::from_name(m).is_some()) {
+        let ends = (g.stops.first().map(|s| s.1), g.stops.last().map(|s| s.1));
+        let from = color_of(p, "from").or(ends.0).unwrap_or(Color::BLACK);
+        let to = color_of(p, "to").or(ends.1).unwrap_or(Color::WHITE);
+        g.stops = gradient_stops(p, from, to);
+    }
     if let Some(c) = color_of(p, "from")
         && let Some(first) = g.stops.first_mut()
     {
@@ -837,10 +856,7 @@ const MAX_EFFECTS: usize = 256;
 /// mismatches and malformed snapshots are errors, never panics.
 fn replace_effects(s: &mut Session, p: &Value) -> Result<Value> {
     const CMD: &str = "layer.layerStyle.replace";
-    let id = match p.get("layer").and_then(Value::as_u64) {
-        Some(id) => photocraft_doc::LayerId(id),
-        None => s.active().and_then(|d| d.active_layer).ok_or(EngineError::Other("no active layer".into()))?,
-    };
+    let id = crate::commands::layer_param(s, p)?;
     let entries = p.get("effects").and_then(Value::as_array).ok_or_else(|| bad(CMD, "need `effects`: [{kind, params, fx?}]"))?;
     if entries.len() > MAX_EFFECTS {
         return Err(bad(CMD, format!("at most {MAX_EFFECTS} effects")));
@@ -891,10 +907,7 @@ fn set_effect(s: &mut Session, p: &Value, kind: &str) -> Result<Value> {
     let (fx, pattern) = crate::pattern_cmds::resolve_effect(s, fx)?;
     let label = format!("Layer Style: {}", fx.label());
     let add = b(p, "add", false);
-    let id = match p.get("layer").and_then(Value::as_u64) {
-        Some(id) => photocraft_doc::LayerId(id),
-        None => s.active().and_then(|d| d.active_layer).ok_or(EngineError::Other("no active layer".into()))?,
-    };
+    let id = crate::commands::layer_param(s, p)?;
     s.edit(&label, |doc, _| {
         if let Some(pat) = &pattern {
             crate::pattern_cmds::ensure_in_doc(doc, pat);
@@ -989,13 +1002,13 @@ pub fn specs() -> Vec<CommandSpec> {
         style_cmd!(
             "stroke",
             "Stroke…",
-            r##"{"size":px=3,"position":"outside|inside|center","color":"#rrggbb","from":"#rrggbb","to":"#rrggbb","style":str,"angle":deg,"opacity":0..100,"blend":str,"add":bool}"##
+            r##"{"size":px=3,"position":"outside|inside|center","color":"#rrggbb","from":"#rrggbb","to":"#rrggbb","method":"classic|perceptual|linear|smooth"?,"smoothness":0..100=100,"style":str,"angle":deg,"opacity":0..100,"blend":str,"add":bool}"##
         ),
         style_cmd!("colorOverlay", "Color Overlay…", r##"{"color":"#rrggbb","opacity":0..100=100,"blend":str,"add":bool}"##),
         style_cmd!(
             "gradientOverlay",
             "Gradient Overlay…",
-            r##"{"from":"#rrggbb","to":"#rrggbb","style":"linear|radial|angle|reflected|diamond","angle":deg=90,"scale":10..150=100,"reverse":bool,"opacity":0..100,"blend":str,"add":bool}"##
+            r##"{"from":"#rrggbb","to":"#rrggbb","method":"classic|perceptual|linear|smooth"? (Photoshop's interpolation; omitted: straight stops),"smoothness":0..100=100,"style":"linear|radial|angle|reflected|diamond","angle":deg=90,"scale":10..150=100,"reverse":bool,"opacity":0..100,"blend":str,"add":bool}"##
         ),
         style_cmd!(
             "patternOverlay",
@@ -1346,6 +1359,26 @@ mod tests {
         assert!((at(&satin("Gaussian"), 0.5) - 0.36).abs() < 0.04, "{}", at(&satin("Gaussian"), 0.5));
         assert!((at(&lut("Gaussian"), 0.5) - 0.64).abs() < 0.03, "{}", at(&lut("Gaussian"), 0.5));
         assert!((at(&lut("Cove - Deep"), 0.0) - 0.26).abs() < 0.02, "Cove - Deep starts above zero");
+    }
+
+    #[test]
+    fn gradient_overlay_method_matches_photoshop() {
+        // Photoshop 27.11, Classic Gradient Overlay #000000 → #ffffff (Smoothness 100 %): 0.037 at
+        // t = 1/16 and 0.5 in the middle; straight stops would give 0.0625.
+        let mut s = session();
+        s.execute("layer.layerStyle.gradientOverlay", json!({"from": "#000000", "to": "#ffffff", "method": "classic"})).unwrap();
+        let Effect::GradientOverlay { gradient, .. } = &effects(&s)[0] else { panic!() };
+        let at = |t: f32| {
+            let w = gradient.stops.windows(2).find(|w| t >= w[0].0 && t <= w[1].0).unwrap();
+            let u = (t - w[0].0) / (w[1].0 - w[0].0).max(1e-6);
+            w[0].1.to_rgb()[0] + (w[1].1.to_rgb()[0] - w[0].1.to_rgb()[0]) * u
+        };
+        assert!((at(1.0 / 16.0) - 0.037).abs() < 0.004, "{}", at(1.0 / 16.0));
+        assert!((at(0.5) - 0.5).abs() < 0.004, "{}", at(0.5));
+        // Without a method the two stops stay as they are.
+        s.execute("layer.layerStyle.gradientOverlay", json!({"from": "#000000", "to": "#ffffff", "add": true})).unwrap();
+        let plain = effects(&s).iter().filter(|e| matches!(e, Effect::GradientOverlay { gradient, .. } if gradient.stops.len() == 2)).count();
+        assert_eq!(plain, 1, "the added overlay keeps its two stops");
     }
 
     #[test]

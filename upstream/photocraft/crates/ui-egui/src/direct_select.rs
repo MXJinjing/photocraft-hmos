@@ -7,14 +7,19 @@
 //!   canvas to marquee-select anchors, click empty canvas to deselect.
 //! * Drag selected anchors to move them, a direction handle to turn it (a smooth point keeps its
 //!   handles collinear; ⌥ breaks them apart), or a segment to bend it (straight segments move).
+//!   The arrow keys nudge the selected anchors 1 px (⇧ 10 px), one history step per press.
 //! * Convert Point (the tool, or Pen + ⌥): click an anchor to make it a corner, drag from it to
 //!   pull out smooth handles, drag a handle to move it alone. The tool selects the anchor it
 //!   converts, so its handles show; a press on empty canvas or a segment does nothing, and ⌘/Ctrl
 //!   is Direct Selection, as with the Pen.
+//! * While a Pen path is being drawn, ⌘/Ctrl edits it in place (its anchors, handles and
+//!   segments) and the Pen carries on drawing from its last anchor once ⌘/Ctrl is let go; a
+//!   ⌘/Ctrl-press anywhere else ends it, as in Photoshop (#4022).
 //!
 //! A drag previews with `photocraft_vector::edit` and commits once on release through the engine
 //! (`path.moveAnchors`, `path.moveHandle`, `path.bendSegment`, `path.convertPoint`): one history
-//! step per drag, and the same commands drive it over MCP and the control channel.
+//! step per drag, and the same commands drive it over MCP and the control channel. The Pen path
+//! being drawn is not in the document yet: its edits apply to it directly, without a command.
 
 use egui::{Color32, Modifiers, Pos2};
 use photocraft_doc::vector::Path;
@@ -34,6 +39,8 @@ pub enum PathRef {
     Work,
     /// A layer's shape path, or its vector mask.
     Layer(u64),
+    /// The Pen path being drawn (`ui.pen`): edited in place, not through the engine.
+    Pen,
 }
 
 impl PathRef {
@@ -42,6 +49,8 @@ impl PathRef {
         match self {
             PathRef::Work => json!({"name": "work"}),
             PathRef::Layer(id) => json!({"name": "layer", "layer": id}),
+            // Never sent: edits to the Pen path being drawn don't go through the engine.
+            PathRef::Pen => json!({}),
         }
     }
 }
@@ -134,12 +143,19 @@ pub fn shows(app: &PhotocraftApp, mods: Modifiers) -> bool {
         || matches!(app.ui.tool, Tool::AddAnchorPoint | Tool::DeleteAnchorPoint | Tool::ConvertPoint)
 }
 
-/// The paths Direct Selection edits, front first: the targeted vector mask or the active shape
-/// layer's path, then the work path.
-pub(crate) fn candidates(app: &PhotocraftApp) -> Vec<(PathRef, Path)> {
+/// The active paths, front first: the targeted vector mask or the active shape layer's path, then
+/// the work path. The Pen's Auto Add/Delete edits these (`anchor_tools::pen_auto`).
+pub(crate) fn active_paths(app: &PhotocraftApp) -> Vec<(PathRef, Path)> {
     let layer = crate::vector_ui::targeted_vector_mask(app).or_else(|| crate::vector_ui::active_shape_path(app));
     let work = app.session.active().and_then(|st| st.doc.work_path.clone());
-    let mut out: Vec<_> = layer.map(|(id, p)| (PathRef::Layer(id), p)).into_iter().chain(work.map(|p| (PathRef::Work, p))).collect();
+    layer.map(|(id, p)| (PathRef::Layer(id), p)).into_iter().chain(work.map(|p| (PathRef::Work, p))).collect()
+}
+
+/// The paths Direct Selection edits, front first: the Pen path being drawn, the active paths, then
+/// every visible shape layer.
+pub(crate) fn candidates(app: &PhotocraftApp) -> Vec<(PathRef, Path)> {
+    let pen = app.ui.pen.as_ref().filter(|p| !p.dragging && !p.knots.is_empty()).map(|p| (PathRef::Pen, crate::vector_ui::pen_path(p)));
+    let mut out: Vec<_> = pen.into_iter().chain(active_paths(app)).collect();
     if let Some(st) = app.session.active() {
         for (path, _, l) in st.doc.walk().iter().rev() {
             if !l.visible || !(1..=path.len()).all(|n| st.doc.layer_at(&path[..n]).is_some_and(|a| a.visible)) {
@@ -189,8 +205,9 @@ pub fn pointer(app: &mut PhotocraftApp, ev: ToolEvent, mods: Modifiers) -> bool 
             if !(direct(tool, mods) || convert) {
                 return false;
             }
-            if !pen_idle && tool != Tool::DirectSelection {
-                // ⌘-click ends the path being drawn, which becomes editable, as in Photoshop.
+            if !pen_idle && tool != Tool::DirectSelection && !hits_pen(app, [x, y]) {
+                // ⌘-click off the path being drawn ends it, which becomes editable, as in
+                // Photoshop. A press on it edits it in place and the Pen carries on (#4022).
                 crate::vector_ui::pen_commit(app, false);
             }
             if tool == Tool::FreeformPen {
@@ -212,8 +229,8 @@ pub fn pointer(app: &mut PhotocraftApp, ev: ToolEvent, mods: Modifiers) -> bool 
             true
         }
         ToolEvent::Up { x, y } => match app.ui.direct_selection.drag.take() {
-            Some(Drag::Edit { target, edit, start, .. }) => {
-                release(app, target, &edit, start, [x, y]);
+            Some(Drag::Edit { target, base, edit, start, .. }) => {
+                release(app, target, &base, &edit, start, [x, y]);
                 true
             }
             Some(Drag::Marquee { start, add, .. }) => {
@@ -223,6 +240,16 @@ pub fn pointer(app: &mut PhotocraftApp, ev: ToolEvent, mods: Modifiers) -> bool 
             None => owns(tool),
         },
     }
+}
+
+/// Does a press at `p` hit the Pen path being drawn: one of its anchors, shown handles or segments?
+fn hits_pen(app: &PhotocraftApp, p: [f64; 2]) -> bool {
+    let tol = 6.0 / f64::from(app.point_zoom().max(0.01));
+    let ds = &app.ui.direct_selection;
+    candidates(app).into_iter().filter(|(r, _)| *r == PathRef::Pen).any(|(r, path)| {
+        let handles = if ds.target == Some(r) { shown_handles(ds, &path) } else { Vec::new() };
+        edit::hit(&path, Point::new(p[0], p[1]), tol, &handles).is_some()
+    })
 }
 
 /// A press: pick what's under the pointer and start a drag. False lets the Pen handle a ⌥-press
@@ -300,9 +327,23 @@ fn press(app: &mut PhotocraftApp, p: [f64; 2], mods: Modifiers, convert: bool) -
 }
 
 /// End of an edit drag: commit it as one command. A click (no movement) commits nothing, except
-/// Pen + ⌥ on an anchor, which makes it a corner.
-fn release(app: &mut PhotocraftApp, target: PathRef, edit: &Edit, start: [f64; 2], end: [f64; 2]) {
+/// Pen + ⌥ on an anchor, which makes it a corner. The Pen path being drawn takes the edit directly.
+fn release(app: &mut PhotocraftApp, target: PathRef, base: &Path, edit: &Edit, start: [f64; 2], end: [f64; 2]) {
     let moved = (end[0] - start[0]).hypot(end[1] - start[1]) * f64::from(app.point_zoom()) >= 1.0;
+    if target == PathRef::Pen {
+        let edited = match edit {
+            Edit::Convert(k) if !moved => {
+                let mut p = base.clone();
+                edit::convert_point(&mut p, *k, None).ok().map(|_| p)
+            }
+            _ if !moved => None,
+            e => e.preview(base, start, end),
+        };
+        if let Some(p) = edited {
+            crate::vector_ui::pen_replace(app, &p);
+        }
+        return;
+    }
     let (id, mut params) = match edit {
         Edit::Convert([s, k]) if !moved => ("path.convertPoint", json!({"subpath": s, "knot": k})),
         _ if !moved => return,
@@ -339,6 +380,37 @@ fn marquee(app: &mut PhotocraftApp, start: [f64; 2], end: [f64; 2], add: bool) {
             ds.segment = None;
         }
     }
+}
+
+/// Arrow keys with Direct Selection and selected anchors (#4486), as in Photoshop: nudge them
+/// 1 px (⇧ 10 px) through `path.moveAnchors`, one history step per press. Not while a drag is
+/// in progress. Returns true when a key was used.
+pub fn arrow_keys(app: &mut PhotocraftApp, ctx: &egui::Context) -> bool {
+    let ds = &app.ui.direct_selection;
+    let Some(target) = ds.target.filter(|_| app.ui.tool == Tool::DirectSelection && !ds.anchors.is_empty() && ds.drag.is_none()) else {
+        return false;
+    };
+    let anchors = ds.anchors.clone();
+    use egui::Key;
+    let keys = [(Key::ArrowLeft, -1.0, 0.0), (Key::ArrowRight, 1.0, 0.0), (Key::ArrowUp, 0.0, -1.0), (Key::ArrowDown, 0.0, 1.0)];
+    for (key, ux, uy) in keys {
+        // ⇧ first: `consume_key` ignores an extra ⇧.
+        for mods in [Modifiers::SHIFT, Modifiers::NONE] {
+            if ctx.input_mut(|i| i.consume_key(mods, key)) {
+                let k = if mods.shift { 10.0 } else { 1.0 };
+                let mut params = json!({"anchors": anchors, "move": [ux * k, uy * k]});
+                if let (Some(p), Some(t)) = (params.as_object_mut(), target.params().as_object()) {
+                    p.extend(t.clone());
+                }
+                if let Err(e) = app.run("path.moveAnchors", params) {
+                    app.ui.status = e;
+                    app.ui.status_error = true;
+                }
+                return true;
+            }
+        }
+    }
+    false
 }
 
 /// Paths with their anchors (selected ones filled), the shown handles, the drag's preview in

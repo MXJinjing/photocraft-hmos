@@ -282,6 +282,63 @@ fn batch_and_processor_real_controls_write_the_chosen_webp_quality() {
 }
 
 #[test]
+fn batch_naming_controls_export_the_requested_names_and_reset_on_cancel() {
+    let _gpu = photocraft_testkit::gpu_lock();
+    let dir = Scratch::new();
+    let input = dir.0.join("input");
+    let output = dir.0.join("output");
+    std::fs::create_dir(&input).unwrap();
+    let source = pattern();
+    let bytes = photocraft_codecs::encode(&source, Format::Png, &EncodeOptions::default()).unwrap();
+    for name in ["first.png", "second.png"] {
+        std::fs::write(input.join(name), &bytes).unwrap();
+    }
+    let mut h = harness();
+    open(&mut h, "file.automate.batch");
+    h.get_by_role_and_label(egui::accesskit::Role::TextInput, "File Naming").click();
+    h.run_steps(2);
+    replace_text(&mut h, "cancelled_{serial}");
+    h.get_by_label("Cancel").click();
+    h.run_steps(3);
+    assert!(!output.exists());
+    open(&mut h, "file.automate.batch");
+    let fields = &h.state().ui.dialogs.last().unwrap().fields;
+    assert_eq!(fields["naming"], "");
+    assert_eq!(fields["startingSerial"], 1);
+    edit_path(&mut h, "Input", &input);
+    edit_path(&mut h, "Output", &output);
+    h.get_by_role_and_label(egui::accesskit::Role::TextInput, "File Naming").click();
+    h.run_steps(2);
+    replace_text(&mut h, "{serial}_{name}");
+    let label = h.get_by_label("Starting serial").rect();
+    h.query_all_by_role(egui::accesskit::Role::SpinButton)
+        .find(|n| {
+            let r = n.rect();
+            r.left() >= label.right() && r.left() < label.right() + 100.0 && (r.center().y - label.center().y).abs() < 3.0
+        })
+        .expect("starting serial number control")
+        .click();
+    h.run_steps(2);
+    h.event(egui::Event::Text("7".into()));
+    h.run_steps(3);
+    h.get_by_label("Starting serial").click();
+    h.run_steps(3);
+    assert_eq!(h.state().ui.dialogs.last().unwrap().fields["startingSerial"], 7, "typing changes the starting serial");
+    evidence(&mut h, "batch-naming");
+    h.get_by_label("OK").click();
+    h.run_steps(5);
+    assert!(h.state().ui.dialogs.is_empty());
+    let expected: Vec<_> = source.data().iter().map(|v| 255 - v).collect();
+    for name in ["007_first.png", "008_second.png"] {
+        let bytes = std::fs::read(output.join(name)).expect("dialog naming reaches the exporter");
+        let decoded = photocraft_codecs::decode_as(Format::Png, &bytes).unwrap();
+        assert_eq!(decoded.data(), expected, "the recorded Invert action still runs");
+    }
+    assert!(!output.join("first.png").exists());
+    assert!(!output.join("second.png").exists());
+}
+
+#[test]
 fn batch_default_quality_keeps_lossless_webp_and_existing_jpeg_bytes() {
     let _gpu = photocraft_testkit::gpu_lock();
     let dir = Scratch::new();

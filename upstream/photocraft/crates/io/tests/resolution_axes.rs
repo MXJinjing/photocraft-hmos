@@ -27,7 +27,7 @@ fn png_with_unequal_axes_reports_the_dropped_vertical_resolution() {
     assert!((r.document.resolution_dpi - 300.0).abs() < 0.01, "{}", r.document.resolution_dpi);
     let notes = resolution_notes(&r);
     assert_eq!(notes.len(), 1, "{:?}", r.warnings);
-    assert!(notes[0].contains("150.01") && notes[0].contains("300.00"), "{notes:?}");
+    assert!(notes[0].contains("150.00") && notes[0].contains("300.00"), "{notes:?}");
 }
 
 #[test]

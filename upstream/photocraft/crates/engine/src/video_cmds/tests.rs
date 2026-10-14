@@ -430,3 +430,71 @@ fn restoring_blank_video_frames_still_produces_blank_frames() {
     s.execute("layer.videoLayers.restoreFrame", json!({})).unwrap();
     assert_eq!(layer_px(&s, id)[3], 0.0);
 }
+
+fn work_area(s: &Session) -> (usize, usize, usize) {
+    let t = s.active().unwrap().doc.timeline.as_ref().unwrap();
+    (t.work_start, t.work_end, t.duration)
+}
+
+#[test]
+fn video_edits_keep_a_narrowed_work_area() {
+    // #4170: a video edit pushed the work-area end to the full duration.
+    for (cmd, params) in [
+        ("layer.videoLayers.showAlteredVideo", json!({})),
+        ("layer.videoLayers.restoreFrame", json!({})),
+        ("layer.videoLayers.interpretFootage", json!({"fps": 24})),
+    ] {
+        let mut s = session();
+        s.execute("timeline.create", json!({"duration": 30, "fps": 30})).unwrap();
+        s.execute("layer.videoLayers.newBlankVideoLayer", json!({})).unwrap();
+        s.execute("timeline.setProps", json!({"workStart": 2, "workEnd": 10})).unwrap();
+        assert_eq!(work_area(&s), (2, 10, 30));
+        s.execute(cmd, params).unwrap();
+        assert_eq!(work_area(&s), (2, 10, 30), "{cmd} moved the work area");
+    }
+}
+
+#[test]
+fn a_full_work_area_grows_with_the_duration() {
+    let mut s = session();
+    s.execute("timeline.create", json!({"duration": 30, "fps": 30})).unwrap();
+    s.execute("layer.videoLayers.newBlankVideoLayer", json!({})).unwrap();
+    assert_eq!(work_area(&s), (0, 30, 30));
+    s.execute("layer.videoLayers.insertBlankFrame", json!({})).unwrap();
+    assert_eq!(work_area(&s), (0, 31, 31));
+    // A narrowed work area stays put when the duration grows.
+    s.execute("timeline.setProps", json!({"workStart": 2, "workEnd": 10})).unwrap();
+    s.execute("layer.videoLayers.insertBlankFrame", json!({})).unwrap();
+    assert_eq!(work_area(&s), (2, 10, 32));
+}
+
+#[test]
+fn longer_footage_grows_only_a_full_work_area() {
+    let dir = tmpdir("workarea");
+    for i in 0..5 {
+        write_png(&format!("{dir}/f{i:02}.png"), 16, 12, "#808080");
+    }
+    // A work area covering everything follows the longer footage.
+    let mut s = session();
+    s.execute("timeline.create", json!({"duration": 3, "fps": 30})).unwrap();
+    s.execute("layer.videoLayers.newVideoLayerFromFile", json!({"path": dir})).unwrap();
+    assert_eq!(work_area(&s), (0, 5, 5));
+    // A narrowed one stays put.
+    let mut s = session();
+    s.execute("timeline.create", json!({"duration": 3, "fps": 30})).unwrap();
+    s.execute("timeline.setProps", json!({"workStart": 1, "workEnd": 2})).unwrap();
+    s.execute("layer.videoLayers.newVideoLayerFromFile", json!({"path": dir})).unwrap();
+    assert_eq!(work_area(&s), (1, 2, 5));
+}
+
+#[test]
+fn grow_duration_never_shrinks_and_keeps_the_work_area_valid() {
+    let mut t = Timeline::new(10, 30.0);
+    grow_duration(&mut t, 4);
+    assert_eq!((t.duration, t.work_end), (10, 10));
+    grow_duration(&mut t, 0);
+    assert_eq!((t.duration, t.work_end), (10, 10));
+    t.work_end = 6;
+    grow_duration(&mut t, 12);
+    assert_eq!((t.work_start, t.work_end, t.duration), (0, 6, 12));
+}

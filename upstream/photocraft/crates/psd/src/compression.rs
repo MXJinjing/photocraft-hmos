@@ -8,7 +8,7 @@ use std::io::{Read, Write};
 
 use crate::error::{PsdError, Result};
 use crate::header::{Version, row_bytes};
-use crate::io::{Reader, WriteExt};
+use crate::io::Reader;
 
 /// Maximum number of decoded bytes a single decode call may produce: 8 GiB on
 /// 64-bit targets, 2 GiB elsewhere (the same budget as `photocraft-codecs`'
@@ -345,21 +345,62 @@ fn encode_rle(decoded: &[u8], layout: &PlaneLayout) -> Result<Vec<u8>> {
     let rows = layout.rows()?;
     let rb = layout.row_bytes();
     let cs = layout.count_size();
-    let mut out = vec![0u8; rows * cs];
-    let mut enc = Vec::new();
-    for row in 0..rows {
-        let start = enc.len();
-        packbits::encode(&decoded[row * rb..(row + 1) * rb], &mut enc);
-        let n = enc.len() - start;
-        if cs == 2 {
-            let n = u16::try_from(n).map_err(|_| PsdError::LimitExceeded("RLE row exceeds 65535 bytes (use PSB)"))?;
-            out[row * 2..row * 2 + 2].copy_from_slice(&n.to_be_bytes());
-        } else {
-            let n = u32::try_from(n).map_err(|_| PsdError::LimitExceeded("RLE row too large"))?;
-            out[row * 4..row * 4 + 4].copy_from_slice(&n.to_be_bytes());
-        }
+    if rows == 0 {
+        return Ok(Vec::new());
     }
-    out.put(&enc);
+    // Rows are independent, so they pack in parallel chunks and concatenate in order.
+    let threads = if cfg!(target_arch = "wasm32") { 1 } else { std::thread::available_parallelism().map_or(1, |v| v.get()).clamp(1, 32) };
+    let chunk_rows = rows.div_ceil(threads).max(1);
+    struct Chunk {
+        counts: Vec<u8>,
+        packed: Vec<u8>,
+    }
+    let pack_chunk = |first: usize, count: usize| -> Result<Chunk> {
+        let mut chunk = Chunk { counts: vec![0u8; count * cs], packed: Vec::new() };
+        for row in first..first + count {
+            let start = chunk.packed.len();
+            packbits::encode(&decoded[row * rb..(row + 1) * rb], &mut chunk.packed);
+            let n = chunk.packed.len() - start;
+            if cs == 2 {
+                let n = u16::try_from(n).map_err(|_| PsdError::LimitExceeded("RLE row exceeds 65535 bytes (use PSB)"))?;
+                chunk.counts[(row - first) * 2..(row - first) * 2 + 2].copy_from_slice(&n.to_be_bytes());
+            } else {
+                let n = u32::try_from(n).map_err(|_| PsdError::LimitExceeded("RLE row too large"))?;
+                chunk.counts[(row - first) * 4..(row - first) * 4 + 4].copy_from_slice(&n.to_be_bytes());
+            }
+        }
+        Ok(chunk)
+    };
+    let chunk_list: Vec<Chunk> = if threads == 1 {
+        vec![pack_chunk(0, rows)?]
+    } else {
+        std::thread::scope(|scope| -> Result<Vec<Chunk>> {
+            let handles: Vec<_> = (0..threads)
+                .map(|t| {
+                    let first = t * chunk_rows;
+                    let count = chunk_rows.min(rows.saturating_sub(first));
+                    scope.spawn(move || pack_chunk(first, count))
+                })
+                .collect();
+            // Join every worker first, then surface the first error like the sequential
+            // path would instead of aborting the scope with a thread panic.
+            let mut all = Vec::with_capacity(threads);
+            for h in handles {
+                all.push(h.join().map_err(|_| PsdError::LimitExceeded("an RLE worker panicked"))??);
+            }
+            Ok(all)
+        })?
+    };
+    let packed_total: usize = chunk_list.iter().map(|c| c.packed.len()).sum();
+    let mut out = vec![0u8; rows * cs + packed_total];
+    let mut counts_at = 0usize;
+    let mut packed_at = rows * cs;
+    for chunk in &chunk_list {
+        out[counts_at..counts_at + chunk.counts.len()].copy_from_slice(&chunk.counts);
+        counts_at += chunk.counts.len();
+        out[packed_at..packed_at + chunk.packed.len()].copy_from_slice(&chunk.packed);
+        packed_at += chunk.packed.len();
+    }
     Ok(out)
 }
 
@@ -828,5 +869,81 @@ mod tests {
     #[test]
     fn zip_garbage_errors() {
         assert!(zip_decompress(&[1, 2, 3, 4], 4).is_err());
+    }
+}
+
+#[cfg(test)]
+mod parallel_rle_equivalence {
+    use super::*;
+
+    /// The parallel row packer's output must be byte-equal to a straightforward sequential
+    /// encoding of the same plane, across depths, row counts around the chunking and data
+    /// shapes (runs, noise, all-default).
+    #[test]
+    fn parallel_rle_matches_sequential() {
+        let mut data: u64 = 0x9e37_79b9_7f4a_7c15;
+        let mut next = move || {
+            data ^= data << 13;
+            data ^= data >> 7;
+            data ^= data << 17;
+            data
+        };
+        let layout_for = |rows: usize, rb: usize, version: Version| PlaneLayout { planes: 1, width: rb, height: rows, depth: 8, version };
+        for (rows, rb, version) in [
+            (0usize, 4usize, Version::Psd),
+            (1, 4, Version::Psd),
+            (7, 4, Version::Psb),
+            (64, 4, Version::Psd),
+            (65, 4, Version::Psb),  // chunk boundary
+            (513, 4, Version::Psd), // more rows than threads on most runners
+            (2049, 4, Version::Psb),
+            (2, 4, Version::Psd), // fewer rows than threads
+            (33, 3000, Version::Psd),
+            (31, 20000, Version::Psb),
+        ] {
+            let pattern: Vec<u8> = match rows % 3 {
+                0 => vec![7u8; rows * rb],                                   // long runs
+                1 => (0..rows * rb).map(|i| (i * 31 % 251) as u8).collect(), // noise-ish
+                _ => vec![0u8; rows * rb],                                   // all default
+            };
+            let pattern = if pattern.len() != rows * rb { vec![7u8; rows * rb] } else { pattern };
+            let mut data = pattern.clone();
+            if rows % 4 == 0 {
+                // sprinkle runs into the noise
+                for chunk in data.chunks_mut(97) {
+                    if let Some(f) = chunk.first_mut() {
+                        *f = 200;
+                    }
+                }
+            }
+            let _ = next();
+            let layout = layout_for(rows, rb, version);
+            let parallel = encode_rle(&data, &layout).expect("parallel encode");
+            let sequential = encode_rle_sequential(&data, &layout).expect("sequential encode");
+            assert_eq!(parallel, sequential, "rows {rows} rb {rb}");
+        }
+    }
+
+    /// The pre-parallel encoder, kept as the oracle.
+    fn encode_rle_sequential(decoded: &[u8], layout: &PlaneLayout) -> Result<Vec<u8>> {
+        let rows = layout.rows()?;
+        let rb = layout.row_bytes();
+        let cs = layout.count_size();
+        let mut out = vec![0u8; rows * cs];
+        let mut enc = Vec::new();
+        for row in 0..rows {
+            let start = enc.len();
+            packbits::encode(&decoded[row * rb..(row + 1) * rb], &mut enc);
+            let n = enc.len() - start;
+            if cs == 2 {
+                let n = u16::try_from(n).map_err(|_| PsdError::LimitExceeded("RLE row exceeds 65535 bytes (use PSB)"))?;
+                out[row * 2..row * 2 + 2].copy_from_slice(&n.to_be_bytes());
+            } else {
+                let n = u32::try_from(n).map_err(|_| PsdError::LimitExceeded("RLE row too large"))?;
+                out[row * 4..row * 4 + 4].copy_from_slice(&n.to_be_bytes());
+            }
+        }
+        out.extend_from_slice(&enc);
+        Ok(out)
     }
 }

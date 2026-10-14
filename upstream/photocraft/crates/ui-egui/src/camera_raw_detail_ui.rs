@@ -341,17 +341,51 @@ fn visible_pixels(image: Rect, viewport: Rect, area: PixelRect, max_side: usize)
     (crop.width() as usize <= max_side && crop.height() as usize <= max_side && crop.width() as u64 * crop.height() as u64 <= 16_777_216).then_some(crop)
 }
 
+/// Pixels per band [`display_image`] reads and colour-converts at once: at least `photocraft-cms`'s
+/// parallel threshold (16K pixels), and small enough that a band's float scratch is 1 MiB.
+const CROP_BAND_PIXELS: usize = 64 * 1024;
+
+/// The visible pixels of `surface`, as the canvas shows them.
 fn crop_image(surface: &Surface, area: PixelRect, display: &photocraft_engine::display_color::CanvasDisplay) -> ColorImage {
-    let width = area.width() as usize;
-    let mut row = vec![[0.0; 4]; width];
-    let mut pixels = Vec::with_capacity(width * area.height() as usize);
-    for y in area.y0..area.y1 {
-        surface.read_rgba_into(PixelRect::new(area.x0, y, area.x1, y + 1), &mut row);
-        let buf = photocraft_compose::Buffer { rect: photocraft_geom::Rect::new(area.x0, y, area.x1, y + 1), px: row.clone() };
-        let img = display.to_rgba8(&buf);
-        pixels.extend(img.pixels.as_chunks::<4>().0.iter().map(|&[r, g, b, a]| Color32::from_rgba_unmultiplied(r, g, b, a)));
+    display_image(area, display, |rect, out| surface.read_rgba_into(rect, out))
+}
+
+/// `area` as the canvas shows it, with `read` filling each band's float pixels. Converted in
+/// bands of rows, in parallel off wasm, not one row or one whole copy at a time: a row is below
+/// `photocraft-cms`'s parallel threshold, so a per-row conversion ran the display transform (any
+/// document profile other than the monitor's, such as an Adobe RGB photo on sRGB) on one core of
+/// the UI thread for every edit (#4682).
+pub(crate) fn display_image(
+    area: PixelRect,
+    display: &photocraft_engine::display_color::CanvasDisplay,
+    read: impl Fn(PixelRect, &mut [[f32; 4]]) + Sync,
+) -> ColorImage {
+    let (width, height) = (area.width() as usize, area.height() as usize);
+    let mut pixels = vec![Color32::TRANSPARENT; width * height];
+    if width == 0 {
+        return ColorImage::new([width, height], pixels);
     }
-    ColorImage::new([width, area.height() as usize], pixels)
+    let band_rows = (CROP_BAND_PIXELS / width).max(1);
+    let band = |index: usize, out: &mut [Color32]| {
+        let y0 = area.y0.saturating_add((index * band_rows) as i32);
+        let rect = PixelRect::new(area.x0, y0, area.x1, y0.saturating_add((out.len() / width) as i32));
+        let mut buf = photocraft_compose::Buffer { rect, px: vec![[0.0; 4]; out.len()] };
+        read(rect, &mut buf.px);
+        let img = display.to_rgba8(&buf);
+        for (o, &[r, g, b, a]) in out.iter_mut().zip(img.pixels.as_chunks::<4>().0) {
+            *o = Color32::from_rgba_unmultiplied(r, g, b, a);
+        }
+    };
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        use rayon::prelude::*;
+        pixels.par_chunks_mut(band_rows * width).enumerate().for_each(|(i, out)| band(i, out));
+    }
+    #[cfg(target_arch = "wasm32")]
+    for (i, out) in pixels.chunks_mut(band_rows * width).enumerate() {
+        band(i, out);
+    }
+    ColorImage::new([width, height], pixels)
 }
 
 #[cfg(test)]
@@ -466,5 +500,48 @@ mod tests {
         assert_eq!((crop.width(), crop.height()), (802, 602));
         assert!(visible_pixels(image, Rect::from_min_size(Pos2::ZERO, vec2(8000.0, 6000.0)), area, 4096).is_none());
         assert!(visible_pixels(Rect::NOTHING, visible, area, 4096).is_none());
+    }
+
+    #[test]
+    fn banded_crop_matches_one_conversion_of_the_whole_area() {
+        // Several bands, a ragged last one and an area off the image origin, through a real
+        // transform (an Adobe RGB document on an sRGB monitor) and without one.
+        let area = PixelRect::new(-3, 5, 1021, 5 + 2 * (CROP_BAND_PIXELS / 1024) as i32 + 7);
+        let mut source = Surface::new(PixelFormat { mode: photocraft_color::ColorMode::Rgb, sample: photocraft_color::SampleType::U8, alpha: true });
+        let n = (area.width() * area.height()) as usize;
+        let px: Vec<f32> = (0..n).flat_map(|i| [(i % 251) as f32 / 255.0, (i % 241) as f32 / 255.0, (i % 239) as f32 / 255.0, (i % 7) as f32 / 6.0]).collect();
+        source.write_region(area, &px);
+        for profile in [photocraft_cms::Builtin::AdobeRgbCompat, photocraft_cms::Builtin::Srgb] {
+            let mut doc =
+                photocraft_doc::Document::new("test", photocraft_geom::Size::new(1024, 1024), photocraft_doc::ColorMode::Rgb, photocraft_doc::SampleType::U8);
+            doc.icc_profile = Some(profile.profile().to_bytes());
+            let mut color = photocraft_engine::color_cmds::ColorState::default();
+            color.settings.monitor_profile = "srgb".into();
+            let display = color.canvas_display(&doc).unwrap();
+            assert_eq!(display.transform.is_some(), profile == photocraft_cms::Builtin::AdobeRgbCompat);
+            let mut whole = photocraft_compose::Buffer { rect: area, px: vec![[0.0; 4]; n] };
+            source.read_rgba_into(area, &mut whole.px);
+            let expected = display.to_rgba8(&whole);
+            let image = crop_image(&source, area, &display);
+            assert_eq!(image.size, [area.width() as usize, area.height() as usize]);
+            let expected: Vec<Color32> = expected.pixels.as_chunks::<4>().0.iter().map(|&[r, g, b, a]| Color32::from_rgba_unmultiplied(r, g, b, a)).collect();
+            assert_eq!(image.pixels, expected, "{profile:?}");
+        }
+        assert_eq!(
+            crop_image(
+                &source,
+                PixelRect::new(0, 0, 0, 4),
+                &photocraft_engine::color_cmds::ColorState::default()
+                    .canvas_display(&photocraft_doc::Document::new(
+                        "t",
+                        photocraft_geom::Size::new(1, 1),
+                        photocraft_doc::ColorMode::Rgb,
+                        photocraft_doc::SampleType::U8
+                    ))
+                    .unwrap()
+            )
+            .size,
+            [0, 4]
+        );
     }
 }

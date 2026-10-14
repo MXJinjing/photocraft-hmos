@@ -34,6 +34,8 @@ photocraft-plugins = { workspace = true }
 blake3 = { version = "1.8", default-features = false, features = ["pure"] }
 photocraft-codecs = { workspace = true }
 flate2 = { workspace = true }
+craft-print = { workspace = true }
+
 # Photoshop `.kys` shortcut sets (`edit.keyboardShortcuts` `importKys`); already in the tree
 # through photocraft-ui-egui and usvg.
 roxmltree = "0.20"

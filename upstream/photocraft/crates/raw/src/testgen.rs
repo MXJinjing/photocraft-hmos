@@ -7,6 +7,41 @@
 
 // ---------------------------------------------------------------- lossless JPEG
 
+/// A CR3 container holding one JPEG track and CMT1 orientation. It deliberately
+/// contains no CRX data: used to test explicit preview fallback and BMFF bounds.
+pub fn cr3_preview(jpeg: &[u8], orientation: u16) -> Vec<u8> {
+    fn bx(kind: &[u8; 4], data: &[u8]) -> Vec<u8> {
+        let mut b = ((data.len() + 8) as u32).to_be_bytes().to_vec();
+        b.extend_from_slice(kind);
+        b.extend_from_slice(data);
+        b
+    }
+    fn moov(jpeg_len: usize, offset: u64, orientation: u16) -> Vec<u8> {
+        let mut tiff = TiffBuilder::default();
+        let ifd = tiff.ifd(vec![(274, Val::Short(vec![orientation]))]);
+        tiff.chain = vec![ifd];
+        let mut meta = vec![0x85, 0xc0, 0xb6, 0x87, 0x82, 0x0f, 0x11, 0xe0, 0x81, 0x11, 0xf4, 0xce, 0x46, 0x2b, 0x6a, 0x48];
+        meta.extend(bx(b"CMT1", &tiff.build()));
+        let mut entry = vec![0; 82];
+        entry.extend(bx(b"JPEG", &[0; 4]));
+        let mut description = vec![0, 0, 0, 0, 0, 0, 0, 1];
+        description.extend(bx(b"CRAW", &entry));
+        let mut sizes = vec![0; 4];
+        sizes.extend_from_slice(&(jpeg_len as u32).to_be_bytes());
+        sizes.extend_from_slice(&1u32.to_be_bytes());
+        let mut offsets = vec![0, 0, 0, 0, 0, 0, 0, 1];
+        offsets.extend_from_slice(&offset.to_be_bytes());
+        let mapping: Vec<u8> = [0u32, 1, 1, 1, 1].iter().flat_map(|n| n.to_be_bytes()).collect();
+        let table = [bx(b"stsd", &description), bx(b"stsz", &sizes), bx(b"co64", &offsets), bx(b"stsc", &mapping)].concat();
+        let track = bx(b"trak", &bx(b"mdia", &bx(b"minf", &bx(b"stbl", &table))));
+        bx(b"moov", &[bx(b"uuid", &meta), track].concat())
+    }
+    let ftyp = bx(b"ftyp", b"crx \0\0\0\x01crx isom");
+    let header = moov(jpeg.len(), 0, orientation);
+    let offset = ftyp.len() + header.len() + 8;
+    [ftyp, moov(jpeg.len(), offset as u64, orientation), bx(b"mdat", jpeg)].concat()
+}
+
 /// Huffman code lengths assigned to categories in decreasing frequency
 /// order. Kraft sum < 1 and no code is all ones.
 const LENGTHS: [u8; 17] = [2, 3, 3, 3, 4, 4, 5, 5, 6, 6, 7, 8, 9, 10, 11, 12, 13];
@@ -1067,6 +1102,136 @@ pub fn rw2(width: usize, height: usize, data: &[u16], bits: u32) -> Vec<u8> {
         (0x0025, Val::Short(vec![256])),
         (0x0026, Val::Short(vec![384])),
         (0x002D, Val::Short(vec![5])),
+        (0x010F, Val::Ascii("Panasonic".into())),
+        (0x0110, Val::Ascii("DC-Synthetic".into())),
+        (0x0112, Val::Short(vec![1])),
+        (0x0118, Val::Blobs(vec![raw])),
+    ]);
+    t.chain = vec![ifd0];
+    let mut b = t.build();
+    b[2..4].copy_from_slice(b"U\0");
+    b
+}
+
+/// Byte split of the vendor-compressed (RawFormat 3/4) stream (see `rw2.rs`).
+const RW2_COMPRESSED_SPLIT: usize = 0x2008;
+
+/// Writer for the vendor-compressed RW2 stream: mirrors the decoder's cursor
+/// (page addressing, downward field order) and deposits every field where the
+/// reader will pick it up.
+struct V4Writer<'a> {
+    buf: &'a mut [u8],
+    base: usize,
+    pos: usize,
+    nbits: u32,
+}
+
+impl V4Writer<'_> {
+    /// Consumes one byte of the row seek (the decoder reads 8-bit fields).
+    fn skip_byte(&mut self) {
+        if 8 > self.nbits {
+            self.nbits += (RW2_PAGE as u32) * 8;
+            self.pos += RW2_PAGE;
+        }
+        self.nbits -= 8;
+    }
+
+    fn put(&mut self, v: u32, num: u32) {
+        if num > self.nbits {
+            self.nbits += (RW2_PAGE as u32) * 8;
+            self.pos += RW2_PAGE;
+        }
+        let mut at = ((self.nbits - num) >> 3) as usize ^ 0x3FF0;
+        at = (at + RW2_PAGE - RW2_COMPRESSED_SPLIT) % RW2_PAGE;
+        let at = self.base + at + self.pos - RW2_PAGE;
+        self.nbits -= num;
+        let cur = u32::from(self.buf[at]) | (u32::from(self.buf[at + 1]) << 8);
+        let cur = cur | ((v & ((1 << num) - 1)) << (self.nbits & 7));
+        self.buf[at] = cur as u8;
+        self.buf[at + 1] = (cur >> 8) as u8;
+    }
+
+    /// Encodes one row as 14-pixel groups: the scale selector is always 0 and
+    /// the two first pixels of each group are absolute (8 + 4 bits); later
+    /// pixels use the 8-bit delta path. Callers keep values inside 16..4096
+    /// and stepping by at most ±127 between pixels of the same parity.
+    fn row(&mut self, pixels: &[u16]) {
+        for group in pixels.as_chunks::<14>().0 {
+            let mut pred = [0i32; 2];
+            let mut nonz = [0i32; 2];
+            for (i, &px) in group.iter().enumerate() {
+                if i % 3 == 2 {
+                    self.put(0, 2); // sh = 0
+                }
+                let p = i & 1;
+                let t = i32::from(px);
+                if nonz[p] == 0 {
+                    let nz = (t >> 4) & 0xFF;
+                    self.put(nz as u32, 8);
+                    if nz != 0 || i > 11 {
+                        self.put((t & 0xF) as u32, 4);
+                        pred[p] = t;
+                    } else {
+                        pred[p] = 0;
+                    }
+                    nonz[p] = nz;
+                } else {
+                    let q = (pred[p] - 0x80).max(0);
+                    let j = t - q;
+                    assert!((1..=0xFF).contains(&j), "{t} is not encodable from {}", pred[p]);
+                    self.put(j as u32, 8);
+                    pred[p] = q + j;
+                }
+                assert_eq!(pred[p], t);
+            }
+        }
+    }
+}
+
+/// The vendor-compressed (RawFormat 3/4) stream of a whole image; see
+/// [`V4Writer::row`] for the value constraints.
+pub fn rw2_v4_pack(data: &[u16], width: usize) -> Vec<u8> {
+    assert_eq!(width % 14, 0);
+    let height = data.len() / width;
+    assert_eq!(data.len(), width * height);
+    let row_bytes = width / 14 * 16;
+    let mut buf = vec![0u8; row_bytes * height + 2 * RW2_PAGE];
+    for (row, pixels) in data.chunks_exact(width).enumerate() {
+        let skip = row_bytes * row;
+        let mut w = V4Writer { buf: &mut buf, base: skip / RW2_PAGE * RW2_PAGE, pos: 0, nbits: 0 };
+        for _ in 0..(skip % RW2_PAGE) {
+            w.skip_byte();
+        }
+        w.row(pixels);
+    }
+    buf
+}
+
+/// A synthetic Panasonic RW2 (RawFormat 4, vendor-compressed) with an RGGB
+/// sensor, a 2-pixel border on every side, black levels 128 / 129 / 130 and
+/// WB levels 512 / 256 / 384; see [`V4Writer::row`] for the pixel constraints.
+pub fn rw2_format4(width: usize, height: usize, data: &[u16]) -> Vec<u8> {
+    let mut t = TiffBuilder::default();
+    let raw = t.blob(rw2_v4_pack(data, width));
+    let ifd0 = t.ifd(vec![
+        (0x0002, Val::Short(vec![width as u16])),
+        (0x0003, Val::Short(vec![height as u16])),
+        (0x0004, Val::Short(vec![2])),
+        (0x0005, Val::Short(vec![2])),
+        (0x0006, Val::Short(vec![height as u16 - 2])),
+        (0x0007, Val::Short(vec![width as u16 - 2])),
+        (0x0009, Val::Short(vec![1])),
+        (0x000A, Val::Short(vec![12])),
+        (0x000E, Val::Short(vec![4095])),
+        (0x000F, Val::Short(vec![4095])),
+        (0x0010, Val::Short(vec![4095])),
+        (0x001C, Val::Short(vec![128])),
+        (0x001D, Val::Short(vec![129])),
+        (0x001E, Val::Short(vec![130])),
+        (0x0024, Val::Short(vec![512])),
+        (0x0025, Val::Short(vec![256])),
+        (0x0026, Val::Short(vec![384])),
+        (0x002D, Val::Short(vec![4])),
         (0x010F, Val::Ascii("Panasonic".into())),
         (0x0110, Val::Ascii("DC-Synthetic".into())),
         (0x0112, Val::Short(vec![1])),

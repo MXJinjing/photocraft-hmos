@@ -17,6 +17,10 @@
 # singular noun in Hungarian, so every @plural entry has a single form.
 
 # Plural messages and command id overrides
+# Custom paper dimensions in Print Settings.
+	Paper Width	Papír szélessége
+	Paper Height	Papír magassága
+
 @id	edit.purge.undo	Visszavonási adatok
 @id	edit.stroke	Körvonalazás…
 @id	edit.transform.scale	Méretezés
@@ -27,6 +31,7 @@
 @plural	Imported {n} brush from {file}|Imported {n} brushes from {file}	{n} ecset importálva. Forrás: {file}
 @plural	Imported {n} brush from {group}|Imported {n} brushes from {group}	{n} ecset importálva. Csoport: {group}
 @plural	Imported {n} gradient from {file}|Imported {n} gradients from {file}	{n} színátmenet importálva. Forrás: {file}
+@plural	Imported {n} pattern from {file}|Imported {n} patterns from {file}	{n} mintázat importálva. Forrás: {file}
 @plural	Imported {n} swatch from {file}|Imported {n} swatches from {file}	{n} színminta importálva. Forrás: {file}
 @plural	Played {n} step|Played {n} steps	{n} lépés lejátszva
 @plural	Saved for Web: {n} file|Saved for Web: {n} files	Mentés webre: {n} fájl
@@ -75,6 +80,13 @@
 	Black & White…	Fekete-fehér…
 	Brightness/Contrast…	Fényerő/kontraszt…
 	Browse…	Tallózás…
+	Source Files	Forrásfájlok
+	Use:	Használat:
+	Files	Fájlok
+	Add Open Files	Megnyitott fájlok hozzáadása
+	Sort By Name	Rendezés név szerint
+	Attempt to Automatically Align Source Images	Forrásképek automatikus igazításának megkísérlése
+	Create Smart Object after Loading Layers	Intelligens objektum létrehozása a rétegek betöltése után
 	Calculations…	Számítások…
 	Canvas Size…	Vászonméret…
 	Channel Mixer…	Csatornakeverő…
@@ -126,6 +138,8 @@
 	File Info…	Fájladatok…
 	Fill…	Kitöltés…
 	Find and Replace Text…	Szöveg keresése és cseréje…
+	Add to Dictionary	Hozzáadás a szótárhoz
+	No Spelling Suggestions	Nincs helyesírási javaslat
 	Fit Image…	Kép méretre igazítása…
 	Flatten All Layer Effects	Összes rétegeffektus egybesimítása
 	Flatten All Masks	Összes maszk egybesimítása
@@ -197,11 +211,15 @@
 	Reveal All	Minden megjelenítése
 	Revert	Visszaállítás
 	Rotate	Forgatás
+	Set horizontal skew	Vízszintes döntés beállítása
+	Set vertical skew	Függőleges döntés beállítása
 	Rotate 180°	Forgatás 180°-kal
 	Rotate 90° Clockwise	Forgatás 90°-kal az óramutató járása szerint
 	Rotate 90° Counter Clockwise	Forgatás 90°-kal az óramutató járásával szemben
 	Save	Mentés
 	Save a Copy…	Másolat mentése…
+	{name} can't keep everything in this document	Nem őrizhető meg minden a dokumentumból ebben a formátumban: {name}
+	Choose a format that keeps it, such as Photoshop (PSD), or save a copy.	Válassz olyan formátumot, amely mindent megőriz, például Photoshop (PSD), vagy ments másolatot.
 	Save As…	Mentés másként…
 	Save for Web (Legacy)…	Mentés webre (régi)…
 	Scale	Méretarány
@@ -382,6 +400,7 @@
 	Smooth…	Simítás…
 	Solid Color…	Egyszínű kitöltés…
 	Stack Mode	Halommód
+	Choose Stack Mode:	Halommód kiválasztása:
 	Standard Deviation	Szórás
 	Subject	Fő téma
 	Subtract Front Shape	Elülső alakzat kivonása
@@ -428,6 +447,9 @@
 	Appearance	Megjelenés
 	Apply Data Set	Adatkészlet alkalmazása
 	Apply Layer Mask	Rétegmaszk alkalmazása
+	Add Mask to Selection	Maszk hozzáadása a kijelöléshez
+	Subtract Mask from Selection	Maszk kivonása a kijelölésből
+	Intersect Mask with Selection	Maszk metszése a kijelöléssel
 	Artboard Guides	Rajztábla-segédvonalak
 	Artboards to Files	Rajztáblák fájlokba
 	Artboards to PDF	Rajztáblák PDF-be
@@ -441,6 +463,10 @@
 	Box Blur…	Dobozelmosás…
 	Breeze Dark Theme	Breeze sötét téma
 	Breeze Light Theme	Breeze világos téma
+	Soft dark	Lágy sötét
+	Soft light	Lágy világos
+	Soft Dark Theme	Lágy sötét téma
+	Soft Light Theme	Lágy világos téma
 	Brush Preview	Ecset előnézete
 	Brush Settings	Ecsetbeállítások
 	Brushes	Ecsetek
@@ -535,6 +561,8 @@
 	Facet	Lapolás
 	Fibers…	Szálak…
 	Field Blur…	Mezőelmosás…
+	No pin selected	Nincs kijelölt tű
+	Click the image to add a pin; drag a pin to move it, or its ring to change its blur. Delete removes the selected pin.	Kattints a képre tű hozzáadásához; húzd a tűt az áthelyezéséhez, vagy a gyűrűjét az elmosás módosításához. A Delete törli a kijelölt tűt.
 	Fill Path…	Útvonal kitöltése…
 	Fill Screen	Képernyő kitöltése
 	Filter	Szűrő
@@ -1159,6 +1187,11 @@
 	New Brush	Új ecset
 	New Brush Preset	Új ecset-előbeállítás
 	New Brush Preset…	Új ecset-előbeállítás…
+	Capture Brush Size in Preset	Ecsetméret rögzítése az előbeállításban
+	Include Tool Settings	Eszközbeállítások belefoglalása
+	Include Color	Szín belefoglalása
+	Enter a name for the brush preset	Adjon nevet az ecset-előbeállításnak
+	A brush preset with this name already exists	Már van ilyen nevű ecset-előbeállítás
 	New Crop Preset…	Új körbevágási előbeállítás…
 	New Tool Preset	Új eszköz-előbeállítás
 	No brush presets	Nincs ecset-előbeállítás
@@ -1684,6 +1717,7 @@ layerLabel	Magenta	Bíbor
 	Always use pressure for opacity	Mindig nyomásfüggő átlátszatlanság
 	Always use pressure for size	Mindig nyomásfüggő méret
 	Appearance Mode	Megjelenési mód
+	Presentation	Megjelenítés
 	Auto Erase	Automatikus radírozás
 	Auto Hide	Automatikus elrejtés
 	Auto-Select:	Automatikus kijelölés:
@@ -1947,6 +1981,7 @@ navigator	Zoom	Nagyítás mértéke
 	Burlap	Zsákvászon
 	Camera Calibration	Fényképezőgép-kalibráció
 	Cancel (Esc)	Mégse (Esc)
+	Manage submitted jobs in the system print queue	Az elküldött feladatok kezelése a rendszer nyomtatási sorában
 	Candle Light	Gyertyaláng
 	Cell Size	Cellaméret
 	Center X	Középpont X
@@ -2451,6 +2486,10 @@ navigator	Zoom	Nagyítás mértéke
 	Camera Raw Filter ({layer})	Camera Raw szűrő ({layer})
 	Camera Raw isn't open	A Camera Raw nincs megnyitva
 	Cancelled opening {name}	Megnyitás megszakítva: {name}
+	The document “{name}” does not have an embedded {mode} profile.	A(z) „{name}” dokumentumnak nincs beágyazott {mode}-profilja.
+	The document “{name}” has an embedded color profile that does not match the current {mode} working space.	A(z) „{name}” dokumentum beágyazott színprofilja nem egyezik az aktuális {mode}-munkaszíntérrel.
+	Embedded: {embedded}	Beágyazott: {embedded}
+	Working: {working}	Munkaszíntér: {working}
 	Cancelled {label}	Megszakítva: {label}
 	Clarity	Tisztaság
 	Color Detail	Színrészletesség
@@ -2613,6 +2652,7 @@ cameraRaw	Yellow	Sárga
 	Autosave minutes	Automatikus mentés gyakorisága (perc)
 	Background Color	Háttérszín
 	Background Contents	Háttér tartalma
+	Custom background color	Egyéni háttérszín
 	Batch	Kötegelt feldolgozás
 	Binary assets added	Hozzáadott bináris elemek
 	Binary assets removed	Eltávolított bináris elemek
@@ -3161,6 +3201,7 @@ cameraRaw	Yellow	Sárga
 	Ellipse Tool	Ellipszis
 	Elliptical Marquee Tool	Ellipszis-kijelölés
 	Enable	Bekapcsolás
+	Enable animations	Animációk engedélyezése
 	Enable flick panning	Lendítéses pásztázás engedélyezése
 	Enable floating document window docking	Lebegő dokumentumablakok dokkolásának engedélyezése
 	Enable narrow options bar	Keskeny beállítósáv engedélyezése
@@ -3392,6 +3433,7 @@ cameraRaw	Yellow	Sárga
 	Photomerge	Fotóegyesítés
 	Pick a screen pixel or press Esc to cancel	Válassz egy pixelt a képernyőn, vagy nyomd meg az Esc billentyűt a megszakításhoz
 	Pick screen color	Szín kiválasztása a képernyőről
+	Pick Color From Image	Szín felvétele a képről
 	Pins	Tűk
 	Pixel Layer	Pixelréteg
 	Place Scale Marker	Méretarány-jelölő elhelyezése
@@ -3950,10 +3992,10 @@ cameraRaw	Yellow	Sárga
 	Amount:	Mérték:
 	Apply Vanishing Point ({key})	Enyészpont alkalmazása ({key})
 	Apply the removal ({key})	Eltávolítás alkalmazása ({key})
-	Drag to draw the curve · {key}-click draws a straight line	Húzással rajzolja meg a görbét · {key}-kattintás egyenes vonalat húz
-	Draw to modify the curve	Rajzoljon a görbe módosításához
-	Edit points to modify the curve	Szerkessze a pontokat a görbe módosításához
-	Fix the red plane first: its corners must form a convex quad	Először javítsa a piros síkot: sarkainak konvex négyszöget kell alkotniuk
+	Drag to draw the curve · {key}-click draws a straight line	Húzással rajzold meg a görbét · {key}+kattintás: egyenes vonal
+	Draw to modify the curve	Rajzolj a görbe módosításához
+	Edit points to modify the curve	Szerkeszd a pontokat a görbe módosításához
+	Fix the red plane first: its corners must form a convex quad	Először javítsd a piros síkot: sarkainak konvex négyszöget kell alkotniuk
 	Grid Size:	Rácsméret:
 	Light Blue	Világoskék
 	Light Red	Világospiros
@@ -3963,10 +4005,80 @@ cameraRaw	Yellow	Sárga
 	Protect:	Védelem:
 	Remove after each stroke	Eltávolítás minden ecsetvonás után
 	Saving {percent}	Mentés: {percent}
-	Scale or rotate the moved area, then press {key}	Méretezze vagy forgassa el az áthelyezett területet, majd nyomja meg: {key}
+	Scale or rotate the moved area, then press {key}	Méretezd vagy forgasd el az áthelyezett területet, majd nyomd meg: {key}
 	Smooth the curve values	A görbeértékek simítása
 	Strokes to remove: {n} (Enter applies, Esc cancels)	Eltávolítandó ecsetvonások: {n} (Enter: alkalmazás, Esc: mégse)
-	The layer or its mask changed. Drag the mask onto the Trash again.	A réteg vagy a maszkja megváltozott. Húzza újra a maszkot a Kukába.
+	The layer or its mask changed. Drag the mask onto the Trash again.	A réteg vagy a maszkja megváltozott. Húzd újra a maszkot a Kukába.
 	Transform On Drop	Átalakítás elengedéskor
 	Vanishing Point is not active	Az Enyészpont nem aktív
-	Vanishing Point: click four corners to create a plane	Enyészpont: sík létrehozásához kattintson a négy sarokra
+	Vanishing Point: click four corners to create a plane	Enyészpont: sík létrehozásához kattints a négy sarokra
+	Clear Brush Controls	Ecsetvezérlők törlése
+	Reset All Locked Settings	Összes zárolt beállítás visszaállítása
+	Copy Texture to Other Tools	Textúra másolása más eszközökre
+
+# Actions panel: Load/Save Actions (.atn) and kept Photoshop steps
+	Load Actions…	Műveletek betöltése…
+	Save Actions…	Műveletek mentése…
+	{name} (Photoshop)	{name} (Photoshop)
+	{message} ({note})	{message} ({note})
+@plural	Loaded {n} action from {file}|Loaded {n} actions from {file}	{n} művelet betöltve. Forrás: {file}
+@plural	{n} step has no PhotoCraft equivalent yet|{n} steps have no PhotoCraft equivalent yet	{n} lépésnek még nincs megfelelője a PhotoCraftban
+@plural	Saved {n} action to {file}|Saved {n} actions to {file}	{n} művelet mentve. Cél: {file}
+@plural	{n} step with no Photoshop equivalent left out|{n} steps with no Photoshop equivalent left out	{n} Photoshop-megfelelő nélküli lépés kihagyva
+
+	Starting serial	Kezdő sorszám
+# Actions panel: set folders, dialog toggle, Insert Stop
+	Insert Stop…	Leállítás beszúrása…
+	Save Set…	Készlet mentése…
+	Message:	Üzenet:
+	Allow Continue	Folytatás engedélyezése
+	Show dialog during playback	Párbeszédablak megjelenítése lejátszáskor
+	Select an action first	Először válassz ki egy műveletet
+	Action playback stopped	A művelet lejátszása leállt
+	Step {step} is waiting for its dialog	A(z) {step}. lépés a párbeszédablakára vár
+@plural	{n} action|{n} actions	{n} művelet
+	Object Finder	Objektumkereső
+	No object found there — drag a rectangle around it	Ott nem található objektum – húzz köré egy téglalapot
+	Drag to pan · Scroll to zoom · Double-click to fit	Húzás: mozgatás · Görgetés: nagyítás · Dupla kattintás: igazítás
+	Gradient Preset Options	Színátmenet-előbeállítás beállításai
+	Import .GRD	.GRD importálása
+	Choose a gradient file (.grd).	Válasszon színátmenetfájlt (.grd).
+	Save Settings…	Beállítások mentése…
+	Load Settings…	Beállítások betöltése…
+	Save these settings as a Camera Raw .xmp file	A beállítások mentése Camera Raw .xmp-fájlként
+	Load settings from a Camera Raw .xmp file	Beállítások betöltése Camera Raw .xmp-fájlból
+	Loaded Camera Raw settings from {file}	Camera Raw-beállítások betöltve innen: {file}
+	Loaded Camera Raw settings from {file} ({n} not supported)	Camera Raw-beállítások betöltve innen: {file} ({n} nem támogatott)
+	Auto Add/Delete	Automatikus hozzáadás/törlés
+
+# Native Windows printing qualification
+	Don't also tick Mirror Image in Print Settings…: the two flips cancel out.	A nyomtatási beállításokban ne jelöld be a tükrözést is: a két tükrözés kioltja egymást.
+	Print Settings…	Nyomtatási beállítások…
+	Remember to turn off the printer's own colour management in Print Settings…	Ne felejtsd el kikapcsolni a nyomtató saját színkezelését a nyomtatási beállításokban…
+	Sent to {printer}	Elküldve ide: {printer}
+	set in Print Settings…	a nyomtatási beállításokban adható meg…
+	ICO is limited to 256 × 256 pixels	Az ICO legfeljebb 256 × 256 képpont lehet
+
+# Channel Options and New Spot Channel (#3761)
+	Channel Color	Csatorna színe
+	Color Indicates:	A szín jelzése:
+	Ink Characteristics	Festék jellemzői
+	Solidity:	Fedőképesség:
+	Redrawing	Újrarajzolás
+
+# HarmonyOS native controls
+	Battery unavailable	Az akkumulátor adatai nem érhetők el
+	Battery: {percent}%	Akkumulátor: {percent}%
+	Block finger input	Ujjal történő bevitel tiltása
+	Choose printer, copies and duplex in the system print dialog.	Válasszon nyomtatót, példányszámot és kétoldalas nyomtatást a rendszer nyomtatási párbeszédablakában.
+	Connected pen	Csatlakoztatott toll
+	Double-tap pen body	Dupla koppintás a toll testén
+	Long-press pen body	Hosszú nyomás a toll testén
+	No pen connected	Nincs csatlakoztatott toll
+	Only show canvas	Csak a vászon megjelenítése
+	Right sidebar	Jobb oldalsáv
+	Stylus	Digitális toll
+	System print preview opened	A rendszer nyomtatási előnézete megnyílt
+	Current tool and Eraser	Aktuális eszköz és radír
+	Previous tool	Előző eszköz
+	Show or hide context menu	Helyi menü megjelenítése vagy elrejtése

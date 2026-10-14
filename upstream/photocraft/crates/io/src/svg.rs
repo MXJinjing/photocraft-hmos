@@ -15,7 +15,7 @@ use std::sync::{Arc, OnceLock};
 use photocraft_color::blend::BlendMode;
 use photocraft_color::{Color, ColorMode, PixelFormat, SampleType};
 use photocraft_doc::effects::GradientStyle;
-use photocraft_doc::vector::{FillRule, Knot, LineCap, LineJoin, Path, PathOp, ShapeLayer, ShapeStroke, StrokeAlign, Subpath};
+use photocraft_doc::vector::{FillRule, Knot, LineCap, LineJoin, Path, PathOp, ShapeLayer, ShapeStroke, StrokeAlign, Subpath, VectorMask};
 use photocraft_doc::{Document, Fill, Group, Layer, LayerContent, MAX_GROUP_DEPTH};
 use photocraft_geom::{Point, Rect, Size};
 use photocraft_raster::Surface;
@@ -348,8 +348,11 @@ impl Conv {
     fn convert_node(&mut self, node: &usvg::Node, out: &mut Vec<Layer>, depth: usize, rec: usize, parent: tiny_skia::Transform) {
         match node {
             usvg::Node::Group(g) => {
+                // A clip-path of one plain path becomes the group's vector mask (#4266); others
+                // are rasterised with the group.
+                let clip = g.clip_path().and_then(|cp| self.clip_mask(g, cp));
                 let dropped: [(bool, &'static str); 3] =
-                    [(!g.filters().is_empty(), "filter"), (g.clip_path().is_some(), "clip-path"), (g.mask().is_some(), "mask")];
+                    [(!g.filters().is_empty(), "filter"), (g.clip_path().is_some() && clip.is_none(), "clip-path"), (g.mask().is_some(), "mask")];
                 let too_deep = self.max_group_depth.is_some_and(|limit| depth >= limit) || depth >= MAX_GROUP_DEPTH || rec >= MAX_RECURSION;
                 if dropped.iter().any(|d| d.0) || too_deep {
                     for (yes, what) in dropped {
@@ -366,7 +369,7 @@ impl Conv {
                 }
                 // A group that only carries a transform (baked into its paths by usvg) or that
                 // usvg inserted for its own bookkeeping adds nothing to the layer tree.
-                let plain = g.id().is_empty() && g.opacity().get() >= 1.0 && g.blend_mode() == usvg::BlendMode::Normal;
+                let plain = clip.is_none() && g.id().is_empty() && g.opacity().get() >= 1.0 && g.blend_mode() == usvg::BlendMode::Normal;
                 let children = self.convert_children(g.children(), if plain { depth } else { depth + 1 }, rec + 1, g.abs_transform());
                 if children.is_empty() {
                     return;
@@ -376,9 +379,14 @@ impl Conv {
                     return;
                 }
                 let only_id = g.opacity().get() >= 1.0 && g.blend_mode() == usvg::BlendMode::Normal;
-                if only_id && children.len() == 1 {
+                // A lone child takes the group's name (and its clip, when it has no vector mask of
+                // its own).
+                if only_id && children.len() == 1 && (clip.is_none() || children.iter().all(|c| c.vector_mask.is_none())) {
                     if let Some(mut child) = children.into_iter().next() {
-                        child.name = g.id().to_string();
+                        if !g.id().is_empty() {
+                            child.name = g.id().to_string();
+                        }
+                        child.vector_mask = clip.or(child.vector_mask);
                         out.push(child);
                     }
                     return;
@@ -386,6 +394,7 @@ impl Conv {
                 let mut l = Layer::new(self.name(g.id(), 1), LayerContent::Group(Group { children, expanded: false, artboard: None }));
                 l.opacity = g.opacity().get();
                 l.blend = blend(g.blend_mode());
+                l.vector_mask = clip;
                 out.push(l);
             }
             usvg::Node::Path(p) => out.extend(self.shape_layer(node, p, parent)),
@@ -410,6 +419,29 @@ impl Conv {
                 out.push(Layer::new(name, LayerContent::Group(Group { children, expanded: false, artboard: None })));
             }
         }
+    }
+
+    /// The vector mask for group `g` clipped by `cp`, when the clip is one visible path with no
+    /// clip of its own: what resvg draws for the clip (the group's transform, then the clip's,
+    /// then the path), in canvas pixels, with the clip rule as its fill rule.
+    fn clip_mask(&self, g: &usvg::Group, cp: &usvg::ClipPath) -> Option<VectorMask> {
+        if cp.clip_path().is_some() {
+            return None;
+        }
+        let [usvg::Node::Path(p)] = cp.root().children() else { return None };
+        if !p.is_visible() {
+            return None;
+        }
+        let ts = g.abs_transform().pre_concat(cp.transform()).post_concat(self.global);
+        let subpaths = knots(&(*p.data()).clone().transform(ts)?);
+        if subpaths.is_empty() {
+            return None;
+        }
+        let fill_rule = match p.fill().map(|f| f.rule()) {
+            Some(usvg::FillRule::EvenOdd) => FillRule::EvenOdd,
+            _ => FillRule::NonZero,
+        };
+        Some(VectorMask::new(Path { subpaths, fill_rule, inverted: false }))
     }
 
     /// A path as a shape layer, or a pixel layer when its paint is a pattern.
@@ -686,6 +718,54 @@ mod tests {
         assert!(!parsed.fontless_text);
         let r = import_parsed("t", parsed, MAX_GROUP_DEPTH).unwrap();
         assert!(r.warnings.iter().all(|w| !w.contains("font")), "{:?}", r.warnings);
+    }
+
+    /// #4266: a group clipped by one path (the PhotoCraft icon's rounded square) stays editable
+    /// shapes with the clip as its vector mask, and looks as resvg draws the drawing; a clip of
+    /// two shapes is still rasterised, with the warning.
+    #[test]
+    fn a_single_path_clip_becomes_the_groups_vector_mask() {
+        let svg = br##"<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64">
+            <defs><clipPath id="c"><rect x="4" y="4" width="40" height="40" rx="10"/></clipPath></defs>
+            <g transform="translate(8 6)" clip-path="url(#c)">
+              <rect width="64" height="64" fill="#2f7bf5"/>
+              <circle cx="40" cy="40" r="20" fill="#efe9dc"/>
+            </g></svg>"##;
+        let r = import_svg("t", svg).unwrap();
+        assert!(r.warnings.iter().all(|w| !w.contains("clip-path")), "{:?}", r.warnings);
+        let [group] = r.document.layers.as_slice() else { panic!("one group: {:?}", r.document.layers.len()) };
+        let LayerContent::Group(g) = &group.content else { panic!("a group") };
+        assert_eq!(g.children.len(), 2);
+        assert!(g.children.iter().all(|c| matches!(c.content, LayerContent::Shape(_))), "editable shapes");
+        let mask = group.vector_mask.as_ref().expect("the clip as a vector mask");
+        let xs: Vec<f64> = mask.path.subpaths.iter().flat_map(|s| s.knots.iter().map(|k| k.anchor.x)).collect();
+        let (lo, hi) = (xs.iter().copied().fold(f64::MAX, f64::min), xs.iter().copied().fold(f64::MIN, f64::max));
+        assert!((lo - 12.0).abs() < 1e-3 && (hi - 52.0).abs() < 1e-3, "in the group's space: {lo}..{hi}");
+        // Pixel for pixel what resvg draws, but for anti-aliasing along the edges.
+        let ours = photocraft_compose::flatten(&r.document).to_rgba8().pixels;
+        let tree = parse(svg).unwrap().tree;
+        let mut pm = tiny_skia::Pixmap::new(64, 64).unwrap();
+        resvg::render(&tree, tiny_skia::Transform::default(), &mut pm.as_mut());
+        let theirs: Vec<u8> = pm
+            .pixels()
+            .iter()
+            .flat_map(|p| {
+                let c = p.demultiply();
+                [c.red(), c.green(), c.blue(), c.alpha()]
+            })
+            .collect();
+        let off = ours.chunks(4).zip(theirs.chunks(4)).filter(|(a, b)| a.iter().zip(*b).any(|(x, y)| x.abs_diff(*y) > 48)).count();
+        assert!(off < 64, "{off} pixels differ");
+        // The report's file: PhotoCraft's own icon opens without the clip-path warning.
+        let icon = import_svg("photocraft.svg", include_bytes!("../../../assets/app-icon/photocraft.svg")).unwrap();
+        assert!(icon.warnings.iter().all(|w| !w.contains("clip-path")), "{:?}", icon.warnings);
+        assert!(icon.document.layers.iter().any(|l| l.vector_mask.is_some()), "its rounded square is a vector mask");
+        // Two shapes in the clip: rasterised, and said so.
+        let two = br##"<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64">
+            <defs><clipPath id="c"><rect width="20" height="20"/><rect x="30" width="20" height="20"/></clipPath></defs>
+            <g clip-path="url(#c)"><rect width="64" height="64"/><rect width="9" height="9" fill="red"/></g></svg>"##;
+        let r = import_svg("t", two).unwrap();
+        assert!(r.warnings.iter().any(|w| w.contains("clip-path")), "{:?}", r.warnings);
     }
 
     #[test]

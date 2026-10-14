@@ -111,7 +111,7 @@ pub fn tool_icon(t: Tool) -> &'static str {
         Tool::Slice => "slice-knife",
         Tool::SliceSelect => "square-dashed-mouse-pointer",
         Tool::Frame => "frame-placeholder",
-        Tool::Gradient => "blend",
+        Tool::Gradient => "gradient",
         Tool::PaintBucket => "paint-bucket",
         Tool::Type | Tool::VerticalType => "type",
         Tool::HorizontalTypeMask => "type-mask",
@@ -177,6 +177,12 @@ pub fn button(ui: &mut egui::Ui, name: &str, box_size: f32, selected: bool, tool
 
 /// Square icon button with an explicit glyph size, independent of its hit area.
 pub fn button_with_icon_size(ui: &mut egui::Ui, name: &str, box_size: f32, icon_size: f32, selected: bool, tooltip: &str) -> Response {
+    button_with_icon_size_tip(ui, name, box_size, icon_size, selected, tooltip, true)
+}
+
+/// [`button_with_icon_size`] whose tooltip shows only when `show_tip`; the tooltip text still
+/// names the button (for screen readers and tests) when it is hidden.
+pub fn button_with_icon_size_tip(ui: &mut egui::Ui, name: &str, box_size: f32, icon_size: f32, selected: bool, tooltip: &str, show_tip: bool) -> Response {
     let t = Tokens::get(ui.ctx());
     let style = IconButtonStyle {
         normal: ButtonVisuals { fill: Color32::TRANSPARENT, stroke: egui::Stroke::NONE, icon: t.icon },
@@ -190,7 +196,7 @@ pub fn button_with_icon_size(ui: &mut egui::Ui, name: &str, box_size: f32, icon_
     let resp = IconButton::new(label, Vec2::splat(box_size), &style).selected(selected).show(ui, |ui, rect, tint| {
         paint(ui, rect, name, icon_size, tint);
     });
-    if tooltip.is_empty() { resp } else { resp.on_hover_text(label) }
+    if tooltip.is_empty() || !show_tip { resp } else { resp.on_hover_text(label) }
 }
 
 /// Rail toggle: "on" gets a quiet filled background and full-strength icon (no accent).
@@ -218,6 +224,28 @@ mod tests {
         for t in Tool::ALL {
             assert!(exists(tool_icon(t)), "{t:?}");
         }
+        assert_eq!(tool_icon(Tool::Gradient), "gradient");
+        assert_ne!(tool_icon(Tool::Gradient), tool_icon(Tool::PaintBucket));
+    }
+
+    #[test]
+    fn gradient_tool_icon_rasterizes_left_to_right_ramp() {
+        let egui::ImageSource::Bytes { bytes, .. } = white_icons().source(tool_icon(Tool::Gradient)) else {
+            panic!("icon source must be embedded bytes");
+        };
+        let image = egui_extras::image::load_svg_bytes_with_size(
+            bytes.as_ref(),
+            egui::load::SizeHint::Size { width: 24, height: 24, maintain_aspect_ratio: true },
+            &Default::default(),
+        )
+        .unwrap();
+        let left_alpha = image[(6, 12)].a();
+        let mid_alpha = image[(12, 12)].a();
+        let right_alpha = image[(18, 12)].a();
+        assert!(
+            left_alpha > mid_alpha && mid_alpha > right_alpha,
+            "interior ramp should fade from left ({left_alpha}) through middle ({mid_alpha}) to right ({right_alpha})"
+        );
     }
 
     #[test]

@@ -70,8 +70,15 @@ fn is_open(h: &Harness<'_, PhotocraftApp>, popup: Popup) -> bool {
 }
 
 fn dismiss_outside(h: &mut Harness<'_, PhotocraftApp>, popup: Popup) {
-    // The status-bar corner is outside every popup and does not edit the document.
-    let at = pos2(1190.0, 790.0);
+    // Leave the host's panel-toggle buttons at the right corner untouched, so dismissal
+    // also preserves the canvas geometry used by the next opening.
+    let id = egui::Id::new(match popup {
+        Popup::Tool => "canvas-selection-menu",
+        Popup::Layers => "canvas-layer-menu",
+        Popup::Brush => "canvas-brush-picker",
+    });
+    let rect = h.ctx.memory(|m| m.area_rect(id)).unwrap();
+    let at = [250.0, 500.0, 750.0, 1000.0].into_iter().map(|x| pos2(x, 790.0)).find(|p| !rect.contains(*p)).expect("inert status text outside the menu");
     h.event(Event::PointerMoved(at));
     h.run_steps(2);
     press(h, at, PointerButton::Primary, true, Modifiers::NONE);
@@ -102,7 +109,13 @@ fn check_reopening(tool: Tool, modifiers: Modifiers, popup: Popup) {
                         if popup == Popup::Tool {
                             let menu = h.state().ui.canvas_tool_menu.as_ref().unwrap();
                             assert_eq!(menu.has_selection, selection);
-                            assert!(!menu.pasteboard);
+                            assert!(
+                                !menu.pasteboard,
+                                "view={:?}, rect={:?}, at={at:?}, doc={:?}",
+                                h.state().ui.views,
+                                h.state().last_canvas_rect,
+                                crate::canvas::ViewXform::active(h.state()).unwrap().to_doc(at)
+                            );
                         }
                         dismiss_outside(&mut h, popup);
                         assert!(document_state(&h) == before, "outside dismissal preserves the document and history");

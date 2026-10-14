@@ -73,7 +73,7 @@ pub fn default_for(kind: &str, mode: ColorMode) -> Result<Adjustment> {
 /// None or of another kind). `mode` picks the Levels/Curves channel space when neither the params
 /// nor the base name one.
 pub fn from_params(kind: &str, p: &Value, base: Option<&Adjustment>, mode: ColorMode) -> Result<Adjustment> {
-    let cmd = format!("adjustment `{kind}`");
+    let cmd = format!("{kind} adjustment");
     if !p.is_object() && !p.is_null() {
         return Err(bad(&cmd, "params must be an object"));
     }
@@ -952,8 +952,10 @@ pub fn parse_curve(cmd: &str, key: &str, v: &Value) -> Result<Vec<CurvePoint>> {
     let mut pts = Vec::with_capacity(a.len());
     for q in a {
         let q = q.as_array().filter(|q| q.len() == 2).ok_or_else(err)?;
-        let x = q.first().and_then(Value::as_f64).filter(|x| x.is_finite()).ok_or_else(err)?;
-        let y = q.get(1).and_then(Value::as_f64).filter(|y| y.is_finite()).ok_or_else(err)?;
+        // Like Photoshop, a point outside 0..255 is refused rather than moved onto the edge.
+        let level = |v: Option<&Value>| v.and_then(Value::as_f64).filter(|v| (-1e-6..=255.0 + 1e-6).contains(v));
+        let x = level(q.first()).ok_or_else(err)?;
+        let y = level(q.get(1)).ok_or_else(err)?;
         pts.push(CurvePoint { input: (x as f32).clamp(0.0, 255.0) / 255.0, output: (y as f32).clamp(0.0, 255.0) / 255.0 });
     }
     pts.sort_by(|a, b| a.input.total_cmp(&b.input));
@@ -1210,6 +1212,17 @@ mod tests {
         assert!(matches!(a, Adjustment::HueSaturation { hue: 180.0, saturation: -100.0, .. }));
         let a = from_params("levels", &json!({"inBlack": 250, "inWhite": 10}), None, ColorMode::Rgb).unwrap();
         assert!(matches!(a, Adjustment::Levels { master, .. } if master.in_white > master.in_black));
+    }
+
+    #[test]
+    fn curve_points_outside_0_255_are_refused_as_the_message_says() {
+        // Photoshop refuses them too ("the settings in the file are invalid"); they used to be
+        // moved onto the edge silently.
+        for pts in [json!([[0, 0], [300, 255]]), json!([[0, -1], [255, 255]]), json!([[0, 0]])] {
+            let e = from_params("curves", &json!({ "points": pts }), None, ColorMode::Rgb).unwrap_err().to_string();
+            assert!(e.contains("[input, output] pairs in 0..255") && e.contains("`curves adjustment`"), "{e}");
+        }
+        assert!(from_params("curves", &json!({"points": [[0, 0], [128.5, 140], [255, 255]]}), None, ColorMode::Rgb).is_ok());
     }
 
     fn curves_parts(a: &Adjustment) -> (&[CurvePoint], &[Vec<CurvePoint>; 3]) {
@@ -1625,7 +1638,8 @@ mod tests {
     #[test]
     fn destructive_levels_dont_clip_in_32_bit() {
         // Input 15..230, gamma 1.3, output 10..245: integer documents stop at the output range,
-        // while float documents preserve the curve's signed and HDR values beyond it.
+        // while float documents preserve the curve's signed and HDR values beyond it (the
+        // compose-side `levels_dont_clip_in_32_bit` pins the same curve, #2592).
         let params = json!({"inBlack": 15, "inWhite": 230, "gamma": 1.3, "outBlack": 10, "outWhite": 245});
         for depth in [8, 16, 32] {
             let mut s = crate::Session::new();
@@ -1703,6 +1717,28 @@ mod tests {
             for prefix in ["image.adjustments.", "layer.newAdjustmentLayer."] {
                 let r = s.execute(&format!("{prefix}{kind}"), p.clone());
                 assert!(matches!(r, Err(EngineError::BadParams { .. })), "{prefix}{kind} {p}: {r:?}");
+            }
+        }
+    }
+    #[test]
+    fn destructive_levels_match_independent_signed_hdr_endpoints() {
+        // Input 15..230, gamma 1.3, output 10..245: black and white land on the output range in
+        // integer documents. Float32 keeps HDR values outside 0..1, as the compositor's real-file
+        // Levels oracle does. These independently calculated endpoints use the signed-power
+        // curve at black and white, not display-clipped values.
+        let params = json!({"inBlack": 15, "inWhite": 230, "gamma": 1.3, "outBlack": 10, "outWhite": 245});
+        for (depth, low, high, tolerance) in [(8, 10.0, 245.0, 0.6), (16, 10.0, 245.0, 0.6), (32, -20.308_89, 265.750_3, 0.01)] {
+            let mut s = crate::Session::new();
+            s.execute("file.new", json!({"width": 16, "height": 16, "depth": depth, "background": "white"})).unwrap();
+            s.execute("select.rect", json!({"x": 0, "y": 0, "width": 8, "height": 16})).unwrap();
+            s.execute("edit.fill", json!({"color": "#000000"})).unwrap();
+            s.execute("select.deselect", json!({})).unwrap();
+            s.execute("image.adjustments.levels", params.clone()).unwrap();
+            let px = pixels(&s);
+            assert!((px[0][0] * 255.0 - low).abs() < tolerance, "black @{depth}: {:?}", px[0]);
+            assert!((px[1][0] * 255.0 - high).abs() < tolerance, "white @{depth}: {:?}", px[1]);
+            if depth == 32 {
+                assert!(px[0][0] < 0.0 && px[1][0] > 1.0, "HDR endpoints must remain unclipped");
             }
         }
     }

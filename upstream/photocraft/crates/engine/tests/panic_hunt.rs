@@ -9,6 +9,8 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 fn fresh() -> Session {
+    // Belt and braces with the EXTERNAL skip below: nothing in this process may reach a printer.
+    photocraft_engine::print_cmds::disable_printing();
     let mut s = Session::new();
     s.execute("file.new", json!({"width": 24, "height": 16})).unwrap();
     s.execute("layer.new.layer", json!({})).unwrap();
@@ -86,6 +88,15 @@ fn no_command_panics_or_hangs_on_adversarial_params() {
     let mut bad: Vec<String> = Vec::new();
     for spec in command_specs() {
         for p in &params {
+            // Print and Print One Copy reach real printers (lp, or the Windows driver): fuzz them
+            // as dry runs so the hunt never prints a page.
+            let mut p = p.clone();
+            if spec.id.starts_with("file.print")
+                && let Some(o) = p.as_object_mut()
+            {
+                o.insert("dryRun".into(), json!(true));
+            }
+            let p = &p;
             if let Err(why) = run_guarded(spec.id, p) {
                 bad.push(format!("{} [{why}] <- {p}", spec.id));
                 break;

@@ -39,6 +39,17 @@ command names joined by a slash, which keep both capitals (*Luminosità/Contrast
 | Footage | Filmato | *Interpreta filmato*, *Sostituisci filmato* |
 | Facet | Sfaccetta | |
 | SemiBold / ExtraBold / ExtraLight | Semigrassetto / Extragrassetto / Extraleggero | one spelling for every weight |
+| (Color) Mode | Metodo | *Cambia metodo condizionale*, never *modo* |
+| Trap | Trapping | the prepress term; *Sovrastampa* is overprint, a different thing |
+| HDR Toning | Mappatura tonale HDR | tone mapping; *Viraggio* stays for colour toning (*Viraggio separato*) |
+| Bevel & Emboss | Smusso e rilievo | pairs with *Rilievo* (Emboss) |
+| Linked (smart object) | Oggetto collegato | *Inserisci oggetto collegato*, *Converti in oggetto collegato* |
+
+## Native review
+
+2026-10-12: a native Italian speaker read the catalog and fixed mistranslations (Trap, HDR
+Toning, Display Text, Vine Color, Override Action "Save" Commands) and unnatural phrasing (Bevel &
+Emboss, East Asian / Middle Eastern Features, linked smart objects, bit depth labels).
 
 ## Not covered
 

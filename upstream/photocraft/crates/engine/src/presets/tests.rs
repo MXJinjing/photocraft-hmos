@@ -385,6 +385,43 @@ fn pattern_groups_select_apply_and_sync() {
     assert!(crate::pattern_cmds::resolve(&s, "Weave").is_none());
 }
 
+#[test]
+fn pattern_batch_delete_keeps_the_library_when_one_name_is_missing() {
+    let mut s = session(8);
+    let before = s.execute("pattern.presets.list", json!({})).unwrap();
+    let err = s.execute("pattern.presets.edit", json!({"action": "delete", "preset": ["Bricks", "missing"]})).unwrap_err();
+    assert!(err.to_string().contains("missing"), "{err}");
+    assert_eq!(s.execute("pattern.presets.list", json!({})).unwrap(), before);
+    assert!(crate::pattern_cmds::resolve(&s, "Bricks").is_some());
+}
+
+#[test]
+fn pattern_batch_delete_rejects_non_string_members_without_deleting() {
+    for invalid in [json!(null), json!(7), json!({})] {
+        let mut s = session(8);
+        let before = s.execute("pattern.presets.list", json!({})).unwrap();
+        assert!(s.execute("pattern.presets.edit", json!({"action": "delete", "preset": ["Bricks", invalid]})).is_err());
+        assert_eq!(s.execute("pattern.presets.list", json!({})).unwrap(), before);
+    }
+}
+
+#[test]
+fn pattern_batch_delete_refuses_a_document_only_pattern_up_front() {
+    let mut s = session(8);
+    let added = s.execute("edit.definePattern", json!({"name": "Document Only"})).unwrap();
+    let id = added["pattern"].as_str().unwrap().to_string();
+    let pattern = s.patterns.items.iter().find(|p| p.id == id).unwrap().clone();
+    s.edit("Embed pattern fixture", |doc, _| {
+        doc.patterns.push(pattern.clone());
+        Ok(())
+    })
+    .unwrap();
+    s.execute("pattern.delete", json!({"pattern": id})).unwrap();
+    let before = s.patterns.items.clone();
+    assert!(s.execute("pattern.presets.edit", json!({"action": "delete", "preset": ["Bricks", id]})).is_err());
+    assert_eq!(s.patterns.items, before, "nothing is deleted when one entry is not in the library");
+}
+
 // ------------------------------------------------------------------ styles
 
 #[test]

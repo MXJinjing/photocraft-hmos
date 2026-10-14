@@ -425,6 +425,31 @@ fn highlights_clip_to_white_and_exposure_applies() {
     assert!((lin(up) / lin(base) - 2.0).abs() < 0.02, "{} vs {}", lin(up), lin(base));
 }
 
+/// storytold/photocraft#4348 (as storytold/lightcraft#548): a 12-bit DNG that states WhiteLevel 4095
+/// but whose sensor saturates at 3567 in every colour. Under the camera's white balance (red x2.46,
+/// blue x1.59) the stuck red and blue samples clip at 1 while green stays at 0.85, so a blown wall
+/// rendered magenta. The wall must come out neutral, and the unclipped ramp beside it unchanged.
+#[test]
+fn highlights_that_clip_below_the_stated_white_level_stay_neutral() {
+    let (w, h) = (64, 32);
+    let data: Vec<u16> = (0..w * h).map(|i| if i % w < w / 2 { 528 + ((i % w) * 90 + (i / w) * 3) as u16 } else { 3567 }).collect();
+    let mut spec = DngSpec::cfa(w, h, data.clone());
+    spec.bits = 12;
+    spec.black = vec![528];
+    spec.white = 4095;
+    spec.as_shot_neutral = Some([1.0 / 2.46, 1.0, 1.0 / 1.59]);
+    let b = spec.build();
+    let d = develop(&b, &DevelopOptions::default()).unwrap();
+    let px = &d.rgb[(16 * w + 48) * 3..(16 * w + 48) * 3 + 3];
+    let lin = |v: u16| (f64::from(v) / 65535.0).powf(1.8);
+    let tint = (lin(px[0]) / lin(px[1]) - 1.0).abs().max((lin(px[2]) / lin(px[1]) - 1.0).abs());
+    assert!(tint < 0.01, "the clipped wall is tinted: {px:?}");
+    let s = sensor(&b);
+    for (i, (&got, &was)) in s.data.iter().zip(&data).enumerate() {
+        assert_eq!(got, if was == 3567 { 4095 } else { was }, "sample {i}");
+    }
+}
+
 #[test]
 fn gain_map_opcode_is_applied() {
     // Uniform 0.25 grey; a gain map that doubles everything over the whole image.

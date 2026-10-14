@@ -85,7 +85,7 @@ pub(crate) fn frame(app: &mut PhotocraftApp) -> Option<TransformSession> {
         return None;
     }
     let LayerContent::Text(text) = &layer.content else { return None };
-    let shape = text.shape;
+    let shape = text.shape.clone();
     let size = text.size_pt;
     let (layout, aff, _) = crate::type_tool::layout(app, id)?;
     if !aff.m.iter().all(|v| v.is_finite()) || aff.inverse().is_none() {
@@ -126,6 +126,7 @@ pub(crate) fn frame(app: &mut PhotocraftApp) -> Option<TransformSession> {
         made: None,
         mode: Default::default(),
         content_aware: None,
+        skew_v: 0.0,
     })
 }
 

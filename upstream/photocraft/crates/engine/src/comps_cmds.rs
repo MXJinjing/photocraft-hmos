@@ -319,13 +319,21 @@ fn restore_last(s: &mut Session) -> Result<Value> {
 }
 
 /// Comps that refer to deleted layers (Photoshop's warning triangle). `"clear": true` drops
-/// those stale states (Clear Layer Comp Warning) as one history step.
+/// those stale states as one history step: from `"comp"` only when given (Clear Layer Comp
+/// Warning), else from every comp (Clear All Layer Comp Warnings). `"comp"` also limits the
+/// report to that comp; an unknown comp is an error and changes nothing.
 fn update_warnings(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "layerComp.updateWarnings";
     let d = s.active().ok_or(EngineError::NoDocument)?;
+    let only = match p.get("comp") {
+        None | Some(Value::Null) => None,
+        Some(_) => Some(comp_param(&d.doc, p, cmd)?),
+    };
     let warnings: Vec<Value> = d
         .doc
         .layer_comps
         .iter()
+        .filter(|c| only.is_none_or(|id| c.id == id))
         .filter_map(|c| {
             let missing = c.missing_layers(&d.doc);
             (!missing.is_empty()).then(|| json!({"comp": c.id, "name": c.name, "missingLayers": missing.iter().map(|l| l.0).collect::<Vec<_>>()}))
@@ -333,9 +341,10 @@ fn update_warnings(s: &mut Session, p: &Value) -> Result<Value> {
         .collect();
     let n = warnings.len();
     if flag(p, "clear", false) && n > 0 {
-        s.edit("Clear Layer Comp Warnings", |doc, _| {
+        let label = if only.is_some() { "Clear Layer Comp Warning" } else { "Clear All Layer Comp Warnings" };
+        s.edit(label, |doc, _| {
             let live: std::collections::HashSet<LayerId> = doc.walk().into_iter().map(|(_, _, l)| l.id).collect();
-            for c in &mut doc.layer_comps {
+            for c in doc.layer_comps.iter_mut().filter(|c| only.is_none_or(|id| c.id == id)) {
                 c.states.retain(|st| live.contains(&st.layer));
             }
             Ok(())
@@ -434,7 +443,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "layerComp.updateWarnings",
             "Layer Comp Warnings",
             &[],
-            r##"{"clear":bool=false (drop states of deleted layers)} → {warnings:[{comp,name,missingLayers}],count}"##,
+            r##"{"comp":id|name? (default: every comp; limits the report and the clear to that comp),"clear":bool=false (drop states of deleted layers)} → {warnings:[{comp,name,missingLayers}],count}"##,
             has_doc,
             update_warnings
         ),

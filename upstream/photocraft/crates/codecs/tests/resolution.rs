@@ -425,16 +425,38 @@ fn png_phys_outranks_its_exif() {
     img.meta.exif = Some(camera_exif(&LE));
     let png = encode(&img, Format::Png, &EncodeOptions::default()).unwrap();
     near(decode(&png).unwrap().meta.dpi, 300.0);
+    near(decode(&with_phys(&png, 5906)).unwrap().meta.dpi, 150.0);
+}
+
+/// `png` with a `pHYs` chunk of `ppm` pixels per metre after IHDR.
+fn with_phys(png: &[u8], ppm: u32) -> Vec<u8> {
     let mut body = b"pHYs".to_vec();
-    body.extend_from_slice(&5906u32.to_be_bytes());
-    body.extend_from_slice(&5906u32.to_be_bytes());
+    body.extend_from_slice(&ppm.to_be_bytes());
+    body.extend_from_slice(&ppm.to_be_bytes());
     body.push(1);
     let mut chunk = 9u32.to_be_bytes().to_vec();
     chunk.extend_from_slice(&body);
     chunk.extend_from_slice(&crc32(&body).to_be_bytes());
     let ihdr_end = 8 + 8 + 13 + 4;
-    let with_phys = [&png[..ihdr_end], &chunk, &png[ihdr_end..]].concat();
-    near(decode(&with_phys).unwrap().meta.dpi, 150.0114);
+    [&png[..ihdr_end], &chunk, &png[ihdr_end..]].concat()
+}
+
+#[test]
+fn png_phys_of_a_whole_ppi_reads_back_whole() {
+    // pHYs holds whole pixels per metre: 300 ppi is stored as 11811 (299.9994 ppi), 72 as 2835
+    // (72.009). The whole number that rounds to the stored value is read, as Photoshop does; a
+    // value no whole ppi rounds to stays as it is.
+    let img = Image::from_raw(4, 4, ChannelLayout::Rgb, SampleType::U8, vec![90; 48]).unwrap();
+    let png = encode(&img, Format::Png, &EncodeOptions { embed_metadata: false, ..Default::default() }).unwrap();
+    for (ppm, want) in [(11811, 300.0), (2835, 72.0), (3937, 100.0), (11812, 300.0248)] {
+        let (x, y) = decode(&with_phys(&png, ppm)).unwrap().meta.dpi.unwrap();
+        assert!((x - want).abs() < 1e-4 && (y - want).abs() < 1e-4, "{ppm} px/m: {x} × {y}, wanted {want}");
+    }
+    // And a 300 ppi PNG written by the encoder opens at exactly 300.
+    let mut img = img;
+    img.meta.dpi = Some((300.0, 300.0));
+    let png = encode(&img, Format::Png, &EncodeOptions::default()).unwrap();
+    assert_eq!(decode(&png).unwrap().meta.dpi, Some((300.0, 300.0)));
 }
 
 /// `camera_exif` plus IFD1, the embedded thumbnail a camera (or the last editor) wrote:

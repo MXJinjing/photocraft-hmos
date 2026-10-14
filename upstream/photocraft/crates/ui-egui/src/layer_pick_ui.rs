@@ -2,8 +2,8 @@
 //! with any tool, lists the layers with visible pixels under the pointer, topmost first, as
 //! Photoshop does. Choosing one selects it.
 //!
-//! The hit test is `layer.pickAt` with `"list": true` (non-transparent pixels, layer masks, hidden
-//! layers and hidden groups skipped), and choosing runs `layer.select`, so the menu is the same
+//! The hit test is `layer.pickAt` with `"list": true` (non-transparent pixels, text bounds,
+//! layer masks, hidden layers and hidden groups), and choosing runs `layer.select`, so the menu is the same
 //! two commands an agent would run. Painting tools keep their plain right-click (the Brush
 //! Preset picker, #268); the ⌘/Ctrl variant reaches the layer list from them too.
 
@@ -27,7 +27,7 @@ pub fn is_gesture(tool: Tool, mods: Modifiers) -> bool {
     tool == Tool::Move || mods.command
 }
 
-/// The layers with pixels at document point (x, y), topmost first.
+/// The layers at document point (x, y), topmost first, including text between glyphs.
 pub fn layers_at(app: &mut PhotocraftApp, x: f64, y: f64) -> Vec<(u64, String)> {
     if !(x.is_finite() && y.is_finite()) {
         return Vec::new();

@@ -292,6 +292,38 @@ fn bitmap_methods_need_grayscale() {
 }
 
 #[test]
+fn bitmap_halftone_rejects_bad_angles_and_frequencies_without_editing_the_document() {
+    // Photoshop's Halftone Screen takes an angle in -180..180 degrees (#4214): 1e39 used to become
+    // inf, then NaN in the screen rotation, and an almost white bitmap landed in history.
+    let mut s = session(16, 16, 8, "grayscale");
+    let before = s.active().unwrap().history.past_len();
+    let bad = [
+        ("angle", json!(1e39)),
+        ("angle", json!(500)),
+        ("angle", json!(-181)),
+        ("angle", json!(180.01)),
+        ("angle", json!("x")),
+        ("frequency", json!("x")),
+        ("frequency", json!(true)),
+    ];
+    for (key, value) in bad {
+        let mut p = json!({"method": "halftone"});
+        p[key] = value.clone();
+        assert!(s.execute("image.mode.bitmap", p).is_err(), "{key}: {value}");
+        assert_eq!(s.active().unwrap().history.past_len(), before, "{key}: {value}");
+        assert_eq!(doc(&s).mode, ColorMode::Grayscale, "{key}: {value}");
+    }
+    for angle in [-180.0, 30.0, 180.0] {
+        s.execute("image.mode.bitmap", json!({"method": "halftone", "angle": angle})).unwrap();
+        assert_eq!(doc(&s).mode, ColorMode::Bitmap, "{angle}");
+        s.execute("edit.undo", json!({})).unwrap();
+    }
+    // Frequency stays clamped to the documented 1..999 lines/inch.
+    s.execute("image.mode.bitmap", json!({"method": "halftone", "frequency": 1e39})).unwrap();
+    assert_eq!(doc(&s).mode, ColorMode::Bitmap);
+}
+
+#[test]
 fn duotone_inks_and_display() {
     let mut s = session(16, 8, 8, "gray");
     paint(&mut s, |x, _| [x as f32 / 15.0; 4].map(|v| v.min(1.0)));
@@ -408,4 +440,67 @@ fn duotone_to_rgb_inks_fill_layer_colours() {
     for (g, w) in c.c[..3].iter().zip([1.0, 0.75, 0.5]) {
         assert!((g - w).abs() < 0.02, "{c:?}");
     }
+}
+
+/// Three-entry Indexed doc (red, blue, transparent at index 2) from an RGB doc with clear pixels.
+fn indexed_with_transparency() -> Session {
+    let mut s = Session::new();
+    s.execute("file.new", json!({"width": 8, "height": 8, "background": "transparent"})).unwrap();
+    paint(&mut s, |x, _| {
+        if x < 3 {
+            [1.0, 0.0, 0.0, 1.0]
+        } else if x < 6 {
+            [0.0, 0.0, 1.0, 1.0]
+        } else {
+            [0.0; 4]
+        }
+    });
+    s.execute("image.mode.indexedColor", json!({"palette": "exact", "colors": 4, "forced": "none", "dither": "none"})).unwrap();
+    assert_eq!(doc(&s).color_table.as_ref().unwrap().transparent, Some(2));
+    s
+}
+
+#[test]
+fn shrinking_the_color_table_drops_a_transparent_index_past_its_end() {
+    // #4186: the transparent index stayed at 2 after the table shrank to 2 entries, so the palette
+    // PNG export refused the table.
+    let mut s = indexed_with_transparency();
+    s.execute("image.mode.colorTable", json!({"colors": ["#000000", "#ffffff"]})).unwrap();
+    let d = doc(&s);
+    let t = d.color_table.as_ref().unwrap();
+    assert_eq!(t.colors.len(), 2);
+    assert!(t.transparent.is_none_or(|i| usize::from(i) < t.colors.len()), "stale transparent index {:?}", t.transparent);
+    // The pixels end up exactly as with an explicit `"transparent": null`.
+    let mut cleared = indexed_with_transparency();
+    cleared.execute("image.mode.colorTable", json!({"colors": ["#000000", "#ffffff"], "transparent": null})).unwrap();
+    assert_eq!(doc(&cleared).color_table.as_ref(), Some(t));
+    let (a, b) = (d.layers[0].surface().unwrap(), doc(&cleared).layers[0].surface().unwrap());
+    for y in 0..8 {
+        for x in 0..8 {
+            assert_eq!(a.rgba(x, y), b.rgba(x, y), "({x},{y})");
+        }
+    }
+    let png = photocraft_io::export(d, "png", &Default::default()).expect("palette PNG export");
+    assert!(png.warnings.iter().any(|w| w.contains("palette PNG")), "{:?}", png.warnings);
+    // Undo restores the transparent entry.
+    s.execute("edit.undo", json!({})).unwrap();
+    assert_eq!(doc(&s).color_table.as_ref().unwrap().transparent, Some(2));
+}
+
+#[test]
+fn color_table_rejects_an_invalid_transparent_index_without_editing() {
+    let mut s = indexed_with_transparency();
+    let before = doc(&s).color_table.clone();
+    let n = s.active().unwrap().history.past_len();
+    for t in [json!(999), json!(3), json!(-1), json!(1.5), json!("0"), json!(true)] {
+        assert!(s.execute("image.mode.colorTable", json!({"transparent": t})).is_err(), "{t}");
+        // Validated against the new colours, before any edit.
+        assert!(s.execute("image.mode.colorTable", json!({"colors": ["#000000", "#ffffff"], "transparent": t})).is_err(), "{t}");
+    }
+    assert!(s.execute("image.mode.colorTable", json!({"colors": ["#000000", "#ffffff"], "transparent": 2})).is_err());
+    assert_eq!(doc(&s).color_table, before);
+    assert_eq!(s.active().unwrap().history.past_len(), n);
+    // A valid index still applies.
+    s.execute("image.mode.colorTable", json!({"transparent": 0})).unwrap();
+    assert_eq!(doc(&s).color_table.as_ref().unwrap().transparent, Some(0));
 }

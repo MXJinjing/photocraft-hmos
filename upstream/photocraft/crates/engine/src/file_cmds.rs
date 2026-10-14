@@ -20,6 +20,8 @@ use serde_json::{Value, json};
 use crate::commands::{CommandSpec, layer_param};
 use crate::{EngineError, Result, Session};
 
+mod batch_naming;
+
 // ---------- predicates ----------
 
 fn has_doc(s: &Session) -> std::result::Result<(), String> {
@@ -98,7 +100,7 @@ pub(crate) fn write_file(path: &str, _bytes: &[u8]) -> Result<()> {
 
 /// Files of a folder that look like images we can open, sorted by name.
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn list_images(dir: &str) -> Result<Vec<String>> {
+pub fn list_images(dir: &str) -> Result<Vec<String>> {
     let rd = std::fs::read_dir(dir).map_err(|e| EngineError::Other(format!("{dir}: {e}")))?;
     let mut out: Vec<String> = rd
         .filter_map(|e| e.ok())
@@ -110,15 +112,16 @@ pub(crate) fn list_images(dir: &str) -> Result<Vec<String>> {
     Ok(out)
 }
 #[cfg(target_arch = "wasm32")]
-pub(crate) fn list_images(dir: &str) -> Result<Vec<String>> {
+pub fn list_images(dir: &str) -> Result<Vec<String>> {
     Err(EngineError::Other(format!("cannot list {dir}: no file system on the web")))
 }
 
 /// Extensions the batch commands pick up from a folder.
 #[cfg(not(target_arch = "wasm32"))]
 const OPENABLE: &[&str] = &[
-    "pdn", "ora", "psd", "psb", "pcraft", "png", "jpg", "jpeg", "tif", "tiff", "webp", "gif", "bmp", "tga", "exr", "hdr", "qoi", "ico", "pnm", "ppm", "pgm",
-    "fits", "fit", "fts", "heic", "heif", "hif", "dng", "cr2", "nef", "nrw", "arw", "pef", "svg", "svgz", "af", "afdesign", "afphoto", "afpub",
+    "pdn", "ora", "kra", "krz", "psd", "psb", "pcraft", "png", "jpg", "jpeg", "tif", "tiff", "webp", "gif", "bmp", "tga", "exr", "hdr", "qoi", "ico", "pnm",
+    "ppm", "pgm", "fits", "fit", "fts", "dpx", "heic", "heif", "hif", "dng", "cr2", "nef", "nrw", "arw", "pef", "svg", "svgz", "af", "afdesign", "afphoto",
+    "afpub",
 ];
 
 /// Whether saving `doc` as a TIFF writes Photoshop layer data (anything beyond a lone
@@ -150,8 +153,9 @@ pub fn extension(path: &str) -> Option<String> {
     file_name(path).rsplit_once('.').filter(|(base, ext)| !base.is_empty() && !ext.is_empty()).map(|(_, ext)| ext.to_ascii_lowercase())
 }
 
-/// Whether a save without a new path may write back to `path`: only layered files (PSD, PSB,
-/// .pcraft). A flat file goes through Save As instead, so it is never flattened over the original.
+/// Whether a save without a new path may write back to `path` as far as its format goes: only
+/// layered files (PSD, PSB, OpenRaster, .pcraft). A flat file goes through Save As instead, so it
+/// is never flattened over the original. Whether this document fits is [`holds_at`].
 pub fn saves_in_place(path: &str) -> bool {
     extension(path).is_some_and(|ext| layered_extension(&ext))
 }
@@ -161,6 +165,33 @@ pub fn saves_in_place(path: &str) -> bool {
 /// saves, desktop and headless alike (#1547, #2579).
 pub fn layered_extension(ext: &str) -> bool {
     matches!(ext, "psd" | "psb" | "pcraft" | "ora")
+}
+
+/// Whether a file in format `ext` (lower-case) holds the whole of `doc`, so it can be the
+/// document's own file: PSD, PSB and .pcraft always; OpenRaster only when it drops nothing (no
+/// adjustment layers, styles, masks…, [`photocraft_io::ora_losses`]). A save to a format that
+/// doesn't hold the document is a copy, and File › Save goes through Save As, so an editable
+/// original is never overwritten with less than it had (#3806).
+pub fn holds(doc: &photocraft_doc::Document, ext: &str) -> bool {
+    match ext {
+        "psd" | "psb" | "pcraft" => true,
+        "ora" => photocraft_io::ora_losses(doc).is_empty(),
+        _ => false,
+    }
+}
+
+/// [`holds`] for the file at `path`.
+pub fn holds_at(doc: &photocraft_doc::Document, path: &str) -> bool {
+    extension(path).is_some_and(|ext| holds(doc, &ext))
+}
+
+/// What a save of `doc` to `path` would leave out when its format can't hold it: OpenRaster's
+/// [`photocraft_io::ora_losses`]; empty for other formats.
+pub fn losses_at(doc: &photocraft_doc::Document, path: &str) -> Vec<String> {
+    match extension(path).as_deref() {
+        Some("ora") => photocraft_io::ora_losses(doc),
+        _ => Vec::new(),
+    }
 }
 
 /// Whether `path` names a document template (.psdt). A template opens as a new untitled document
@@ -218,8 +249,8 @@ pub(crate) fn import(name: &str, bytes: &[u8]) -> Result<Document> {
     Ok(r.document)
 }
 
-/// What a headless save writes beyond the format: JPEG quality, TIFF layers, Targa bits and PSD
-/// previews.
+/// What a headless save writes beyond the format: JPEG quality, TIFF layers, Targa bits, PSD
+/// previews and the PSD merged image.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct SaveOpts {
     /// Photoshop's 0–12 JPEG scale.
@@ -229,27 +260,35 @@ pub(crate) struct SaveOpts {
     /// Targa: 24 or 32 bits per pixel (`"tgaBits"`); unset, 32 with an alpha channel or
     /// transparency, else 24.
     pub tga_bits: Option<photocraft_io::TgaBits>,
+    /// DPX: 8, 10, 12 or 16 bits per sample (`"dpxBits"`); unset, 8 for an 8-bit document, else 16.
+    pub dpx_bits: Option<photocraft_io::DpxBits>,
     /// PSD/PSB: embed the thumbnail resource (Preferences › File Handling › Image Previews).
     pub image_previews: bool,
+    /// PSD/PSB: write the real merged image (Preferences › File Handling › Maximize PSD and PSB
+    /// File Compatibility).
+    pub psd_maximize_compatibility: bool,
 }
 
 impl Default for SaveOpts {
     fn default() -> Self {
-        SaveOpts { quality: None, tiff_layers: false, tga_bits: None, image_previews: true }
+        SaveOpts { quality: None, tiff_layers: false, tga_bits: None, dpx_bits: None, image_previews: true, psd_maximize_compatibility: true }
     }
 }
 
 impl SaveOpts {
     /// `quality`, `tiffLayers` and `tgaBits` from command `cmd`'s params (a `tgaBits` other than
-    /// 24 or 32 is an error); the image previews from the session's File Handling preferences
-    /// (Ask When Saving has no dialog here, so it saves them, as Photoshop's Save As checkbox
-    /// starts on).
+    /// 24 or 32 is an error); the image previews and the PSD merged image from the session's File
+    /// Handling preferences (Ask When Saving has no dialog here, so it saves them, as Photoshop's
+    /// Save As checkbox and its Maximize Compatibility checkbox both start on).
     pub(crate) fn from_params(s: &Session, p: &Value, cmd: &str) -> Result<Self> {
+        let file_handling = &s.prefs().file_handling;
         Ok(SaveOpts {
             quality: f64_param(p, "quality"),
             tiff_layers: p.get("tiffLayers").and_then(Value::as_bool).unwrap_or(false),
             tga_bits: tga_bits_param(p, cmd)?,
-            image_previews: s.prefs().file_handling.image_previews != crate::prefs::Ask::Never,
+            dpx_bits: dpx_bits_param(p, cmd)?,
+            image_previews: file_handling.image_previews != crate::prefs::Ask::Never,
+            psd_maximize_compatibility: file_handling.maximize_psd_compatibility != crate::prefs::Ask::Never,
         })
     }
 
@@ -279,15 +318,34 @@ pub fn tga_bits_param(p: &Value, cmd: &str) -> Result<Option<photocraft_io::TgaB
     }
 }
 
+/// The DPX bits per sample in `p` (`"dpxBits": 8 | 10 | 12 | 16`; absent or null: the document's
+/// depth). Anything else is a bad parameter of command `cmd`.
+pub fn dpx_bits_param(p: &Value, cmd: &str) -> Result<Option<photocraft_io::DpxBits>> {
+    match p.get("dpxBits") {
+        None | Some(Value::Null) => Ok(None),
+        Some(v) => v
+            .as_u64()
+            .and_then(photocraft_io::DpxBits::from_bits)
+            .map(Some)
+            .ok_or_else(|| EngineError::BadParams { cmd: cmd.into(), msg: format!("`dpxBits` must be 8, 10, 12 or 16, got {v}") }),
+    }
+}
+
 /// Encodes `doc` for `path`'s extension.
 pub(crate) fn encode(doc: &Document, path: &str, save: impl Into<SaveOpts>) -> Result<(Vec<u8>, Vec<String>)> {
     crate::allocation::checkpoint("saving document")?;
     let save = save.into();
-    let mut opts =
-        photocraft_io::ExportOptions { tiff_layers: save.tiff_layers, tga_bits: save.tga_bits, image_previews: save.image_previews, ..Default::default() };
+    let mut opts = photocraft_io::ExportOptions {
+        tiff_layers: save.tiff_layers,
+        tga_bits: save.tga_bits,
+        image_previews: save.image_previews,
+        psd_maximize_compatibility: save.psd_maximize_compatibility,
+        ..Default::default()
+    };
     // No quality chosen: write the file the way it was opened (a JPEG at its own quality, a WebP
     // lossy or lossless as it was), as Photoshop's Save does.
     photocraft_io::apply_file_encoding(doc, &mut opts.encode);
+    opts.encode.dpx_bits = save.dpx_bits;
     if let Some(q) = save.quality {
         let q = (q.clamp(0.0, 12.0) / 12.0 * 99.0 + 1.0).round() as u8;
         opts.encode.jpeg_quality = q;
@@ -875,19 +933,25 @@ pub(crate) fn batch_inputs(p: &Value, cmd: &str) -> Result<Vec<String>> {
 /// Opens each input in a scratch session, runs `f` on it and saves it to `output` as `format`
 /// (`"same"` keeps the input's extension). Errors per file are collected, not fatal.
 pub(crate) fn process_files(inputs: &[String], output: &str, format: &str, save: SaveOpts, suffix: &str, f: &dyn Fn(&mut Session) -> Result<()>) -> Value {
+    let outputs = inputs.iter().map(|path| {
+        let ext =
+            if format == "same" { path.rsplit('.').next().unwrap_or("png").to_ascii_lowercase() } else { format.trim_start_matches('.').to_ascii_lowercase() };
+        (path.as_str(), join(output, &format!("{}{suffix}.{ext}", stem(path))))
+    });
+    process_outputs(outputs, save, f)
+}
+
+fn process_outputs<'a>(outputs: impl IntoIterator<Item = (&'a str, String)>, save: SaveOpts, f: &dyn Fn(&mut Session) -> Result<()>) -> Value {
     let mut files = Vec::new();
     let mut errors = Vec::new();
     let mut written = OutputClaims::default();
-    for path in inputs {
-        let ext =
-            if format == "same" { path.rsplit('.').next().unwrap_or("png").to_ascii_lowercase() } else { format.trim_start_matches('.').to_ascii_lowercase() };
-        let out = join(output, &format!("{}{suffix}.{ext}", stem(path)));
+    for (path, out) in outputs {
         let r = (|| -> Result<()> {
             written.check(&out).map_err(EngineError::Other)?;
             let bytes = read_file(path)?;
             let mut scratch = Session::new();
             let doc = import(&file_name(path), &bytes)?;
-            scratch.add_document(doc, Some(path.clone()));
+            scratch.add_document(doc, Some(path.to_string()));
             f(&mut scratch)?;
             let d = scratch.active().ok_or(EngineError::NoDocument)?;
             save_doc(&d.doc, &out, save)?;
@@ -932,7 +996,7 @@ fn batch(s: &mut Session, p: &Value) -> Result<Value> {
     // Each result goes to the destination folder, which overrides the action's recorded Save /
     // Save As steps (Photoshop's "Override Action 'Save As' Commands"). Recorded view steps
     // (zoom, fit) don't change the output, so they are skipped (#2752).
-    steps.retain(|(id, _)| !crate::actions_cmds::shell_save_command(id) && !crate::actions_cmds::shell_view_command(id));
+    steps.retain(|(id, _)| !crate::actions_cmds::shell_save_command(id) && !crate::actions_cmds::shell_view_command(id) && id != "file.export.quickExport");
     if let Some((id, _)) = steps.iter().find(|(id, _)| crate::commands::find(id).is_none()) {
         return Err(EngineError::BadParams { cmd: cmd.into(), msg: format!("unknown command `{id}` in the action") });
     }
@@ -954,7 +1018,9 @@ fn batch(s: &mut Session, p: &Value) -> Result<Value> {
         }
     };
     let actions = crate::actions_cmds::ActionState { list, playing: s.actions.playing, playback_stack: s.actions.playback_stack.clone(), ..Default::default() };
-    let r = process_files(&inputs, &output, &format, SaveOpts::from_params(s, p, cmd)?, "", &|scratch| {
+    let names = batch_naming::plan(&inputs, &output, &format, p)?;
+    let save = SaveOpts::from_params(s, p, cmd)?;
+    let run = |scratch: &mut Session| {
         scratch.actions = actions.clone();
         for (id, params) in &steps {
             let r = scratch.execute(id, params.clone())?;
@@ -964,7 +1030,11 @@ fn batch(s: &mut Session, p: &Value) -> Result<Value> {
             }
         }
         Ok(())
-    });
+    };
+    let r = match names {
+        Some(names) => process_outputs(inputs.iter().map(String::as_str).zip(names), save, &run),
+        None => process_files(&inputs, &output, &format, save, "", &run),
+    };
     Ok(r)
 }
 
@@ -1017,7 +1087,11 @@ fn load_files_into_stack(s: &mut Session, p: &Value) -> Result<Value> {
         stack.layers.push(Layer::new(name.clone(), LayerContent::Raster(flattened(d, fmt))));
     }
     let n = stack.layers.len();
-    if p.get("createSmartObject").and_then(Value::as_bool).unwrap_or(false) {
+    let smart = p.get("createSmartObject").and_then(Value::as_bool).unwrap_or(false);
+    // "Attempt to Automatically Align Source Images": Auto-Align Layers on the loaded layers, before
+    // they go into the smart object.
+    let align = p.get("align").and_then(Value::as_bool).unwrap_or(false) && n > 1;
+    if smart && !align {
         // "Create Smart Object after Loading Layers": the layers go inside one smart object, ready
         // for Layer › Smart Objects › Stack Mode. Like Photoshop, they sit at the top level of the
         // contents, with no wrapper group.
@@ -1026,6 +1100,23 @@ fn load_files_into_stack(s: &mut Session, p: &Value) -> Result<Value> {
         stack.layers = vec![smart];
     }
     let i = s.add_document(stack, None);
+    if align {
+        s.execute("select.allLayers", json!({}))?;
+        s.execute("edit.autoAlignLayers", json!({"projection": "auto"}))?;
+        if smart {
+            let name = s.active().map(|d| d.doc.name.clone()).unwrap_or_default();
+            s.edit("Convert to Smart Object", |doc, active| {
+                let layers = std::mem::take(&mut doc.layers);
+                let smart = crate::smart_cmds::layers_to_smart(doc, &name, layers)?;
+                *active = Some(smart.id);
+                doc.layers = vec![smart];
+                Ok(())
+            })?;
+            if let Some(st) = s.active_mut() {
+                st.selected_layers = st.active_layer.into_iter().collect();
+            }
+        }
+    }
     Ok(json!({"document": i, "layers": n}))
 }
 
@@ -1395,7 +1486,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Save a Copy…",
             &["File"],
             Some("Cmd+Alt+S"),
-            r##"{"path":str (format from the extension),"quality":0..12? (JPEG),"layers":bool=true,"tiffLayers":bool=false (TIFF: keep the layers; flat by default),"tgaBits":24|32? (TGA: 32 writes the alpha channel, or else the transparency, as the alpha; unset, 32 with an alpha channel or transparency, else 24)}"##,
+            r##"{"path":str (format from the extension),"quality":0..12? (JPEG),"layers":bool=true,"tiffLayers":bool=false (TIFF: keep the layers; flat by default),"tgaBits":24|32? (TGA: 32 writes the alpha channel, or else the transparency, as the alpha; unset, 32 with an alpha channel or transparency, else 24),"dpxBits":8|10|12|16? (DPX: bits per sample; unset, 8 for an 8-bit document, else 16)}"##,
             native_doc,
             save_a_copy
         ),
@@ -1458,7 +1549,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Batch…",
             &["File", "Automate"],
             None,
-            r##"{"steps":[[commandId,params]|{"command":id,"params":{}}…] (a recorded action),"input":folder|[paths],"output":folder,"format":"same|png|jpg|psd|tiff|…"="same","quality":0..12?,"tiffLayers":bool=false,"tgaBits":24|32?,"calledActions":[{"name","steps"}…]? (the actions Play Action steps call; default: the session's)} → {files, errors} (an input whose output name was already written in the run goes to errors)"##,
+            r##"{"steps":[[commandId,params]|{"command":id,"params":{}}…] (a recorded action),"input":folder|[paths],"output":folder,"format":"same|png|jpg|psd|tiff|…"="same","quality":0..12?,"naming":string? (blank keeps source names; {name}, {serial} padded to 3 digits, {date} as YYYY-MM-DD UTC; extension added automatically),"startingSerial":1..4294967295=1 (input position, including failed inputs),"tiffLayers":bool=false,"tgaBits":24|32?,"dpxBits":8|10|12|16? (DPX: bits per sample; unset, 8 for an 8-bit document, else 16),"calledActions":[{"name","steps"}…]? (the actions Play Action steps call; default: the session's)} → {files, errors} (an input whose output name was already written in the run goes to errors)"##,
             native,
             batch
         ),
@@ -1467,7 +1558,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Image Processor…",
             &["File", "Scripts"],
             None,
-            r##"{"input":folder|[paths],"output":folder,"format":"jpg|png|psd|tiff|…"="jpg","quality":0..12=8,"tiffLayers":bool=false,"tgaBits":24|32?,"width":px?,"height":px? (fit, never enlarge),"convertToSrgb":bool=false} → {files, errors} (an input whose output name was already written in the run goes to errors)"##,
+            r##"{"input":folder|[paths],"output":folder,"format":"jpg|png|psd|tiff|…"="jpg","quality":0..12=8,"tiffLayers":bool=false,"tgaBits":24|32?,"dpxBits":8|10|12|16? (DPX: bits per sample; unset, 8 for an 8-bit document, else 16),"width":px?,"height":px? (fit, never enlarge),"convertToSrgb":bool=false} → {files, errors} (an input whose output name was already written in the run goes to errors)"##,
             native,
             image_processor
         ),
@@ -1476,7 +1567,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Load Files into Stack…",
             &["File", "Scripts"],
             None,
-            r##"{"paths":[str]|folder,"createSmartObject":bool=false} → new document with one layer per file (inside one smart object with createSmartObject)"##,
+            r##"{"paths":[str]|folder,"align":bool=false (Auto-Align Layers on them first),"createSmartObject":bool=false} → new document with one layer per file (inside one smart object with createSmartObject)"##,
             native,
             load_files_into_stack
         ),
@@ -1495,7 +1586,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Layers to Files…",
             &["File", "Export"],
             None,
-            r##"{"dir":folder,"format":"png|jpg|psd|tiff|…"="png","prefix":str=document name,"visibleOnly":bool=true,"quality":0..12?,"tiffLayers":bool=false,"tgaBits":24|32?} → {files}"##,
+            r##"{"dir":folder,"format":"png|jpg|psd|tiff|…"="png","prefix":str=document name,"visibleOnly":bool=true,"quality":0..12?,"tiffLayers":bool=false,"tgaBits":24|32?,"dpxBits":8|10|12|16? (DPX: bits per sample; unset, 8 for an 8-bit document, else 16)} → {files}"##,
             native_doc,
             layers_to_files
         ),

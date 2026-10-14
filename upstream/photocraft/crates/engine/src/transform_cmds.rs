@@ -1,10 +1,10 @@
 //! Edit › Free Transform / Transform: projective transforms of layers (and the selection).
 
-use photocraft_algo::transform::{Homography, Interp, warp_surface};
+use photocraft_algo::transform::{Homography, Interp, warp_output_bounds, warp_surface, warp_surface_with};
 use photocraft_color::PixelFormat;
 use photocraft_doc::{Document, Layer, LayerContent, LayerId, Locks};
 use photocraft_geom::{Affine, Rect};
-use photocraft_raster::Surface;
+use photocraft_raster::{Interrupt, Surface};
 use serde_json::{Value, json};
 
 use crate::commands::CommandSpec;
@@ -29,16 +29,20 @@ pub fn moves_whole(layer: &Layer) -> bool {
 /// content within the selection, or all of it for a layer that [`moves_whole`] (#2630).
 /// Content scans are cached per tile: snapping asks for every layer's bounds per Move drag.
 pub fn transform_bounds(doc: &Document, layer: &Layer) -> Rect {
-    let content = match &layer.content {
-        LayerContent::Group(g) => g.children.iter().map(|l| transform_bounds(doc, l)).fold(Rect::EMPTY, |a, b| a.union(&b)),
-        _ => layer.surface().map_or(Rect::EMPTY, photocraft_compose::bounds::content_bounds),
-    };
-    let content =
-        if content.is_empty() { layer.mask.as_ref().map_or(Rect::EMPTY, |m| photocraft_compose::bounds::content_bounds(&m.surface)) } else { content };
+    let content = whole_layer_bounds(layer);
     match &doc.selection {
         Some(sel) if !moves_whole(layer) => content.intersect(&sel.content_bounds()),
         _ => content,
     }
+}
+
+/// A group moves all its descendants, so its frame must not clip raster children to the selection.
+fn whole_layer_bounds(layer: &Layer) -> Rect {
+    let content = match &layer.content {
+        LayerContent::Group(g) => g.children.iter().map(whole_layer_bounds).fold(Rect::EMPTY, |a, b| a.union(&b)),
+        _ => layer.surface().map_or(Rect::EMPTY, photocraft_compose::bounds::content_bounds),
+    };
+    if content.is_empty() { layer.mask.as_ref().map_or(Rect::EMPTY, |m| photocraft_compose::bounds::content_bounds(&m.surface)) } else { content }
 }
 
 /// Warp a surface whose pixels outside the content read as `default` (masks, selections):
@@ -230,9 +234,103 @@ pub fn locked_for_transform(doc: &Document, id: LayerId) -> bool {
     false
 }
 
+/// The largest result (px) a single Free Transform warp may build: 2³⁰, the bound Puppet Warp uses
+/// too ([`photocraft_algo::puppet::MAX_WARP_PIXELS`]). Only the size of the result counts, not
+/// where it lands, so moving a layer far off the canvas stays allowed. A scale past it is refused
+/// rather than clipped (#3773): the warp would otherwise fill every tile of a result up to 2²¹ px
+/// on a side before anything could fail.
+pub const MAX_TRANSFORM_PIXELS: u64 = 1 << 30;
+
+/// Tests use a far lower budget, so proving a refusal never comes near allocating the real one.
+#[cfg(not(test))]
+const BUDGET: u64 = MAX_TRANSFORM_PIXELS;
+#[cfg(test)]
+const BUDGET: u64 = 1 << 20;
+
+/// Refuse a warp of the content inside `src` by `h` whose result would exceed the pixel budget,
+/// before anything is built. `what` names the surface in the message.
+pub(crate) fn check_budget(src: Rect, h: &Homography, what: &str) -> Result<()> {
+    let Some(b) = warp_output_bounds(src, h) else { return Ok(()) };
+    let (w, ht) = (u64::from(b.width()), u64::from(b.height()));
+    if w.saturating_mul(ht) > BUDGET {
+        let detail = format!("the transformed {what} would be {w} x {ht} px, more than the {BUDGET} px limit");
+        return Err(crate::allocation::error("transforming pixels", &detail));
+    }
+    Ok(())
+}
+
+/// [`check_budget`] for every warp [`transform_layer`] would make of `l` (for a group, of every
+/// layer inside it), so a transform that doesn't fit is refused before any layer is built and a
+/// group that partly fits isn't half-transformed.
+fn check_layer_budget(doc_sel: Option<&Surface>, l: &Layer, h: &Homography) -> Result<()> {
+    if h.is_identity() {
+        return Ok(());
+    }
+    // An explicit stack rather than recursion: documents can nest deeply.
+    let mut stack = vec![(l, doc_sel)];
+    while let Some((l, sel)) = stack.pop() {
+        match &l.content {
+            LayerContent::Group(g) => stack.extend(g.children.iter().map(|c| (c, None))),
+            LayerContent::Text(_) | LayerContent::Shape(_) => {}
+            LayerContent::Smart(sm) => {
+                if let Some(c) = &sm.cache {
+                    check_budget(c.content_bounds(), h, "smart object")?;
+                }
+                if let Some(m) = &sm.filter_mask {
+                    check_budget(m.surface.content_bounds(), h, "smart filter mask")?;
+                }
+            }
+            _ => {
+                if let Some(surf) = l.surface() {
+                    check_budget(surf.content_bounds(), h, &format!("layer \"{}\"", l.name))?;
+                }
+            }
+        }
+        if let Some(m) = &l.mask
+            && m.linked
+        {
+            // With a selection only its region of the mask moves (`warp_gray_selected`).
+            let src = match sel.filter(|_| !moves_whole(l)) {
+                Some(sel) => sel.content_bounds(),
+                None => m.surface.content_bounds(),
+            };
+            check_budget(src, h, "layer mask")?;
+        }
+    }
+    Ok(())
+}
+
 /// `group` holds the locks `l` inherits from the groups around it ([`group_locks`]). A Background
 /// is turned into a normal layer by the caller first ([`crate::extra_cmds::background_to_layer`]).
+/// Refused, with `l` untouched, when a result would exceed [`MAX_TRANSFORM_PIXELS`].
 pub(crate) fn transform_layer(doc_sel: Option<&Surface>, group: Locks, l: &mut Layer, h: &Homography, affine: Option<Affine>, interp: Interp) -> Result<()> {
+    transform_layer_with(doc_sel, group, l, h, affine, interp, &Interrupt::NONE)
+}
+
+/// [`transform_layer`] with progress and cancellation for the pixel warp (the slow part on a
+/// large layer, #1015).
+fn transform_layer_with(
+    doc_sel: Option<&Surface>,
+    group: Locks,
+    l: &mut Layer,
+    h: &Homography,
+    affine: Option<Affine>,
+    interp: Interp,
+    ctl: &Interrupt,
+) -> Result<()> {
+    check_layer_budget(doc_sel, l, h)?;
+    apply_transform(doc_sel, group, l, h, affine, interp, ctl)
+}
+
+fn apply_transform(
+    doc_sel: Option<&Surface>,
+    group: Locks,
+    l: &mut Layer,
+    h: &Homography,
+    affine: Option<Affine>,
+    interp: Interp,
+    ctl: &Interrupt,
+) -> Result<()> {
     crate::allocation::checkpoint("transforming pixels")?;
     let locks = transform_locks(l, group, false);
     if locks.position || locks.all {
@@ -241,7 +339,7 @@ pub(crate) fn transform_layer(doc_sel: Option<&Surface>, group: Locks, l: &mut L
     if h.is_identity() {
         if let LayerContent::Group(g) = &mut l.content {
             for c in g.children.iter_mut() {
-                transform_layer(None, locks, c, h, affine, interp)?;
+                apply_transform(None, locks, c, h, affine, interp, ctl)?;
             }
         }
         return Ok(());
@@ -252,7 +350,7 @@ pub(crate) fn transform_layer(doc_sel: Option<&Surface>, group: Locks, l: &mut L
     match &mut l.content {
         LayerContent::Group(g) => {
             for c in g.children.iter_mut() {
-                transform_layer(None, locks, c, h, affine, interp)?;
+                apply_transform(None, locks, c, h, affine, interp, ctl)?;
             }
         }
         LayerContent::Text(t) => {
@@ -290,12 +388,12 @@ pub(crate) fn transform_layer(doc_sel: Option<&Surface>, group: Locks, l: &mut L
                     // Only the selected pixels move: lift them, clear them, warp and paste back.
                     Some(sel) => {
                         let (lifted, mut rest) = split_selected(surf, sel)?;
-                        let moved = warp_surface(&lifted, src, h, interp)?;
+                        let moved = warp_surface_with(&lifted, src, h, interp, ctl)?.ok_or(EngineError::Cancelled)?;
                         composite_over(&mut rest, &moved);
                         rest.prune();
                         rest
                     }
-                    None => warp_surface(surf, src, h, interp)?,
+                    None => warp_surface_with(surf, src, h, interp, ctl)?.ok_or(EngineError::Cancelled)?,
                 };
             }
         }
@@ -393,6 +491,33 @@ pub(crate) fn composite_over(dst: &mut Surface, top: &Surface) {
     dst.write_region(b, &d);
 }
 
+/// The relative form (`scaleX`, `scaleY` in percent, `rotate` in degrees clockwise, `dx`, `dy`
+/// in pixels), as Photoshop records a Free Transform: scale and rotate about the frame's
+/// centre, then move. `None` when none of them is given.
+fn relative_matrix(p: &Value, rect: [f64; 4]) -> Result<Option<Homography>> {
+    let num = |k: &str| -> Result<Option<f64>> {
+        match p.get(k) {
+            None | Some(Value::Null) => Ok(None),
+            Some(v) => v.as_f64().filter(|f| f.is_finite()).map(Some).ok_or_else(|| bad(format!("`{k}` must be a finite number"))),
+        }
+    };
+    let (sx, sy, rot, dx, dy) = (num("scaleX")?, num("scaleY")?, num("rotate")?, num("dx")?, num("dy")?);
+    if sx.is_none() && sy.is_none() && rot.is_none() && dx.is_none() && dy.is_none() {
+        return Ok(None);
+    }
+    let (sx, sy) = (sx.unwrap_or(100.0) / 100.0, sy.unwrap_or(100.0) / 100.0);
+    if sx.abs() < 1e-6 || sy.abs() < 1e-6 {
+        return Err(bad("`scaleX` and `scaleY` must not be 0"));
+    }
+    let (cx, cy) = ((rect[0] + rect[2]) / 2.0, (rect[1] + rect[3]) / 2.0);
+    let (sin, cos) = rot.unwrap_or(0.0).to_radians().sin_cos();
+    // (x, y) → translate(-c) → scale → rotate → translate(c + d).
+    let (a, b, c, d) = (sx * cos, sx * sin, -sy * sin, sy * cos);
+    let e = cx + dx.unwrap_or(0.0) - a * cx - c * cy;
+    let f = cy + dy.unwrap_or(0.0) - b * cx - d * cy;
+    Ok(Some(Homography([a, c, e, b, d, f, 0.0, 0.0, 1.0])))
+}
+
 fn quad_param(p: &Value) -> Option<[[f64; 2]; 4]> {
     let a = p.get("quad")?.as_array()?;
     if a.len() != 4 {
@@ -422,10 +547,7 @@ fn with_panel_target(s: &Session, p: &Value) -> Value {
 fn transform(s: &mut Session, p: &Value) -> Result<Value> {
     let p = &with_panel_target(s, p);
     let st = s.active().ok_or(EngineError::NoDocument)?;
-    let id = match p.get("layer").and_then(Value::as_u64) {
-        Some(v) => Some(LayerId(v)),
-        None => st.active_layer,
-    };
+    let id = crate::commands::explicit_layer(s, p)?.or(st.active_layer);
     let lone = lone_target(&st.doc, id, p)?;
     let id = match (id, lone.is_some() && crate::channel_cmds::is_channel_target(p)) {
         (_, true) => None,
@@ -458,8 +580,10 @@ fn transform(s: &mut Session, p: &Value) -> Result<Value> {
         }
         // Affine [a b c d e f] maps (x, y) → (a·x + c·y + e, b·x + d·y + f).
         Homography([v[0], v[2], v[4], v[1], v[3], v[5], 0.0, 0.0, 1.0])
+    } else if let Some(m) = relative_matrix(p, rect)? {
+        m
     } else {
-        return Err(bad("pass `quad` (where the rect's corners go) or `matrix`"));
+        return Err(bad("pass `quad` (where the rect's corners go), `matrix`, or `scaleX`/`scaleY`/`rotate`/`dx`/`dy`"));
     };
     if h.inverse().is_none() {
         return Err(bad("the transform collapses the layer"));
@@ -469,43 +593,69 @@ fn transform(s: &mut Session, p: &Value) -> Result<Value> {
         (m[6].abs() < 1e-12 && m[7].abs() < 1e-12).then(|| Affine { m: [m[0] / m[8], m[3] / m[8], m[1] / m[8], m[4] / m[8], m[2] / m[8], m[5] / m[8]] });
     let interp = Interp::parse(p.get("interpolation").and_then(Value::as_str).unwrap_or("bicubic"));
     let lone = lone.is_some();
-    s.edit("Free Transform", |doc, _| {
-        let sel = doc.selection.clone();
-        if lone {
-            // A targeted unlinked mask, alpha channel or Quick Mask transforms by itself.
-            if !h.is_identity() {
-                let (surf, _) = crate::channel_cmds::target_surface(doc, id, p)?;
-                *surf = match &sel {
-                    Some(sel) => warp_gray_selected(surf, sel, &h, interp)?,
-                    None => warp_gray(surf, &h, interp)?,
-                };
-                if let Some(sel) = &doc.selection {
-                    doc.selection = Some(warp_gray(sel, &h, Interp::Bilinear)?).filter(|s| !s.content_bounds().is_empty());
-                }
-            }
-            return Ok(());
-        }
-        let id = id.ok_or_else(|| EngineError::Other("no active layer".into()))?;
-        let is_group = doc.layer(id).is_some_and(Layer::is_group);
-        let group = group_locks(doc, id);
-        // Photoshop turns the Background into a normal layer before transforming it.
-        crate::extra_cmds::background_to_layer(doc, id);
-        let l = doc.layer_mut(id).ok_or(EngineError::NoLayer(id))?;
-        transform_layer(if is_group { None } else { sel.as_ref() }, group, l, &h, affine, interp)?;
+    let p = p.clone();
+    // A background job when started with `Session::start` (#1015): the warp of a large layer runs
+    // on a worker with progress, and can be cancelled.
+    crate::jobs::edit_job(
+        s,
+        "Free Transform",
+        move |doc, _, ctx| ctx.stage(0.0, 1.0, "Transforming", |ctl| transform_doc(doc, id, &p, lone, &h, affine, interp, ctl)),
+        move |()| json!({"rect": rect}),
+    )
+}
+
+/// The edit of [`transform`]: the layer (or a lone mask or channel) and the selection outline.
+#[allow(clippy::too_many_arguments)]
+fn transform_doc(
+    doc: &mut Document,
+    id: Option<LayerId>,
+    p: &Value,
+    lone: bool,
+    h: &Homography,
+    affine: Option<Affine>,
+    interp: Interp,
+    ctl: &Interrupt,
+) -> Result<()> {
+    let sel = doc.selection.clone();
+    // The selection outline moves too: price it before anything is built.
+    if let Some(sel) = sel.as_ref().filter(|_| !h.is_identity()) {
+        check_budget(sel.content_bounds(), h, "selection")?;
+    }
+    if lone {
+        // A targeted unlinked mask, alpha channel or Quick Mask transforms by itself.
         if !h.is_identity() {
-            // Type layers re-render from their new transform.
-            let snapshot = doc.clone();
-            if let Some(l) = doc.layer_mut(id) {
-                refresh_text(&snapshot, l);
-            }
-            // The selection outline moves with the pixels.
+            let (surf, _) = crate::channel_cmds::target_surface(doc, id, p)?;
+            let src = sel.as_ref().map_or_else(|| surf.content_bounds(), Surface::content_bounds);
+            check_budget(src, h, "mask or channel")?;
+            *surf = match &sel {
+                Some(sel) => warp_gray_selected(surf, sel, h, interp)?,
+                None => warp_gray(surf, h, interp)?,
+            };
             if let Some(sel) = &doc.selection {
-                doc.selection = Some(warp_gray(sel, &h, Interp::Bilinear)?).filter(|s| !s.content_bounds().is_empty());
+                doc.selection = Some(warp_gray(sel, h, Interp::Bilinear)?).filter(|s| !s.content_bounds().is_empty());
             }
         }
-        Ok(())
-    })?;
-    Ok(json!({"rect": rect}))
+        return Ok(());
+    }
+    let id = id.ok_or_else(|| EngineError::Other("no active layer".into()))?;
+    let is_group = doc.layer(id).is_some_and(Layer::is_group);
+    let group = group_locks(doc, id);
+    // Photoshop turns the Background into a normal layer before transforming it.
+    crate::extra_cmds::background_to_layer(doc, id);
+    let l = doc.layer_mut(id).ok_or(EngineError::NoLayer(id))?;
+    transform_layer_with(if is_group { None } else { sel.as_ref() }, group, l, h, affine, interp, ctl)?;
+    if !h.is_identity() {
+        // Type layers re-render from their new transform.
+        let snapshot = doc.clone();
+        if let Some(l) = doc.layer_mut(id) {
+            refresh_text(&snapshot, l);
+        }
+        // The selection outline moves with the pixels.
+        if let Some(sel) = &doc.selection {
+            doc.selection = Some(warp_gray(sel, h, Interp::Bilinear)?).filter(|s| !s.content_bounds().is_empty());
+        }
+    }
+    Ok(())
 }
 
 pub fn specs() -> Vec<CommandSpec> {
@@ -514,7 +664,7 @@ pub fn specs() -> Vec<CommandSpec> {
         label: "Free Transform",
         menu: &[],
         shortcut: None,
-        params: r##"{"layer":id?,"rect":[x0,y0,x1,y1]? (source frame; default = layer content ∩ selection),"quad":[[x,y]×4]? (where the frame's corners go, clockwise from top-left),"matrix":[a,b,c,d,e,f]? (affine alternative),"interpolation":"bicubic|bilinear|nearest"="bicubic","target":"pixels"|"mask"|"quickMask"|{"channel":i}=Channels panel target (an unlinked mask, an alpha channel or the Quick Mask transforms alone; a linked mask moves with its layer)}"##,
+        params: r##"{"layer":id?,"rect":[x0,y0,x1,y1]? (source frame; default = layer content ∩ selection),"quad":[[x,y]×4]? (where the frame's corners go, clockwise from top-left),"matrix":[a,b,c,d,e,f]? (affine alternative),"scaleX":%?,"scaleY":%?,"rotate":deg?,"dx":px?,"dy":px? (relative alternative: scale and rotate about the frame's centre, then move, as a Photoshop action records a Free Transform),"interpolation":"bicubic|bilinear|nearest"="bicubic","target":"pixels"|"mask"|"quickMask"|{"channel":i}=Channels panel target (an unlinked mask, an alpha channel or the Quick Mask transforms alone; a linked mask moves with its layer)}"##,
         enabled: has_layer,
         journal: true,
         run: transform,
@@ -526,8 +676,12 @@ mod tests {
     use super::*;
 
     fn session() -> Session {
+        session_depth(8)
+    }
+
+    fn session_depth(depth: u32) -> Session {
         let mut s = Session::new();
-        s.execute("file.new", json!({"width": 100, "height": 100})).unwrap();
+        s.execute("file.new", json!({"width": 100, "height": 100, "depth": depth})).unwrap();
         s.execute("layer.new.layer", json!({})).unwrap();
         s.edit("paint", |doc, active| {
             let l = doc.layer_mut(active.unwrap()).unwrap();
@@ -541,6 +695,112 @@ mod tests {
     fn active_bounds(s: &Session) -> Rect {
         let st = s.active().unwrap();
         st.doc.layer(st.active_layer.unwrap()).unwrap().surface().unwrap().content_bounds()
+    }
+
+    // ---- Pixel budget (#3773). Tests run with a 2²⁰ px budget, so nothing here comes near the real one. ----
+
+    /// A 16 x 16 document whose active layer is a 1 x 8 column at x = 10.
+    fn column() -> Session {
+        let mut s = Session::new();
+        s.execute("file.new", json!({"width": 16, "height": 16})).unwrap();
+        s.execute("layer.new.layer", json!({})).unwrap();
+        s.edit("paint", |doc, active| {
+            doc.layer_mut(active.unwrap()).unwrap().surface_mut().unwrap().fill_rect(Rect::new(10, 2, 11, 10), &[1.0, 0.0, 0.0, 1.0]);
+            Ok(())
+        })
+        .unwrap();
+        s
+    }
+
+    /// Stretch x by `k` about x = 10 (the column's left edge).
+    fn stretch(k: f64) -> Value {
+        json!({"matrix": [k, 0, 0, 1, -10.0 * k, 0], "interpolation": "nearest"})
+    }
+
+    #[test]
+    fn a_scale_past_the_pixel_budget_is_refused_and_changes_nothing() {
+        let mut s = column();
+        let st = s.active().unwrap();
+        let (before, revision, steps) = (st.doc.clone(), st.revision, st.history.past_len());
+        // 200000 x 10 px of output: twice the test budget.
+        let err = s.execute("edit.transform", stretch(2e5)).unwrap_err().to_string();
+        assert!(err.starts_with("not enough memory for transforming pixels"), "{err}");
+        assert!(err.contains("would be 200002 x 10 px") && err.ends_with("the document was not changed"), "{err}");
+        let st = s.active().unwrap();
+        assert!(st.doc == before, "the document is untouched");
+        assert_eq!((st.revision, st.history.past_len()), (revision, steps));
+        // Within the budget the same stretch still works, nothing clipped.
+        s.execute("edit.transform", stretch(1e4)).unwrap();
+        assert_eq!(active_bounds(&s), Rect::new(0, 2, 10_000, 10));
+    }
+
+    #[test]
+    fn a_group_with_one_layer_past_the_budget_is_not_half_transformed() {
+        let mut s = column();
+        let wide = s.active().unwrap().active_layer.unwrap();
+        // Over the column: a 1 px dot, which fits the budget stretched by the same amount.
+        s.execute("layer.new.layer", json!({})).unwrap();
+        let dot = s.active().unwrap().active_layer.unwrap();
+        s.edit("paint", |doc, _| {
+            doc.layer_mut(dot).unwrap().surface_mut().unwrap().fill_rect(Rect::new(10, 12, 11, 13), &[0.0, 1.0, 0.0, 1.0]);
+            // Widen the column to 8 px (x 2..10), so it alone needs 400002 x 10 px.
+            doc.layer_mut(wide).unwrap().surface_mut().unwrap().fill_rect(Rect::new(2, 2, 10, 10), &[1.0, 0.0, 0.0, 1.0]);
+            Ok(())
+        })
+        .unwrap();
+        s.execute("layer.select", json!({"layer": wide.0})).unwrap();
+        s.execute("layer.select", json!({"layer": dot.0, "mode": "add"})).unwrap();
+        let group = LayerId(s.execute("layer.groupLayers", json!({})).unwrap()["layer"].as_u64().unwrap());
+        let st = s.active().unwrap();
+        assert!(matches!(&st.doc.layer(group).unwrap().content, LayerContent::Group(g) if g.children.len() == 2));
+        let (before, revision) = (st.doc.clone(), st.revision);
+        let k = 5e4;
+        assert!(s.execute("edit.transform", json!({"layer": group.0, "matrix": [k, 0, 0, 1, -10.0 * k, 0]})).is_err());
+        let st = s.active().unwrap();
+        assert!(st.doc == before && st.revision == revision, "nothing changed");
+        // The layer-level check runs before any child is warped, so even the layer itself
+        // (not just the edit's copy of the document) is left as it was.
+        let mut l = st.doc.layer(group).unwrap().clone();
+        let h = Homography([k, 0.0, -10.0 * k, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]);
+        assert!(transform_layer(None, Locks::default(), &mut l, &h, None, Interp::Nearest).is_err());
+        assert!(&l == st.doc.layer(group).unwrap(), "no child was transformed");
+    }
+
+    #[test]
+    fn moving_a_small_layer_far_off_the_canvas_is_within_budget() {
+        let mut s = session();
+        s.execute("edit.transform", json!({"matrix": [1, 0, 0, 1, 900_000, -900_000]})).unwrap();
+        assert_eq!(active_bounds(&s), Rect::new(900_010, -899_990, 900_030, -899_980));
+        s.execute("edit.transform", json!({"matrix": [1, 0, 0, 1, -900_000, 900_000]})).unwrap();
+        assert_eq!(active_bounds(&s), Rect::new(10, 10, 30, 20), "and back, every pixel kept");
+    }
+
+    #[test]
+    fn selections_masks_and_channels_have_the_same_budget() {
+        // The selection outline of a layer transform.
+        let mut s = column();
+        s.execute("select.rect", json!({"x": 10, "y": 2, "width": 1, "height": 8})).unwrap();
+        let before = s.active().unwrap().doc.clone();
+        let err = s.execute("edit.transform", stretch(2e5)).unwrap_err().to_string();
+        assert!(err.contains("transformed selection would be"), "{err}");
+        // Transform Selection.
+        let err = s.execute("select.transformSelection", stretch(2e5)).unwrap_err().to_string();
+        assert!(err.contains("transformed selection would be"), "{err}");
+        assert!(s.active().unwrap().doc == before);
+        // A targeted alpha channel.
+        let mut s = column();
+        s.execute("channel.new", json!({})).unwrap();
+        s.edit("paint channel", |doc, _| {
+            doc.channels[0].surface.fill_rect(Rect::new(10, 2, 11, 10), &[1.0]);
+            Ok(())
+        })
+        .unwrap();
+        let before = s.active().unwrap().doc.clone();
+        let mut p = stretch(2e5);
+        p["target"] = json!({"channel": 0});
+        let err = s.execute("edit.transform", p).unwrap_err().to_string();
+        assert!(err.contains("transformed mask or channel would be"), "{err}");
+        assert!(s.active().unwrap().doc == before);
     }
 
     #[test]
@@ -689,7 +949,11 @@ mod tests {
 
     /// `session()` plus a reveal-all mask with `hide` painted black (linked unless `linked` is false).
     fn masked(hide: &[Rect], linked: bool) -> Session {
-        let mut s = session();
+        masked_depth(hide, linked, 8)
+    }
+
+    fn masked_depth(hide: &[Rect], linked: bool, depth: u32) -> Session {
+        let mut s = session_depth(depth);
         s.execute("layer.layerMask.revealAll", json!({})).unwrap();
         s.edit("mask", |doc, active| {
             let m = doc.layer_mut(active.unwrap()).unwrap().mask.as_mut().unwrap();
@@ -888,6 +1152,66 @@ mod tests {
     }
 
     #[test]
+    fn group_transform_ignores_selections_inside_its_children() {
+        group_transform_with_selection(Rect::new(10, 10, 15, 15));
+    }
+
+    #[test]
+    fn group_transform_ignores_selections_outside_its_children() {
+        group_transform_with_selection(Rect::new(70, 70, 80, 80));
+    }
+
+    #[test]
+    fn group_transform_presets_rotate_about_the_whole_group() {
+        for depth in [8, 16, 32] {
+            for x in [10, 70] {
+                let mut s = masked_depth(&[Rect::new(10, 10, 15, 20)], true, depth);
+                let child = s.active().unwrap().active_layer.unwrap();
+                s.execute("layer.groupLayers", json!({})).unwrap();
+                s.execute("select.rect", json!({"x": x, "y": 10, "width": 5, "height": 5})).unwrap();
+                s.execute("edit.transform.rotate180", json!({})).unwrap();
+                let layer = s.active().unwrap().doc.layer(child).unwrap();
+                assert_eq!(layer.surface().unwrap().content_bounds(), Rect::new(10, 10, 30, 20), "rotate about the group's centre, not the selection's");
+                let mask = &layer.mask.as_ref().unwrap().surface;
+                assert_eq!(mask.sample_channel(27, 15, 0), 0.0);
+                assert_eq!(mask.sample_channel(12, 15, 0), 1.0);
+            }
+        }
+    }
+
+    fn group_transform_with_selection(selection: Rect) {
+        for depth in [8, 16, 32] {
+            for nested in [false, true] {
+                let mut s = masked_depth(&[Rect::new(10, 10, 15, 20)], true, depth);
+                let child = s.active().unwrap().active_layer.unwrap();
+                s.execute("layer.groupLayers", json!({})).unwrap();
+                if nested {
+                    s.execute("layer.groupLayers", json!({})).unwrap();
+                }
+                s.execute("select.rect", json!({"x": selection.x0, "y": selection.y0, "width": selection.width(), "height": selection.height()})).unwrap();
+                let steps = s.active().unwrap().history.entries().len();
+                let result = s.execute("edit.transform", json!({"quad": [[10, 10], [50, 10], [50, 30], [10, 30]], "interpolation": "nearest"})).unwrap();
+                assert_eq!(result["rect"], json!([10.0, 10.0, 30.0, 20.0]), "frame must include the whole group (nested={nested})");
+                let st = s.active().unwrap();
+                let layer = st.doc.layer(child).unwrap();
+                assert_eq!(layer.surface().unwrap().content_bounds(), Rect::new(10, 10, 50, 30));
+                let mask = &layer.mask.as_ref().unwrap().surface;
+                assert_eq!(mask.sample_channel(19, 20, 0), 0.0, "the linked mask scales with its complete layer");
+                assert_eq!(mask.sample_channel(21, 20, 0), 1.0);
+                assert_eq!(st.history.entries().len(), steps + 1);
+                assert!(s.undo());
+                let st = s.active().unwrap();
+                let layer = st.doc.layer(child).unwrap();
+                assert_eq!(layer.surface().unwrap().content_bounds(), Rect::new(10, 10, 30, 20));
+                assert_eq!(layer.mask.as_ref().unwrap().surface.sample_channel(19, 15, 0), 1.0);
+                assert_eq!(st.doc.selection.as_ref().unwrap().content_bounds(), selection);
+                assert!(s.redo());
+                assert_eq!(s.active().unwrap().doc.layer(child).unwrap().surface().unwrap().content_bounds(), Rect::new(10, 10, 50, 30));
+            }
+        }
+    }
+
+    #[test]
     fn feathered_selection_identity_transform_preserves_pixels() {
         let mut s = Session::new();
         s.execute("file.new", json!({"width": 16, "height": 16, "background": "transparent"})).unwrap();
@@ -923,5 +1247,31 @@ mod tests {
         // Locked layer still refuses transform even if identity.
         s.execute("layer.setProps", json!({"locks": {"position": true}})).unwrap();
         assert!(s.execute("edit.transform", json!({"matrix": [1, 0, 0, 1, 0, 0]})).is_err(), "locked layer refuses identity transform");
+    }
+
+    #[test]
+    fn relative_params_scale_and_rotate_about_the_frame_centre() {
+        let mut s = Session::new();
+        s.execute("file.new", json!({"width": 100, "height": 100})).unwrap();
+        s.execute("layer.new.layer", json!({})).unwrap();
+        s.execute("select.rect", json!({"x": 20, "y": 30, "width": 40, "height": 20})).unwrap();
+        s.execute("edit.fill", json!({"contents": "black"})).unwrap();
+        s.execute("select.deselect", json!({})).unwrap();
+        // 50% about the centre (40, 40), then 10 px right: the content ends at x 40..60, y 35..45.
+        let r = s.execute("edit.transform", json!({"scaleX": 50, "scaleY": 50, "dx": 10})).unwrap();
+        let rect: Vec<f64> = serde_json::from_value(r["rect"].clone()).unwrap();
+        assert_eq!(rect, [20.0, 30.0, 60.0, 50.0], "the reported frame is the source frame");
+        let bounds = |s: &Session| {
+            let d = s.active().unwrap();
+            let b = transform_bounds(&d.doc, d.doc.layer(d.active_layer.unwrap()).unwrap());
+            (b.x0, b.y0, b.x1, b.y1)
+        };
+        assert_eq!(bounds(&s), (40, 35, 60, 45));
+        // A quarter turn about the centre (50, 40) swaps the frame's sides.
+        s.execute("edit.transform", json!({"rotate": 90})).unwrap();
+        assert_eq!(bounds(&s), (45, 30, 55, 50));
+        for bad in [json!({"scaleX": 0}), json!({"rotate": "x"}), json!({"dx": f64::NAN})] {
+            assert!(s.execute("edit.transform", bad.clone()).is_err(), "{bad}");
+        }
     }
 }

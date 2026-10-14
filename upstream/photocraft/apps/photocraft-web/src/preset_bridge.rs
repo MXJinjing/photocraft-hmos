@@ -337,6 +337,7 @@ mod tests {
         let b = Bridge::default();
         b.unavailable("SecurityError".into());
         let (mut s, _) = session(b.clone());
+        assert!(!b.unsaved(), "nothing is lost before the first change, so the web shell shows no banner");
         import(&mut s);
         assert!(s.tools.presets.iter().any(|p| p.name == "Browser seam brush"));
         assert!(b.unsaved());

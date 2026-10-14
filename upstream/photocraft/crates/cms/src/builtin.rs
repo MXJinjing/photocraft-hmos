@@ -32,6 +32,10 @@ pub enum Builtin {
     GrayGamma22,
     /// Gray with the sRGB transfer function (sGray): gray `v` looks like RGB `(v, v, v)` in sRGB.
     SGray,
+    /// Gray matching Photoshop's default working gray (Dot Gain 20 %) with our own curve: a pure
+    /// gamma of 1.732, fitted on Photoshop 27.11's RGB → Grayscale (sRGB 64 / 128 / 192 and pure red
+    /// become 46 / 105 / 177 / 107, all within 1 level). Not Adobe's profile.
+    DotGain20Compat,
     /// CIE L*a*b* D50 identity (device Lab = PCS Lab, ICC v4 encoding).
     LabD50,
     /// Synthetic coated-offset CMYK (300 % total ink, medium GCR); see [`crate::synth`].
@@ -39,7 +43,7 @@ pub enum Builtin {
 }
 
 impl Builtin {
-    pub const ALL: [Builtin; 10] = [
+    pub const ALL: [Builtin; 11] = [
         Builtin::Srgb,
         Builtin::DisplayP3,
         Builtin::AdobeRgbCompat,
@@ -48,6 +52,7 @@ impl Builtin {
         Builtin::Rec2020,
         Builtin::GrayGamma22,
         Builtin::SGray,
+        Builtin::DotGain20Compat,
         Builtin::LabD50,
         Builtin::CoatedCmyk,
     ];
@@ -63,6 +68,7 @@ impl Builtin {
             Builtin::Rec2020 => "rec2020",
             Builtin::GrayGamma22 => "gray-gamma-2.2",
             Builtin::SGray => "sgray",
+            Builtin::DotGain20Compat => "dot-gain-20-compat",
             Builtin::LabD50 => "lab-d50",
             Builtin::CoatedCmyk => "coated-cmyk",
         }
@@ -79,6 +85,7 @@ impl Builtin {
             Builtin::Rec2020 => "Rec. ITU-R BT.2020 (Photocraft)",
             Builtin::GrayGamma22 => "Gray Gamma 2.2 (Photocraft)",
             Builtin::SGray => "sGray (sRGB tone curve, Photocraft)",
+            Builtin::DotGain20Compat => "Dot Gain 20%-compatible (gamma 1.732, Photocraft)",
             Builtin::LabD50 => "Lab D50 identity (Photocraft)",
             Builtin::CoatedCmyk => crate::synth::DESCRIPTION,
         }
@@ -96,6 +103,7 @@ impl Builtin {
             "rec2020" | "bt2020" => Some(Builtin::Rec2020),
             "gray" | "graygamma22" | "gamma22" => Some(Builtin::GrayGamma22),
             "sgray" | "graysrgb" => Some(Builtin::SGray),
+            "dotgain20" | "dotgain20compat" | "dotgain" => Some(Builtin::DotGain20Compat),
             "lab" | "labd50" | "cielab" => Some(Builtin::LabD50),
             "cmyk" | "coatedcmyk" | "defaultcmyk" | "photocraftcoatedcmyk" => Some(Builtin::CoatedCmyk),
             _ => None,
@@ -105,18 +113,19 @@ impl Builtin {
 
     /// The profile (built once per process).
     pub fn profile(self) -> &'static Profile {
-        static CELLS: [OnceLock<Profile>; 10] = [const { OnceLock::new() }; 10];
+        static CELLS: [OnceLock<Profile>; 11] = [const { OnceLock::new() }; 11];
         // `ALL` lists the variants in declaration order (checked by `all_in_declaration_order`),
         // so the discriminant is the cell index.
         CELLS[self as usize].get_or_init(|| build(self))
     }
 }
 
-/// The default profile for a colour space: sRGB, sGray, the coated CMYK profile, Lab D50.
+/// The default profile for a colour space: sRGB, Dot Gain 20 %-compatible gray (Photoshop's default
+/// working gray), the coated CMYK profile, Lab D50.
 pub fn default_for(cs: ColorSpace) -> Option<&'static Profile> {
     Some(match cs {
         ColorSpace::Rgb => Builtin::Srgb.profile(),
-        ColorSpace::Gray => Builtin::SGray.profile(),
+        ColorSpace::Gray => Builtin::DotGain20Compat.profile(),
         ColorSpace::Cmyk => Builtin::CoatedCmyk.profile(),
         ColorSpace::Lab => Builtin::LabD50.profile(),
         _ => return None,
@@ -268,6 +277,7 @@ fn build(b: Builtin) -> Profile {
         }
         Builtin::GrayGamma22 => gray(b.description(), Curve::Gamma(2.2)),
         Builtin::SGray => gray(b.description(), srgb_trc()),
+        Builtin::DotGain20Compat => gray(b.description(), Curve::Gamma(1.732)),
         Builtin::LabD50 => lab(),
         // The shipped bytes are `synth::coated_cmyk()` (checked by the `regen` test); rebuild
         // them rather than crash if they ever fail to parse.

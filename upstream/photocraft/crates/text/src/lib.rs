@@ -125,7 +125,7 @@ impl TextEngine {
     /// Lays out and rasterizes a text layer into document space.
     pub fn render(&mut self, layer: &TextLayer, dpi: f32, format: PixelFormat) -> (TextLayout, Rendered) {
         let l = self.layout(layer, dpi);
-        let warp = render::layout_warp(&l, layer.warp.as_ref());
+        let warp = render::layout_deform(&l, layer);
         let r = render::rasterize_warped(&l, &layer.transform, format, layer.antialias, warp.as_ref());
         (l, r)
     }
@@ -147,7 +147,9 @@ fn uses_system_fonts() -> bool {
 }
 
 fn new_shared() -> std::sync::Mutex<TextEngine> {
-    std::sync::Mutex::new(if uses_system_fonts() { TextEngine::with_system_fonts() } else { TextEngine::new() })
+    let mut engine = if uses_system_fonts() { TextEngine::with_system_fonts() } else { TextEngine::new() };
+    engine.fonts.mark_shared();
+    std::sync::Mutex::new(engine)
 }
 
 /// A process-wide engine for callers without their own (bundled fonts only on the web; bundled
@@ -163,6 +165,43 @@ pub fn shared() -> &'static std::sync::Mutex<TextEngine> {
 /// fonts (web, tests) the engine is cheap and this always returns it.
 pub fn try_shared() -> Option<&'static std::sync::Mutex<TextEngine>> {
     SHARED.try_get(new_shared, uses_system_fonts())
+}
+
+/// Preferences › Type › Enable Missing Glyph Protection for [`shared`]: 0 = not set yet,
+/// 1 = off, 2 = on. Read under the engine's lock, so the newest setting always wins.
+static WANT_GLYPH_PROTECTION: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+/// A thread is already waiting for the font scan to apply [`WANT_GLYPH_PROTECTION`].
+static GLYPH_PROTECTION_WAITING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+fn apply_glyph_protection(engine: &std::sync::Mutex<TextEngine>) {
+    let mut e = engine.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    match WANT_GLYPH_PROTECTION.load(std::sync::atomic::Ordering::SeqCst) {
+        1 => e.fonts.set_missing_glyph_protection(false),
+        2 => e.fonts.set_missing_glyph_protection(true),
+        _ => {}
+    }
+}
+
+/// Sets [`shared`]'s missing-glyph protection without waiting for the system font scan (#4519):
+/// applied now when the engine is built, otherwise by a helper thread once the scan finishes.
+/// Called from the UI thread at launch and on every preferences change, where [`shared`] would
+/// block until the scan is done.
+pub fn set_shared_missing_glyph_protection(on: bool) {
+    WANT_GLYPH_PROTECTION.store(if on { 2 } else { 1 }, std::sync::atomic::Ordering::SeqCst);
+    if let Some(engine) = try_shared() {
+        apply_glyph_protection(engine);
+        return;
+    }
+    if GLYPH_PROTECTION_WAITING.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        // The waiting thread reads the newest setting when it applies it.
+        return;
+    }
+    let spawned = std::thread::Builder::new().name("photocraft-glyph-protection".into()).spawn(|| apply_glyph_protection(shared()));
+    if spawned.is_err() {
+        // No thread: apply it here, as before.
+        GLYPH_PROTECTION_WAITING.store(false, std::sync::atomic::Ordering::SeqCst);
+        apply_glyph_protection(shared());
+    }
 }
 
 /// Starts building [`shared`] (the system font scan) on a background thread, so the Type tool's

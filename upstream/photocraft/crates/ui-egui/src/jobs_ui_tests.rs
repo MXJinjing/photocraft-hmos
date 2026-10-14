@@ -66,9 +66,16 @@ fn slow_job(app: &mut PhotocraftApp, gate: &Arc<AtomicBool>) -> JobId {
 
 /// Step frames for `ms` of wall time; returns (frames, slowest frame in ms).
 fn frames_for(h: &mut Harness<'_, PhotocraftApp>, ms: u64) -> (u64, f64) {
+    frames_for_at_least(h, ms, 0)
+}
+
+/// Prove the frame loop advances while a gated worker stays blocked, without assuming a
+/// minimum frame rate on software-rendered CI machines. Also wait for the progress modal.
+fn frames_for_at_least(h: &mut Harness<'_, PhotocraftApp>, ms: u64, min_frames: u64) -> (u64, f64) {
     let t = Instant::now();
     let (mut n, mut worst) = (0, 0.0f64);
-    while t.elapsed() < Duration::from_millis(ms) {
+    while t.elapsed() < Duration::from_millis(ms) || n < min_frames {
+        assert!(t.elapsed() < Duration::from_secs(30), "frame observation timed out after {n} frames");
         let f = Instant::now();
         h.step();
         worst = worst.max(f.elapsed().as_secs_f64() * 1000.0);
@@ -84,7 +91,7 @@ fn the_frame_loop_keeps_running_during_a_slow_job_and_esc_cancels_it() {
     let doc_before = h.state().session.active().unwrap().doc.clone();
     let job = slow_job(h.state_mut(), &gate);
     let frame0 = h.state().frame;
-    let (n, worst) = frames_for(&mut h, 400);
+    let (n, worst) = frames_for_at_least(&mut h, 400, 10);
     assert!(h.state().frame - frame0 >= 10, "the UI kept rendering ({n} frames)");
     eprintln!("{n} frames during the job, slowest {worst:.1} ms");
     // The status bar shows the job, and after the delay the modal progress dialog.
@@ -418,7 +425,7 @@ fn saves_run_in_the_background_and_are_recorded_when_they_end() {
     assert!(h.state().saving());
 
     // The window keeps drawing; the document stays unsaved and can't be edited meanwhile.
-    let (frames, _) = frames_for(&mut h, 400);
+    let (frames, _) = frames_for_at_least(&mut h, 400, 4);
     assert!(frames >= 4, "only {frames} frames while saving");
     let st = h.state().session.active().unwrap();
     assert!(st.is_dirty() && st.path.is_none());
@@ -634,4 +641,144 @@ fn a_finished_job_beeps_when_the_preference_is_on() {
     let _ = slow_job(h.state_mut(), &gate);
     frames_for(&mut h, 800);
     assert_eq!(BEEPS.load(Ordering::Relaxed), 1, "one beep for the finished job");
+}
+
+#[test]
+fn printing_keeps_drawing_and_reports_only_the_final_spooler_result() {
+    for success in [true, false] {
+        let mut h = app_harness();
+        let gate = Arc::new(AtomicBool::new(false));
+        let worker_gate = gate.clone();
+        let Started::Job(id) = h
+            .state_mut()
+            .session
+            .start_job(
+                "file.print",
+                json!({}),
+                "Print",
+                false,
+                move |_| {
+                    while !worker_gate.load(Ordering::Relaxed) {
+                        std::thread::sleep(Duration::from_millis(1));
+                    }
+                    if success {
+                        Ok(json!({"sent": true, "spooler": "request id is Office-42", "pdf": null}))
+                    } else {
+                        Err(photocraft_engine::EngineError::Other("queue refused".into()))
+                    }
+                },
+                |_, result| Ok(result),
+            )
+            .unwrap()
+        else {
+            panic!("must run on a worker")
+        };
+        let frame = h.state().frame;
+        h.run_steps(4);
+        assert!(h.state().frame > frame);
+        assert!(!h.state().ui.status.contains("Sent to the printer"));
+        h.key_press(egui::Key::Escape);
+        h.run_steps(2);
+        assert!(h.state().session.job(id).is_some(), "Esc cannot retract a submitted job");
+        let (request, _) = crate::control::ControlRequest::new("jobs.cancel", json!({"job": id.0}));
+        let ctx = h.ctx.clone();
+        let crate::control::Outcome::Done(reply) = crate::control::handle(h.state_mut(), &ctx, &request) else { panic!("cancel replies immediately") };
+        assert_eq!(reply["result"]["cancelled"], 0, "control must not falsely report cancellation: {reply}");
+        let st = h.state_mut().session.active_mut().unwrap();
+        st.saved_revision = st.revision;
+        assert!(press_window_close(h.state_mut()), "quit waits for print submission");
+        assert!(h.state().jobs.close_after_saves);
+        gate.store(true, Ordering::Relaxed);
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while h.state().session.has_jobs() && Instant::now() < deadline {
+            h.step();
+        }
+        assert!(!h.state().session.has_jobs());
+        assert!(!h.state().jobs.close_after_saves, "close repeats on success or is cleared for a visible error");
+        if success {
+            assert!(h.state().ui.status.contains("Office-42"), "{}", h.state().ui.status);
+            assert!(!h.state().ui.status_error);
+        } else {
+            assert!(h.state().ui.status.contains("queue refused"), "{}", h.state().ui.status);
+            assert!(h.state().ui.status_error);
+        }
+    }
+}
+
+fn layer_count(app: &PhotocraftApp) -> usize {
+    app.session.active().unwrap().doc.layers.len()
+}
+
+/// Free Transform the active layer to the right half of the canvas, then ↩.
+fn transform_and_commit(h: &mut Harness<'static, PhotocraftApp>, copy: bool) {
+    let ctx = h.ctx.clone();
+    let app = h.state_mut();
+    if copy { crate::transform_tool::begin_copy(app, &ctx) } else { crate::transform_tool::begin(app, &ctx) }.unwrap();
+    app.ui.transform.as_mut().unwrap().quad = [[160.0, 0.0], [320.0, 0.0], [320.0, 120.0], [160.0, 120.0]];
+    crate::transform_tool::commit(app);
+}
+
+#[test]
+fn a_free_transform_commit_runs_in_the_background_and_keeps_its_preview() {
+    let mut h = app_harness();
+    let (layers, steps) = (layer_count(h.state()), h.state().session.active().unwrap().history.past_len());
+    transform_and_commit(&mut h, true);
+    let app = h.state();
+    // The warp runs as a job; the moving pixels stay on screen until it lands, and the box's
+    // history is closed meanwhile.
+    let job = crate::transform_tool::committing(app).expect("the commit runs as a job");
+    assert!(app.session.job(job).is_some_and(|j| j.label == "Free Transform"));
+    assert!(app.ui.transform.is_some() && app.transform_preview.is_some());
+    assert_eq!(crate::transform_tool::is_enabled(app, "edit.undo"), Some(false));
+    assert!(h.state_mut().run("edit.undo", json!({})).is_err());
+    crate::transform_tool::commit(h.state_mut());
+    let t = Instant::now();
+    while h.state().session.has_jobs() && t.elapsed() < Duration::from_secs(10) {
+        h.step();
+    }
+    h.run_steps(2);
+    let app = h.state();
+    assert!(app.ui.transform.is_none() && app.transform_preview.is_none(), "the session ends with the job");
+    // The copy and its transform are one step, as when the commit ran inline.
+    let st = app.session.active().unwrap();
+    assert_eq!((layer_count(app), st.history.past_len()), (layers + 1, steps + 1));
+    assert_eq!(st.history.undo_label(), Some("Free Transform"));
+    let moved = st.doc.layer(st.active_layer.unwrap()).unwrap().surface().unwrap().content_bounds();
+    assert_eq!((moved.x0, moved.y0, moved.x1, moved.y1), (160, 0, 320, 120));
+}
+
+#[test]
+fn esc_cancels_a_background_free_transform_commit() {
+    let mut h = app_harness();
+    let (layers, steps) = (layer_count(h.state()), h.state().session.active().unwrap().history.past_len());
+    let before = h.state().session.active().unwrap().doc.clone();
+    transform_and_commit(&mut h, true);
+    let job = crate::transform_tool::committing(h.state()).expect("the commit runs as a job");
+    // Esc reaches the transform tool first (shortcuts), which cancels the job.
+    crate::transform_tool::cancel(h.state_mut());
+    h.run_steps(3);
+    let app = h.state();
+    assert!(app.session.job(job).is_none());
+    assert!(app.ui.transform.is_none() && app.transform_preview.is_none());
+    // The copy is taken back with the transform, leaving nothing to redo.
+    let st = app.session.active().unwrap();
+    assert_eq!((layer_count(app), st.history.past_len()), (layers, steps));
+    assert!(!st.history.can_redo());
+    assert_eq!(st.doc.layers.len(), before.layers.len());
+}
+
+/// #4559: a background open (the desktop app's) also warns, when its document arrives, about
+/// type in a font that isn't installed.
+#[test]
+fn background_open_warns_about_missing_fonts() {
+    let mut s = photocraft_engine::Session::new();
+    s.execute("file.new", json!({"width": 40, "height": 20})).unwrap();
+    s.execute("type.create", json!({"text": "Hi", "x": 2, "y": 12, "size": 10, "font": "NoSuchFamily4559"})).unwrap();
+    let doc = (*s.active().unwrap().doc).clone();
+    let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+    // What the open job leaves behind: the decoded document in the session, then its result.
+    let (index, _) = app.session.open_document(doc, None);
+    super::finish_open(&mut app, "poster.psd", None, &json!({"document": index, "warnings": []}), None).unwrap();
+    let want = vec!["font 'NoSuchFamily4559' is not installed; text may render using a fallback face".to_string()];
+    assert!(app.ui.notices.last().is_some_and(|n| n.title.contains("poster.psd") && n.lines == want), "{:?}", app.ui.notices);
 }
