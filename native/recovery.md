@@ -32,8 +32,9 @@ Run:
 cargo test --offline --locked --manifest-path native/rust/Cargo.toml --lib
 ```
 
-The two existing brush-outline tests in the upstream input module remain
-unrelated failures on this branch; the native recovery tests pass.
+After merging `origin/main` at `a19bae36` for PR submission on 2026-10-14, the
+complete native unit suite passed: 66 tests, with no exclusions. The two
+brush-outline failures observed in earlier runs did not reproduce in this run.
 
 For device fault injection, build the ARM64 library with
 `--features host-recovery-test` and package it through the normal hvigor/CMake

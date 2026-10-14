@@ -15,6 +15,7 @@ import { HarmonyStylusAdapter } from '../stylus/HarmonyStylusAdapter';
 import { StylusPacket } from '../stylus/StylusProtocol';
 import { NativeImeAdapter, NativeImeState } from '../input/NativeImeAdapter';
 import { NativeCursorAdapter } from '../input/NativeCursorAdapter';
+import { IMAGE_DROP_TYPES, NativeDropAdapter } from '../input/NativeDropAdapter';
 import { isFiniteHoverPoint, penHoverLeaveMessage, penHoverMoveMessage } from '../input/PenHoverPreview';
 import { moveWindow, toggleWindowMaximize } from '../WindowChrome';
 import { window } from '@kit.ArkUI';
@@ -77,6 +78,9 @@ struct Index {
     return result.authResults.length > 0 && result.authResults[0] === 0;
   });
   private cursor: NativeCursorAdapter = new NativeCursorAdapter(this.getUIContext());
+  private dropping: NativeDropAdapter = new NativeDropAdapter(this.context.cacheDir,
+    (key: string): void => { this.getUIContext().getDragController().cancelDataLoading(key); },
+    (name: string, fd: number): void => { native.openFile(name, fd); });
   private ime: NativeImeAdapter = new NativeImeAdapter((message: string): void => native.input(message));
   private printing: NativePrintAdapter = new NativePrintAdapter(this.context,
     (message: string): void => { if (this.alive) { this.failure = message; } });
@@ -87,7 +91,14 @@ struct Index {
         let path = file.uri.length > 0 ? new fileUri.FileUri(file.uri).path : '';
         if (this.documents?.owns(path)) name = path;
       } catch (error) { console.info('Open source path unavailable'); }
-      native.open(name, file.bytes);
+      try {
+        native.openFile(name, file.file.fd);
+      } catch (error) {
+        this.failure = (error as Error).message;
+      } finally {
+        try { fileIo.closeSync(file.file); }
+        catch (error) { console.error(`Open close failed: ${(error as Error).message}`); }
+      }
     }
   }
   aboutToAppear(): void {
@@ -131,6 +142,7 @@ struct Index {
   aboutToDisappear(): void {
     this.alive = false;
     this.printing.stop();
+    this.dropping.stop();
     this.generation++;
     this.initialized = false;
     this.saveTargets.clear();
@@ -214,21 +226,13 @@ struct Index {
         native.reply(id, false, 'cancelled', new ArrayBuffer(0)); return;
       }
       let file = await fileIo.open(uris[0], fileIo.OpenMode.READ_ONLY);
-      let bytes: ArrayBuffer;
       try {
-        let size = (await fileIo.stat(file.fd)).size;
-        if (size <= 0 || size > 256 * 1024 * 1024) throw new Error('File is empty or exceeds 256 MiB');
-        bytes = new ArrayBuffer(size);
-        let view = new Uint8Array(bytes); let offset = 0;
-        while (offset < size) {
-          let chunk = new ArrayBuffer(Math.min(1024 * 1024, size - offset));
-          let read = await fileIo.read(file.fd, chunk);
-          if (read <= 0) throw new Error('Incomplete file read');
-          view.set(new Uint8Array(chunk, 0, read), offset); offset += read;
+        if (!this.alive || generation !== this.generation) {
+          native.reply(id, false, 'cancelled', new ArrayBuffer(0)); return;
         }
+        let opened = new fileUri.FileUri(uris[0]);
+        native.replyFile(id, this.documents?.owns(opened.path) ? opened.path : opened.name, file.fd);
       } finally { await fileIo.close(file); }
-      let opened = new fileUri.FileUri(uris[0]);
-      native.reply(id, true, this.documents?.owns(opened.path) ? opened.path : opened.name, bytes);
     } catch (error) {
       let failure = error as Error;
       native.reply(id, false, failure.message, new ArrayBuffer(0));
@@ -283,6 +287,22 @@ struct Index {
       native.reply(id, false, failure.message, new ArrayBuffer(0));
     }
   }
+  private async dropImages(event: DragEvent): Promise<void> {
+    const generation = this.generation;
+    const isCurrent = (): boolean => this.alive && this.initialized && generation === this.generation;
+    try {
+      const images = await this.dropping.receive(event, isCurrent);
+      if (!isCurrent()) { return; }
+      for (const image of images) {
+        native.open(image.name, image.bytes);
+        console.info('PhotoCraft drop queued: ' + image.name);
+      }
+    } catch (error) {
+      if (isCurrent()) { this.failure = (error as Error).message; }
+    } finally {
+      if (isCurrent()) { this.restoreEditorFocus(); }
+    }
+  }
   private sendPenHoverMove(event: HoverEvent): void {
     if (!this.alive || !this.initialized) { return; }
     let x = Number(event.x);
@@ -308,6 +328,13 @@ struct Index {
           this.ime.setOrigin(this.getUIContext().vp2px(Number(area.globalPosition.x)),
             this.getUIContext().vp2px(Number(area.globalPosition.y)));
         })
+        .allowDrop(IMAGE_DROP_TYPES)
+        .onDragMove((event: DragEvent): void => {
+          event.dragBehavior = DragBehavior.COPY;
+          event.setResult(DragResult.DROP_ENABLED);
+        })
+        // Required by startDataLoading: avoid the default prefetch consuming UDMF data.
+        .onDrop((event: DragEvent): void => { this.dropImages(event); }, { disableDataPrefetch: true })
         .onHoverMove((event: HoverEvent): void => { this.sendPenHoverMove(event); })
         .onHover((isHover: boolean): void => { this.sendPenHoverLeave(isHover); })
         .id('photocraft-editor').focusable(true).defaultFocus(true).focusOnTouch(true)

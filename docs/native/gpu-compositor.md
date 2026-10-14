@@ -94,8 +94,18 @@ borrows. Production input behavior is unchanged.
   Pad; drawing stopped and the error notification appeared without a process
   crash. The normal HAP was rebuilt without fault-injection features and
   reinstalled afterward. See [failure verification](../../native/recovery.md).
-- Native unit tests: 59 passed with the two previously reproduced brush-outline
-  failures excluded. The full suite still has those two failures.
+- Before the final main merge, native unit tests passed with 59 tests and two
+  brush-outline failures excluded. After merging `origin/main` at `a19bae36`
+  for PR submission, the full suite passed: 66 tests, no exclusions; those
+  earlier failures did not reproduce in this run.
+- The final merge retained main's file-open and drop handling. Resolving the
+  single module-declaration conflict kept both native modules. The SDK also
+  required typing the drop adapter's rethrown exception as `Error`.
+  ARM64 release Rust and signed debug HAP rebuilds passed; drop, large-file-open
+  and window-chrome tests passed. This rebuilt HAP's SHA-256 is
+  `01b8bb82d21c8ad30d4b3a4ccac0f081212ed1506aa28ffd241c8ed8388e1c7b`.
+  It was built for merge verification; the device screenshots above predate
+  this final merge and do not establish device testing of this exact artifact.
 - The user confirmed freeform mode, maximization and window resizing on the
   Pad. Original screenshots and the distinction between captured state and
   user-run transition tests are in [the window validation report](titlebar-recovery.md#real-device-validation-2026-10-14).
