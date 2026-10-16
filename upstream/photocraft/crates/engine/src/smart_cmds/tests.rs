@@ -243,7 +243,7 @@ fn smart_filter_commands_check_an_explicit_layer_target() {
     assert_eq!(active(&s), curves, "the active layer stays");
     // A target that isn't a smart object with filters is still refused, and the active layer stays.
     assert!(matches!(s.execute("layer.smartFilter.setParams", json!({"layer": curves, "params": {}})), Err(EngineError::Disabled(..))));
-    assert!(s.execute("layer.smartFilter.setParams", json!({"layer": 999_999, "params": {}})).is_err());
+    assert!(s.execute("layer.smartFilter.setParams", json!({"layer": u64::MAX, "params": {}})).is_err());
     assert_eq!(active(&s), curves);
 }
 

@@ -446,6 +446,10 @@ fn halos_and_output_area() {
     assert_eq!(output_area(&FilterParams::Twirl { angle: 1.0 }, content, R, None), R);
     assert_eq!(output_area(&FilterParams::BoxBlur { radius: 1.0 }, content, R, Some(Rect::new(0, 0, 12, 12))), Rect::new(8, 8, 12, 12));
     assert!(output_area(&FilterParams::Invert, Rect::EMPTY, R, None).is_empty());
+    // Fibers renders without reading the layer: an empty layer still fills the bounds (#5241).
+    let fibers = FilterParams::Fibers { variance: 16.0, strength: 4.0, seed: 0, foreground: [0.0; 4], background: [1.0; 4] };
+    assert_eq!(output_area(&fibers, Rect::EMPTY, R, None), R);
+    assert_eq!(output_area(&fibers, content, R, Some(Rect::new(0, 0, 12, 12))), Rect::new(0, 0, 12, 12));
 }
 
 #[test]

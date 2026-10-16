@@ -50,7 +50,7 @@ fn browse_runs_a_script_file() {
     assert_eq!((d.size.width, d.size.height), (20, 30));
     assert!(s.execute("file.scripts.browse", json!({"script": "no.such.command"})).is_err());
     // A failing step stops the script and is reported.
-    let r = s.execute("file.scripts.browse", json!({"steps": [["layer.delete", {"layer": 999_999}], ["image.imageRotation.90cw", {}]]})).unwrap();
+    let r = s.execute("file.scripts.browse", json!({"steps": [["layer.delete", {"layer": u64::MAX}], ["image.imageRotation.90cw", {}]]})).unwrap();
     assert_eq!(r["results"].as_array().unwrap().len(), 1);
 }
 
@@ -348,7 +348,7 @@ fn a_failed_step_inside_a_called_action_fails_scripts_and_batch() {
     });
     s.actions.list.push(Action {
         name: "Bad".into(),
-        steps: vec![("layer.delete".into(), json!({"layer": 999_999}))],
+        steps: vec![("layer.delete".into(), json!({"layer": u64::MAX}))],
         disabled: Default::default(),
         ..Default::default()
     });

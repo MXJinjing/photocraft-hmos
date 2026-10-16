@@ -127,9 +127,9 @@ note = "canvas.rs marquee_corners: Shift square or circle, Alt from the centre, 
 [[item]]
 id = "TOOL-214-3"
 target = "Color Range test: Sampled Colors at Fuzziness 0 selects the exact match only"
-status = "partial"
+status = "done"
 issue = 214
-note = "Fuzziness-0 tests cover midtones/shadows only (selection_cmds.rs:444-447)"
+note = "color_range_fuzziness_zero_selects_exact_match_only in selection_cmds.rs asserts exact match is selected and 1-level-off pixels are rejected at fuzziness 0; tonal presets covered in color_range_presets"
 
 [[item]]
 id = "TOOL-214-4"

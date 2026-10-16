@@ -381,7 +381,7 @@ mod tests {
         let m = r["aligned"][0]["matrix"].as_array().unwrap().iter().map(|v| v.as_f64().unwrap()).collect::<Vec<_>>();
         assert!((m[2] + 6.0).abs() < 1.0 && (m[5] + 5.0).abs() < 1.0, "{r}");
         assert!(s.execute("edit.autoAlignLayers", json!({"projection": "sideways"})).is_err());
-        assert!(s.execute("edit.autoAlignLayers", json!({"reference": 9999})).is_err());
+        assert!(s.execute("edit.autoAlignLayers", json!({"reference": u64::MAX})).is_err());
     }
 
     #[test]

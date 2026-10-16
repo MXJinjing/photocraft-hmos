@@ -264,7 +264,7 @@ mod tests {
         for id in IDS {
             assert!(s.execute(id, json!([1, 2])).is_err(), "{id}");
             assert!(s.execute(id, json!("x")).is_err(), "{id}");
-            assert!(s.execute(id, json!({"layer": 99_999})).is_err(), "{id}");
+            assert!(s.execute(id, json!({"layer": u64::MAX})).is_err(), "{id}");
             assert!(s.execute(id, json!({"target": {"channel": 42}})).is_err(), "{id}");
         }
     }

@@ -1474,6 +1474,36 @@ fn shadow_knockout_needs_see_through_fill() {
 }
 
 #[test]
+fn shadow_knockout_beneath_a_layer_in_a_blending_mode() {
+    // Layer Knocks Out Drop Shadow keeps the shadow out from under the layer's shape. In Normal
+    // mode an opaque layer covers it anyway; in a mode that blends with what's beneath, the shadow
+    // would show through: under a white Exclusion square on white, it read as white (white over
+    // the black shadow) instead of black (white over white), so a logo's Exclusion bar with a
+    // drop shadow came out blank. A red Multiply square came out black instead of red.
+    for (blend, colour, inside, depth) in [
+        (photocraft_color::BlendMode::Exclusion, [1.0, 1.0, 1.0, 1.0], [0.0, 0.0, 0.0, 1.0]),
+        (photocraft_color::BlendMode::Multiply, [1.0, 0.0, 0.0, 1.0], [1.0, 0.0, 0.0, 1.0]),
+    ]
+    .into_iter()
+    .flat_map(|c| SampleType::ALL.map(|depth| (c, depth)))
+    .map(|((b, c, i), depth)| (b, c, i, depth))
+    {
+        let mut d = Document::new("t", Size::new(40, 40), ColorMode::Rgb, depth);
+        d.layers.push(solid_layer("bg", Rect::new(0, 0, 40, 40), [1.0; 4]));
+        let mut l = solid_layer("sq", Rect::new(10, 10, 30, 30), colour);
+        l.blend = blend;
+        l.effects.items = vec![Effect::DropShadow(shadow(0.0, 90.0))];
+        d.layers.push(l);
+        assert!(close4(px(&d, 20, 20), inside), "{blend:?} {depth:?}: {:?}", px(&d, 20, 20));
+        // Not knocked out, the shadow shows through the blend, as in Photoshop with the box unticked.
+        if let Effect::DropShadow(s) = &mut d.layers[1].effects.items[0] {
+            s.knocks_out = false;
+        }
+        assert!(!close4(px(&d, 20, 20), inside), "{blend:?} {depth:?} without knockout: {:?}", px(&d, 20, 20));
+    }
+}
+
+#[test]
 fn linked_pattern_overlay_anchors_at_the_effects_reference_point() {
     use photocraft_doc::pattern::Pattern;
     // 2 × 1 tile: red, blue. Anchored at x = 11 (reference point), x = 11 is red, 12 blue.

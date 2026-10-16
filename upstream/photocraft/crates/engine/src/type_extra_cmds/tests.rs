@@ -108,8 +108,9 @@ fn vertical_orientation_renders_columns_inside_the_canvas() {
     assert!(l.vertical && l.lines.len() == 2);
     let [x0, y0, x1, y1] = l.bounds().unwrap();
     assert!(x1 > 0.0 && x0 < -40.0 && y0 >= -1e-3 && y1 > 60.0, "{:?}", l.bounds());
-    // Bad layer ids fail cleanly.
-    assert!(s.execute("type.orientation.vertical", json!({"layer": 9999})).is_err());
+    // Bad layer ids fail cleanly. Not a small number like 9999: ids come from one process-wide
+    // counter, so in a full test run a layer made above can get it (#3343).
+    assert!(s.execute("type.orientation.vertical", json!({"layer": u64::MAX})).is_err());
 }
 
 #[test]
@@ -299,7 +300,7 @@ fn type_attaches_to_a_path_and_releases_it() {
     .unwrap();
     assert!(s.execute("type.attachToPath", json!({"subpath": 5})).is_err());
     assert!(s.execute("type.attachToPath", json!({"start": "far"})).is_err());
-    assert!(s.execute("type.attachToPath", json!({"shape": 9999})).is_err());
+    assert!(s.execute("type.attachToPath", json!({"shape": u64::MAX})).is_err());
     s.execute("type.attachToPath", json!({"start": 4})).unwrap();
     assert!(matches!(text(&s, id).shape, TextShape::Path { start, .. } if start == 4.0));
     let on_path = ink(&s, id);

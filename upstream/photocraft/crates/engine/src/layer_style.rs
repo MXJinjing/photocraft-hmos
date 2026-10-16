@@ -1206,7 +1206,7 @@ mod tests {
         let layer = s.active().unwrap().active_layer.unwrap().0;
         s.execute("layer.layerStyle.clear", json!({"layer": layer, "effect": 0})).unwrap();
         assert!(matches!(effects(&s)[..], [Effect::ColorOverlay { .. }]));
-        for bad in [json!({"effect": 5}), json!({"effect": -1}), json!({"effect": "x"}), json!({"effect": 0, "layer": 999_999})] {
+        for bad in [json!({"effect": 5}), json!({"effect": -1}), json!({"effect": "x"}), json!({"effect": 0, "layer": u64::MAX})] {
             assert!(s.execute("layer.layerStyle.clear", bad).is_err());
         }
         assert_eq!(effects(&s).len(), 1, "bad params change nothing");

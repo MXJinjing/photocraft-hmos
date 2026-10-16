@@ -105,7 +105,7 @@ fn listed_pixel_methods_can_be_used_to_redefine_variables() {
 #[test]
 fn bad_params_are_errors() {
     let (mut s, _p, badge, _t) = session();
-    assert!(s.execute("image.variables.define", json!({"defs": [{"name": "x", "layer": 999999, "type": "visibility"}]})).is_err());
+    assert!(s.execute("image.variables.define", json!({"defs": [{"name": "x", "layer": u64::MAX, "type": "visibility"}]})).is_err());
     assert!(s.execute("image.variables.define", json!({"defs": [{"name": "x", "layer": badge.0, "type": "nope"}]})).is_err());
     assert!(s.execute("image.applyDataSet", json!({"name": "missing"})).is_err());
 }

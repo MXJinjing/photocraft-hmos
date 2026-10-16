@@ -1584,7 +1584,8 @@ impl Session {
                 }
             };
             interface.insert("appearanceMode".into(), json!(mode));
-            interface.insert(slot.into(), json!(theme.name()));
+            // A partially migrated file may already contain a newer theme selection (#5139).
+            interface.entry(slot).or_insert_with(|| json!(theme.name()));
         }
         let color = v.as_object_mut().and_then(|m| m.remove("colorSettings"));
         let presets = v.as_object_mut().and_then(|m| m.remove("presets"));

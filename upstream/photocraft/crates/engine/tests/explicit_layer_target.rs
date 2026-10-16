@@ -67,7 +67,7 @@ fn a_named_layer_of_the_wrong_kind_or_that_does_not_exist_is_refused() {
     let r = s.execute("layer.smartObjects.rasterize", json!({"layer": pixels}));
     assert!(matches!(r, Err(EngineError::Disabled(..))), "{r:?}");
     // A layer that doesn't exist falls back to the active layer's check, and still fails.
-    assert!(s.execute("layer.smartObjects.rasterize", json!({"layer": 999_999})).is_err());
+    assert!(s.execute("layer.smartObjects.rasterize", json!({"layer": u64::MAX})).is_err());
     assert!(s.execute("layer.smartObjects.rasterize", json!({"layer": "nope"})).is_err());
     assert_eq!(s.active().unwrap().doc, before);
     assert_eq!(active(&s), pixels);

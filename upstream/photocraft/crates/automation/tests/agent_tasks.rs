@@ -166,7 +166,7 @@ async fn agent_completes_ten_scripted_tasks() {
     let outside = pixel(&c, 1, 1).await;
     assert!(inside[0] > 0.99 && inside[1] < 0.01, "task 5: centre is red {inside:?}");
     assert!(outside[0] < 0.1, "task 5: corner shows the photo {outside:?}");
-    run(&c, "select.deselect", json!({})).await;
+    assert_eq!(inspect(&c).await["hasSelection"], false, "task 5: the selection became the mask");
 
     // 6. Save a selection to a channel and load it back.
     run(&c, "select.rect", json!({"x": 4, "y": 6, "width": 20, "height": 10})).await;
@@ -413,7 +413,7 @@ async fn agent_completes_ten_more_scripted_tasks() {
     assert_eq!(top_layer(&doc)["hasMask"], true, "task 17");
     let boundary = pixel(&c, 20, 40).await;
     assert!(boundary[3] > 0.05 && boundary[3] < 0.95, "task 17: the feathered edge keeps partial alpha {boundary:?}");
-    run(&c, "select.deselect", json!({})).await;
+    assert_eq!(doc["hasSelection"], false, "task 17: the selection became the mask");
 
     // 18. Expand a selection and read its bounds back.
     run(&c, "select.rect", json!({"x": 20, "y": 20, "width": 20, "height": 20})).await;

@@ -353,7 +353,6 @@ fn invert_with_the_mask_targeted_inverts_the_mask() {
         let mut s = session(depth, "rgb");
         s.execute("select.rect", json!({"x": 24, "y": 0, "width": 24, "height": 32})).unwrap();
         s.execute("layer.layerMask.revealSelection", json!({})).unwrap();
-        s.execute("select.deselect", json!({})).unwrap();
         let (pixels, off_canvas) = (rgba(&s, 3, 3), mask_at(&s, -500, 3));
         let steps = s.active().unwrap().history.past_len();
         s.execute("image.adjustments.invert", json!({"target": "mask"})).unwrap();
@@ -369,6 +368,31 @@ fn invert_with_the_mask_targeted_inverts_the_mask() {
             s.undo(); // invert, select, invert
         }
         assert_eq!((mask_at(&s, 3, 3), mask_at(&s, 30, 3), mask_at(&s, -500, 3)), (0.0, 1.0, off_canvas));
+    }
+}
+
+/// Photoshop: a mask made from the selection (Reveal Selection, the Layers panel's mask button)
+/// takes the selection with it, as Hide Selection does. So ⌘I on the new mask right away inverts
+/// all of it; with the selection kept it inverted only the inside, leaving the mask all black.
+/// Undo brings the selection back with the mask gone, in one step.
+#[test]
+fn reveal_selection_drops_the_selection_so_invert_flips_the_whole_mask() {
+    for depth in DEPTHS {
+        let mut s = session(depth, "rgb");
+        s.execute("select.rect", json!({"x": 24, "y": 0, "width": 24, "height": 32})).unwrap();
+        let selection = s.active().unwrap().doc.selection.clone();
+        let steps = s.active().unwrap().history.past_len();
+        s.execute("layer.layerMask.revealSelection", json!({})).unwrap();
+        assert!(s.active().unwrap().doc.selection.is_none(), "depth {depth}: the selection became the mask");
+        assert_eq!(s.active().unwrap().history.past_len(), steps + 1, "one step");
+        assert_eq!((mask_at(&s, 3, 3), mask_at(&s, 30, 3)), (0.0, 1.0));
+        s.execute("image.adjustments.invert", json!({"target": "mask"})).unwrap();
+        assert_eq!((mask_at(&s, 3, 3), mask_at(&s, 30, 3)), (1.0, 0.0), "depth {depth}: inside and outside both flip");
+        s.undo();
+        s.undo();
+        let st = s.active().unwrap();
+        assert_eq!(st.doc.selection, selection, "undo restores the selection");
+        assert!(st.doc.layer(st.active_layer.unwrap()).unwrap().mask.is_none(), "and removes the mask");
     }
 }
 
@@ -492,7 +516,6 @@ fn a_targeted_mask_enables_editing_it_on_any_layer() {
     s.execute("layer.delete", json!({})).unwrap();
     s.execute("select.rect", json!({"x": 24, "y": 0, "width": 24, "height": 32})).unwrap();
     s.execute("layer.layerMask.revealSelection", json!({})).unwrap();
-    s.execute("select.deselect", json!({})).unwrap();
     let pixels = rgba(&s, 23, 3);
     s.execute("filter.blur.gaussianBlur", json!({"radius": 3, "target": "mask"})).unwrap();
     assert!(mask_at(&s, 23, 3) > 0.0 && mask_at(&s, 23, 3) < 1.0, "the mask's edge is blurred");

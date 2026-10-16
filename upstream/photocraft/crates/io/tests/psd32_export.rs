@@ -203,3 +203,36 @@ fn merged_oracle_does_not_treat_extra_channels_as_transparency() {
         assert_eq!(merged_composite(&file).unwrap(), vec![[2.0, 2.0, 2.0, 1.0]], "{mode:?}");
     }
 }
+
+// Photoshop saves a transparent 32-bit document with a positive layer count and an `Mt32`
+// ("Saving Merged Transparency") global block: the merged image's first extra channel, named
+// "Transparency", is its transparency (psd-tools transparentbg.psd). The oracle reads it as the
+// composite's alpha, and opening the file doesn't turn it into an alpha channel.
+#[test]
+fn mt32_marks_the_merged_transparency() {
+    let mut doc = Document::new("transparent", Size::new(2, 1), ColorMode::Rgb, SampleType::F32);
+    let fmt = doc.pixel_format();
+    let mut layer = photocraft_doc::Layer::raster("shape", fmt);
+    if let Some(s) = layer.surface_mut() {
+        s.fill_rect(photocraft_geom::Rect::new(0, 0, 1, 1), &[0.0, 0.0, 0.0, 1.0]);
+    }
+    doc.layers.push(layer);
+    let mut file = PsdFile::from_bytes(&export_psd(&doc)).unwrap();
+    file.header.channels = 4;
+    if let Some(li) = file.layer_info.as_mut() {
+        li.merged_alpha = false;
+    }
+    file.image_data.compression = Compression::Raw;
+    let plane = |v: [f32; 2]| v.into_iter().flat_map(f32::to_be_bytes).collect::<Vec<u8>>();
+    file.image_data.data = [plane([0.0, 1.0]), plane([0.0, 1.0]), plane([0.0, 1.0]), plane([1.0, 0.0])].concat();
+    let name: Vec<u8> = [0u8, 0, 0, 13].into_iter().chain("Transparency\0".encode_utf16().flat_map(u16::to_be_bytes)).collect();
+    file.resources.retain(|r| r.id != 1045);
+    file.resources.push(photocraft_psd::ImageResource::new(1045, name));
+    assert!(!file.merged_has_alpha(), "a positive layer count alone");
+    file.global_blocks.push(photocraft_psd::TaggedBlock::new(*b"Mt32", Vec::new()));
+    assert!(file.merged_has_alpha());
+    let merged = merged_composite(&file).unwrap();
+    assert_eq!(merged.iter().map(|p| p[3]).collect::<Vec<_>>(), vec![1.0, 0.0]);
+    let opened = import("transparent.psd", &file.to_bytes().unwrap()).unwrap();
+    assert!(opened.document.channels.is_empty(), "{:?}", opened.document.channels.iter().map(|c| &c.name).collect::<Vec<_>>());
+}

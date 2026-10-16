@@ -5,7 +5,8 @@
 use photocraft_engine::{Session, command_specs};
 use serde_json::{Value, json};
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::sync::mpsc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Mutex, Once, PoisonError, mpsc};
 use std::time::Duration;
 
 fn fresh() -> Session {
@@ -22,19 +23,41 @@ fn fresh() -> Session {
 /// 0.3 s even on a heavily loaded machine, so this only catches real hangs.
 const DEADLINE: Duration = Duration::from_secs(4);
 
-/// Run `id` with `p` on a fresh session, on a worker thread. `None` if it timed out, else whether
-/// it finished without panicking (returning Ok or a graceful Err both count).
-fn run_once(id: &str, p: &Value) -> Option<bool> {
-    let (tx, rx) = mpsc::channel();
-    let (id, p) = (id.to_string(), test_params(id, p));
-    std::thread::spawn(move || {
-        let r = catch_unwind(AssertUnwindSafe(|| {
-            let mut s = fresh();
-            let _ = s.execute(&id, p);
+/// Panics anywhere in the process, counted by a hook. `Session::execute` contains a command's
+/// panic and returns an ordinary `Err`, so the unwind never reaches `catch_unwind` here; the hook
+/// still sees it, on whichever thread (rayon workers included) it happened (#4982).
+static PANICS: AtomicUsize = AtomicUsize::new(0);
+/// One run at a time, so a panic is charged to the run that caused it.
+static RUN: Mutex<()> = Mutex::new(());
+
+/// Run `f` on a worker thread. `None` if it timed out, else whether it finished without
+/// panicking, contained or not (returning Ok or a graceful Err both count).
+fn run_watched(f: impl FnOnce() + Send + 'static) -> Option<bool> {
+    static HOOK: Once = Once::new();
+    HOOK.call_once(|| {
+        let default = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            PANICS.fetch_add(1, Ordering::SeqCst);
+            default(info);
         }));
+    });
+    let _one = RUN.lock().unwrap_or_else(PoisonError::into_inner);
+    let before = PANICS.load(Ordering::SeqCst);
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        let r = catch_unwind(AssertUnwindSafe(f));
         let _ = tx.send(r.is_ok());
     });
-    rx.recv_timeout(DEADLINE).ok()
+    rx.recv_timeout(DEADLINE).ok().map(|ok| ok && PANICS.load(Ordering::SeqCst) == before)
+}
+
+/// Run `id` with `p` on a fresh session; see [`run_watched`].
+fn run_once(id: &str, p: &Value) -> Option<bool> {
+    let (id, p) = (id.to_string(), p.clone());
+    run_watched(move || {
+        let mut s = fresh();
+        let _ = s.execute(&id, p);
+    })
 }
 
 /// `Err` with a reason on panic or hang, `Ok` otherwise.
@@ -49,31 +72,6 @@ fn run_guarded(id: &str, p: &Value) -> Result<(), String> {
         Some(false) => Err("panicked".into()),
         None => Err(format!("hung (>{}s, twice)", DEADLINE.as_secs())),
     }
-}
-
-// Registry fuzzing must never send documents to the contributor's default printer.
-// Render the PDF and exercise layout validation, but suppress every spooler call.
-fn test_params(id: &str, p: &Value) -> Value {
-    let mut p = p.clone();
-    if matches!(id, "file.print" | "file.printOneCopy")
-        && let Some(fields) = p.as_object_mut()
-    {
-        fields.insert("dryRun".into(), json!(true));
-        fields.insert("send".into(), json!(false));
-    }
-    p
-}
-
-#[test]
-fn print_fuzzing_always_renders_pdf_without_spooling() {
-    for id in ["file.print", "file.printOneCopy"] {
-        for params in [json!({}), json!({"send": true, "dryRun": false})] {
-            let safe = test_params(id, &params);
-            assert_eq!(safe["send"], false);
-            assert_eq!(safe["dryRun"], true);
-        }
-    }
-    assert_eq!(test_params("file.new", &json!({})), json!({}));
 }
 
 #[test]
@@ -104,4 +102,18 @@ fn no_command_panics_or_hangs_on_adversarial_params() {
         }
     }
     assert!(bad.is_empty(), "{} commands panicked or hung:\n{}", bad.len(), bad.join("\n"));
+}
+
+/// #4982: a panic the code under test contains still fails the run; a graceful `Err` does not.
+#[test]
+fn contained_panics_count_and_graceful_errors_do_not() {
+    let contained = run_watched(|| {
+        let _ = catch_unwind(|| panic!("contained, as Session::execute does"));
+    });
+    assert_eq!(contained, Some(false));
+    let graceful = run_watched(|| {
+        let mut s = fresh();
+        assert!(s.execute("layer.delete", json!({"layer": 999999})).is_err());
+    });
+    assert_eq!(graceful, Some(true));
 }

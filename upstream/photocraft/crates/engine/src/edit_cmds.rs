@@ -495,9 +495,12 @@ fn new_from_clipboard(s: &mut Session) -> Result<Value> {
     if w == 0 || h == 0 {
         return Err(EngineError::Other("the clipboard image has no size".into()));
     }
+    let (Some(dx), Some(dy)) = (b.x0.checked_neg(), b.y0.checked_neg()) else {
+        return Err(EngineError::Other("the clipboard origin is outside the coordinate range for a new document".into()));
+    };
     let fmt = clip.surface.format();
     let target = PixelFormat::new(fmt.mode, fmt.sample, true);
-    let moved = if b.x0 == 0 && b.y0 == 0 { clip.surface } else { photocraft_algo::resample::translate_surface(&clip.surface, -b.x0, -b.y0) };
+    let moved = if dx == 0 && dy == 0 { clip.surface } else { photocraft_algo::resample::translate_surface(&clip.surface, dx, dy) };
     let mut doc = Document::new("Untitled", photocraft_geom::Size::new(w, h), fmt.mode, fmt.sample);
     if let Some(r) = clip.resolution.filter(|r| r.is_finite() && *r > 0.0) {
         doc.resolution_dpi = r;
@@ -1042,6 +1045,19 @@ mod tests {
         })
         .unwrap();
         s
+    }
+
+    #[test]
+    fn new_clipboard_document_rejects_an_unrepresentable_origin() {
+        let mut s = Session::new();
+        let mut surface = Surface::new(PixelFormat::RGBA8);
+        surface.write_pixel(i32::MIN, 0, &[1.0, 0.0, 0.0, 1.0]);
+        s.clipboard = Some(Clip { surface, bounds: Rect::from_xywh(i32::MIN, 0, 1, 1), layers: None, resolution: None });
+        let result = new_from_clipboard(&mut s);
+        assert!(result.unwrap_err().to_string().contains("clipboard origin"));
+        assert!(s.execute("file.newFromClipboard", json!({})).is_err());
+        assert!(s.documents().is_empty());
+        assert_eq!(s.clipboard.as_ref().unwrap().surface.rgba(i32::MIN, 0), [1.0, 0.0, 0.0, 1.0]);
     }
 
     #[test]

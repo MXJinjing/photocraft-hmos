@@ -588,7 +588,7 @@ fn transfer_effects_moves_or_copies_between_layers() {
     for bad in [
         json!({"from": a.0, "to": a.0}),
         json!({"from": a.0}),
-        json!({"from": a.0, "to": 9999}),
+        json!({"from": a.0, "to": u64::MAX}),
         json!({"from": a.0, "to": b.0, "effect": 7}),
         json!({"from": a.0, "to": b.0, "effect": -1}),
         json!({"from": b.0, "to": a.0}),

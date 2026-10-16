@@ -225,7 +225,7 @@ mod tests {
             json!([1, 2]),
             json!({"layer": -1}),
             json!({"layer": "x"}),
-            json!({"layer": 999_999}),
+            json!({"layer": u64::MAX}),
             json!({"document": 999_999}),
             json!({"pattern": "nope"}),
             json!({"pattern": ""}),

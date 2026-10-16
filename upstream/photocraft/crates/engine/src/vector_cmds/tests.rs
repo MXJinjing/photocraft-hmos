@@ -646,7 +646,6 @@ fn rasterizing_a_vector_mask_keeps_what_the_masks_show() {
             if let Some((feather, density)) = pm {
                 s.execute("select.rect", json!({"x": 0, "y": 0, "width": 40, "height": 64})).unwrap();
                 s.execute("layer.layerMask.revealSelection", json!({})).unwrap();
-                s.execute("select.deselect", json!({})).unwrap();
                 s.edit("mask settings", |doc, _| {
                     let m = doc.layer_mut(id).unwrap().mask.as_mut().unwrap();
                     (m.feather, m.density) = (feather, density);
@@ -925,7 +924,7 @@ fn combine_shapes_fails_gracefully() {
     let (mut s, a, _) = two_selected_rects(8);
     let before = doc(&s).clone();
     let history = s.active().unwrap().history.past_len();
-    let bad_params = [json!({"layer": 999_999}), json!({"layer": a, "subpath": 99}), json!({"subpath": 99}), json!({"tolerance": "x", "layer": 999_999})];
+    let bad_params = [json!({"layer": u64::MAX}), json!({"layer": a, "subpath": 99}), json!({"subpath": 99}), json!({"tolerance": "x", "layer": u64::MAX})];
     for cmd in [
         "layer.combineShapes.unite",
         "layer.combineShapes.subtractFrontShape",

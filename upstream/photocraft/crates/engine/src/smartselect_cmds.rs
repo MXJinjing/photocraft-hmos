@@ -217,10 +217,23 @@ impl ObjectFinderCache {
     }
 }
 
+/// Object Selection samples only the active layer by default: when that layer has no pixels in
+/// `area`, say so instead of quietly finding nothing (#5246; scripts often add an empty layer
+/// above the photo first).
+fn check_sampled_pixels(doc: &Document, layer: Option<LayerId>, all_layers: bool, area: Rect) -> Result<()> {
+    let Some(surf) = sampled_target(doc, layer, all_layers).and_then(|id| doc.layer(id)).and_then(Layer::surface) else { return Ok(()) };
+    if surf.content_bounds().intersect(&area).is_empty() {
+        let msg = if surf.content_bounds().is_empty() { "the active layer is empty" } else { "the active layer has no pixels in that area" };
+        return Err(bad("select.object", &format!("{msg}; set \"sampleAllLayers\": true or select a layer with pixels")));
+    }
+    Ok(())
+}
+
 /// `select.object` with `"point"`: the Object Finder's object under the point (cached).
 fn object_at_point(s: &mut Session, p: &Value, (x, y): (f32, f32)) -> Result<Value> {
     let all_layers = b(p, "sampleAllLayers", false);
     let d = s.active().ok_or(EngineError::NoDocument)?;
+    check_sampled_pixels(&d.doc, d.active_layer, all_layers, Rect::from_xywh(x.floor() as i32, y.floor() as i32, 1, 1))?;
     let target = sampled_target(&d.doc, d.active_layer, all_layers);
     let region = match s.object_finder.lookup(&d.doc, target, x, y) {
         Some(r) => Some(r),
@@ -248,7 +261,10 @@ fn object_selection(s: &mut Session, p: &Value) -> Result<Value> {
         return object_at_point(s, p, pt);
     }
     let rect = rect_param(p).ok_or_else(|| bad("select.object", "needs \"rect\": [x, y, w, h] or \"point\": [x, y]"))?;
-    let region = with_sampler(s, b(p, "sampleAllLayers", false), |smp, doc| grabcut::object_select(smp, doc.bounds(), rect, 160_000))?;
+    let all_layers = b(p, "sampleAllLayers", false);
+    let d = s.active().ok_or(EngineError::NoDocument)?;
+    check_sampled_pixels(&d.doc, d.active_layer, all_layers, rect)?;
+    let region = with_sampler(s, all_layers, |smp, doc| grabcut::object_select(smp, doc.bounds(), rect, 160_000))?;
     apply(s, "Object Selection", region.as_ref(), mode(p, "replace"))
 }
 
@@ -417,6 +433,7 @@ fn refine_edge(s: &mut Session, p: &Value) -> Result<Value> {
             s.edit("Select and Mask", |doc, _| {
                 let surface =
                     region.as_ref().map(matting::region_surface).unwrap_or_else(|| photocraft_raster::Surface::new(photocraft_color::PixelFormat::GRAY8));
+                crate::extra_cmds::background_to_layer_for_mask(doc, id);
                 let existing = doc.layer(id).and_then(|l| l.mask.as_ref()).cloned().unwrap_or_else(LayerMask::reveal_all);
                 doc.layer_mut(id).ok_or(EngineError::NoLayer(id))?.mask = Some(LayerMask { surface, ..existing });
                 doc.selection = None;
@@ -703,7 +720,7 @@ mod tests {
         // Any point on the object hits; the background and another target miss.
         assert!(std::sync::Arc::ptr_eq(&s.object_finder.lookup(&doc, target, 120.0, 90.0).unwrap(), &r));
         assert!(s.object_finder.lookup(&doc, target, 3.0, 3.0).is_none());
-        assert!(s.object_finder.lookup(&doc, Some(LayerId(9999)), 100.0, 80.0).is_none());
+        assert!(s.object_finder.lookup(&doc, Some(LayerId(u64::MAX)), 100.0, 80.0).is_none());
         // The click reuses it, and a selection-only edit keeps it.
         s.execute("select.object", json!({"point": [110, 70]})).unwrap();
         assert_eq!(s.object_finder.len(), 1);
@@ -728,6 +745,26 @@ mod tests {
         // Negative width/height (drag up-left) work too.
         s.execute("select.object", json!({"rect": [160, 140, -120, -120]})).unwrap();
         assert!(cov(&s, 100, 80) >= 0.5);
+    }
+
+    #[test]
+    fn object_selection_on_an_empty_active_layer_says_so() {
+        // #5246: an empty layer above the photo used to find nothing without a word.
+        let (mut s, inside) = disc(8);
+        s.execute("layer.new.layer", json!({})).unwrap();
+        for p in [json!({"rect": [40, 20, 120, 120]}), json!({"point": [100, 80]})] {
+            let e = s.execute("select.object", p.clone()).unwrap_err().to_string();
+            assert!(e.contains("active layer is empty") && e.contains("sampleAllLayers"), "{p}: {e}");
+            assert!(s.active().unwrap().doc.selection.is_none());
+        }
+        // Sampling all layers finds the disc below.
+        s.execute("select.object", json!({"rect": [40, 20, 120, 120], "sampleAllLayers": true})).unwrap();
+        assert!(sel_iou(&s, 200, 160, &inside) > 0.95);
+        // A layer with pixels elsewhere: the rectangle holds none of them.
+        s.execute("select.deselect", json!({})).unwrap();
+        s.execute("paint.pencil", json!({"points": [[5, 5], [10, 5]], "size": 2, "color": "#000000"})).unwrap();
+        let e = s.execute("select.object", json!({"rect": [60, 60, 100, 80]})).unwrap_err().to_string();
+        assert!(e.contains("no pixels in that area"), "{e}");
     }
 
     #[test]
@@ -970,7 +1007,6 @@ mod tests {
     fn refine_edge_works_on_layer_mask_without_selection() {
         let mut s = blurred_edge_selected();
         s.execute("layer.layerMask.revealSelection", json!({})).unwrap();
-        s.execute("select.deselect", json!({})).unwrap();
         assert!(s.active().unwrap().doc.selection.is_none());
         assert!(s.active().unwrap().doc.layers[0].mask.is_some());
         assert!(s.is_enabled("select.refineEdge"));

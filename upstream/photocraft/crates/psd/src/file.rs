@@ -272,7 +272,10 @@ impl PsdFile {
         self.image_data.decode(&self.header)
     }
 
-    /// `true` if the merged image carries a transparency channel.
+    /// `true` if the merged image carries a transparency channel: its first extra channel, when
+    /// the layer count was stored negative or a "Saving Merged Transparency" global block (`Mtrn`,
+    /// `Mt16`, `Mt32`) is present. Photoshop marks 32-bit documents with `Mt32` and a positive
+    /// layer count (psd-tools transparentbg.psd).
     pub fn merged_has_alpha(&self) -> bool {
         let Some(color) = self.header.color_mode.color_channels() else {
             return false;
@@ -280,8 +283,9 @@ impl PsdFile {
         if self.header.channels <= color {
             return false;
         }
+        let marked = self.global_blocks.iter().any(|b| matches!(&b.key, b"Mtrn" | b"Mt16" | b"Mt32"));
         match &self.layer_info {
-            Some(li) => li.merged_alpha,
+            Some(li) => li.merged_alpha || marked,
             None => true,
         }
     }
