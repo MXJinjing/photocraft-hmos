@@ -106,12 +106,15 @@ fn smooth_ease(u: f32) -> f32 {
 /// Colour at `t` for sorted stops (positions in 0..1) in `m`'s space.
 fn eval(stops: &[(f32, [f32; 3])], mids: &[f32], smooth: f32, t: f32, m: Method) -> [f32; 3] {
     let n = stops.len();
-    if t <= stops[0].0 {
-        return stops[0].1;
+    let (Some(first), Some(last)) = (stops.first(), stops.last()) else { return [0.0; 3] };
+    // A lone stop (even at a NaN position, which neither test below catches) is the colour.
+    if t <= first.0 || n < 2 {
+        return first.1;
     }
-    if t >= stops[n - 1].0 {
-        return stops[n - 1].1;
+    if t >= last.0 {
+        return last.1;
     }
+    // From here `stops[i + 1]` and the tangents' `n - 2` are in range: `i < n - 1` and `n >= 2`.
     let i = stops.windows(2).position(|w| t >= w[0].0 && t <= w[1].0).unwrap_or(0);
     let (t0, t1) = (stops[i].0, stops[i + 1].0);
     let h = (t1 - t0).max(1e-6);
@@ -280,5 +283,15 @@ mod tests {
     fn midpoint_shifts_the_half_way_colour() {
         let s = bake(vec![(0.0, Color::BLACK), (1.0, Color::WHITE)], &[0.25], 0.0, Method::Classic);
         assert!((at(&s, 0.25)[0] - 0.5).abs() < 0.01);
+    }
+
+    /// `eval` guards its own stops instead of relying on `bake`'s two-stop check.
+    #[test]
+    fn eval_with_fewer_than_two_stops_does_not_index_out_of_range() {
+        assert_eq!(eval(&[], &[], 1.0, 0.5, Method::Smooth), [0.0; 3]);
+        let lone = [(f32::NAN, [0.25, 0.5, 0.75])];
+        for m in [Method::Classic, Method::Smooth] {
+            assert_eq!(eval(&lone, &[], 1.0, 0.5, m), [0.25, 0.5, 0.75]);
+        }
     }
 }

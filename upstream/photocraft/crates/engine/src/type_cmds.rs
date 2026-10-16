@@ -1184,7 +1184,7 @@ mod tests {
             st.saved_revision = st.revision;
         }
         let rev = s.active().unwrap().revision;
-        let unknown = [(doc_id, LayerId(9999)), (photocraft_doc::DocId(u64::MAX), id)];
+        let unknown = [(doc_id, LayerId(u64::MAX)), (photocraft_doc::DocId(u64::MAX), id)];
         assert!(s.refresh_type_layers(&[&[(doc_id, id)][..], &unknown].concat()).is_empty());
         assert!(text_layer(&s, id.0).cache.is_some());
         let st = s.active().unwrap();

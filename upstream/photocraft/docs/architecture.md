@@ -1,6 +1,6 @@
 # PhotoCraft architecture
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-10 · **Change:** minor (current-state summary added; the design plan below is kept, with its deviations listed) · **Target:** Adobe Photoshop 2026
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-13 · **Change:** minor (workspace size and test counts recounted; current-state summary added; the design plan below is kept, with its deviations listed) · **Target:** Adobe Photoshop 2026
 
 ## Current state (2026-10-10)
 
@@ -8,9 +8,9 @@ What exists on `main` today. The numbered sections below are the original design
 2026-09-30; where the code differs, this summary wins.
 
 - **Workspace:** 25 library crates under `crates/`, 3 apps (`photocraft` desktop, `photocraft-cli`,
-  `photocraft-web`), `xtask`, an example plug-in and 5 fuzz crates; ~393,000 lines of Rust in
-  ~1,020 files; ~5,460 `#[test]` functions (ui-egui 1,677, engine 1,237, algo 408, io 377,
-  codecs 325, psd 263). Crate map and layers: [`AGENTS.md`](../AGENTS.md) §2 and
+  `photocraft-web`), `xtask`, an example plug-in and 5 fuzz crates; ~539,000 lines of Rust in
+  ~1,310 files; ~8,040 `#[test]` functions (ui-egui 2,809, engine 1,796, algo 572, io 539,
+  codecs 426, psd 341), counted 2026-10-13. Crate map and layers: [`AGENTS.md`](../AGENTS.md) §2 and
   `xtask/src/layers.rs` (enforced by `cargo xtask layers`).
 - **UI toolkit:** decided: egui/eframe on wgpu (no webview, no JavaScript). The same Rust builds
   to WebAssembly for the browser (trunk + wasm-bindgen).
@@ -588,5 +588,6 @@ Each phase ends with a demoable build and green CI on all targets. Phases 8–10
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-13 | minor | Workspace size and `#[test]` counts recounted (393k → 539k lines, 5,460 → 8,040 tests); other current-state figures unchanged |
 | 2026-10-10 | minor | Current-state summary and deviations from the plan; status line; broken link to `photoshop-parity.md` repointed to `target-app-parity.md` |
 | 2026-09-30 | major | Design plan v1 |

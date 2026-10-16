@@ -586,7 +586,6 @@ fn flatten_all_layer_effects_and_masks() {
         s.execute("select.rect", json!({"x": 0, "y": 0, "width": 20, "height": 40})).unwrap();
         s.execute("select.inverse", json!({})).unwrap();
         s.execute("layer.layerMask.revealSelection", json!({})).unwrap();
-        s.execute("select.deselect", json!({})).unwrap();
         assert!(composite(&s, 15, 15)[1] > 0.99 && composite(&s, 15, 15)[0] > 0.99, "white shows through the mask");
         let r = s.execute("file.scripts.flattenAllMasks", json!({})).unwrap();
         assert_eq!(r["flattened"], 1);
@@ -633,7 +632,6 @@ fn flatten_all_layer_effects_keeps_masks() {
         .unwrap();
         s.execute("select.rect", json!({"x": 0, "y": 0, "width": 20, "height": 40})).unwrap();
         s.execute("layer.layerMask.revealSelection", json!({})).unwrap();
-        s.execute("select.deselect", json!({})).unwrap();
         // Layer 2: a red square at the bottom-right with the same overlay and a *disabled* mask.
         s.execute("layer.new.layer", json!({})).unwrap();
         s.execute("select.rect", json!({"x": 30, "y": 30, "width": 8, "height": 8})).unwrap();
@@ -652,7 +650,6 @@ fn flatten_all_layer_effects_keeps_masks() {
         .unwrap();
         s.execute("select.rect", json!({"x": 34, "y": 34, "width": 2, "height": 2})).unwrap();
         s.execute("layer.layerMask.revealSelection", json!({})).unwrap();
-        s.execute("select.deselect", json!({})).unwrap();
         s.edit("disable", |doc, _| {
             if let Some(m) = doc.layer_mut(id2).and_then(|l| l.mask.as_mut()) {
                 m.enabled = false;

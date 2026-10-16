@@ -553,7 +553,7 @@ fn clipping_masks_apply_to_every_selected_layer() {
     // A `layer` param still acts on that layer alone.
     s.execute("layer.releaseClippingMask", json!({"layer": ids[2]})).unwrap();
     assert_eq!(clipped(&s), [false, true, false]);
-    assert!(s.execute("layer.createClippingMask", json!({"layer": 999_999})).is_err());
+    assert!(s.execute("layer.createClippingMask", json!({"layer": u64::MAX})).is_err());
 }
 
 #[test]
@@ -992,8 +992,8 @@ fn move_to_copy_rejects_bad_params() {
     for p in [
         json!({"layer": a, "copy": true}),
         json!({"layer": a, "target": "x", "copy": true}),
-        json!({"layer": a, "target": 9_999_999, "copy": true}),
-        json!({"layer": 9_999_999, "target": a, "copy": true}),
+        json!({"layer": a, "target": u64::MAX, "copy": true}),
+        json!({"layer": u64::MAX, "target": a, "copy": true}),
         json!({"layer": a, "target": a, "position": "into", "copy": true}),
     ] {
         assert!(s.execute("layer.moveTo", p.clone()).is_err(), "{p}");

@@ -68,6 +68,17 @@ fn appearance_defaults_and_legacy_theme_migrate() {
 }
 
 #[test]
+fn legacy_theme_migration_preserves_saved_theme_slots() {
+    for (legacy, slot, saved) in [("proMedium", "darkTheme", "solarizedDark"), ("studioLight", "lightTheme", "adwaita")] {
+        let mut interface = json!({"theme": legacy});
+        interface[slot] = json!(saved);
+        let mut session = Session::new();
+        session.load_prefs_json(&json!({"interface": interface}).to_string()).unwrap();
+        assert_eq!(session.prefs_value()["interface"][slot], saved, "explicit {slot} survives migration");
+    }
+}
+
+#[test]
 fn appearance_choices_validate_and_legacy_theme_still_selects() {
     let mut s = Session::new();
     s.execute("prefs.set", json!({"values": {"interface.appearanceMode": "auto", "interface.darkTheme": "studio", "interface.lightTheme": "classic"}}))

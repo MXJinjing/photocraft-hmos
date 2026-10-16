@@ -460,7 +460,6 @@ mod tests {
         if reveal_selection {
             s.execute("select.all", json!({})).unwrap();
             s.execute("layer.layerMask.revealSelection", json!({})).unwrap();
-            s.execute("select.deselect", json!({})).unwrap();
         } else {
             s.execute("layer.layerMask.revealAll", json!({})).unwrap();
         }

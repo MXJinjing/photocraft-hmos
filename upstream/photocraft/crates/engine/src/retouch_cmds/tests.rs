@@ -993,7 +993,7 @@ fn patch_fails_gracefully() {
         json!({"offset": [0, -30]}),
         json!({"offset": [10, 0], "target": "mask"}),
         json!({"offset": [10, 0], "target": {"channel": 7}}),
-        json!({"offset": [10, 0], "layer": 999}),
+        json!({"offset": [10, 0], "layer": u64::MAX}),
     ] {
         assert!(s.execute("paint.patch", p.clone()).is_err(), "{p}");
     }
@@ -1269,7 +1269,7 @@ fn content_aware_move_fails_gracefully() {
         json!({"offset": [0, -30]}),
         json!({"offset": [10, 0], "target": "mask"}),
         json!({"offset": [10, 0], "target": {"channel": 7}}),
-        json!({"offset": [10, 0], "layer": 999}),
+        json!({"offset": [10, 0], "layer": u64::MAX}),
         json!({"offset": [10, 0], "scaleX": 0}),
         json!({"offset": [10, 0], "scaleY": 0.5}),
         json!({"offset": [10, 0], "scaleX": 1e9}),
@@ -1727,7 +1727,7 @@ fn remove_bad_params_are_errors() {
         json!({"points": []}),
         json!({"points": "x"}),
         json!({"points": [[1, 1]], "size": "big", "closeLoops": "yes", "sampleAllLayers": 3}),
-        json!({"points": [[1, 1]], "layer": 999_999}),
+        json!({"points": [[1, 1]], "layer": u64::MAX}),
     ] {
         let _ = s.execute("paint.remove", p);
     }

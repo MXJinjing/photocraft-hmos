@@ -461,7 +461,12 @@ fn modify(s: &mut Session, p: &Value, op: &str) -> Result<Value> {
     // continue past the canvas. Border has no such option: its band always follows the canvas edge,
     // or a Select All would border to nothing.
     let at_bounds = op == "border" || b(p, "applyAtCanvasBounds", false);
-    let (area, m) = current_mask(&s.active().ok_or(EngineError::NoDocument)?.doc);
+    let doc = &s.active().ok_or(EngineError::NoDocument)?.doc;
+    let area = doc.bounds();
+    if area.size().area() > MAX_MODIFY_PIXELS as u64 {
+        return Err(EngineError::BadParams { cmd: format!("select.modify.{op}"), msg: "the selection is too large to modify".into() });
+    }
+    let (_, m) = current_mask(doc);
     let (w, h) = (area.width() as usize, area.height() as usize);
     // Feather reaches 3σ = 3 r (σ = r, as in Photoshop); the others reach r. A margin past that
     // keeps the canvas edge out of reach. A selection clear of the canvas edge needs none: both
@@ -766,6 +771,28 @@ mod tests {
     }
 
     #[test]
+    fn modify_rejects_oversized_canvases_before_reading_the_mask() {
+        let mut s = Session::new();
+        let mut doc = photocraft_doc::Document::new(
+            "large",
+            photocraft_geom::Size::new(300_000, 300_000),
+            photocraft_color::ColorMode::Rgb,
+            photocraft_color::SampleType::U8,
+        );
+        let mut selection = photocraft_raster::Surface::new(photocraft_color::PixelFormat::GRAY8);
+        selection.write_pixel(0, 0, &[1.0]);
+        doc.selection = Some(selection);
+        s.add_document(doc, None);
+        let before = s.active().unwrap().doc.clone();
+        for op in ["expand", "contract", "border", "smooth", "feather"] {
+            let error = s.execute(&format!("select.modify.{op}"), json!({"radius": 1})).unwrap_err();
+            assert!(error.to_string().contains("too large to modify"));
+            assert_eq!(*s.active().unwrap().doc, *before);
+            assert!(!s.active().unwrap().history.can_undo());
+        }
+    }
+
+    #[test]
     fn color_range_replace_is_bounded_by_existing_selection() {
         for params in [json!({"color": "#ff0000", "fuzziness": 0}), json!({"select": "reds"})] {
             let mut s = session();
@@ -850,7 +877,6 @@ mod tests {
         let mut s = session();
         s.execute("select.rect", json!({"x": 0, "y": 0, "width": 20, "height": 20})).unwrap();
         s.execute("layer.layerMask.revealSelection", json!({})).unwrap();
-        s.execute("select.deselect", json!({})).unwrap();
         s.execute("view.layerMask", json!({"mode": "gray"})).unwrap();
         s.execute("select.magicWand", json!({"x": 7, "y": 7, "tolerance": 0, "antiAlias": false})).unwrap();
         assert_eq!(coverage(&s, 2, 2), 1.0, "gray mask view selects the mask");
@@ -975,6 +1001,45 @@ mod tests {
         // kept clearly more (about 0.55 vs 0.31).
         let (lighter, redder) = (coverage(&s, 15, 5), coverage(&s, 25, 5));
         assert!(lighter > redder + 0.15 && redder > 0.0, "lighter {lighter}, redder {redder}");
+    }
+
+    #[test]
+    fn color_range_fuzziness_zero_selects_exact_match_only() {
+        // Sampled Colors at Fuzziness 0 selects only the exact match (TOOL-214-3, #214).
+        let mut s = Session::new();
+        s.execute("file.new", json!({"width": 50, "height": 10})).unwrap();
+        s.edit("paint", |doc, _| {
+            let bg = doc.layers[0].surface_mut().unwrap();
+            let v = |c: u8| f32::from(c) / 255.0;
+            // Exact target color [200, 140, 120]
+            bg.fill_rect(Rect::new(0, 0, 10, 10), &[v(200), v(140), v(120), 1.0]);
+            // Off by 1 level in red [201, 140, 120]
+            bg.fill_rect(Rect::new(10, 0, 20, 10), &[v(201), v(140), v(120), 1.0]);
+            // Off by 1 level in green [200, 141, 120]
+            bg.fill_rect(Rect::new(20, 0, 30, 10), &[v(200), v(141), v(120), 1.0]);
+            // Off by 2 levels in blue [200, 140, 122] (crosses 8-bit Lab grid threshold)
+            bg.fill_rect(Rect::new(30, 0, 40, 10), &[v(200), v(140), v(122), 1.0]);
+            // Exact target color again at a different position
+            bg.fill_rect(Rect::new(40, 0, 50, 10), &[v(200), v(140), v(120), 1.0]);
+            Ok(())
+        })
+        .unwrap();
+
+        // Sampled via eyedropper point at [5, 5] with Fuzziness 0
+        s.execute("select.colorRange", json!({"points": [[5, 5]], "fuzziness": 0})).unwrap();
+        assert_eq!(coverage(&s, 5, 5), 1.0, "sampled pixel itself is fully selected");
+        assert_eq!(coverage(&s, 45, 5), 1.0, "identical color elsewhere on canvas is fully selected");
+        assert_eq!(coverage(&s, 15, 5), 0.0, "1 level off in red is unselected at fuzziness 0");
+        assert_eq!(coverage(&s, 25, 5), 0.0, "1 level off in green is unselected at fuzziness 0");
+        assert_eq!(coverage(&s, 35, 5), 0.0, "1 level off in blue is unselected at fuzziness 0");
+
+        // Sampled via hex color with Fuzziness 0
+        s.execute("select.colorRange", json!({"color": "#c88c78", "fuzziness": 0})).unwrap();
+        assert_eq!(coverage(&s, 5, 5), 1.0, "exact color match from hex is fully selected");
+        assert_eq!(coverage(&s, 45, 5), 1.0, "identical color elsewhere on canvas is fully selected");
+        assert_eq!(coverage(&s, 15, 5), 0.0, "1 level off in red is unselected for hex at fuzziness 0");
+        assert_eq!(coverage(&s, 25, 5), 0.0, "1 level off in green is unselected for hex at fuzziness 0");
+        assert_eq!(coverage(&s, 35, 5), 0.0, "1 level off in blue is unselected for hex at fuzziness 0");
     }
 
     /// Red squares (from `session`), a blue square, a black and a mid-grey strip on white.

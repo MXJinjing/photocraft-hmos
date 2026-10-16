@@ -13,7 +13,8 @@
 //! Interior effects are painted relative to the layer's shape and then take the shape's alpha
 //! (an overlay recolours a half-transparent edge without adding coverage). The outside parts
 //! of strokes blend onto the backdrop with their own modes, an upper stroke covering the
-//! lower ones. Drop shadows are knocked out only through see-through fill.
+//! lower ones. Drop shadows are knocked out through see-through fill, and beneath the whole shape
+//! when the layer's mode lets what's under it show through (see [`shadow_see_through`]).
 //!
 //! Shapes come from the layer's alpha (after its mask). A stroke's outer edge, and precise glows /
 //! chiselled bevels, use an exact Euclidean transform: a 5 × 5 chamfer's level sets are polygons,
@@ -1850,6 +1851,16 @@ fn knock_out_exterior(map: &mut Map, shape: &Map, fill_opacity: f32) {
     }
 }
 
+/// How far the layer lets a knocked-out drop shadow show beneath its own shape (Layer Knocks Out
+/// Drop Shadow), 0 = covered, 1 = knocked out wholly. In a normal mode an opaque layer covers the
+/// shadow anyway, so only see-through fill knocks it out (and anti-aliased edges are not
+/// attenuated twice). In any other mode the layer blends with what's beneath it, shadow and all:
+/// an Exclusion or Difference layer would invert it, Multiply darken by it, Screen show it as
+/// grey. Photoshop keeps it out from under the shape, so here it's knocked out wholly.
+pub fn shadow_see_through(layer: &Layer) -> f32 {
+    if matches!(layer.blend, BlendMode::Normal | BlendMode::Dissolve | BlendMode::PassThrough) { 1.0 - layer.fill_opacity.clamp(0.0, 1.0) } else { 1.0 }
+}
+
 /// Blend Interior Effects as Group off (Photoshop's default): the layer's mode applies to its
 /// own pixels only, and the interior effects paint over the blended result. The layer is merged
 /// into the backdrop before they paint, so an Overlay colour overlay on a black Color-mode layer
@@ -1916,10 +1927,10 @@ pub(crate) fn composite_with_effects_prepared(
         if let Effect::DropShadow(s) = e {
             let mut m = fx(i, 0);
             if s.knocks_out {
-                // The layer hides the shadow beneath it only where its fill is see-through: at
-                // 100 % fill the layer covers it anyway (and anti-aliased edges are not
-                // attenuated twice), at 0 % the shape shows the bare backdrop.
-                knock_out_exterior(&mut m, &shape, layer.fill_opacity);
+                // The layer hides the shadow beneath it where its fill is see-through (at 100 %
+                // fill in a normal mode it covers it anyway; at 0 % the shape shows the bare
+                // backdrop), and wholly in a mode that blends with it ([`shadow_see_through`]).
+                knock_out_exterior(&mut m, &shape, 1.0 - shadow_see_through(layer));
             }
             paint_color(&mut work, &m, rgb(&s.color), s.common.blend, s.common.opacity);
         }
