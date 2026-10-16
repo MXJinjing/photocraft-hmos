@@ -24,17 +24,32 @@ function load(name, dependencies) {
   for (const request of [undefined, false, true, 'true', 1]) {
     const calls = [];
     const { default: EntryAbility } = load('entryability/EntryAbility', {
-      'libphotocraft.so': { default: { active: value => calls.push(['active', value]) } },
+      'libphotocraft.so': {
+        default: {
+          active: value => calls.push(['active', value]),
+          input: json => calls.push(['input', JSON.parse(json)])
+        }
+      },
       '@kit.AbilityKit': { UIAbility: class {} },
       '@kit.ArkUI': {}, '@kit.BasicServicesKit': {},
       '../SystemBars': { LOADING_CHROME: '#FF262626', paintWindow() {}, applySystemBars() {} },
+      // SystemTheme arrived with dark-mode support; host-mode must mock it like the other EntryAbility deps.
+      '../SystemTheme': {
+        systemThemeFromColorMode: colorMode => (colorMode === 0 ? 'dark' : colorMode === 1 ? 'light' : ''),
+        publishSystemTheme: theme => calls.push(['theme', theme])
+      },
       '../WindowChrome': { WindowChrome: class { start() {} stop() {} refresh() {} } },
       '../input/NativeCursorAdapter': { restorePointerVisibility() {} },
       '../openInbox': { acceptOpenWant: want => calls.push(['open', want.uri]) },
       '../closeGuard': { resetCloseGuard() {}, requestWindowClose() {} },
     });
     const app = new EntryAbility();
+    // UIAbility.context is framework-owned; provide a minimal config so onCreate/onForeground theme sync works.
+    app.context = { config: { colorMode: 0 } };
     app.onCreate({ parameters: { 'photocraft.dev': request } }, {});
+    assert.ok(calls.some(c => c[0] === 'theme' && c[1] === 'dark'), 'onCreate publishes the system theme');
+    assert.ok(calls.some(c => c[0] === 'input' && c[1].kind === 'system_theme' && c[1].text === 'dark'),
+      'onCreate pushes system_theme into the native worker');
     const pages = [];
     const stage = { on() {}, getMainWindowSync() { return {}; }, loadContent(page, cb) { pages.push(page); cb({ code: 0 }); } };
     app.onWindowStageCreate(stage);
