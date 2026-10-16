@@ -330,9 +330,9 @@ checksum = "3d7b894f5411737b7867f4827955924d7c254fc9f4d91a6aad6b097804b1018b"
 
 [[package]]
 name = "combine"
-version = "4.6.8"
+version = "4.6.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cfc320937d09e6de266b31b9afb480f197d7a861be86be7cb2ea7e5d1bfffc5e"
+checksum = "4356eba6976435498d05a311ee9fc486da3bc81c200d3f0d7dd9703b41913f92"
 dependencies = [
  "bytes",
  "memchr",
@@ -721,9 +721,9 @@ checksum = "773fa9c96dd0dbef887e39d0ed6177f141cce4d68e6041df77570aa3702dfa13"
 
 [[package]]
 name = "equivalent"
-version = "1.0.2"
+version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "877a4ace8713b0bcf2a4e7eec82529c029f1d0619886d18145fea96c3ffe5c0f"
+checksum = "00d174d5400e5e8fd687ad1049e2f578285fa914201b1af7e8b112a4546bd826"
 
 [[package]]
 name = "errno"
@@ -869,9 +869,9 @@ checksum = "77ce24cb58228fbb8aa041425bb1050850ac19177686ea6e0f41a70416f56fdb"
 
 [[package]]
 name = "font-types"
-version = "0.12.6"
+version = "0.12.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6c92d9081c7ab3bd83ef1eecdfad090f3d966e3ce74106779664114cfe1a6274"
+checksum = "835ae9d781464a79026cde387f9cbc650c9a4909d7cf7e658b127e3c35d2f35d"
 dependencies = [
  "bytemuck",
 ]
@@ -1165,9 +1165,9 @@ checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
 
 [[package]]
 name = "http"
-version = "1.4.2"
+version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6970f50e31d6fc17d3fa27329444bfa74e196cf62e95052a3f6fee181dba6425"
+checksum = "918d3568bebf352712bc2ef3d46a8bcf1a75b373be6539de198e9105cbbf9ce0"
 dependencies = [
  "bytes",
  "itoa",
@@ -2154,7 +2154,7 @@ checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
 
 [[package]]
 name = "photocraft-affinity"
-version = "0.8.2"
+version = "0.9.0"
 dependencies = [
  "crc32fast",
  "flate2",
@@ -2163,7 +2163,7 @@ dependencies = [
 
 [[package]]
 name = "photocraft-algo"
-version = "0.8.2"
+version = "0.9.0"
 dependencies = [
  "photocraft-color",
  "photocraft-geom",
@@ -2175,14 +2175,14 @@ dependencies = [
 
 [[package]]
 name = "photocraft-cms"
-version = "0.8.2"
+version = "0.9.0"
 dependencies = [
  "rayon",
 ]
 
 [[package]]
 name = "photocraft-codecs"
-version = "0.8.2"
+version = "0.9.0"
 dependencies = [
  "exr",
  "flate2",
@@ -2201,7 +2201,7 @@ dependencies = [
 
 [[package]]
 name = "photocraft-color"
-version = "0.8.2"
+version = "0.9.0"
 dependencies = [
  "photocraft-cms",
  "serde",
@@ -2209,7 +2209,7 @@ dependencies = [
 
 [[package]]
 name = "photocraft-compose"
-version = "0.8.2"
+version = "0.9.0"
 dependencies = [
  "photocraft-color",
  "photocraft-doc",
@@ -2221,7 +2221,7 @@ dependencies = [
 
 [[package]]
 name = "photocraft-doc"
-version = "0.8.2"
+version = "0.9.0"
 dependencies = [
  "photocraft-color",
  "photocraft-geom",
@@ -2232,7 +2232,7 @@ dependencies = [
 
 [[package]]
 name = "photocraft-engine"
-version = "0.8.2"
+version = "0.9.0"
 dependencies = [
  "blake3",
  "craft-print",
@@ -2263,7 +2263,7 @@ dependencies = [
 
 [[package]]
 name = "photocraft-format"
-version = "0.8.2"
+version = "0.9.0"
 dependencies = [
  "blake3",
  "crc32fast",
@@ -2283,14 +2283,14 @@ dependencies = [
 
 [[package]]
 name = "photocraft-geom"
-version = "0.8.2"
+version = "0.9.0"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "photocraft-gpu"
-version = "0.8.2"
+version = "0.9.0"
 dependencies = [
  "half",
  "log",
@@ -2305,7 +2305,7 @@ dependencies = [
 
 [[package]]
 name = "photocraft-hmos"
-version = "0.8.2"
+version = "0.9.0"
 dependencies = [
  "egui",
  "egui-wgpu",
@@ -2324,7 +2324,7 @@ dependencies = [
 
 [[package]]
 name = "photocraft-io"
-version = "0.8.2"
+version = "0.9.0"
 dependencies = [
  "blake3",
  "flate2",
@@ -2351,14 +2351,14 @@ dependencies = [
 
 [[package]]
 name = "photocraft-ops"
-version = "0.8.2"
+version = "0.9.0"
 dependencies = [
  "photocraft-doc",
 ]
 
 [[package]]
 name = "photocraft-paint"
-version = "0.8.2"
+version = "0.9.0"
 dependencies = [
  "photocraft-color",
  "photocraft-geom",
@@ -2368,7 +2368,7 @@ dependencies = [
 
 [[package]]
 name = "photocraft-plugins"
-version = "0.8.2"
+version = "0.9.0"
 dependencies = [
  "photocraft-color",
  "photocraft-geom",
@@ -2382,7 +2382,7 @@ dependencies = [
 
 [[package]]
 name = "photocraft-psd"
-version = "0.8.2"
+version = "0.9.0"
 dependencies = [
  "flate2",
  "thiserror",
@@ -2390,7 +2390,7 @@ dependencies = [
 
 [[package]]
 name = "photocraft-raster"
-version = "0.8.2"
+version = "0.9.0"
 dependencies = [
  "photocraft-color",
  "photocraft-geom",
@@ -2399,7 +2399,7 @@ dependencies = [
 
 [[package]]
 name = "photocraft-raw"
-version = "0.8.2"
+version = "0.9.0"
 dependencies = [
  "flate2",
  "jxl-oxide",
@@ -2410,7 +2410,7 @@ dependencies = [
 
 [[package]]
 name = "photocraft-text"
-version = "0.8.2"
+version = "0.9.0"
 dependencies = [
  "flate2",
  "parley",
@@ -2424,7 +2424,7 @@ dependencies = [
 
 [[package]]
 name = "photocraft-ui-egui"
-version = "0.8.2"
+version = "0.9.0"
 dependencies = [
  "base64 0.22.1",
  "craft-print",
@@ -2465,7 +2465,7 @@ dependencies = [
 
 [[package]]
 name = "photocraft-vector"
-version = "0.8.2"
+version = "0.9.0"
 dependencies = [
  "photocraft-color",
  "photocraft-doc",
@@ -2970,9 +2970,9 @@ dependencies = [
 
 [[package]]
 name = "rustls"
-version = "0.23.45"
+version = "0.23.46"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0d41d731c7d2f962d1ccc364cec258de3c0e93b38c2fb3ba97ac74513048d634"
+checksum = "48e13bd8c0e9365c43cfa5c9e8f9ad49d3c8444926c9aac819e0e4dc503c8fdf"
 dependencies = [
  "aws-lc-rs",
  "once_cell",
@@ -3793,9 +3793,9 @@ dependencies = [
 
 [[package]]
 name = "tokio"
-version = "1.53.2"
+version = "1.53.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e95f91fcc7a621e8b030f6aa23c71fe9838ae2fb4d8118b75602a328f5144044"
+checksum = "ce3335fa71841cda333a58d7615b03901380ecf09d59b3296d21f8bbac0dde4e"
 dependencies = [
  "bytes",
  "libc",
@@ -4810,18 +4810,18 @@ dependencies = [
 
 [[package]]
 name = "zerocopy"
-version = "0.8.62"
+version = "0.8.63"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "86502bf56ac7c77571a32e2647bb2a15894565e981fb2a48d7bde2d91c965a9d"
+checksum = "e5fe1f8f1b06191a00962174c61aa5005e0bb391a6d80d07e24d115c01a92ed8"
 dependencies = [
  "zerocopy-derive",
 ]
 
 [[package]]
 name = "zerocopy-derive"
-version = "0.8.62"
+version = "0.8.63"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5457206954b06561e2608c7e19cf58b1926586d999c246eebe4502f7e2039d1a"
+checksum = "863ad3ac83293fb4d740aedbfdc9240dd8d1a50c1099acd76ce80ce7c7230c7f"
 dependencies = [
  "proc-macro2",
  "quote",
