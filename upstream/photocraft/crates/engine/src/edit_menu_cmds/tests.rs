@@ -219,6 +219,38 @@ fn delete_and_fill_selection_removes_the_object_in_one_step() {
 }
 
 #[test]
+fn content_aware_fill_on_an_empty_layer_samples_the_composite() {
+    let mut s = blob_session(8);
+    s.execute("layer.new.layer", json!({})).unwrap();
+    let empty = s.active().unwrap().active_layer.unwrap();
+    assert_eq!(px(&s, 30, 20)[3], 0.0, "the new layer has no paint");
+    let r = s.execute("edit.contentAwareFill", json!({"colorAdaptation": "none"})).unwrap();
+    assert!(r["filled"].as_u64().unwrap() > 0);
+    assert_eq!(s.active().unwrap().active_layer, Some(empty));
+    assert!(px(&s, 30, 20)[3] > 0.5, "the hole is filled from the layers underneath");
+    s.undo();
+    let missed = s.execute("edit.contentAwareFill", json!({"sampleAllLayers": false, "colorAdaptation": "none"})).unwrap();
+    assert!(missed["filled"].as_u64().unwrap() > 0);
+    assert!(px(&s, 30, 20)[3] < 0.05, "sampling only the empty layer leaves it empty");
+}
+
+#[test]
+fn content_aware_fill_on_an_empty_cmyk_layer_uses_the_layer_format() {
+    let mut s = Session::new();
+    s.execute("file.new", json!({"width": 48, "height": 36, "mode": "cmyk", "background": "white"})).unwrap();
+    s.execute("select.rect", json!({"x": 16, "y": 12, "width": 12, "height": 10})).unwrap();
+    s.execute("layer.new.layer", json!({})).unwrap();
+    let before = px(&s, 20, 16);
+    assert!(before.iter().all(|c| *c < 0.05), "the new CMYK layer is empty: {before:?}");
+    s.execute("edit.contentAwareFill", json!({"colorAdaptation": "none"})).unwrap();
+    let v = px(&s, 20, 16);
+    assert_eq!(v.len(), before.len());
+    // White in the layer's CMYK is near zero ink with a covered alpha, not the compositor's RGBA.
+    assert!(v[..4].iter().all(|c| *c < 0.15), "CMYK ink stayed low: {v:?}");
+    assert!(v.last().copied().unwrap_or(0.0) > 0.5, "the hole is covered: {v:?}");
+}
+
+#[test]
 fn content_aware_fill_samples_photoshops_window() {
     // A 50 px selection samples the 200 px square centred on it (Photoshop 25.4's overlay);
     // at the canvas edge the square slides inwards. Edit › Fill uses the same window.
@@ -447,6 +479,27 @@ fn find_and_replace_across_type_layers() {
 }
 
 #[test]
+fn find_and_replace_change_rejects_a_layer_locked_after_the_find() {
+    // #4188: the found match's layer gets Lock All before Change; the text must stay.
+    let mut s = session(8);
+    let id = s.execute("type.create", json!({"text": "abc", "x": 2, "y": 12})).unwrap()["layer"].as_u64().unwrap();
+    // A second, unlocked type layer keeps the command enabled.
+    s.execute("type.create", json!({"text": "zzz", "x": 2, "y": 40})).unwrap();
+    let found = s.execute("edit.findAndReplaceText", json!({"find": "abc", "action": "find"})).unwrap();
+    assert_eq!(found["found"]["layer"].as_u64(), Some(id));
+    s.execute("layer.setProps", json!({"layer": id, "locked": true})).unwrap();
+    let history = s.active().unwrap().history.past_len();
+    let result = s.execute("edit.findAndReplaceText", json!({"find": "abc", "replace": "x", "action": "change"}));
+    assert!(matches!(&result, Err(EngineError::Other(message)) if message.contains("locked")), "{result:?}");
+    let text = match &s.active().unwrap().doc.layer(LayerId(id)).unwrap().content {
+        LayerContent::Text(t) => t.text.clone(),
+        _ => String::new(),
+    };
+    assert_eq!(text, "abc");
+    assert_eq!(s.active().unwrap().history.past_len(), history);
+}
+
+#[test]
 fn find_in_the_active_layer_finds_nothing_when_it_is_not_type() {
     // #703: `allLayers: false` with a raster layer active leaves nothing to search.
     let mut s = session(8);
@@ -467,4 +520,47 @@ fn find_in_the_active_layer_finds_nothing_when_it_is_not_type() {
     s.execute("layer.select", json!({"layer": id})).unwrap();
     let r = s.execute("edit.findAndReplaceText", json!({"find": "abc", "allLayers": false, "action": "find"})).unwrap();
     assert_eq!((r["found"]["layer"].as_u64(), r["found"]["text"].as_str()), (Some(id), Some("abc")));
+}
+
+#[test]
+fn backward_change_find_moves_past_the_replaced_text() {
+    // A backward Change/Find whose replacement still matches ("cat" -> "Cat", case-insensitive)
+    // must move on to the previous match, not find the replaced text again.
+    let mut s = session(8);
+    s.execute("type.create", json!({"text": "cat dog cat", "x": 2, "y": 12})).unwrap();
+    let p = |action: &str, forward: bool| json!({"find": "cat", "replace": "Cat", "action": action, "forward": forward, "allLayers": false});
+    let f = s.execute("edit.findAndReplaceText", p("find", false)).unwrap();
+    assert_eq!((f["found"]["start"].as_u64(), f["found"]["end"].as_u64()), (Some(8), Some(11)), "{f}");
+    let r = s.execute("edit.findAndReplaceText", p("changeFind", false)).unwrap();
+    assert_eq!((r["changed"]["start"].as_u64(), r["changed"]["end"].as_u64()), (Some(8), Some(11)), "{r}");
+    assert_eq!((r["found"]["start"].as_u64(), r["found"]["end"].as_u64()), (Some(0), Some(3)), "{r}");
+
+    // Forward is unchanged: replace the first match, then find the next one.
+    let mut s = session(8);
+    s.execute("type.create", json!({"text": "cat dog cat", "x": 2, "y": 12})).unwrap();
+    let f = s.execute("edit.findAndReplaceText", p("find", true)).unwrap();
+    assert_eq!(f["found"]["start"].as_u64(), Some(0), "{f}");
+    let r = s.execute("edit.findAndReplaceText", p("changeFind", true)).unwrap();
+    assert_eq!((r["changed"]["start"].as_u64(), r["changed"]["end"].as_u64()), (Some(0), Some(3)), "{r}");
+    assert_eq!((r["found"]["start"].as_u64(), r["found"]["end"].as_u64()), (Some(8), Some(11)), "{r}");
+}
+
+#[test]
+fn fade_allocation_failure_keeps_document_and_history() {
+    for depth in [8, 16, 32] {
+        let mut s = session(depth);
+        s.execute("edit.fill", json!({"color": "#000000"})).unwrap();
+        let before = s.active().unwrap().doc.clone();
+        let history = s.active().unwrap().history.entries();
+        crate::allocation::fail_next_for_test();
+        let result = s.execute("edit.fade", json!({"opacity": 25}));
+        let _ = crate::allocation::capacity::<u8>(0, "reset failpoint");
+        assert!(result.is_err());
+        assert_eq!(*s.active().unwrap().doc, *before);
+        assert_eq!(s.active().unwrap().history.entries(), history);
+        assert!(s.is_enabled("edit.fade"));
+        s.execute("edit.fade", json!({"opacity": 25})).unwrap();
+        assert!(s.undo());
+        assert_eq!(*s.active().unwrap().doc, *before);
+    }
 }

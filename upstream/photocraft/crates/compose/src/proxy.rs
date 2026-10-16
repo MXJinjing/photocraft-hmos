@@ -20,12 +20,15 @@ pub fn downsample(s: &Surface, k: u32) -> Surface {
     let bpp = s.format().bytes_per_pixel();
     let (x0, x1) = (b.x0.div_euclid(k), b.x1.div_euclid(k) + i32::from(b.x1.rem_euclid(k) != 0));
     let (y0, y1) = (b.y0.div_euclid(k), b.y1.div_euclid(k) + i32::from(b.y1.rem_euclid(k) != 0));
-    let w = (x1 - x0).max(0) as usize;
+    let w = x1.saturating_sub(x0).max(0) as usize;
     let mut row = vec![0u8; w * bpp];
     for oy in y0..y1 {
-        let src = s.to_interleaved(Rect::new(x0 * k, oy * k, x1 * k, oy * k + 1));
+        let src = s.to_interleaved(Rect::new(x0.saturating_mul(k), oy.saturating_mul(k), x1.saturating_mul(k), oy.saturating_mul(k).saturating_add(1)));
         for (i, px) in row.chunks_exact_mut(bpp).enumerate() {
-            px.copy_from_slice(&src[i * k as usize * bpp..(i * k as usize + 1) * bpp]);
+            // Saturated edges (a surface at the i32 limits) can make `src` shorter than expected.
+            if let Some(from) = (i * k as usize * bpp).checked_add(bpp).and_then(|end| src.get(i * k as usize * bpp..end)) {
+                px.copy_from_slice(from);
+            }
         }
         out.write_interleaved(Rect::new(x0, oy, x1, oy + 1), &row);
     }
@@ -79,6 +82,9 @@ pub fn proxy_document(doc: &Document, k: u32) -> Document {
         c.surface = downsample(&c.surface, k);
     }
     p.selection = p.selection.as_ref().map(|s| downsample(s, k));
+    if let Some(mask) = &mut p.quick_mask {
+        mask.surface = downsample(&mask.surface, k);
+    }
     p
 }
 
@@ -170,6 +176,27 @@ mod tests {
         let s = p.selection.as_ref().expect("selection kept");
         assert_eq!((s.pixel(7, 15)[0], s.pixel(8, 0)[0]), (1.0, 0.0));
         assert!(proxy_document(&Document::new("n", Size::new(8, 8), ColorMode::Rgb, SampleType::U8), 4).selection.is_none());
+    }
+
+    #[test]
+    fn proxy_scales_quick_mask_at_every_depth() {
+        for depth in [SampleType::U8, SampleType::U16, SampleType::F32] {
+            let mut doc = Document::new("mask", Size::new(16, 12), ColorMode::Rgb, depth);
+            let mut surface = Surface::new(PixelFormat::new(ColorMode::Grayscale, depth, false));
+            surface.fill_rect(Rect::new(0, 0, 8, 12), &[1.0]);
+            let mut mask = photocraft_doc::AlphaChannel::new("Quick Mask", surface);
+            mask.opacity = 0.25;
+            doc.quick_mask = Some(mask);
+            for k in [1, 2, 4] {
+                let proxy = proxy_document(&doc, k);
+                let mask = proxy.quick_mask.as_ref().unwrap();
+                assert_eq!(mask.surface.pixel((8 / k - 1) as i32, 0), vec![1.0]);
+                assert_eq!(mask.surface.pixel((8 / k) as i32, 0), vec![0.0], "depth {depth:?}, factor {k}");
+                assert_eq!(mask.opacity, 0.25);
+                assert_eq!(mask.surface.format().sample, depth);
+            }
+            assert_eq!(doc.quick_mask.as_ref().unwrap().surface.pixel(7, 0), vec![1.0], "source stays intact");
+        }
     }
 
     #[test]

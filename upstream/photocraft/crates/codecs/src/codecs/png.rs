@@ -17,6 +17,15 @@ fn err(e: impl std::fmt::Display) -> CodecError {
     CodecError::malformed(F, e)
 }
 
+/// Pixels per inch for `pHYs` pixels per metre. A whole number of ppi is stored rounded to whole
+/// pixels per metre (300 ppi = 11811), so reading it back gives 299.9994: the whole number that
+/// rounds to the stored value is the resolution that was meant, as Photoshop reads it.
+pub(crate) fn dpi_of_ppm(ppm: u32) -> f32 {
+    let dpi = f64::from(ppm) * f64::from(METERS_PER_INCH);
+    let whole = dpi.round();
+    if (whole / f64::from(METERS_PER_INCH)).round() == f64::from(ppm) { whole as f32 } else { dpi as f32 }
+}
+
 pub(crate) fn decode(bytes: &[u8], limits: &Limits) -> Result<Image, CodecError> {
     let mut input = Cursor::new(bytes);
     let mut decoder = png::Decoder::new_with_limits(&mut input, png::Limits { bytes: limits.alloc_usize() });
@@ -74,7 +83,7 @@ pub(crate) fn decode(bytes: &[u8], limits: &Limits) -> Result<Image, CodecError>
         && d.xppu > 0
         && d.yppu > 0
     {
-        meta.dpi = Some((d.xppu as f32 * METERS_PER_INCH, d.yppu as f32 * METERS_PER_INCH));
+        meta.dpi = Some((dpi_of_ppm(d.xppu), dpi_of_ppm(d.yppu)));
     }
     drop(reader);
     let end = usize::try_from(input.position()).map_err(|_| err("invalid PNG reader position"))?;
@@ -85,6 +94,37 @@ pub(crate) fn decode(bytes: &[u8], limits: &Limits) -> Result<Image, CodecError>
         img.warnings.push(DecodeWarning::MoreFrames { total: u32::try_from(images).ok() });
     }
     Ok(img)
+}
+
+/// The colour table of a palette PNG (`PLTE`) and the one entry its `tRNS` makes transparent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PngPalette {
+    pub colors: Vec<[u8; 3]>,
+    pub transparent: Option<u8>,
+}
+
+/// The colour table of a palette PNG (colour type 3), read from the headers without decoding
+/// pixels. `None` for other colour types, and for a `tRNS` with partial alpha or several
+/// transparent entries: an Indexed Color document holds one transparent entry.
+pub fn palette(bytes: &[u8]) -> Result<Option<PngPalette>, CodecError> {
+    let mut decoder = png::Decoder::new_with_limits(Cursor::new(bytes), png::Limits::default());
+    decoder.set_ignore_text_chunk(true);
+    let reader = decoder.read_info().map_err(map_png_err)?;
+    let info = reader.info();
+    if info.color_type != png::ColorType::Indexed {
+        return Ok(None);
+    }
+    let Some(plte) = info.palette.as_deref() else { return Ok(None) };
+    let colors = plte.as_chunks::<3>().0.to_vec();
+    let mut transparent = None;
+    for (i, &a) in info.trns.as_deref().unwrap_or_default().iter().enumerate() {
+        match a {
+            255 => {}
+            0 if transparent.is_none() && i < colors.len() => transparent = u8::try_from(i).ok(),
+            _ => return Ok(None),
+        }
+    }
+    Ok(Some(PngPalette { colors, transparent }))
 }
 
 fn map_png_err(e: png::DecodingError) -> CodecError {
@@ -585,6 +625,33 @@ mod indexed_tests {
         assert_eq!(px.data()[11], 0, "transparent entry");
         assert!(encode_indexed(3, 2, &[9; 6], &pal, None, None).is_err());
         assert!(encode_indexed(3, 3, &idx, &pal, None, None).is_err());
+    }
+
+    fn png(color: png::ColorType, trns: Option<&[u8]>) -> Vec<u8> {
+        let mut out = Vec::new();
+        let mut e = png::Encoder::new(&mut out, 2, 1);
+        e.set_color(color);
+        e.set_depth(png::BitDepth::Eight);
+        e.set_palette(vec![1, 2, 3, 4, 5, 6]);
+        if let Some(t) = trns {
+            e.set_trns(t.to_vec());
+        }
+        let data = if color == png::ColorType::Rgb { vec![0; 6] } else { vec![0, 1] };
+        e.write_header().unwrap().write_image_data(&data).unwrap();
+        out
+    }
+
+    #[test]
+    fn palette_reads_the_table_and_its_one_transparent_entry() {
+        let bytes = encode_indexed(2, 1, &[0, 1], &[[1, 2, 3], [4, 5, 6]], Some(1), None).unwrap();
+        let colors = vec![[1, 2, 3], [4, 5, 6]];
+        assert_eq!(palette(&bytes).unwrap(), Some(PngPalette { colors: colors.clone(), transparent: Some(1) }));
+        assert_eq!(palette(&png(png::ColorType::Indexed, None)).unwrap(), Some(PngPalette { colors, transparent: None }));
+        // A truecolour PNG's suggested palette is not a colour table.
+        assert_eq!(palette(&png(png::ColorType::Rgb, None)).unwrap(), None);
+        // Partial alpha or two transparent entries don't fit one transparent index.
+        assert_eq!(palette(&png(png::ColorType::Indexed, Some(&[255, 128]))).unwrap(), None);
+        assert_eq!(palette(&png(png::ColorType::Indexed, Some(&[0, 0]))).unwrap(), None);
     }
 }
 

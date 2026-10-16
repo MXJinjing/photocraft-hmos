@@ -119,6 +119,7 @@ fn rename(s: &mut Session, p: &Value) -> Result<Value> {
         pr.builtin = false;
         if was_current {
             s.tools.current_preset = Some(new.clone());
+            s.tools.brush_changed();
         }
         s.brush_presets_changed();
     }
@@ -433,6 +434,7 @@ fn delete_group(s: &mut Session, p: &Value) -> Result<Value> {
     s.tools.presets.retain(|x| !in_folder(x, &g, &f));
     if s.tools.current_preset.as_ref().is_some_and(|c| !s.tools.presets.iter().any(|x| x.name.eq_ignore_ascii_case(c))) {
         s.tools.current_preset = None;
+        s.tools.brush_changed();
     }
     s.brush_presets_changed();
     Ok(json!({ "deleted": before - s.tools.presets.len(), "count": s.tools.presets.len() }))
@@ -486,7 +488,14 @@ mod tests {
     fn with_groups() -> Session {
         let mut s = Session::new();
         for (n, g) in [("A1", "Alpha"), ("A2", "Alpha"), ("A3", "Alpha"), ("B1", "Beta"), ("B2", "Beta")] {
-            s.tools.presets.push(BrushPreset { name: n.into(), brush: Default::default(), builtin: false, group: g.into(), folder: Vec::new() });
+            s.tools.presets.push(BrushPreset {
+                name: n.into(),
+                brush: Default::default(),
+                builtin: false,
+                group: g.into(),
+                folder: Vec::new(),
+                captures: Default::default(),
+            });
         }
         s
     }
@@ -591,7 +600,14 @@ mod tests {
         let mut s = Session::new();
         for (n, f) in [("S0", &[][..]), ("I1", &["Ink"][..]), ("F1", &["Ink", "Fine"][..]), ("I2", &["Ink"][..]), ("D1", &["Dry"][..])] {
             let folder = f.iter().map(|x| x.to_string()).collect();
-            s.tools.presets.push(BrushPreset { name: n.into(), brush: Default::default(), builtin: false, group: "Set".into(), folder });
+            s.tools.presets.push(BrushPreset {
+                name: n.into(),
+                brush: Default::default(),
+                builtin: false,
+                group: "Set".into(),
+                folder,
+                captures: Default::default(),
+            });
         }
         s
     }
@@ -691,7 +707,14 @@ mod tests {
         let mut s = with_folders();
         for (n, f) in [("O1", &[][..]), ("B1", &["Box"][..])] {
             let folder = f.iter().map(|x| x.to_string()).collect();
-            s.tools.presets.push(BrushPreset { name: n.into(), brush: Default::default(), builtin: false, group: "Other".into(), folder });
+            s.tools.presets.push(BrushPreset {
+                name: n.into(),
+                brush: Default::default(),
+                builtin: false,
+                group: "Other".into(),
+                folder,
+                captures: Default::default(),
+            });
         }
         s
     }
@@ -724,8 +747,22 @@ mod tests {
         let mut s = with_two_groups();
         // A chain 31 deep under Set/Deep.
         let deep: Vec<String> = std::iter::once("Deep".to_string()).chain((0..30).map(|i| format!("d{i}"))).collect();
-        s.tools.presets.push(BrushPreset { name: "Z".into(), brush: Default::default(), builtin: false, group: "Set".into(), folder: deep.clone() });
-        s.tools.presets.push(BrushPreset { name: "Y".into(), brush: Default::default(), builtin: false, group: "Other".into(), folder: vec!["Dry".into()] });
+        s.tools.presets.push(BrushPreset {
+            name: "Z".into(),
+            brush: Default::default(),
+            builtin: false,
+            group: "Set".into(),
+            folder: deep.clone(),
+            captures: Default::default(),
+        });
+        s.tools.presets.push(BrushPreset {
+            name: "Y".into(),
+            brush: Default::default(),
+            builtin: false,
+            group: "Other".into(),
+            folder: vec!["Dry".into()],
+            captures: Default::default(),
+        });
         let before = s.tools.presets.clone();
         let deep_json = json!(deep);
         for p in [
@@ -758,7 +795,14 @@ mod tests {
         s.execute("brush.presets.moveGroup", json!({"group": "Set", "folder": ["Ink", "Fine"], "into": {"group": "Set"}})).unwrap();
         assert_eq!(folder_of(&s, "F1"), ["Fine"]);
         // An ungrouped preset's group can't move.
-        s.tools.presets.push(BrushPreset { name: "U".into(), brush: Default::default(), builtin: false, group: String::new(), folder: Vec::new() });
+        s.tools.presets.push(BrushPreset {
+            name: "U".into(),
+            brush: Default::default(),
+            builtin: false,
+            group: String::new(),
+            folder: Vec::new(),
+            captures: Default::default(),
+        });
         assert!(s.execute("brush.presets.moveGroup", json!({"group": "", "into": {"group": "Set"}})).is_err());
     }
 }

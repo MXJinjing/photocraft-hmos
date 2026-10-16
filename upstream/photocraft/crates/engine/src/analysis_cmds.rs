@@ -842,6 +842,23 @@ fn count_delete_group(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(count_json(doc(s)?.as_ref()))
 }
 
+/// A size parameter (`markerSize`, `labelSize`) clamped to `lo..=hi`: `None` when absent or null.
+/// Whole numbers sent as JSON floats (`8.0`, as UIs and recorded actions do) count; fractions,
+/// negatives and non-numbers are bad params rather than silently ignored. Clamping happens in
+/// `u64`/`f64`, so a huge value can't wrap through `as u32`.
+fn whole_size(cmd: &str, p: &Value, key: &str, lo: u32, hi: u32) -> Result<Option<u32>> {
+    let v = match p.get(key) {
+        None | Some(Value::Null) => return Ok(None),
+        Some(v) => v,
+    };
+    let n = match (v.as_u64(), v.as_f64()) {
+        (Some(n), _) => n.clamp(u64::from(lo), u64::from(hi)),
+        (None, Some(f)) if f.is_finite() && f >= 0.0 && f.fract() == 0.0 => f.clamp(f64::from(lo), f64::from(hi)) as u64,
+        _ => return Err(bad(cmd, format!("`{key}` = {v} must be a whole number ({lo}..={hi})"))),
+    };
+    Ok(Some(u32::try_from(n).unwrap_or(hi)))
+}
+
 fn count_set_group(s: &mut Session, p: &Value) -> Result<Value> {
     const CMD: &str = "count.setGroup";
     let d = doc(s)?;
@@ -853,11 +870,11 @@ fn count_set_group(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(c) = color_of(p, "color") {
         grp.color = c;
     }
-    if let Some(v) = p.get("markerSize").and_then(Value::as_u64) {
-        grp.marker_size = (v as u32).clamp(1, 10);
+    if let Some(v) = whole_size(CMD, p, "markerSize", 1, 10)? {
+        grp.marker_size = v;
     }
-    if let Some(v) = p.get("labelSize").and_then(Value::as_u64) {
-        grp.label_size = (v as u32).clamp(8, 72);
+    if let Some(v) = whole_size(CMD, p, "labelSize", 8, 72)? {
+        grp.label_size = v;
     }
     if let Some(v) = p.get("visible").and_then(Value::as_bool) {
         grp.visible = v;

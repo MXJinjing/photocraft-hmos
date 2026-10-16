@@ -527,15 +527,25 @@ pub(crate) fn with_pattern_placement(mut d: Descriptor, angle: f32, link: bool, 
 
 /// The warp of a placed layer (`SoLd`/`SoLE` `warp` descriptor): style, bend, distortions,
 /// axis, bounds and, for `warpCustom`, the 4 × 4 `customEnvelopeWarp` mesh. Read-only: the raw
-/// block is what gets written back. `None` when absent or `warpNone` with no mesh.
+/// block is what gets written back. `None` when absent or `warpNone` with no mesh. A `PlLd`
+/// record keeps its warp elsewhere: see [`parse_plld_warp`].
 pub fn parse_placed_warp(key: &[u8; 4], data: &[u8]) -> Option<photocraft_geom::warp::Warp> {
-    use photocraft_geom::warp::{BezierMesh, Warp, WarpStyle};
     if key != b"SoLd" && key != b"SoLE" {
         return None;
     }
     let d = data.get(8..).and_then(parse_prefix_versioned)?;
-    let w = get_desc(&d, "warp")?;
+    warp_of(get_desc(&d, "warp")?).flatten()
+}
+
+/// A `warp` descriptor (the `SoLd` key, or the whole descriptor after a `PlLd` record's corners)
+/// as a warp: `Some(None)` for no warp (`warpNone`, or a warp that moves nothing), `None` when it
+/// can't be read (an unknown style, missing bounds, a mesh that isn't 4 × 4).
+fn warp_of(w: &Descriptor) -> Option<Option<photocraft_geom::warp::Warp>> {
+    use photocraft_geom::warp::{BezierMesh, Warp, WarpStyle};
     let style = enum_of(w, "warpStyle").and_then(|v| WarpStyle::parse(&String::from_utf8_lossy(v)))?;
+    if style == WarpStyle::None {
+        return Some(None);
+    }
     let b = get_desc(w, "bounds")?;
     let g = |k: &str| num(b.get(k));
     let bounds = [g("Left")?, g("Top ")?, g("Rght")?, g("Btom")?];
@@ -558,7 +568,7 @@ pub fn parse_placed_warp(key: &[u8; 4], data: &[u8]) -> Option<photocraft_geom::
         warp.mesh = mesh.is_valid().then_some(mesh);
         warp.mesh.as_ref()?;
     }
-    (!warp.is_identity()).then_some(warp)
+    Some((!warp.is_identity()).then_some(warp))
 }
 
 /// Text content and transform from a `TySh` block (best effort).
@@ -598,7 +608,8 @@ pub(crate) fn placed_frame(warp: Option<&photocraft_geom::warp::Warp>, w: f64, h
     if ok { b } else { rect }
 }
 
-/// Smart object identifier and transform from `SoLd`/`PlLd` (best effort).
+/// Smart object identifier and transform from `SoLd`/`SoLE` (best effort). A `PlLd` block
+/// stores no source size, so its transform needs the embedded file: see [`parse_plld`].
 pub fn parse_smart(key: &[u8; 4], data: &[u8]) -> (String, Affine) {
     // SoLd: 'soLD' + version(4) + versioned descriptor.
     let desc = if key == b"SoLd" || key == b"SoLE" { data.get(8..).and_then(parse_prefix_versioned) } else { None };
@@ -611,14 +622,95 @@ pub fn parse_smart(key: &[u8; 4], data: &[u8]) -> (String, Affine) {
     if let (Some(Value::List(pts)), Some(sz)) = (d.get("Trnf"), get_desc(&d, "Sz  ")) {
         let p: Vec<f64> = pts.iter().filter_map(|v| num(Some(v))).collect();
         let (w, h) = (num(sz.get("Wdth")).unwrap_or(0.0), num(sz.get("Hght")).unwrap_or(0.0));
-        if p.len() == 8 && w > 0.0 && h > 0.0 {
-            let [x0, y0, x1, y1] = placed_frame(parse_placed_warp(key, data).as_ref(), w, h);
-            let (bw, bh) = (x1 - x0, y1 - y0);
-            let (a, b, c, d) = ((p[2] - p[0]) / bw, (p[3] - p[1]) / bw, (p[6] - p[0]) / bh, (p[7] - p[1]) / bh);
-            affine = Affine { m: [a, b, c, d, p[0] - a * x0 - c * y0, p[1] - b * x0 - d * y0] };
+        if let (Ok(p), true) = (<[f64; 8]>::try_from(p), w > 0.0 && h > 0.0) {
+            affine = corners_affine(&p, placed_frame(parse_placed_warp(key, data).as_ref(), w, h)).unwrap_or(Affine::IDENTITY);
         }
     }
     (id, affine)
+}
+
+/// The affine that takes the source-space box `frame` (left, top, right, bottom; see
+/// [`placed_frame`]) onto placed corners `p` (top-left, top-right, bottom-right, bottom-left as
+/// x, y pairs). `None` for an empty or non-finite frame, or non-finite corners.
+pub fn corners_affine(p: &[f64; 8], frame: [f64; 4]) -> Option<Affine> {
+    let [x0, y0, x1, y1] = frame;
+    let (bw, bh) = (x1 - x0, y1 - y0);
+    if !(frame.iter().chain(p).all(|v| v.is_finite()) && bw > 0.0 && bh > 0.0) {
+        return None;
+    }
+    let (a, b, c, d) = ((p[2] - p[0]) / bw, (p[3] - p[1]) / bw, (p[6] - p[0]) / bh, (p[7] - p[1]) / bh);
+    let m = [a, b, c, d, p[0] - a * x0 - c * y0, p[1] - b * x0 - d * y0];
+    m.iter().all(|v| v.is_finite()).then_some(Affine { m })
+}
+
+/// The transform and (Distort/Perspective) projective placement of a `PlLd` record's corners `p`
+/// for a source of `size` warped by `warp`: the inverse of [`crate::smart_map::plld_bytes`]'s
+/// quad. As for `SoLd`'s `Trnf` (#3677), affine corners frame a single-patch custom warp's
+/// control-point box (which may spill past the source), else the source rect; projective corners
+/// frame the source rect, as `parse_smart_perspective` reads them. `PlLd` stores no source size:
+/// without the source file (`None`) the layer is taken as placed at 100 %, the edge lengths being
+/// its size (a custom warp's box needs no size); position and rotation stay right, only Replace
+/// Contents and re-renders depend on the scale. Import and export (which keeps an unedited record
+/// verbatim) both place a `PlLd` layer with this.
+pub fn plld_transform(p: &[f64; 8], size: Option<(f64, f64)>, warp: Option<&photocraft_geom::warp::Warp>) -> (Affine, Option<[f64; 9]>) {
+    let (w, h) = size.unwrap_or_else(|| ((p[2] - p[0]).hypot(p[3] - p[1]), (p[6] - p[0]).hypot(p[7] - p[1])));
+    let perspective = corners_perspective([[p[0], p[1]], [p[2], p[3]], [p[4], p[5]], [p[6], p[7]]], (w, h));
+    let frame = if perspective.is_some() { [0.0, 0.0, w, h] } else { placed_frame(warp, w, h) };
+    (corners_affine(p, frame).unwrap_or(Affine::IDENTITY), perspective)
+}
+
+/// The source identifier and placed corners of a `PlLd` block, the placed-layer record Photoshop
+/// CS2 and older write with no `SoLd` next to it (#2465). Adobe PSD spec, "Placed Layer": `plcL`,
+/// version, Pascal unique id (unpadded), page, total pages, anti-alias policy, layer type, then
+/// 8 doubles: the x, y of each corner (top-left, top-right, bottom-right, bottom-left). The warp
+/// that follows is read by [`parse_plld_warp`]. `None` for anything else or a truncated record.
+pub fn parse_plld(data: &[u8]) -> Option<(String, [f64; 8])> {
+    plld_record(data).map(|(id, corners, _)| (id, corners))
+}
+
+/// [`parse_plld`] and the offset just past the corners, where the warp starts.
+fn plld_record(data: &[u8]) -> Option<(String, [f64; 8], usize)> {
+    if data.get(..4)? != b"plcL" {
+        return None;
+    }
+    let n = usize::from(*data.get(8)?);
+    let id = String::from_utf8_lossy(data.get(9..9 + n)?).into_owned();
+    // Page number, total pages, anti-alias policy and layer type (4 × u32).
+    let at = 9 + n + 16;
+    let mut corners = [0.0; 8];
+    for (i, c) in corners.iter_mut().enumerate() {
+        let b = data.get(at + i * 8..at + i * 8 + 8)?;
+        *c = f64::from_be_bytes(b.try_into().ok()?);
+    }
+    corners.iter().all(|v| v.is_finite()).then_some((id, corners, at + 64))
+}
+
+/// The warp of a placed layer's `PlLd` record (Photoshop CS2 can warp a smart object).
+#[derive(Debug, Clone, PartialEq)]
+pub enum PlldWarp {
+    /// No warp: `warpNone`, a warp that moves nothing, or a record that ends at its corners.
+    None,
+    /// The warp, in source pixels like the `SoLd` one.
+    Warp(photocraft_geom::warp::Warp),
+    /// A warp is stored but can't be read (or the record itself can't be): re-rendering the
+    /// layer from its source would drop it.
+    Unreadable,
+}
+
+/// The warp after a `PlLd` record's corners: a u32 warp version, then a versioned `warp`
+/// descriptor (Adobe PSD spec, "Placed Layer"; the layout [`crate::smart_map::plld_bytes`]
+/// writes).
+pub fn parse_plld_warp(data: &[u8]) -> PlldWarp {
+    let Some(rest) = plld_record(data).and_then(|(_, _, end)| data.get(end..)) else { return PlldWarp::Unreadable };
+    // Only padding after the corners: no warp stored.
+    if rest.iter().all(|b| *b == 0) {
+        return PlldWarp::None;
+    }
+    match rest.get(4..).and_then(parse_prefix_versioned).as_ref().and_then(warp_of) {
+        Some(Some(w)) => PlldWarp::Warp(w),
+        Some(None) => PlldWarp::None,
+        None => PlldWarp::Unreadable,
+    }
 }
 
 /// The projective placement of a `SoLd` / `SoLE` block whose corners aren't a parallelogram
@@ -638,6 +730,12 @@ pub fn parse_smart_perspective(key: &[u8; 4], data: &[u8]) -> Option<[f64; 9]> {
         (p.len() == 8 && p.iter().all(|v| v.is_finite())).then(|| [[p[0], p[1]], [p[2], p[3]], [p[4], p[5]], [p[6], p[7]]])
     };
     let q = quad("nonAffineTransform").or_else(|| quad("Trnf"))?;
+    corners_perspective(q, (w, h))
+}
+
+/// The projective placement of a `w` × `h` source onto corners `q` that aren't a parallelogram;
+/// `None` for affine corners (see [`corners_affine`]) or an empty size.
+pub fn corners_perspective(q: [[f64; 2]; 4], (w, h): (f64, f64)) -> Option<[f64; 9]> {
     // A parallelogram (top-left + bottom-right = top-right + bottom-left) is affine.
     let tol = 1e-6 * (1.0 + q.iter().flatten().fold(0.0f64, |m, v| m.max(v.abs())));
     if (0..2).all(|i| (q[0][i] + q[2][i] - q[1][i] - q[3][i]).abs() <= tol) || w <= 0.0 || h <= 0.0 {
@@ -916,6 +1014,172 @@ mod more_tests {
         assert_eq!(id, "uuid-1");
         assert_eq!(a.m, [2.0, 0.0, 0.0, 2.0, 10.0, 20.0]);
         assert_eq!(parse_smart(b"PlLd", &data).0, "");
+        assert_eq!(parse_plld(&data), None, "soLD data is not a plcL record");
+    }
+
+    /// A `PlLd` record (as Photoshop CS2 writes it, with no `SoLd`, #2465) gives its source id and
+    /// placed corners; with the source size those are the same transform `SoLd` gives.
+    #[test]
+    fn plld_id_and_corners() {
+        use crate::smart_map::{PlacedSpec, plld_bytes};
+        let t = Affine { m: [1.5, 0.25, -0.5, 2.0, 10.0, 20.0] };
+        let spec = PlacedSpec { idnt: "uuid-cs2", placed: "", transform: t, perspective: None, size: (40.0, 30.0), dpi: 72.0, warp: None, filter_fx: None };
+        let data = plld_bytes(&spec, &mut Vec::new());
+        let (id, p) = parse_plld(&data).expect("a plcL record");
+        assert_eq!(id, "uuid-cs2");
+        assert_eq!(p, [10.0, 20.0, 70.0, 30.0, 55.0, 90.0, -5.0, 80.0]);
+        let back = corners_affine(&p, [0.0, 0.0, 40.0, 30.0]).unwrap();
+        for (a, b) in back.m.iter().zip(t.m) {
+            assert!((a - b).abs() < 1e-12, "{back:?} vs {t:?}");
+        }
+        assert_eq!(corners_perspective([[p[0], p[1]], [p[2], p[3]], [p[4], p[5]], [p[6], p[7]]], (40.0, 30.0)), None, "affine corners");
+        assert_eq!(corners_affine(&p, [0.0, 0.0, 0.0, 30.0]), None);
+        assert_eq!(corners_affine(&p, [0.0, 0.0, f64::NAN, 30.0]), None);
+        assert_eq!(corners_affine(&p, [5.0, 0.0, 5.0, 30.0]), None, "an empty frame");
+        let mut nan = p;
+        nan[3] = f64::INFINITY;
+        assert_eq!(corners_affine(&nan, [0.0, 0.0, 40.0, 30.0]), None);
+        // The placed-layer record is the one block that can be the principal one: PlLd-only
+        // layers have no smart transform from `parse_smart`.
+        assert_eq!(parse_smart(b"PlLd", &data), (String::new(), Affine::IDENTITY));
+    }
+
+    /// A `PlLd` record's corners frame the same box as `SoLd`'s `Trnf` (#3677): with a custom
+    /// warp whose control points spill past the source, the control-point box, not the source
+    /// rect. The CS2 record then places the layer exactly as the equivalent `SoLd` does, with or
+    /// without the source size (the box needs none).
+    #[test]
+    fn plld_corners_frame_a_spilled_custom_warp_like_sold() {
+        use crate::smart_map::{PlacedSpec, parse_sold, plld_bytes, sold_bytes};
+        use photocraft_geom::warp::{BezierMesh, Warp};
+        let bounds = [0.0, 0.0, 50.0, 25.0];
+        let mut mesh = BezierMesh::identity(bounds, 1, 1);
+        mesh.points[0] = [-10.0, -5.0];
+        mesh.points[15] = [60.0, 25.0];
+        let warp = Warp::custom(mesh, bounds);
+        let t = Affine { m: [2.0, 0.5, -0.25, 2.0, 120.0, 210.0] };
+        let spec = PlacedSpec { idnt: "cs2", placed: "p", transform: t, perspective: None, size: (50.0, 25.0), dpi: 72.0, warp: Some(&warp), filter_fx: None };
+        let plld = plld_bytes(&spec, &mut Vec::new());
+        let sold = sold_bytes(None, &spec, &mut Vec::new());
+        let (_, p) = parse_plld(&plld).expect("a plcL record");
+        assert_eq!(parse_plld_warp(&plld), PlldWarp::Warp(warp.clone()));
+        let from_sold = parse_smart(b"SoLd", &sold).1;
+        assert_eq!(parse_sold(&sold).map(|s| s.transform), Some(from_sold));
+        let close = |a: Affine, b: Affine| a.m.iter().zip(b.m).all(|(x, y)| (x - y).abs() < 1e-9);
+        assert!(close(from_sold, t), "{from_sold:?} vs {t:?}");
+        for size in [Some((50.0, 25.0)), None] {
+            let (got, perspective) = plld_transform(&p, size, Some(&warp));
+            assert!(close(got, from_sold), "size {size:?}: {got:?} vs SoLd {from_sold:?}");
+            assert_eq!(perspective, None);
+        }
+        // Framing the source rect instead would stretch it (the bug #3677 fixed for SoLd).
+        let rect = corners_affine(&p, [0.0, 0.0, 50.0, 25.0]).unwrap();
+        assert!(!close(rect, t), "the test needs a mesh that spills: {rect:?}");
+        // With no warp, or a preset one, the frame is the source rect, as before.
+        let plain = PlacedSpec { warp: None, ..spec };
+        let (_, q) = parse_plld(&plld_bytes(&plain, &mut Vec::new())).unwrap();
+        assert!(close(plld_transform(&q, Some((50.0, 25.0)), None).0, t));
+    }
+
+    /// Malformed `PlLd` data (wrong magic, truncated anywhere, a Pascal length past the end,
+    /// non-finite corners) reads as `None`, never a panic.
+    #[test]
+    fn plld_malformed_is_none() {
+        use crate::smart_map::{PlacedSpec, plld_bytes};
+        let spec =
+            PlacedSpec { idnt: "id", placed: "", transform: Affine::IDENTITY, perspective: None, size: (4.0, 4.0), dpi: 72.0, warp: None, filter_fx: None };
+        let data = plld_bytes(&spec, &mut Vec::new());
+        // Magic + version + Pascal "id" + 4 × u32 + 8 × f64: everything after is the warp.
+        let end = 4 + 4 + 1 + 2 + 16 + 64;
+        assert!(parse_plld(&data[..end]).is_some());
+        for n in 0..end {
+            assert_eq!(parse_plld(&data[..n]), None, "truncated to {n} bytes");
+        }
+        let mut bad = data.clone();
+        bad[..4].copy_from_slice(b"soLD");
+        assert_eq!(parse_plld(&bad), None);
+        let mut long = data.clone();
+        long[8] = 255; // a Pascal id longer than the record
+        assert_eq!(parse_plld(&long[..200.min(long.len())]), None);
+        let mut nan = data.clone();
+        nan[end - 8..end].copy_from_slice(&f64::NAN.to_be_bytes());
+        assert_eq!(parse_plld(&nan), None);
+        assert_eq!(parse_plld(&[]), None);
+    }
+
+    /// Photoshop CS2 can warp a smart object; `PlLd` keeps that warp after the corners (a u32
+    /// warp version, then the versioned `warp` descriptor). It reads back as written, and
+    /// `warpNone`, an identity warp or a record that stops at its corners mean no warp.
+    #[test]
+    fn plld_warps_round_trip() {
+        use crate::smart_map::{PlacedSpec, plld_bytes};
+        use photocraft_geom::warp::{BezierMesh, Warp, WarpStyle};
+        let bounds = [0.0, 0.0, 60.0, 30.0];
+        let mut arc = Warp::preset(WarpStyle::Arc, 40.0, bounds);
+        arc.vertical = true;
+        arc.h_distort = 10.0;
+        let mut mesh = BezierMesh::identity(bounds, 1, 1);
+        mesh.points[15] = [67.0, 30.0];
+        let custom = Warp::custom(mesh, bounds);
+        let flat = Warp::preset(WarpStyle::Flag, 0.0, bounds);
+        for (w, back) in
+            [(Some(&arc), PlldWarp::Warp(arc.clone())), (Some(&custom), PlldWarp::Warp(custom.clone())), (Some(&flat), PlldWarp::None), (None, PlldWarp::None)]
+        {
+            let t = Affine { m: [0.5, 0.0, 0.0, 0.5, 3.0, 4.0] };
+            let spec = PlacedSpec { idnt: "w", placed: "", transform: t, perspective: None, size: (60.0, 30.0), dpi: 72.0, warp: w, filter_fx: None };
+            let data = plld_bytes(&spec, &mut Vec::new());
+            assert_eq!(parse_plld_warp(&data), back, "{w:?}");
+            // The corners are unchanged by the warp that follows them.
+            assert_eq!(parse_plld(&data).map(|(_, p)| p[..2].to_vec()), Some(vec![3.0, 4.0]));
+        }
+        let spec =
+            PlacedSpec { idnt: "id", placed: "", transform: Affine::IDENTITY, perspective: None, size: (4.0, 4.0), dpi: 72.0, warp: None, filter_fx: None };
+        let end = 4 + 4 + 1 + 2 + 16 + 64;
+        let data = plld_bytes(&spec, &mut Vec::new());
+        assert_eq!(parse_plld_warp(&data[..end]), PlldWarp::None, "no warp stored");
+        assert_eq!(parse_plld_warp(&[data[..end].to_vec(), vec![0; 3]].concat()), PlldWarp::None, "padding");
+    }
+
+    /// A `PlLd` warp that is stored but can't be read (truncated, an unknown style, a missing
+    /// bounds rectangle or mesh) is `Unreadable`, so the import keeps the warped pixels.
+    #[test]
+    fn plld_unreadable_warps() {
+        use crate::smart_map::{PlacedSpec, plld_bytes};
+        use photocraft_geom::warp::{Warp, WarpStyle};
+        let arc = Warp::preset(WarpStyle::Arc, 40.0, [0.0, 0.0, 4.0, 4.0]);
+        let spec = PlacedSpec {
+            idnt: "id",
+            placed: "",
+            transform: Affine::IDENTITY,
+            perspective: None,
+            size: (4.0, 4.0),
+            dpi: 72.0,
+            warp: Some(&arc),
+            filter_fx: None,
+        };
+        let data = plld_bytes(&spec, &mut Vec::new());
+        let end = 4 + 4 + 1 + 2 + 16 + 64;
+        assert!(matches!(parse_plld_warp(&data), PlldWarp::Warp(_)));
+        for n in end + 1..data.len() - 4 {
+            if data[end..n].iter().any(|b| *b != 0) {
+                assert_eq!(parse_plld_warp(&data[..n]), PlldWarp::Unreadable, "truncated to {n} bytes");
+            }
+        }
+        let with = |d: Descriptor| [data[..end].to_vec(), vec![0; 4], VersionedDescriptor::new(d).to_bytes()].concat();
+        let style = |s: &str| Value::Enumerated { type_id: Id::new("warpStyle"), value: Id::new(s) };
+        assert_eq!(parse_plld_warp(&with(Descriptor::new("warp").with("warpStyle", style("warpSomethingNew")))), PlldWarp::Unreadable);
+        assert_eq!(parse_plld_warp(&with(Descriptor::new("warp").with("warpStyle", style("warpArc")))), PlldWarp::Unreadable, "no bounds");
+        assert_eq!(parse_plld_warp(&with(Descriptor::new("warp").with("warpStyle", style("warpNone")))), PlldWarp::None);
+        let bounds = Descriptor::new("classFloatRect")
+            .with("Top ", Value::Double(0.0))
+            .with("Left", Value::Double(0.0))
+            .with("Btom", Value::Double(4.0))
+            .with("Rght", Value::Double(4.0));
+        let custom = Descriptor::new("warp").with("warpStyle", style("warpCustom")).with("bounds", Value::Descriptor(bounds));
+        assert_eq!(parse_plld_warp(&with(custom)), PlldWarp::Unreadable, "custom with no mesh");
+        assert_eq!(parse_plld_warp(&[data[..end].to_vec(), vec![0, 0, 0, 0, 0, 0, 0, 16, 1, 2]].concat()), PlldWarp::Unreadable);
+        assert_eq!(parse_plld_warp(&data[..end - 1]), PlldWarp::Unreadable, "the record itself");
+        assert_eq!(parse_plld_warp(&[]), PlldWarp::Unreadable);
     }
 
     /// `SoLd` data with a 50 × 25 source, the quad `trnf` and, when given, a custom warp whose

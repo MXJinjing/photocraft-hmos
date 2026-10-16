@@ -37,6 +37,7 @@ pub fn sync_tool_brush(app: &mut PhotocraftApp) {
     // The picked preset was the outgoing tool's brush: forget it, so Update Brush can't overwrite
     // that preset with this tool's brush.
     app.session.tools.current_preset = None;
+    app.session.tools.brush_changed();
     app.ui.brush_tool = tool;
 }
 
@@ -442,8 +443,8 @@ mod tests {
         assert!(h.state().ui.brush_picker.is_some());
     }
 
-    /// The gear menu's New Brush Preset… saves the brush and asks for its name in the picker's
-    /// rename bar; Enter there renames it and leaves the picker open (Enter closes it otherwise).
+    /// The gear menu's New Brush Preset… opens the New Brush Preset dialog (#4490), which saves
+    /// the preset under the typed name on OK.
     #[test]
     fn picker_gear_menu_saves_and_names_a_new_preset() {
         use egui_kittest::kittest::Queryable;
@@ -453,19 +454,20 @@ mod tests {
         h.run_steps(2);
         h.get_by_label("Brush Preset Options").click();
         h.run_steps(2);
+        let before = h.state().session.tools.presets.len();
         h.get_by_label("New Brush Preset…").click();
         h.run_steps(3);
-        let saved = h.state().ui.brush_picker_list.renaming.clone().expect("the rename bar asks for a name");
-        assert!(h.state().session.tools.presets.iter().any(|p| p.name == saved.name));
-        assert!(h.state().ui.brush_picker.is_some(), "the menu's click didn't close the picker");
-        h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
-        h.event(egui::Event::Text("Inky".into()));
-        h.run_steps(1);
-        h.key_press(egui::Key::Enter);
-        h.run_steps(3);
-        assert!(h.state().session.tools.presets.iter().any(|p| p.name == "Inky"), "renamed");
-        assert!(h.state().ui.brush_picker_list.renaming.is_none());
-        assert!(h.state().ui.brush_picker.is_some(), "Enter ended the rename, not the picker");
+        let dialog = h.state().ui.dialogs.iter().find(|d| crate::brush_preset_dialog::owns(&d.fields)).map(|d| d.id).expect("the dialog asks for a name");
+        assert_eq!(h.state().session.tools.presets.len(), before, "nothing is saved before OK");
+        assert!(h.state().ui.brush_picker.is_none(), "the dialog takes the picker's place");
+        // This harness draws the canvas only: OK as automation does (the dialog's own tests type).
+        h.state_mut().ui.dialog_mut(dialog).unwrap().fields.insert("name".into(), json!("Inky"));
+        crate::dialogs::confirm(h.state_mut(), dialog).unwrap();
+        h.run_steps(2);
+        assert!(h.state().session.tools.presets.iter().any(|p| p.name == "Inky"), "saved under the typed name");
+        assert_eq!(h.state().session.tools.current_preset.as_deref(), Some("Inky"));
+        h.state_mut().ui.brush_picker = Some([c.x, c.y]);
+        h.run_steps(2);
         // The gear's boxes pick the card parts; the last one on can't be turned off.
         h.get_by_label("Brush Preset Options").click();
         h.run_steps(2);

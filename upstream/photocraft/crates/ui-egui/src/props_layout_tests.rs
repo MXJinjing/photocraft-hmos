@@ -175,8 +175,12 @@ fn type_controls_fill_the_panel_at_every_width_and_scale() {
                 .map(|r| r.right())
                 .fold(f32::MIN, f32::max);
             // (Both rows have a unit suffix: compare with the size/leading row.)
-            let top = fields.iter().map(|r| r.top()).fold(f32::MAX, f32::min);
-            let lead = fields.iter().filter(|r| (r.top() - top).abs() < 0.5).map(|r| r.right()).fold(f32::MIN, f32::max);
+            // Variable-font axes can precede the size/leading row and have no unit suffix.
+            // Compare the intended point-valued controls, retaining the same edge tolerance.
+            let lead = ["Font size", "Leading (set to the font size × auto-leading when Auto)"]
+                .into_iter()
+                .map(|label| h.get_by_role_and_label(egui::accesskit::Role::SpinButton, label).rect().right())
+                .fold(f32::MIN, f32::max);
             assert!((t_right - lead).abs() < 0.5, "{what}: Transform fields end at {t_right}, Character at {lead}");
             // Quick Actions buttons span the panel too.
             let qa = h.get_by_label("Rasterize Type").rect();
@@ -308,4 +312,37 @@ fn properties_distribute_buttons_move_selected_layers_and_undo_in_both_axes() {
         };
         assert_eq!(restored, before, "{button}: undo restores its location");
     }
+}
+
+/// #4608: with the Background one of several selected layers (and the active one), Properties
+/// shows the Document properties as before, with Align and Distribute above them, and its buttons
+/// align the selection: the Background stays, the other layer lines up with it.
+#[test]
+fn background_in_a_multiple_selection_keeps_align_and_distribute() {
+    use photocraft_doc::LayerId;
+    let mut s = photocraft_engine::Session::new();
+    s.execute("file.new", json!({"width": 300, "height": 200})).unwrap();
+    let bg = s.active().unwrap().doc.layers[0].id.0;
+    let block = s.execute("layer.new.layer", json!({"name": "Block"})).unwrap()["layer"].as_u64().unwrap();
+    s.execute("select.rect", json!({"x": 20, "y": 30, "width": 40, "height": 20})).unwrap();
+    s.execute("edit.fill", json!({"contents": "color", "color": "#336699"})).unwrap();
+    s.execute("select.deselect", json!({})).unwrap();
+    // Background alone: the Document properties only.
+    s.execute("layer.select", json!({"layer": bg})).unwrap();
+    let mut h = harness(s, 1.0, 320.0);
+    assert!(h.query_by_label("Align Horizontal Centers").is_none(), "one layer: Document properties only");
+    // The Background is still the active layer once Block joins the selection.
+    h.state_mut().run("layer.select", json!({"layer": block, "mode": "add"})).unwrap();
+    h.state_mut().run("layer.select", json!({"layer": bg, "mode": "add"})).unwrap();
+    h.run_steps(8);
+    assert_eq!(h.state().session.active().unwrap().active_layer, Some(LayerId(bg)));
+    assert_eq!(h.state().session.active().unwrap().selected_layers().len(), 2);
+    let names: Vec<String> = headers(&h).into_iter().map(|(n, _)| n).collect();
+    assert!(names.iter().any(|n| n == "Align and Distribute"), "{names:?}");
+    h.get_by_label("Align Horizontal Centers").click();
+    h.run_steps(4);
+    let st = h.state().session.active().unwrap();
+    let b = st.doc.layer(LayerId(block)).unwrap().surface().unwrap().content_bounds();
+    assert_eq!((b.x0 + b.x1) / 2, 150, "centred on the Background, which spans the canvas: {b:?}");
+    assert_eq!(b.y0, 30, "only horizontally");
 }

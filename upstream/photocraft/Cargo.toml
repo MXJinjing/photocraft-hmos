@@ -8,7 +8,7 @@ default-members = ["crates/*", "apps/photocraft", "apps/photocraft-cli", "xtask"
 wgpu-hal = { path = "../../third_party/wgpu-hal-30.0.1" }
 
 [workspace.package]
-version = "0.8.2"
+version = "0.9.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 rust-version = "1.95"
@@ -42,6 +42,7 @@ photocraft-testkit = { path = "crates/testkit" }
 photocraft-tablet = { path = "crates/tablet" }
 
 # external
+craft-print = { git = "https://github.com/storytold/craft-libs", rev = "3d37da389a3618ab9b76109da11416e9ca4ea719" }
 thiserror = "2"
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json = "1"

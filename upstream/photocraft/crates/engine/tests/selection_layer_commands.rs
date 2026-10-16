@@ -148,6 +148,6 @@ fn bad_targets_fail_gracefully() {
     }
     let mut sc = scene();
     for id in ["layer.layerMask.revealAll", "layer.layerStyle.pasteLayerStyle", "layer.layerStyle.clear"] {
-        assert!(sc.s.execute(id, json!({"layer": 9_999_999})).is_err(), "{id}: no such layer");
+        assert!(sc.s.execute(id, json!({"layer": u64::MAX})).is_err(), "{id}: no such layer");
     }
 }

@@ -553,3 +553,55 @@ fn blend_if_round_trips_as_blending_ranges() {
     assert!(back.layers[1].blend_if.is_default());
     assert_eq!(back.layers[2].blend_if.get(1)[0], BlendRange { black: [1, 2], white: [3, 4] });
 }
+
+#[test]
+fn psd_16bit_layers_with_compatibility_section_open_visible() {
+    use photocraft_doc::{Document, Layer, LayerContent, Size};
+    use photocraft_geom::Rect;
+    use photocraft_raster::Surface;
+
+    // A 16-bit document with multiple distinct user layers.
+    let mut doc = Document::new("Test16", Size::new(50, 50), ColorMode::Rgb, SampleType::U16);
+    let fmt = doc.pixel_format();
+
+    let bg_data = vec![255u8; 50 * 50 * 8];
+    let bg_surf = Surface::from_interleaved(fmt, Rect::new(0, 0, 50, 50), &bg_data);
+    let mut bg = Layer::new("Background", LayerContent::Raster(bg_surf));
+    bg.visible = true;
+    doc.layers.push(bg);
+
+    let fg_data = vec![128u8; 20 * 20 * 8];
+    let fg_surf = Surface::from_interleaved(fmt, Rect::new(10, 10, 30, 30), &fg_data);
+    let mut fg = Layer::new("Foreground", LayerContent::Raster(fg_surf));
+    fg.visible = true;
+    doc.layers.push(fg);
+
+    let exported = export(&doc, "test.psd", &ExportOptions::default()).expect("export");
+    let bytes = exported.bytes;
+
+    let cmd_len = u32::from_be_bytes(bytes[26..30].try_into().unwrap()) as usize;
+    let res_pos = 30 + cmd_len;
+    let res_len = u32::from_be_bytes(bytes[res_pos..res_pos + 4].try_into().unwrap()) as usize;
+    let lm_pos = res_pos + 4 + res_len;
+    let lm_len = u32::from_be_bytes(bytes[lm_pos..lm_pos + 4].try_into().unwrap()) as usize;
+    let li_pos = lm_pos + 4;
+
+    // Simulate Photoshop's 16-bit format: an empty/compatibility layer info section (count = 0)
+    // before the global Lr16 block (#4928).
+    let mut modified = bytes;
+    let new_lm_len = (lm_len + 4) as u32;
+    modified[lm_pos..lm_pos + 4].copy_from_slice(&new_lm_len.to_be_bytes());
+    modified[li_pos..li_pos + 4].copy_from_slice(&4u32.to_be_bytes());
+    modified.splice(li_pos + 4..li_pos + 4, [0u8, 0, 0, 0]);
+
+    let imported = import("test.psd", &modified).expect("import").document;
+
+    // Must import the 16-bit layers from Lr16 ("Background" and "Foreground").
+    assert_eq!(imported.layers.len(), 2);
+    assert_eq!(imported.layers[0].name, "Background");
+    assert_eq!(imported.layers[1].name, "Foreground");
+    assert!(imported.layers[0].visible);
+    assert!(imported.layers[1].visible);
+    assert!(imported.layers[0].surface().unwrap().tile_count() > 0);
+    assert!(imported.layers[1].surface().unwrap().tile_count() > 0);
+}

@@ -15,19 +15,21 @@ pub const USAGE: &str = "\
 photocraft-cli: headless Photocraft
 
 USAGE:
-  photocraft-cli convert <in> <out> [--format <ext>] [--quality <1-100>] [--tiff-layers] [--tga-bits <24|32>]
+  photocraft-cli convert <in> <out> [--format <ext>] [--quality <1-100>] [--tiff-layers] [--tga-bits <24|32>] [--dpx-bits <8|10|12|16>]
       Convert between formats (.pcraft, .psd, .png, .jpg, .tif, .webp, .exr, …).
       TIFF output is flat unless --tiff-layers keeps the layers (Photoshop layer data).
       --quality sets the JPEG or WebP quality; a WebP written with a quality is lossy, without one lossless.
       --tga-bits sets a TGA's bits per pixel: 32 writes the alpha channel (or else the transparency) as
       its alpha, 24 none. Without it: 32 with an alpha channel or transparency, else 24.
+      --dpx-bits sets a DPX's bits per sample. Without it: 8 for an 8-bit document, else 16.
   photocraft-cli info <file> [--compact]
       Print the document as JSON (size, mode, depth, layer tree).
-  photocraft-cli run (<file> | --new <json>) --cmd <id> [--params <json>] [--cmd …] [--out <file>] [--format <ext>] [--quality <1-100>] [--tiff-layers] [--tga-bits <24|32>]
+  photocraft-cli run (<file> | --new <json>) --cmd <id> [--params <json>] [--cmd …] [--out <file>] [--format <ext>] [--quality <1-100>] [--tiff-layers] [--tga-bits <24|32>] [--dpx-bits <8|10|12|16>]
       Open a file, run engine commands in order, save the result. Each --params
       applies to the preceding --cmd. Prints each command's JSON result.
-  photocraft-cli batch --actions <actions.json> [--action <name>] --in <dir> --out <dir> [--format <ext>] [--quality <1-100>] [--in-place] [--tiff-layers] [--tga-bits <24|32>]
-      Apply an action list to every image in a directory. Steps are [id, params] pairs,
+  photocraft-cli batch --actions <actions.json|set.atn> [--action <name>] --in <dir> --out <dir> [--format <ext>] [--quality <1-100>] [--in-place] [--tiff-layers] [--tga-bits <24|32>] [--dpx-bits <8|10|12|16>]
+      Apply an action list to every image in a directory. A Photoshop Actions file (.atn) is a
+      set: its action --action names plays, as below. JSON steps are [id, params] pairs,
       {\"command\": id, \"params\": {…}} objects or bare ids, as a recorded action or droplet stores them
       (a list, or wrapped in {\"actions\": …}, {\"steps\": …} or a droplet). An Actions set (the Actions
       panel's actions.json, {\"actions\": [{\"name\", \"steps\"}…]}) plays the action --action names (needed
@@ -67,17 +69,17 @@ struct Subcommand {
 }
 
 const SUBCOMMANDS: &[Subcommand] = &[
-    Subcommand { name: "convert", values: &["--format", "--quality", "--tga-bits"], bare: &["--tiff-layers"], run: convert },
+    Subcommand { name: "convert", values: &["--format", "--quality", "--tga-bits", "--dpx-bits"], bare: &["--tiff-layers"], run: convert },
     Subcommand { name: "info", values: &[], bare: &["--compact"], run: |a, out, _| info(a, out) },
     Subcommand {
         name: "run",
-        values: &["--new", "--cmd", "--params", "--out", "--format", "--quality", "--tga-bits"],
+        values: &["--new", "--cmd", "--params", "--out", "--format", "--quality", "--tga-bits", "--dpx-bits"],
         bare: &["--tiff-layers"],
         run: run_cmds,
     },
     Subcommand {
         name: "batch",
-        values: &["--actions", "--action", "--in", "--out", "--format", "--quality", "--tga-bits"],
+        values: &["--actions", "--action", "--in", "--out", "--format", "--quality", "--tga-bits", "--dpx-bits"],
         bare: &["--in-place", "--tiff-layers"],
         run: batch,
     },
@@ -213,6 +215,10 @@ fn export_opts(a: &Args) -> Result<ExportOptions, String> {
     if let Some(b) = a.get("--tga-bits") {
         o.tga_bits = Some(b.parse().ok().and_then(photocraft_io::TgaBits::from_bits).ok_or_else(|| format!("bad --tga-bits `{b}`: expected 24 or 32"))?);
     }
+    if let Some(b) = a.get("--dpx-bits") {
+        o.encode.dpx_bits =
+            Some(b.parse().ok().and_then(photocraft_io::DpxBits::from_bits).ok_or_else(|| format!("bad --dpx-bits `{b}`: expected 8, 10, 12 or 16"))?);
+    }
     Ok(o)
 }
 
@@ -292,13 +298,14 @@ fn command_list(a: &Args) -> Result<Vec<(String, Value)>, String> {
 fn run_cmds(a: &Args, out: &mut dyn Write, err: &mut dyn Write) -> R {
     let opts = export_opts(a)?;
     let mut h = Headless::trusted_local();
-    // Each missing-font warning is printed once, wherever it is first detected (open, a command or
-    // the save).
+    // Opening, running commands and exporting can all notice the same missing font:
+    // one `run` invocation reports each warning line at most once.
     let mut reported_fonts = std::collections::HashSet::<String>::new();
     match (a.positional.as_slice(), a.get("--new")) {
         ([file], None) => {
             let o = h.open(Path::new(file)).map_err(|e| e.to_string())?;
             let ws: Vec<String> = serde_json::from_value(o["warnings"].clone()).unwrap_or_default();
+            reported_fonts.extend(ws.iter().cloned());
             warn_all(err, &ws);
             reported_fonts.extend(ws);
         }
@@ -344,9 +351,8 @@ fn run_cmds(a: &Args, out: &mut dyn Write, err: &mut dyn Write) -> R {
     warn_all(err, &remaining);
     if let Some(o) = a.get("--out") {
         let r = h.save(None, Some(Path::new(o)), a.get("--format"), &opts).map_err(|e| e.to_string())?;
-        // The save repeats the document's missing-font warnings; each was already reported above.
-        let ws: Vec<String> =
-            serde_json::from_value::<Vec<String>>(r["warnings"].clone()).unwrap_or_default().into_iter().filter(|w| !reported_fonts.contains(w)).collect();
+        let ws: Vec<String> = serde_json::from_value(r["warnings"].clone()).unwrap_or_default();
+        let ws: Vec<String> = ws.into_iter().filter(|w| reported_fonts.insert(w.clone())).collect();
         warn_all(err, &ws);
     }
     Ok(())
@@ -392,6 +398,38 @@ pub fn load_actions(text: &str, name: Option<&str>) -> Result<(Steps, Vec<Action
     Ok((play, set))
 }
 
+/// [`load_actions`] for a file on disk: a Photoshop Actions file (`.atn`, by extension or by
+/// its version word) is converted first; the played action's steps with no PhotoCraft
+/// equivalent come back as warnings (they fail at playback, as in Photoshop when a step can't run).
+pub fn load_actions_file(path: &str, name: Option<&str>) -> Result<(Steps, Vec<Action>, Vec<String>), String> {
+    let bytes = std::fs::read(path).map_err(|e| format!("{path}: {e}"))?;
+    let is_atn = Path::new(path).extension().is_some_and(|e| e.eq_ignore_ascii_case("atn")) || bytes.starts_with(&[0, 0, 0, 16]);
+    if !is_atn {
+        let text = String::from_utf8(bytes).map_err(|e| format!("{path}: {e}"))?;
+        let (steps, set) = load_actions(&text, name)?;
+        return Ok((steps, set, Vec::new()));
+    }
+    let imp = photocraft_engine::atn_cmds::import(&bytes).map_err(|e| format!("{path}: {e}"))?;
+    let names = || imp.actions.iter().map(|a| format!("`{}`", a.name)).collect::<Vec<_>>().join(", ");
+    let action = match (name, imp.actions.as_slice()) {
+        (Some(n), _) => {
+            imp.actions.iter().find(|a| a.name == n).ok_or_else(|| format!("no action named `{n}` in the set `{}` (it holds {})", imp.set, names()))?
+        }
+        (None, [only]) => only,
+        (None, []) => return Err(format!("{path}: the set holds no actions")),
+        (None, _) => return Err(format!("the set `{}` holds {} actions: pick one with --action <name> ({})", imp.set, imp.actions.len(), names())),
+    };
+    let warnings = imp
+        .unsupported
+        .iter()
+        .filter(|u| u.action == action.name)
+        .map(|u| format!("`{}` step {}: Photoshop's \"{}\" ({}) has no PhotoCraft equivalent yet", u.action, u.step + 1, u.name, u.event))
+        .chain(imp.warnings.iter().cloned())
+        .collect();
+    let play = vec![("actions.play".to_string(), json!({"action": action.name}))];
+    Ok((play, imp.actions, warnings))
+}
+
 /// Whether `a` and `b` name the same existing folder, however they are spelt (relative, with a
 /// trailing separator, through a symbolic link).
 fn same_dir(a: &Path, b: &Path) -> bool {
@@ -400,7 +438,7 @@ fn same_dir(a: &Path, b: &Path) -> bool {
 
 fn is_input(p: &Path) -> bool {
     let known = |e: &str| {
-        matches!(e, "pcraft" | "psd" | "psb" | "pdn" | "ora" | "af" | "afdesign" | "afphoto" | "afpub")
+        matches!(e, "pcraft" | "psd" | "psb" | "pdn" | "ora" | "kra" | "krz" | "af" | "afdesign" | "afphoto" | "afpub")
             || photocraft_codecs::from_extension(e).is_some_and(|f| photocraft_codecs::caps(f).read)
     };
     p.is_file() && p.extension().is_some_and(|e| known(&e.to_string_lossy().to_ascii_lowercase()))
@@ -410,8 +448,10 @@ fn batch(a: &Args, out: &mut dyn Write, err: &mut dyn Write) -> R {
     let actions_path = a.get("--actions").ok_or("batch needs --actions <file>")?;
     let in_dir = PathBuf::from(a.get("--in").ok_or("batch needs --in <dir>")?);
     let out_dir = PathBuf::from(a.get("--out").ok_or("batch needs --out <dir>")?);
-    let text = std::fs::read_to_string(actions_path).map_err(|e| format!("{actions_path}: {e}"))?;
-    let (actions, set) = load_actions(&text, a.get("--action"))?;
+    let (actions, set, warnings) = load_actions_file(actions_path, a.get("--action"))?;
+    for w in &warnings {
+        let _ = writeln!(err, "warning: {w}");
+    }
     let opts = export_opts(a)?;
     // Results are saved as `<out>/<stem>.<ext>`, so an `--out` that is the `--in` folder would
     // replace the originals (#492).
@@ -634,6 +674,11 @@ mod missing_font_warning_tests {
         let (code, _, stderr) = invoke(&["convert", &ora, &png]);
         assert_eq!(code, 0, "{stderr}");
         assert!(is_input(std::path::Path::new(&ora)));
+        // Krita documents are batch inputs too (import-only).
+        for name in ["sketch.kra", "old.KRZ"] {
+            std::fs::write(folder.join(name), b"").unwrap();
+            assert!(is_input(&folder.join(name)), "{name}");
+        }
         let _ = std::fs::remove_dir_all(&folder);
     }
 

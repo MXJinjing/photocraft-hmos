@@ -59,6 +59,8 @@ pub(crate) struct Ctx<'a> {
     pub filter_effects: Vec<photocraft_psd::filter_effects::FilterEffectsItem>,
     /// Placed layers naming the same source share editable contents, not their placement.
     pub smart_contents: std::collections::HashMap<String, SmartContentsId>,
+    /// Source sizes of `PlLd`-only placed layers, by source id (read once per embedded file).
+    pub plld_sizes: std::collections::HashMap<String, Option<(f64, f64)>>,
     /// Cancellation and progress for background opens (checked per layer record).
     pub ctl: photocraft_raster::Interrupt<'a>,
     /// Layer records decoded so far, out of `total` (progress).
@@ -105,9 +107,49 @@ fn soft_shape_fill(rec: &LayerRecord, has_vector: bool, fill_key: Option<&[u8; 4
     (soft || pattern).then_some((fill, soft))
 }
 
+/// Where a placed layer's source goes: read from `SoLd`/`SoLE`, or from a CS2 `PlLd` record.
+/// An empty `id` leaves the contents unavailable (the stored pixels stay the rendering).
+#[derive(Default)]
+struct Placement {
+    id: String,
+    transform: photocraft_geom::Affine,
+    perspective: Option<[f64; 9]>,
+    warp: Option<photocraft_geom::warp::Warp>,
+}
+
 impl Ctx<'_> {
     fn warn(&mut self, s: impl Into<String>) {
         self.warnings.push(s.into());
+    }
+
+    /// Source id, transform, (Distort/Perspective) projective placement and warp of a placed
+    /// layer that has only a `PlLd` block, as Photoshop CS2 and older write it (#2465). `PlLd`
+    /// stores the placed corners but not the source size, which comes from the embedded file.
+    fn plld_placement(&mut self, data: &[u8], name: &str) -> Placement {
+        let Some((id, p)) = blocks::parse_plld(data) else {
+            self.warn(format!("layer \"{name}\": its placed-layer data (PlLd) could not be read; the smart object's contents are unavailable"));
+            return Placement::default();
+        };
+        let warp = match blocks::parse_plld_warp(data) {
+            blocks::PlldWarp::None => None,
+            blocks::PlldWarp::Warp(w) => Some(w),
+            blocks::PlldWarp::Unreadable => {
+                // Re-rendering from the source would unwarp the layer: keep it as saved (its
+                // warped pixels), as before PlLd was read.
+                self.warn(format!(
+                    "layer \"{name}\": its smart object warp (PlLd) could not be read; the layer keeps its warped pixels but its contents are unavailable"
+                ));
+                return Placement::default();
+            }
+        };
+        let (file, ctl) = (self.file, self.ctl);
+        let size = *self
+            .plld_sizes
+            .entry(id.clone())
+            .or_insert_with(|| crate::linked::source_size_in_blocks(file.global_blocks.iter().map(|b| (&b.key, b.data.as_slice())), &id, &ctl));
+        // Without the source (missing or unreadable), it is taken as placed at 100 %.
+        let (transform, perspective) = blocks::plld_transform(&p, size, warp.as_ref());
+        Placement { id, transform, perspective, warp }
     }
 
     fn channel_plane(&mut self, rec: &LayerRecord, id: i16, name: &str) -> Option<Vec<u8>> {
@@ -121,6 +163,13 @@ impl Ctx<'_> {
         }
     }
 
+    /// [`Self::channel_plane`] without the warnings sink, so a layer's channels decode
+    /// concurrently (their RLE rows are the bulk of the open time on full-canvas layers).
+    fn channel_plane_decoded(&self, rec: &LayerRecord, id: i16) -> Option<Vec<u8>> {
+        rec.channel(id)?;
+        rec.decode_channel(id, self.file.header.depth, self.file.header.version).ok()
+    }
+
     fn record_surface(&mut self, rec: &LayerRecord, name: &str) -> Surface {
         let r = rec.rect;
         if r.is_empty() || r.size().is_err() {
@@ -128,15 +177,28 @@ impl Ctx<'_> {
         }
         let (w, h) = r.size().unwrap_or((0, 0));
         let s = self.fmt.sample;
-        let mut planes = Vec::with_capacity(self.cc + 1);
-        for c in 0..self.cc {
-            planes.push(self.channel_plane(rec, c as i16, name));
-        }
-        planes.push(self.channel_plane(rec, CHANNEL_TRANSPARENCY, name));
+        let ids: Vec<i16> = (0..self.cc as i16).chain([CHANNEL_TRANSPARENCY]).collect();
+        let planes: Vec<Option<Vec<u8>>> = if cfg!(target_arch = "wasm32") {
+            ids.iter().map(|&id| self.channel_plane(rec, id, name)).collect()
+        } else {
+            // The channels decode independently; their RLE rows are the bulk of the open
+            // time for full-canvas layers, so they run side by side and the warnings land
+            // in the same order afterwards.
+            // par_map reuses the crate's worker pool (one OS thread per channel per layer
+            // would spawn thousands on a file with many layers).
+            let decoded: Vec<Option<Vec<u8>>> = crate::pixels::par_map(ids.to_vec(), |id| self.channel_plane_decoded(rec, id));
+            let mut planes: Vec<Option<Vec<u8>>> = Vec::with_capacity(decoded.len());
+            for (&id, p) in ids.iter().zip(decoded) {
+                if p.is_none() && rec.channel(id).is_some() {
+                    self.warn(format!("layer \"{name}\": channel {id} could not be decoded; treated as empty"));
+                }
+                planes.push(p);
+            }
+            planes
+        };
         // A channel that is in the file but could not be decoded leaves the layer empty, as the
         // warning says. Filling in for it would paint an opaque black layer over the document.
-        let ids = (0..self.cc as i16).chain([CHANNEL_TRANSPARENCY]);
-        if ids.zip(&planes).any(|(id, p)| p.is_none() && rec.channel(id).is_some()) {
+        if ids.iter().zip(planes.iter()).any(|(&id, p)| p.is_none() && rec.channel(id).is_some()) {
             return Surface::new(self.fmt);
         }
         // Only decoded channel data justifies a buffer: the decoders bound their output by the
@@ -267,7 +329,8 @@ impl Ctx<'_> {
         let fill_key = [b"SoCo", b"GdFl", b"PtFl"].into_iter().find(|k| rec.block(k).is_some());
         let vector_key = [b"vsms", b"vmsk"].into_iter().find(|k| rec.block(k).is_some());
         let adj_key = ADJUSTMENT_KEYS.into_iter().find(|k| rec.block(k).is_some());
-        let smart_key = [b"SoLd", b"PlLd", b"SoLE"].into_iter().find(|k| rec.block(k).is_some());
+        // `SoLE` (a linked smart object) before `PlLd`: a `PlLd` alone is Photoshop CS2's record.
+        let smart_key = [b"SoLd", b"SoLE", b"PlLd"].into_iter().find(|k| rec.block(k).is_some());
         let blocks = preserved_blocks(rec);
         // `psd_raw` shares the Arc of the matching `psd_blocks` entry.
         let principal = |k: &[u8; 4]| blocks.iter().find(|(bk, _)| bk == k).map(|(_, d)| d.clone());
@@ -321,7 +384,16 @@ impl Ctx<'_> {
             t.psd_raw = principal(b"TySh");
             LayerContent::Text(t)
         } else if let Some(k) = smart_key {
-            let (id, transform) = rec.block(k).map(|b| blocks::parse_smart(k, &b.data)).unwrap_or_default();
+            let Placement { id, transform, perspective, warp } = match rec.block(k) {
+                Some(b) if k == b"PlLd" => self.plld_placement(&b.data, &name),
+                Some(b) => {
+                    let (id, transform) = blocks::parse_smart(k, &b.data);
+                    // Distort / Perspective: the fourth corner (the affine `transform` drops it).
+                    let perspective = blocks::parse_smart_perspective(k, &b.data);
+                    Placement { id, transform, perspective, warp: blocks::parse_placed_warp(k, &b.data) }
+                }
+                None => Placement::default(),
+            };
             let contents_id =
                 if id.is_empty() { SmartContentsId::fresh() } else { *self.smart_contents.entry(id.clone()).or_insert_with(SmartContentsId::fresh) };
             // Smart filters (`filterFX` in the placed-layer data) and their mask (`FEid`).
@@ -340,10 +412,9 @@ impl Ctx<'_> {
                 psd_raw: principal(k),
                 filters_enabled: stack.enabled,
                 filter_mask,
-                warp: rec.block(k).and_then(|b| blocks::parse_placed_warp(k, &b.data)),
+                warp,
                 stack_mode: None,
-                // Distort / Perspective: the fourth corner (the affine `transform` drops it).
-                perspective: rec.block(k).and_then(|b| blocks::parse_smart_perspective(k, &b.data)),
+                perspective,
             })
         } else if let Some((f, soft)) = soft_shape_fill(rec, vector_key.is_some(), fill_key) {
             // A shape whose vector mask has a density or feather is a fill layer seen through a
@@ -548,6 +619,35 @@ fn parse_guides(data: &[u8], doc: &mut Document) {
 }
 
 /// Converts a parsed PSD into a document. Never fails: problems become warnings.
+/// A flattened file's merged image as its layer: like Photoshop, an opaque one is the locked
+/// Background (Photoshop 27.11 opens psd-tools' flat Bitmap and Indexed files that way), so it is
+/// written back as one.
+fn flat_background(s: Surface) -> Layer {
+    let opaque = {
+        let r = s.content_bounds();
+        let n = s.channels();
+        !r.is_empty() && s.read_region(r).chunks_exact(n).all(|p| p.last().is_some_and(|a| *a >= 1.0))
+    };
+    let mut l = Layer::new("Background", LayerContent::Raster(s));
+    l.locks.transparency = opaque;
+    l.locks.position = opaque;
+    l
+}
+
+/// Photoshop opens a file's bottom layer as its Background when that layer's record has no
+/// transparency (`-1`) channel, whatever its name and lock flags say: it is then locked and shown
+/// as "Background" (measured on Photoshop 27.11 with files from psd-tools and ag-psd whose bottom
+/// layer is called "Фон", "bg" or "Layer 1" and carries no locks).
+fn mark_background(file: &PsdFile, layers: &mut [Layer]) {
+    let Some(rec) = file.layers().first() else { return };
+    let Some(bottom) = layers.first_mut() else { return };
+    let opaque_record = !rec.channels.is_empty() && rec.channels.iter().all(|c| c.id >= 0);
+    if opaque_record && matches!(bottom.content, LayerContent::Raster(_)) && !bottom.clipped {
+        bottom.locks.transparency = true;
+        bottom.locks.position = true;
+    }
+}
+
 pub fn psd_to_document(file: &PsdFile) -> (Document, Vec<String>) {
     // Never cancelled, so always `Some`; the fallback is unreachable.
     psd_to_document_with(file, &photocraft_raster::Interrupt::NONE)
@@ -573,8 +673,9 @@ pub fn psd_to_document_with(file: &PsdFile, ctl: &photocraft_raster::Interrupt) 
         match r.id {
             ids::RESOLUTION_INFO => {
                 if let Ok(ri) = photocraft_psd::ResolutionInfo::from_bytes(&r.data) {
-                    let ppi = |res: f64, unit: u16| if unit == 2 { res * 2.54 } else { res };
-                    let (x, y) = (ppi(ri.h_res(), ri.h_res_unit), ppi(ri.v_res(), ri.v_res_unit));
+                    // Fixed 16.16 hRes/vRes are pixels per inch. The unit shorts only
+                    // say how to show that number (1 = px/in, 2 = px/cm).
+                    let (x, y) = (ri.h_res(), ri.v_res());
                     doc.resolution_dpi = x as f32;
                     warnings.extend(crate::unequal_resolution_warning(x, y));
                 }
@@ -650,6 +751,7 @@ pub fn psd_to_document_with(file: &PsdFile, ctl: &photocraft_raster::Interrupt) 
         txt2: file.global_blocks.iter().find(|b| &b.key == b"Txt2").and_then(|b| photocraft_text::psd::parse_txt2(&b.data)),
         filter_effects: Vec::new(),
         smart_contents: Default::default(),
+        plld_sizes: Default::default(),
         ctl: *ctl,
         done: 0,
         total: file.layers().len(),
@@ -707,16 +809,10 @@ pub fn psd_to_document_with(file: &PsdFile, ctl: &photocraft_raster::Interrupt) 
         // its own profile, as the compositor and the PSD writer read them.
         let space = photocraft_compose::cmyk_space(&doc);
         doc.layers = photocraft_color::convert::with_cmyk_space(space.as_ref(), || cx.build(&tree, 0));
-        // Photoshop's Background: the bottom record, a transparency-protected pixel layer stored
-        // without a transparency channel (-1). It is also position-locked, whatever its
-        // (localized) name and whether or not the file carries an `lspf` block.
-        if let (Some(rec), Some(bottom)) = (file.layers().first(), doc.layers.first_mut())
-            && rec.flags.transparency_protected()
-            && !rec.channels.iter().any(|c| c.id == -1)
-            && matches!(bottom.content, LayerContent::Raster(_))
-        {
-            bottom.locks.position = true;
-        }
+        // Photoshop's Background: the bottom record stored without a transparency channel (-1),
+        // locked whatever its (localized) name and whether or not the file carries an `lspf`
+        // block. Its name is kept.
+        mark_background(file, &mut doc.layers);
         // Layer › Link Layers: resource 1026 holds one group id per layer record (0 = unlinked).
         if let Some(Ok(photocraft_psd::resources::ResourceData::LayerGroupInfo(groups))) =
             file.resources.iter().find(|r| r.id == ids::LAYER_GROUP_INFO).and_then(photocraft_psd::resources::ImageResource::parsed)
@@ -813,7 +909,7 @@ pub fn psd_to_document_with(file: &PsdFile, ctl: &photocraft_raster::Interrupt) 
                 .collect();
             s.write_region(canvas, &vals);
             s.prune();
-            doc.layers.push(Layer::new("Background", LayerContent::Raster(s)));
+            doc.layers.push(flat_background(s));
         }
     }
 

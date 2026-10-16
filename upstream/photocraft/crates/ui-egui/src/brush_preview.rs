@@ -353,7 +353,7 @@ mod tests {
         let s = tip_alpha(&TipShape::Sampled(bar), 1.0, 0.0, 1.0, (false, false), n);
         assert!(at(&s, 3, 16) > 0.9 && at(&s, 16, 2) < 0.01);
         // Degenerate input never panics.
-        let empty = paint::GrayTile { width: 0, height: 0, data: vec![] };
+        let empty = paint::GrayTile { width: 0, height: 0, data: vec![].into() };
         assert!(tip_alpha(&TipShape::Sampled(empty), 1.0, 0.0, 0.0, (true, true), 0).iter().all(|v| *v == 0.0));
     }
 }

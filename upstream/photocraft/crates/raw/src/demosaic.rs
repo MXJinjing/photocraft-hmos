@@ -187,14 +187,14 @@ fn kernels(phase: [u8; 4], method: Demosaic, stride: usize) -> [[Vec<(isize, f32
 }
 
 /// Demosaics a padded CFA plane into interleaved RGB (`w × h × 3`).
-pub(crate) fn demosaic(p: &Padded, phase: [u8; 4], method: Demosaic, to_xyz: &Mat3) -> Vec<f32> {
+pub(crate) fn demosaic(p: &Padded, phase: [u8; 4], method: Demosaic, to_xyz: &Mat3, ahd_jobs: usize) -> Vec<f32> {
     let (w, h, s) = (p.w, p.h, p.stride);
     let mut out = vec![0.0f32; w * h * 3];
     if w == 0 || h == 0 || p.data.len() < s * (h + 2 * PAD) {
         return out;
     }
     if method == Demosaic::Ahd {
-        ahd(p, phase, to_xyz, &mut out);
+        ahd(p, phase, to_xyz, &mut out, ahd_jobs);
         return out;
     }
     let ks = kernels(phase, method, s);
@@ -460,7 +460,19 @@ const AHD_BAND: usize = 32;
 /// Extra band rows above and below the output rows.
 const M: usize = 3;
 
-fn ahd(p: &Padded, phase: [u8; 4], to_xyz: &Mat3, out: &mut [f32]) {
+/// Maximum scratch allocation of one AHD band: two green, RGB and Lab float
+/// planes and two byte homogeneity planes, including their border rows.
+pub(crate) fn ahd_scratch(w: u64, h: u64) -> u64 {
+    w.saturating_add(2 * PAD as u64).saturating_mul(h.min(AHD_BAND as u64).saturating_add(2 * M as u64)).saturating_mul(58)
+}
+
+pub(crate) fn ahd_bands(h: usize) -> usize {
+    h.div_ceil(AHD_BAND)
+}
+
+pub(crate) const AHD_TABLE_BYTES: u64 = (LABF_STEPS as u64 + 2) * 4;
+
+fn ahd(p: &Padded, phase: [u8; 4], to_xyz: &Mat3, out: &mut [f32], jobs: usize) {
     let (w, s) = (p.w, p.stride);
     let d = &p.data;
     // Colour at padded coordinates (PAD is even, so the phase is unchanged).
@@ -468,7 +480,7 @@ fn ahd(p: &Padded, phase: [u8; 4], to_xyz: &Mat3, out: &mut [f32]) {
     let white = [0.9642f32, 1.0, 0.8249];
     let m: [[f32; 3]; 3] = std::array::from_fn(|i| std::array::from_fn(|j| to_xyz[i][j] as f32 / white[i]));
     let labf = LabF::new();
-    par::chunks_mut(out, AHD_BAND * w * 3, |band, chunk| {
+    par::chunks_mut_limited(out, AHD_BAND * w * 3, jobs, |band, chunk| {
         let rows = chunk.len() / (w * 3);
         let n = rows + 2 * M;
         // Band row b ↔ padded row py(b); padded columns are used as is.
@@ -577,13 +589,24 @@ mod tests {
     use super::*;
     use crate::color::IDENTITY;
 
+    #[test]
+    fn ahd_band_concurrency_does_not_change_pixels() {
+        let (w, h) = (53, 103);
+        let cfa: Vec<f32> = (0..w * h).map(|i| ((i * 97 + i / w * 31) % 1009) as f32 / 1009.0).collect();
+        let p = Padded::from_plane(&cfa, w, h);
+        let one = demosaic(&p, [0, 1, 1, 2], Demosaic::Ahd, &IDENTITY, 1);
+        for jobs in [2, 3, 4, 128] {
+            assert_eq!(one, demosaic(&p, [0, 1, 1, 2], Demosaic::Ahd, &IDENTITY, jobs));
+        }
+    }
+
     /// Mosaics an RGB image with the given phase.
     fn mosaic(rgb: &[[f32; 3]], w: usize, h: usize, phase: [u8; 4]) -> Vec<f32> {
         (0..w * h).map(|i| rgb[i][phase[((i / w) & 1) * 2 + ((i % w) & 1)] as usize]).collect()
     }
 
     fn run(cfa: &[f32], w: usize, h: usize, phase: [u8; 4], m: Demosaic) -> Vec<f32> {
-        demosaic(&Padded::from_plane(cfa, w, h), phase, m, &IDENTITY)
+        demosaic(&Padded::from_plane(cfa, w, h), phase, m, &IDENTITY, par::workers())
     }
 
     fn psnr(a: &[f32], b: &[[f32; 3]], w: usize, h: usize, border: usize) -> f64 {
@@ -671,7 +694,7 @@ mod tests {
         let cfa: Vec<f32> = (0..w * h).map(|i| ((i * 7919) % 1000) as f32 / 1000.0).collect();
         for phase in [[0, 1, 1, 2], [1, 2, 0, 1]] {
             let p = Padded::from_plane(&cfa, w, h);
-            let fast = demosaic(&p, phase, Demosaic::Bilinear, &IDENTITY);
+            let fast = demosaic(&p, phase, Demosaic::Bilinear, &IDENTITY, par::workers());
             let ks = kernels(phase, Demosaic::Bilinear, p.stride);
             for y in 0..h {
                 for x in 0..w {

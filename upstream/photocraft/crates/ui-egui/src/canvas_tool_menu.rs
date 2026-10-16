@@ -31,6 +31,10 @@ pub struct CanvasToolMenu {
     /// Opened while a Type tool edits text: the text and type rows instead of the tool's actions.
     #[serde(default)]
     pub text: bool,
+    /// The misspelled word under the pointer when the type edit menu opened: its suggestions head
+    /// the menu.
+    #[serde(default)]
+    pub spelling: Option<Spelling>,
 }
 
 /// An open context menu owns the contact through its release, even if it closes on press.
@@ -53,6 +57,24 @@ pub fn canvas_input_blocked(app: &PhotocraftApp, ctx: &Context) -> bool {
         blocked
     })
 }
+
+/// A misspelled word in the type layer being edited (`edit.checkSpelling`'s `list` entry).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Spelling {
+    pub layer: u64,
+    /// The word's characters `start..end` in the layer's text.
+    pub start: usize,
+    pub end: usize,
+    pub word: String,
+    pub suggestions: Vec<String>,
+}
+
+/// Most suggestions the type edit menu lists.
+const MAX_SUGGESTIONS: usize = 3;
+/// The spelling rows' ids: `spelling.replace.<n>` picks the n-th suggestion.
+const SPELLING_REPLACE: &str = "spelling.replace.";
+const SPELLING_NONE: &str = "spelling.none";
+const SPELLING_ADD: &str = "spelling.add";
 
 /// One menu row: label and command id. `None` is a separator.
 pub type Row = Option<(&'static str, &'static str)>;
@@ -304,12 +326,12 @@ pub fn rows(menu: &CanvasToolMenu) -> &'static [Row] {
 
 /// Is `command` one of the open menu's rows, and enabled?
 pub fn available(app: &PhotocraftApp, menu: &CanvasToolMenu, command: &str) -> bool {
-    rows(menu).iter().flatten().any(|(_, id)| *id == command) && entry_enabled(app, menu, command)
+    (rows(menu).iter().flatten().any(|(_, id)| *id == command) || is_spelling(menu, command)) && entry_enabled(app, menu, command)
 }
 
 /// Is `command` the transform box's current mode (checked in the transform menu)?
-/// Scale and Rotate are Free Transform's mode, so only Free Transform shows it checked. Warp is
-/// not a box mode (it is its own session), and `for_command` would read it as Free.
+/// Scale stays Free Transform's mode (only Free Transform is checked). Rotate is its own mode.
+/// Warp is not a box mode (it is its own session), and `for_command` would read it as Free.
 pub(crate) fn mode_checked(app: &PhotocraftApp, menu: &CanvasToolMenu, command: &str) -> bool {
     if menu.pasteboard {
         return pasteboard_choice(command) == Some(app.session.prefs().interface.canvas_color);
@@ -318,7 +340,7 @@ pub(crate) fn mode_checked(app: &PhotocraftApp, menu: &CanvasToolMenu, command: 
         return type_checked(app, command);
     }
     menu.transform
-        && matches!(command, "edit.freeTransform" | "edit.transform.skew" | "edit.transform.distort" | "edit.transform.perspective")
+        && matches!(command, "edit.freeTransform" | "edit.transform.rotate" | "edit.transform.skew" | "edit.transform.distort" | "edit.transform.perspective")
         && app.ui.transform.as_ref().is_some_and(|t| t.mode == crate::state::TransformMode::for_command(command))
 }
 
@@ -340,6 +362,49 @@ pub fn editing_text(app: &PhotocraftApp, tool: Tool) -> bool {
     tool.is_type() && app.ui.text_edit.is_some()
 }
 
+/// The misspelled word of the edited text under document point `doc`, with its suggestions.
+fn spelling_at(app: &mut PhotocraftApp, doc: [f64; 2]) -> Option<Spelling> {
+    let layer = app.ui.text_edit.as_ref()?.layer;
+    if !doc.iter().all(|v| v.is_finite()) {
+        return None;
+    }
+    let at = crate::type_tool::offset_at(app, photocraft_doc::LayerId(layer), doc[0], doc[1]);
+    let found = app.session.execute("edit.checkSpelling", json!({"action": "list", "layer": layer, "suggestions": MAX_SUGGESTIONS})).ok()?;
+    let hit = found["misspellings"].as_array()?.iter().find(|m| {
+        let (a, b) = (m["start"].as_u64().unwrap_or(u64::MAX) as usize, m["end"].as_u64().unwrap_or(0) as usize);
+        a <= at && at <= b
+    })?;
+    Some(Spelling {
+        layer,
+        start: hit["start"].as_u64()? as usize,
+        end: hit["end"].as_u64()? as usize,
+        word: hit["word"].as_str()?.to_string(),
+        suggestions: hit["suggestions"].as_array()?.iter().filter_map(|s| s.as_str().map(str::to_string)).take(MAX_SUGGESTIONS).collect(),
+    })
+}
+
+/// The spelling rows heading the type edit menu (label, id): the suggestions, or a greyed note
+/// when there are none, then Add to Dictionary. Empty away from a misspelled word.
+pub fn spelling_rows(menu: &CanvasToolMenu) -> Vec<(String, String)> {
+    let Some(sp) = menu.spelling.as_ref().filter(|_| menu.text) else { return Vec::new() };
+    let mut rows: Vec<(String, String)> = sp.suggestions.iter().enumerate().map(|(i, s)| (s.clone(), format!("{SPELLING_REPLACE}{i}"))).collect();
+    if rows.is_empty() {
+        rows.push(("No Spelling Suggestions".into(), SPELLING_NONE.into()));
+    }
+    rows.push(("Add to Dictionary".into(), SPELLING_ADD.into()));
+    rows
+}
+
+/// Is `command` one of the menu's spelling rows?
+fn is_spelling(menu: &CanvasToolMenu, command: &str) -> bool {
+    spelling_rows(menu).iter().any(|(_, id)| id == command)
+}
+
+/// Does a spelling row's label come from the UI (translated) rather than from the dictionary?
+pub fn spelling_label_is_ui(id: &str) -> bool {
+    matches!(id, SPELLING_NONE | SPELLING_ADD)
+}
+
 /// Right-click over a Free Transform box: its modes.
 pub fn open_transform(app: &mut PhotocraftApp, ctx: &Context, pos: [f32; 2]) -> bool {
     if !pos.iter().all(|v| v.is_finite()) {
@@ -357,6 +422,7 @@ pub fn open_transform(app: &mut PhotocraftApp, ctx: &Context, pos: [f32; 2]) -> 
         pasteboard: false,
         anchor: None,
         text: false,
+        spelling: None,
     });
     crate::canvas_popup::mark_open(ctx, menu_id());
     true
@@ -375,7 +441,21 @@ pub fn engine_call(menu: &CanvasToolMenu, command: &str) -> (String, Value) {
         Some(c) if menu.pasteboard => ("prefs.set".into(), json!({"values": {"interface.canvasColor": c.name()}})),
         _ if menu.pasteboard => ("prefs.set".into(), json!({})),
         _ if menu.text && matches!(command, FAUX_BOLD | FAUX_ITALIC) => ("type.setStyle".into(), json!({})),
+        _ if is_spelling(menu, command) => spelling_call(menu, command),
         _ => (command.into(), json!({})),
+    }
+}
+
+/// The `edit.checkSpelling` call a spelling row makes: replace the word with a suggestion, or add
+/// it to the user dictionary.
+fn spelling_call(menu: &CanvasToolMenu, command: &str) -> (String, Value) {
+    let Some(sp) = menu.spelling.as_ref() else { return ("edit.checkSpelling".into(), json!({})) };
+    let replace = command.strip_prefix(SPELLING_REPLACE).and_then(|n| n.parse::<usize>().ok()).and_then(|n| sp.suggestions.get(n));
+    match replace {
+        Some(to) => {
+            ("edit.checkSpelling".into(), json!({"action": "change", "layer": sp.layer, "start": sp.start, "end": sp.end, "word": sp.word, "replace": to}))
+        }
+        None => ("edit.checkSpelling".into(), json!({"action": "addToDictionary", "word": sp.word})),
     }
 }
 
@@ -406,6 +486,7 @@ pub fn open_pasteboard(app: &mut PhotocraftApp, ctx: &Context, tool: Tool, pos: 
         pasteboard: true,
         anchor: None,
         text: false,
+        spelling: None,
     });
     crate::canvas_popup::mark_open(ctx, menu_id());
     true
@@ -435,6 +516,8 @@ pub fn entry_enabled(app: &PhotocraftApp, menu: &CanvasToolMenu, command: &str) 
     }
     if menu.text {
         return match command {
+            SPELLING_NONE => false,
+            c if is_spelling(menu, c) => app.ui.text_edit.is_some(),
             FAUX_BOLD | FAUX_ITALIC => app.ui.text_edit.is_some(),
             c => TYPE_EDIT_MENU.iter().flatten().any(|(_, id)| *id == c) && crate::menus::is_enabled(app, c),
         };
@@ -478,6 +561,12 @@ pub fn entry_enabled(app: &PhotocraftApp, menu: &CanvasToolMenu, command: &str) 
 }
 
 pub fn open(app: &mut PhotocraftApp, ctx: &Context, tool: Tool, pos: [f32; 2]) -> bool {
+    open_at(app, ctx, tool, pos, None)
+}
+
+/// [`open`] for a right-click at document point `doc`: over a misspelled word of the text being
+/// edited, the menu starts with its spelling suggestions.
+pub fn open_at(app: &mut PhotocraftApp, ctx: &Context, tool: Tool, pos: [f32; 2], doc: Option<[f64; 2]>) -> bool {
     let text = editing_text(app, tool);
     if !(applies(tool) || text) || !pos.iter().all(|v| v.is_finite()) {
         return false;
@@ -487,7 +576,9 @@ pub fn open(app: &mut PhotocraftApp, ctx: &Context, tool: Tool, pos: [f32; 2]) -
     let has_selection = app.session.active().is_some_and(|s| s.doc.selection.is_some());
     let has_path = crate::vector_ui::active_path_name(app).is_some() || app.ui.pen.as_ref().is_some_and(|p| p.knots.len() >= 2);
     let path_name = crate::vector_ui::active_path_name(app);
-    app.ui.canvas_tool_menu = Some(CanvasToolMenu { pos, tool, has_selection, has_path, path_name, transform: false, pasteboard: false, anchor: None, text });
+    let spelling = if text { doc.and_then(|d| spelling_at(app, d)) } else { None };
+    app.ui.canvas_tool_menu =
+        Some(CanvasToolMenu { pos, tool, has_selection, has_path, path_name, transform: false, pasteboard: false, anchor: None, text, spelling });
     crate::canvas_popup::mark_open(ctx, menu_id());
     true
 }
@@ -510,6 +601,7 @@ pub fn open_view(app: &mut PhotocraftApp, ctx: &Context, tool: Tool, pos: [f32; 
         pasteboard: false,
         anchor: Some(doc),
         text: false,
+        spelling: None,
     });
     crate::canvas_popup::mark_open(ctx, menu_id());
     true
@@ -550,6 +642,8 @@ pub fn choose(app: &mut PhotocraftApp, ctx: &Context, command: &str) {
         choose_pasteboard(app, &menu, command)
     } else if menu.anchor.is_some() {
         choose_view(app, ctx, &menu, command)
+    } else if menu.text && is_spelling(&menu, command) {
+        choose_spelling(app, &menu, command)
     } else if menu.text {
         choose_type(app, ctx, command)
     } else if menu.tool == Tool::Pen && !menu.transform {
@@ -565,6 +659,19 @@ pub fn choose(app: &mut PhotocraftApp, ctx: &Context, command: &str) {
         app.ui.status = e;
         app.ui.status_error = true;
     }
+}
+
+/// A spelling row: replace the word under the pointer (the caret lands after the replacement), or
+/// add it to the user dictionary.
+fn choose_spelling(app: &mut PhotocraftApp, menu: &CanvasToolMenu, command: &str) -> Result<(), String> {
+    let (id, params) = engine_call(menu, command);
+    let result = app.run(&id, params)?;
+    if let Some(end) = result["end"].as_u64().map(|e| e as usize)
+        && let Some(e) = app.ui.text_edit.as_mut()
+    {
+        (e.caret, e.anchor) = (end, end);
+    }
+    Ok(())
 }
 
 /// A type edit row. Undo, Cut, Copy, Paste and Select All run as their Edit and Select menu items,
@@ -696,6 +803,17 @@ pub fn show(app: &mut PhotocraftApp, ctx: &Context) {
             ui.spacing_mut().item_spacing.y = 0.0;
             ui.set_width(200.0);
             crate::widgets::menu_scroll(ui, |ui| {
+                let spelling = spelling_rows(&menu);
+                for (label, command) in &spelling {
+                    let text = if spelling_label_is_ui(command) { tl!(label).to_string() } else { label.clone() };
+                    let item = egui::Button::new(text).min_size(egui::vec2(200.0, 20.0));
+                    if ui.add_enabled(entry_enabled(app, &menu, command), item).clicked() {
+                        selected = Some(command.clone());
+                    }
+                }
+                if !spelling.is_empty() {
+                    ui.separator();
+                }
                 for row in rows(&menu) {
                     let Some((label, command)) = *row else {
                         ui.separator();
@@ -703,14 +821,14 @@ pub fn show(app: &mut PhotocraftApp, ctx: &Context) {
                     };
                     let item = egui::Button::selectable(mode_checked(app, &menu, command), tl!(label)).min_size(egui::vec2(200.0, 20.0));
                     if ui.add_enabled(entry_enabled(app, &menu, command), item).clicked() {
-                        selected = Some(command);
+                        selected = Some((*command).to_string());
                     }
                 }
             });
         });
     });
     if let Some(command) = selected {
-        choose(app, ctx, command);
+        choose(app, ctx, &command);
     } else if crate::canvas_popup::outside_pressed(ctx, id, area.response.rect) {
         app.ui.canvas_tool_menu = None;
     }
@@ -875,6 +993,37 @@ mod tests {
         reopen(&mut app);
         choose(&mut app, &ctx, "type.rasterizeTypeLayer");
         assert!(app.ui.text_edit.is_none() && text_of(&app, id).is_none(), "the type layer is pixels now");
+    }
+
+    #[test]
+    fn type_edit_menu_lists_spelling_suggestions_for_the_word_under_the_pointer() {
+        let mut app = app();
+        app.ui.tool = Tool::Type;
+        let id = app.run("type.create", json!({"text": "Teh cat", "size": 12, "x": 4, "y": 20})).unwrap()["layer"].as_u64().unwrap();
+        let ctx = Context::default();
+        crate::menus::invoke(&mut app, &ctx, "type.editText", json!({})).unwrap();
+        // Away from the misspelling (past the end of the line): no spelling rows.
+        assert!(open_at(&mut app, &ctx, Tool::Type, [10.0, 10.0], Some([600.0, 15.0])));
+        assert!(spelling_rows(app.ui.canvas_tool_menu.as_ref().unwrap()).is_empty());
+        // Over "Teh": its suggestions head the menu, then Add to Dictionary.
+        assert!(open_at(&mut app, &ctx, Tool::Type, [10.0, 10.0], Some([5.0, 15.0])));
+        let menu = app.ui.canvas_tool_menu.clone().unwrap();
+        let rows = spelling_rows(&menu);
+        assert!(rows.iter().any(|(l, _)| l == "The"), "{rows:?}");
+        assert_eq!(rows.last().map(|(_, id)| id.as_str()), Some(SPELLING_ADD));
+        assert!(rows.len() <= MAX_SUGGESTIONS + 1, "at most {MAX_SUGGESTIONS} suggestions and Add to Dictionary: {rows:?}");
+        assert!(available(&app, &menu, &rows[0].1));
+        let pick = rows.iter().find(|(l, _)| l == "The").unwrap().1.clone();
+        choose(&mut app, &ctx, &pick);
+        assert_eq!(text_of(&app, id).unwrap().text, "The cat");
+        assert_eq!(app.ui.text_edit.as_ref().map(|e| (e.caret, e.anchor)), Some((3, 3)), "the caret lands after the replacement");
+        // Add to Dictionary stops flagging a word.
+        app.run("type.insertText", json!({"layer": id, "text": " Zqx"})).unwrap();
+        assert!(open_at(&mut app, &ctx, Tool::Type, [10.0, 10.0], Some([600.0, 15.0])));
+        let menu = app.ui.canvas_tool_menu.clone().unwrap();
+        assert!(menu.spelling.as_ref().is_some_and(|s| s.word == "Zqx"));
+        choose(&mut app, &ctx, SPELLING_ADD);
+        assert!(app.session.prefs().user_dictionary.iter().any(|w| w == "Zqx"));
     }
 
     #[test]
@@ -1345,6 +1494,9 @@ mod tests {
         choose_open(&mut app, "layer.vectorMask.fromPath");
         let st = app.session.active().unwrap();
         assert!(st.active_layer.and_then(|id| st.doc.layer(id)).is_some_and(|l| l.vector_mask.is_some()));
+        // The new vector mask's path becomes the active one (#4728); pick the Work Path again.
+        assert_eq!(app.ui.selected_path.as_deref(), Some("layer"));
+        app.ui.selected_path = Some("work".into());
         choose_open(&mut app, "edit.defineCustomShape");
         let id = app.ui.dialogs.last().map(|d| d.id).unwrap();
         let fields = &app.ui.dialogs.last().unwrap().fields;

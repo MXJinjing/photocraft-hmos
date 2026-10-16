@@ -59,7 +59,7 @@ id = "UI-217-8"
 target = "Tool-specific canvas right-click menu; right-click spelling suggestions in text fields"
 status = "partial"
 issue = 217
-note = "paint_mouse.rs brush picker and canvas_tool_menu.rs selection actions; text_field_menu.rs gives every text field its right-click Undo/Cut/Copy/Paste/Delete/Select All menu (#2921); other tools missing; spelling suggestions (edit.checkSpelling suggest) not in the text-field menu yet"
+note = "paint_mouse.rs brush picker and canvas_tool_menu.rs selection actions; text_field_menu.rs gives every text field its right-click Undo/Cut/Copy/Paste/Delete/Select All menu (#2921); other tools missing; the Type tool's edit menu starts with spelling suggestions and Add to Dictionary over a misspelled word (#4370); Ignore / Ignore All, suggestions in the non-editing type menu and in generic text fields are not there yet"
 
 [[item]]
 id = "UI-217-9"
@@ -78,9 +78,9 @@ note = "interface.enableAnimations (prefs_ui.rs sync_animations, #3273) zeroes e
 [[item]]
 id = "UI-217-11"
 target = "Soft dark and soft light themes with picker previews; outlined knobs in light themes"
-status = "missing"
+status = "partial"
 issue = 217
-note = "theme.rs ThemeKind has twelve themes (the four Pro brightness levels, Studio and Studio Light, Classic, Adwaita and Adwaita Dark, Solarized Dark, Breeze Light and Breeze Dark); no Soft dark or Soft light, and no outlined knobs in the light themes"
+note = "theme.rs ThemeKind has fourteen themes: the twelve earlier ones plus Soft Dark and Soft Light (low-contrast Studio-layout palettes, text at 4.5:1, selectable in Preferences with the existing theme-card previews, ui.set {theme}, Window > Theme); outlined knobs in the light themes are still missing"
 
 [[item]]
 id = "UI-217-12"

@@ -118,21 +118,85 @@ fn marquee_shift_and_empty_clicks_select_like_photoshop() {
 }
 
 #[test]
-fn pen_with_command_edits_paths_and_ends_the_one_being_drawn() {
+fn pen_with_command_ends_the_path_being_drawn_when_pressed_off_it() {
     let mut app = app(Tool::Pen);
     for p in [[30.0, 30.0], [90.0, 30.0]] {
         click(&mut app, p, Modifiers::NONE);
     }
     assert_eq!(app.ui.pen.as_ref().map(|p| p.knots.len()), Some(2));
-    // ⌘-drag (Ctrl-drag off the Mac) on the second anchor: the path is finished and edited.
-    drag(&mut app, [90.0, 30.0], [90.0, 70.0], Modifiers::COMMAND);
+    // ⌘-click (Ctrl-click off the Mac) on empty canvas: the path is finished, open.
+    click(&mut app, [170.0, 170.0], Modifiers::COMMAND);
     assert!(app.ui.pen.is_none());
     assert_eq!(app.ui.tool, Tool::Pen, "the Pen stays the tool");
-    let wp = work(&app);
-    assert_eq!((wp.subpaths[0].closed, wp.subpaths[0].knots[1].anchor), (false, Point::new(90.0, 70.0)));
+    assert!(!work(&app).subpaths[0].closed);
+    // ⌘-drag then edits the finished path.
+    drag(&mut app, [90.0, 30.0], [90.0, 70.0], Modifiers::COMMAND);
+    assert_eq!(anchor(&app, 1), Point::new(90.0, 70.0));
     // Without ⌘ the Pen draws again.
     click(&mut app, [150.0, 150.0], Modifiers::NONE);
     assert_eq!(app.ui.pen.as_ref().map(|p| p.knots.len()), Some(1));
+}
+
+/// #4022: ⌘/Ctrl-dragging an anchor of the path being drawn moves it in place; the path stays
+/// unfinished, outside the document and its history, and the Pen carries on from its last anchor.
+#[test]
+fn pen_with_command_edits_the_path_being_drawn_in_place() {
+    let mut app = app(Tool::Pen);
+    for p in [[30.0, 30.0], [90.0, 30.0]] {
+        click(&mut app, p, Modifiers::NONE);
+    }
+    let before = steps(&app);
+    drag(&mut app, [90.0, 30.0], [90.0, 70.0], Modifiers::COMMAND);
+    let pen = app.ui.pen.clone().expect("still drawing");
+    assert_eq!(pen.knots.len(), 2);
+    assert_eq!(pen.knots[1][0], [90.0, 70.0], "the anchor moved");
+    assert_eq!(pen.knots[0][0], [30.0, 30.0]);
+    assert!(app.session.active().unwrap().doc.work_path.is_none(), "not committed");
+    assert_eq!(steps(&app), before, "no history step until the path is finished");
+    // Let go of ⌘: the next click adds an anchor after the moved one.
+    click(&mut app, [150.0, 150.0], Modifiers::NONE);
+    assert_eq!(app.ui.pen.as_ref().map(|p| p.knots.len()), Some(3));
+    crate::vector_ui::pen_commit(&mut app, false);
+    let wp = work(&app);
+    assert_eq!(wp.subpaths[0].knots.len(), 3);
+    assert_eq!(wp.subpaths[0].knots[1].anchor, Point::new(90.0, 70.0));
+    assert_eq!(app.ui.direct_selection.target, None, "the Pen selection is gone with the Pen path");
+}
+
+/// ⌘/Ctrl-click selects an anchor of the path being drawn, showing its handles; ⌘-dragging one
+/// turns it and the other follows (a smooth point), still without committing.
+#[test]
+fn pen_with_command_turns_a_handle_of_the_path_being_drawn() {
+    let mut app = app(Tool::Pen);
+    click(&mut app, [30.0, 30.0], Modifiers::NONE);
+    drag(&mut app, [90.0, 30.0], [110.0, 30.0], Modifiers::NONE);
+    assert_eq!(app.ui.pen.as_ref().unwrap().knots[1], [[90.0, 30.0], [70.0, 30.0], [110.0, 30.0]]);
+    click(&mut app, [90.0, 30.0], Modifiers::COMMAND);
+    assert_eq!(app.ui.direct_selection.target, Some(PathRef::Pen));
+    assert_eq!(app.ui.direct_selection.anchors, vec![[0, 1]]);
+    drag(&mut app, [110.0, 30.0], [110.0, 50.0], Modifiers::COMMAND);
+    let k = app.ui.pen.as_ref().expect("still drawing").knots[1];
+    assert_eq!(k[2], [110.0, 50.0], "the outgoing handle turned");
+    let (o, i) = ([k[2][0] - k[0][0], k[2][1] - k[0][1]], [k[1][0] - k[0][0], k[1][1] - k[0][1]]);
+    assert!((o[0] * i[1] - o[1] * i[0]).abs() < 1e-6 && o[0] * i[0] + o[1] * i[1] < 0.0, "the incoming handle stays opposite: {k:?}");
+    assert!(app.session.active().unwrap().doc.work_path.is_none());
+}
+
+/// The Curvature Pen too: ⌘/Ctrl-dragging an anchor of its path in progress moves it, and the
+/// curve through the anchors follows.
+#[test]
+fn curvature_pen_with_command_moves_an_anchor_of_the_path_being_drawn() {
+    let mut app = app(Tool::CurvaturePen);
+    for p in [[30.0, 30.0], [90.0, 30.0], [150.0, 60.0]] {
+        click(&mut app, p, Modifiers::NONE);
+    }
+    let before = app.ui.pen.clone().unwrap();
+    drag(&mut app, [90.0, 30.0], [90.0, 10.0], Modifiers::COMMAND);
+    let pen = app.ui.pen.clone().expect("still drawing");
+    assert!(pen.curvature && pen.knots.len() == 3);
+    assert_eq!(pen.knots[1][0], [90.0, 10.0]);
+    assert_ne!(pen.knots[1][1], before.knots[1][1], "the handles follow the moved anchor");
+    assert!(app.session.active().unwrap().doc.work_path.is_none());
 }
 
 #[test]
@@ -224,4 +288,40 @@ fn the_convert_point_tool_shows_the_path_overlay() {
     app.ui.tool = Tool::Pen;
     assert!(!super::shows(&app, Modifiers::NONE));
     assert!(super::shows(&app, Modifiers::COMMAND));
+}
+
+/// One key press through the canvas arrow keys, as egui delivers it.
+fn press(app: &mut PhotocraftApp, key: egui::Key, mods: Modifiers) -> bool {
+    let ctx = egui::Context::default();
+    ctx.input_mut(|i| {
+        i.modifiers = mods;
+        i.events.push(egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers: mods });
+    });
+    crate::move_mods::arrow_keys(app, &ctx)
+}
+
+/// #4486: the arrow keys nudge the selected anchors 1 px (⇧ 10 px), one history step per press,
+/// as in Photoshop. With no anchor selected they leave the path alone.
+#[test]
+fn arrow_keys_nudge_the_selected_anchors() {
+    let mut app = app(Tool::DirectSelection);
+    with_path(&mut app);
+    // The path stays targeted after a click on empty canvas, but no anchor is selected.
+    click(&mut app, [40.0, 120.0], Modifiers::NONE);
+    click(&mut app, [80.0, 80.0], Modifiers::NONE);
+    assert_eq!(app.ui.direct_selection.target, Some(PathRef::Work));
+    let n = steps(&app);
+    assert!(!press(&mut app, egui::Key::ArrowRight, Modifiers::NONE), "no anchor selected: not Direct Selection's key");
+    assert_eq!(steps(&app), n);
+    click(&mut app, [40.0, 120.0], Modifiers::NONE);
+    click(&mut app, [120.0, 120.0], Modifiers::SHIFT);
+    let (before, n) = (work(&app), steps(&app));
+    assert!(press(&mut app, egui::Key::ArrowRight, Modifiers::NONE));
+    assert_eq!((anchor(&app, 2), anchor(&app, 3)), (Point::new(121.0, 120.0), Point::new(41.0, 120.0)));
+    assert!(press(&mut app, egui::Key::ArrowDown, Modifiers::SHIFT));
+    assert_eq!((anchor(&app, 2), anchor(&app, 3)), (Point::new(121.0, 130.0), Point::new(41.0, 130.0)), "⇧ nudges 10 px");
+    assert_eq!(anchor(&app, 0), Point::new(40.0, 40.0), "unselected anchors stay");
+    assert_eq!(steps(&app), n + 2, "one history step per press");
+    assert!(app.session.undo() && app.session.undo());
+    assert_eq!(work(&app), before);
 }

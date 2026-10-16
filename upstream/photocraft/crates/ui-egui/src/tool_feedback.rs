@@ -105,6 +105,10 @@ pub fn badge(app: &PhotocraftApp, tool: Tool, m: egui::Modifiers) -> Option<Badg
     if let Some(t) = crate::anchor_tools::effective(tool, m) {
         return (!m.command).then_some(if t == Tool::AddAnchorPoint { Badge::Add } else { Badge::Subtract });
     }
+    // The Pen over the active path with Auto Add/Delete on: what a click would do (#4144).
+    if let Some(p) = app.hover_doc.filter(|_| tool == Tool::Pen) {
+        return crate::anchor_tools::pen_auto(app, tool, m, p).map(|(t, ..)| if t == Tool::AddAnchorPoint { Badge::Add } else { Badge::Subtract });
+    }
     if !is_selection_tool(tool) {
         return None;
     }

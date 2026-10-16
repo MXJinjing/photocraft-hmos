@@ -136,6 +136,8 @@ fn stroke(s: &mut Session, p: &Value) -> Result<Value> {
     // Whole pixels, rounded up, as in Photoshop (0.5 px strokes 1 px).
     let width = p.get("width").and_then(Value::as_f64).filter(|w| w.is_finite()).unwrap_or(1.0).clamp(1.0, 250.0).ceil() as usize;
     let color = color_param(p, "color", s.tools.foreground);
+    // A colour picked as CMYK strokes a CMYK document with the picked inks (#4196).
+    let picked = s.tools.picked_cmyk([color[0], color[1], color[2]]);
     let mode = match p.get("mode") {
         None | Some(Value::Null) => photocraft_color::BlendMode::Normal,
         Some(Value::String(m)) => crate::commands::blend_from_str(m)
@@ -214,7 +216,7 @@ fn stroke(s: &mut Session, p: &Value) -> Result<Value> {
         let surf = crate::commands::paint_surface(doc, id, &Value::Null)?;
         let area = band.content_bounds().intersect(&canvas);
         if !area.is_empty() {
-            crate::fill_cmds::blend_color_mask(surf, area, color, &band, mode, opacity, preserve || lock)?;
+            crate::fill_cmds::blend_color_mask(surf, area, color, picked, &band, mode, opacity, preserve || lock)?;
             surf.prune();
         }
         Ok(())
@@ -435,11 +437,20 @@ pub fn reveal_all_bounds(doc: &Document) -> Rect {
 
 // ---------- layers ----------
 
-fn layer_from_background(s: &mut Session) -> Result<Value> {
+fn layer_from_background(s: &mut Session, p: &Value) -> Result<Value> {
+    let d = s.active().ok_or(EngineError::NoDocument)?;
+    if d.doc.background().is_none() && p.get("ifPresent").and_then(Value::as_bool) == Some(true) {
+        return Ok(json!({"layer": null}));
+    }
+    // `select: false`: the targeted layer stays targeted, as when a Photoshop action's `set`
+    // names the Background while another layer is selected.
+    let select = p.get("select").and_then(Value::as_bool).unwrap_or(true);
     let id = s.edit("Layer From Background", |doc, active| {
         let l = doc.background_mut().ok_or(EngineError::Other("the document has no Background layer".into()))?;
         unlock_background(l);
-        *active = Some(l.id);
+        if select || active.is_none() {
+            *active = Some(l.id);
+        }
         Ok(l.id)
     })?;
     Ok(json!({"layer": id.0}))
@@ -856,7 +867,15 @@ pub fn specs() -> Vec<CommandSpec> {
             s.execute("image.crop", json!({"x": all.x0, "y": all.y0, "width": all.width(), "height": all.height(), "deleteCroppedPixels": false}))?;
             Ok(json!({"changed": true}))
         }),
-        spec!("layer.new.layerFromBackground", "Layer From Background…", &["Layer", "New"], None, "{}", has_background, |s, _| layer_from_background(s)),
+        spec!(
+            "layer.new.layerFromBackground",
+            "Layer From Background…",
+            &["Layer", "New"],
+            None,
+            r##"{"ifPresent":bool=false (true: a document without a Background is left as it is, as a Photoshop action's step needs on an image that opened as a normal layer),"select":bool=true (false: the targeted layer stays targeted)}"##,
+            has_background,
+            layer_from_background
+        ),
         spec!("layer.layerStyle.copyLayerStyle", "Copy Layer Style", &["Layer", "Layer Style"], None, r##"{"layer":id?}"##, has_layer, |s, p| {
             let id = layer_param(s, p)?;
             let l = s.active().and_then(|d| d.doc.layer(id)).ok_or(EngineError::NoLayer(id))?;
@@ -1530,7 +1549,7 @@ mod tests {
         // Layer 1 is already the only visible layer: ⌥-clicking it shows everything.
         assert_eq!(s.execute("layer.showOnly", json!({})).unwrap()["shownAlone"], false);
         assert!(doc(&s).layers.iter().all(|l| l.visible));
-        assert!(s.execute("layer.showOnly", json!({"layer": 9999})).is_err());
+        assert!(s.execute("layer.showOnly", json!({"layer": u64::MAX})).is_err());
         assert!(Session::new().execute("layer.showOnly", json!({})).is_err());
     }
 
@@ -1605,7 +1624,7 @@ mod tests {
         let bg_locks = doc(&s).layer(bg).unwrap().locks;
         assert!(s.execute("layer.toggleLockTransparency", json!({"layer": bg.0})).is_err());
         assert_eq!(doc(&s).layer(bg).unwrap().locks, bg_locks, "the Background is left alone");
-        assert!(s.execute("layer.toggleLockTransparency", json!({"layer": 999_999})).is_err());
+        assert!(s.execute("layer.toggleLockTransparency", json!({"layer": u64::MAX})).is_err());
     }
 
     #[test]

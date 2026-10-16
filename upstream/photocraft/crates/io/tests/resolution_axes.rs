@@ -27,7 +27,7 @@ fn png_with_unequal_axes_reports_the_dropped_vertical_resolution() {
     assert!((r.document.resolution_dpi - 300.0).abs() < 0.01, "{}", r.document.resolution_dpi);
     let notes = resolution_notes(&r);
     assert_eq!(notes.len(), 1, "{:?}", r.warnings);
-    assert!(notes[0].contains("150.01") && notes[0].contains("300.00"), "{notes:?}");
+    assert!(notes[0].contains("150.00") && notes[0].contains("300.00"), "{notes:?}");
 }
 
 #[test]
@@ -59,13 +59,27 @@ fn psd_with_equal_axes_opens_silently() {
     let r = import("x.psd", &psd(ResolutionInfo::from_dpi(300.0))).unwrap();
     assert!((r.document.resolution_dpi - 300.0).abs() < 1e-3, "{}", r.document.resolution_dpi);
     assert!(resolution_notes(&r).is_empty(), "{:?}", r.warnings);
-    // Each axis is read in its own unit: 100 pixels per centimetre on both is 254 ppi on both.
-    let mut cm = ResolutionInfo::from_dpi(100.0);
+}
+
+/// Resource 1005 stores 300 ppi even when the display unit is centimetres. Scaling
+/// that fixed-point value by 2.54 opened the file at 762 ppi (#5201).
+#[test]
+fn resolution_info_cm_display_unit_is_pixels_per_inch() {
+    let mut cm = ResolutionInfo::from_dpi(300.0);
     cm.h_res_unit = 2;
     cm.v_res_unit = 2;
+    cm.width_unit = 2;
+    cm.height_unit = 2;
     let r = import("x.psd", &psd(cm)).unwrap();
-    assert!((r.document.resolution_dpi - 254.0).abs() < 1e-3, "{}", r.document.resolution_dpi);
+    assert!((r.document.resolution_dpi - 300.0).abs() < 1e-3, "{}", r.document.resolution_dpi);
     assert!(resolution_notes(&r).is_empty(), "{:?}", r.warnings);
+
+    let out = export(&r.document, "out.psd", &ExportOptions::default()).unwrap();
+    let file = photocraft_psd::PsdFile::from_bytes(&out.bytes).unwrap();
+    let written = file.resolution().unwrap();
+    assert!((written.h_res() - 300.0).abs() < 1e-3, "{}", written.h_res());
+    assert!((written.v_res() - 300.0).abs() < 1e-3, "{}", written.v_res());
+    assert_eq!((written.h_res_unit, written.v_res_unit), (1, 1));
 }
 
 /// A layered TIFF opens through the PSD importer with the TIFF's own resolution tags.

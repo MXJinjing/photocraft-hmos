@@ -112,13 +112,30 @@ impl PsdFile {
             if s.remaining() >= 4 {
                 let n = s.u32()?;
                 global_layer_mask = Some(GlobalLayerMask { data: s.bytes_u64(u64::from(n))?.to_vec() });
-                let mut candidate_seen = layer_info.is_some();
+                let target_key = match header.depth {
+                    16 => Some(b"Lr16"),
+                    32 => Some(b"Lr32"),
+                    _ => None,
+                };
+                let mut candidate_seen = match target_key {
+                    Some(_) => false,
+                    None => layer_info.as_ref().is_some_and(|i| !i.layers.is_empty()),
+                };
                 let (blocks, trailing) = read_blocks_with(&mut s, header.version, 4, |index, signature, key, data, padding| {
-                    if candidate_seen || !matches!(&key, b"Lr16" | b"Lr32" | b"Layr") {
+                    let is_candidate = match target_key {
+                        Some(k) => &key == k,
+                        None => matches!(&key, b"Layr" | b"Lr16" | b"Lr32"),
+                    };
+                    if candidate_seen || !is_candidate {
                         return false;
                     }
                     candidate_seen = true;
-                    let Ok(info) = LayerInfo::read_body(data, header.version) else { return false };
+                    let Ok(info) = LayerInfo::read_body(data, header.version) else {
+                        if target_key.is_some() {
+                            layer_info = None;
+                        }
+                        return false;
+                    };
                     layer_info = Some(info);
                     layer_info_placement = LayerInfoPlacement::GlobalBlock { index, signature, key, padding: padding.clone() };
                     true
@@ -255,7 +272,10 @@ impl PsdFile {
         self.image_data.decode(&self.header)
     }
 
-    /// `true` if the merged image carries a transparency channel.
+    /// `true` if the merged image carries a transparency channel: its first extra channel, when
+    /// the layer count was stored negative or a "Saving Merged Transparency" global block (`Mtrn`,
+    /// `Mt16`, `Mt32`) is present. Photoshop marks 32-bit documents with `Mt32` and a positive
+    /// layer count (psd-tools transparentbg.psd).
     pub fn merged_has_alpha(&self) -> bool {
         let Some(color) = self.header.color_mode.color_channels() else {
             return false;
@@ -263,8 +283,9 @@ impl PsdFile {
         if self.header.channels <= color {
             return false;
         }
+        let marked = self.global_blocks.iter().any(|b| matches!(&b.key, b"Mtrn" | b"Mt16" | b"Mt32"));
         match &self.layer_info {
-            Some(li) => li.merged_alpha,
+            Some(li) => li.merged_alpha || marked,
             None => true,
         }
     }
@@ -386,6 +407,34 @@ mod write_tests {
                 assert!(parsed.layer_info.is_none());
                 assert_eq!(parsed.global_blocks.len(), 5);
                 assert_eq!(parsed.to_bytes().unwrap(), bytes);
+            }
+        }
+    }
+
+    #[test]
+    fn global_layers_prioritized_over_compatibility_section() {
+        for version in [Version::Psd, Version::Psb] {
+            for depth in [16, 32] {
+                let file = testgen::layered(version, ColorMode::Rgb, depth, Compression::Raw);
+                let key = if depth == 16 { *b"Lr16" } else { *b"Lr32" };
+                let mut lr_data = Vec::new();
+                file.layer_info.as_ref().unwrap().write_body(&mut lr_data, version).unwrap();
+
+                // Photoshop writes an empty (or 8-bit compatibility) Layer Info section
+                // alongside the global Lr16/Lr32 block (#4928).
+                let mut compat_file = file.clone();
+                compat_file.layer_info =
+                    Some(LayerInfo { layers: vec![LayerRecord { name: b"CompatibilityLayer".to_vec(), ..Default::default() }], ..Default::default() });
+                compat_file.layer_info_placement = LayerInfoPlacement::Section;
+                compat_file.global_blocks.insert(0, TaggedBlock::new(key, lr_data));
+
+                let bytes = compat_file.to_bytes().unwrap();
+                let parsed = PsdFile::from_bytes(&bytes).unwrap();
+
+                assert_eq!(parsed.layers().len(), file.layers().len());
+                assert_ne!(parsed.layers()[0].name(), "CompatibilityLayer");
+                assert_eq!(parsed.layers()[0].name(), file.layers()[0].name());
+                assert!(matches!(parsed.layer_info_placement, LayerInfoPlacement::GlobalBlock { key: k, .. } if k == key));
             }
         }
     }

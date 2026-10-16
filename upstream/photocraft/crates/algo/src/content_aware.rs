@@ -662,6 +662,26 @@ mod tests {
         assert!(err < 0.12, "mean error {err}");
     }
 
+    /// A vertical sky gradient (each row one colour) filled at every adaptation level stays the
+    /// gradient: no tinted blotch where the copied rows' colours were shifted per channel.
+    #[test]
+    fn color_adaptation_leaves_a_smooth_gradient_untinted() {
+        let (w, h) = (120, 60);
+        let row = |y: usize| {
+            let t = y as f32 / (h - 1) as f32;
+            [0.27 + 0.45 * t, 0.53 + 0.32 * t, 0.86 + 0.1 * t]
+        };
+        let img: Vec<f32> = (0..w * h).flat_map(|i| row(i / w)).collect();
+        let hole: Vec<bool> = (0..w * h).map(|i| (50..70).contains(&(i % w)) && (20..40).contains(&(i / w))).collect();
+        let src = vec![true; w * h];
+        for level in ["none", "default", "high", "veryHigh"] {
+            let out = fill(w, h, 3, &img, &hole, &src, &FillOptions { color_adaptation: color_level(level), ..Default::default() });
+            let (out, img) = (&out, &img);
+            let worst = (0..w * h).filter(|i| hole[*i]).flat_map(|i| (0..3).map(move |c| (out[i * 3 + c] - img[i * 3 + c]).abs())).fold(0.0f32, f32::max);
+            assert!(worst < 3.0 / 255.0, "{level}: off by {}", worst * 255.0);
+        }
+    }
+
     /// I.i.d. noise: every value occurs once, so a filled pixel equal to an image pixel was copied.
     fn noise(w: usize, h: usize, seed: u64) -> Vec<f32> {
         let mut z = seed;

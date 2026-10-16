@@ -16,7 +16,7 @@ Affinity files.
 | Artboards (legacy `ABEn`, or current `.af` `phrp`/`aprp` properties, including converted curves), with name, solid background, any transform | artboards (nested ones as groups with a vector mask; rotated/curved boards use their bounding rectangle) |
 | Layers (`Scop`), groups (`Grup`), pass-through or isolated | groups (pass-through or Normal) |
 | Curves (`PCrv`): cubic subpaths, closed flags, live corners (`CnrD`) | shape layers (multi-subpath curves fill even-odd) |
-| Rectangles with corner radii (relative or absolute), ellipses, polygons (smooth too), stars, square stars, pies, triangles, trapezoids, clouds, hearts, cogs, rounded and elliptical callouts, arrows, double stars, tears, crescents, diamonds and circular segments | shape layers |
+| Rectangles with corner radii (relative or absolute, locked or per corner) and round or straight corners, ellipses, polygons (smooth too), stars, square stars, pies, triangles, trapezoids, clouds, hearts, cogs, rounded and elliptical callouts, arrows, double stars, tears, crescents, diamonds and circular segments | shape layers |
 | Compound shapes (`Comp`, add and subtract) | one even-odd shape |
 | A shape or curve with children clips them | group with the outline as vector mask, the shape at its bottom |
 | Vector masks (`AdCh` curves and shapes) | vector masks |
@@ -34,7 +34,7 @@ Affinity files.
 Everything else is reported in the import warnings, one line per kind with a count, never
 dropped silently: layer effects, adjustment layers and live filters, brush and pressure strokes,
 transparency gradients, fill opacity, bitmap fills, master pages, unrecognized
-parametric shapes (imported as their bounding ellipses), corner types other than round, stars with
+parametric shapes (imported as their bounding ellipses), corner types other than round or straight, stars with
 rounded points, several fills or strokes on one object (one of each is used), strokes behind the
 fill, outlined or scaled text, text fields such as page numbers, frames with columns or a curved
 outline, grey/Lab/32-bit pixels, CMYK and Lab colour (converted to RGB without the document's

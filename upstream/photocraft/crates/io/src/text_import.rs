@@ -11,7 +11,7 @@ pub(crate) const MAX_RENDER_PIXELS: u64 = 64 * 1024 * 1024;
 /// Renders `t` from its model unless its ink would exceed [`MAX_RENDER_PIXELS`].
 fn render_bounded(eng: &mut photocraft_text::TextEngine, t: &mut TextLayer, dpi: f32, format: photocraft_color::PixelFormat) {
     let layout = eng.layout(t, dpi);
-    let warp = photocraft_text::render::layout_warp(&layout, t.warp.as_ref());
+    let warp = photocraft_text::render::layout_deform(&layout, t);
     let ink = photocraft_text::render::ink_rect_warped(&layout, &t.transform, warp.as_ref());
     if u64::from(ink.width()).saturating_mul(u64::from(ink.height())) > MAX_RENDER_PIXELS {
         t.cache = Some(photocraft_raster::Surface::new(photocraft_color::PixelFormat { alpha: true, ..format }));
@@ -36,10 +36,16 @@ pub(crate) fn prepare(doc: &mut Document) {
                     let mut changed = false;
                     for r in &mut t.runs {
                         if let Some(ps) = r.style.postscript_name.clone()
-                            && !eng.fonts.has_family(&r.style.font_family)
+                            && !eng.fonts.faces(&r.style.font_family).iter().any(|f| f.postscript_name.as_deref() == Some(&ps))
                         {
                             let f = eng.fonts.resolve_postscript(&ps);
-                            if f.exact || eng.fonts.has_family(&f.family) {
+                            // Keep installed families, including legacy names whose faces are
+                            // indexed under a typographic family. An exact face may recover a
+                            // truncated hyphenated family; a heuristic only fills a missing one.
+                            let installed = eng.fonts.has_family(&r.style.font_family);
+                            let exact_recovery =
+                                f.exact && (!installed || f.family.strip_prefix(&r.style.font_family).is_some_and(|suffix| suffix.starts_with('-')));
+                            if exact_recovery || (!installed && eng.fonts.has_family(&f.family)) {
                                 r.style.font_family = f.family;
                                 r.style.weight = f.weight;
                                 r.style.italic = f.italic;

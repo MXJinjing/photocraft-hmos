@@ -43,6 +43,25 @@ enum SmallCapsMode {
     Synthetic,
 }
 
+/// Index of the run containing byte offset `off`, given each run's start offset (non-decreasing):
+/// the last run starting at or before `off`, or 0 when none does. Binary search, so a layer with
+/// many runs doesn't make per-character lookups quadratic.
+fn run_index_at(run_starts: &[usize], off: usize) -> usize {
+    run_starts.partition_point(|&s| s <= off).saturating_sub(1)
+}
+
+/// Whether the style's selected face has an `smcp` feature (a font load and GSUB parse).
+fn probe_smcp(fonts: &mut FontDb, style: &CharStyle) -> bool {
+    #[cfg(test)]
+    SMCP_PROBES.with(|c| c.set(c.get() + 1));
+    fonts.selected_face_has_feature(&style.font_family, style.weight, style.italic, Tag::new(b"smcp"))
+}
+
+#[cfg(test)]
+thread_local! {
+    static SMCP_PROBES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 fn small_caps_mode(caps: Caps, face_has_smcp: bool) -> SmallCapsMode {
     match caps {
         Caps::SmallCaps if face_has_smcp => SmallCapsMode::OpenType,
@@ -469,7 +488,7 @@ impl Layouter {
                 Some(s)
             })
             .collect();
-        let style_at = |off: usize| run_starts.iter().rposition(|&s| s <= off).unwrap_or(0);
+        let style_at = |off: usize| run_index_at(&run_starts, off);
         let para_starts: Vec<usize> = paras
             .iter()
             .scan(0, |a, r| {
@@ -483,11 +502,23 @@ impl Layouter {
         let text = &t.text;
         let (box_rect, is_box) = match t.shape {
             TextShape::Box { x, y, width, height } => ((x, y, width, height), true),
-            TextShape::Point => ((0.0, 0.0, 0.0, 0.0), false),
+            // Path text is laid out as one point-text line, then bent onto the path.
+            TextShape::Point | TextShape::Path { .. } => ((0.0, 0.0, 0.0, 0.0), false),
         };
         let mut prev_baseline: Option<f32> = None;
         let mut pending_space = 0.0f32;
         let mut stop = false;
+        // Fixed for the whole layout, and the font probe only matters for styles that use small
+        // caps. A real `smcp` substitution must receive lowercase source text; only the fallback
+        // path uppercases it and scales it down.
+        let small_caps: Vec<SmallCapsMode> = out
+            .styles
+            .iter()
+            .map(|style| match style.caps {
+                Caps::SmallCaps => small_caps_mode(style.caps, probe_smcp(fonts, style)),
+                _ => SmallCapsMode::None,
+            })
+            .collect();
         for (pi, prange) in split_paragraphs(text).into_iter().enumerate() {
             if stop {
                 break;
@@ -502,13 +533,6 @@ impl Layouter {
             };
             let mut ptext = String::with_capacity(prefix.len() + content.len());
             ptext.push_str(prefix);
-            // A real `smcp` substitution must receive lowercase source text; only the fallback
-            // path uppercases it and scales it down.
-            let small_caps: Vec<SmallCapsMode> = out
-                .styles
-                .iter()
-                .map(|style| small_caps_mode(style.caps, fonts.selected_face_has_feature(&style.font_family, style.weight, style.italic, Tag::new(b"smcp"))))
-                .collect();
             // Ranges in `ptext` for lowercase characters rendered as synthetic small caps.
             // They have the same UTF-8 length as their uppercase form, so the layer's byte-based
             // run and caret offsets remain unchanged.
@@ -1354,7 +1378,63 @@ fn first_ascent(line: &parley::Line<'_, RunBrush>) -> Option<f32> {
 #[cfg(test)]
 mod tests {
     use super::{SmallCapsMode, feature_list, small_caps_mode, variation_list};
-    use photocraft_doc::text::{Caps, CharStyle, FontVariation};
+    use photocraft_doc::TextLayer;
+    use photocraft_doc::text::{Caps, CharStyle, FontVariation, TextRun};
+
+    /// Reference: the lookup the layout used before it became a binary search.
+    fn run_index_reference(starts: &[usize], off: usize) -> usize {
+        starts.iter().rposition(|&s| s <= off).unwrap_or(0)
+    }
+
+    #[test]
+    fn run_lookup_matches_the_linear_reference() {
+        // Deterministic pseudo-random run layouts with empty runs, equal adjacent styles and
+        // offsets past the end.
+        let mut seed = 0x2545_f491_4f6c_dd1d_u64;
+        let mut next = move |m: u64| {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            (seed % m) as usize
+        };
+        for _ in 0..300 {
+            let n = next(12);
+            let mut acc = 0;
+            let starts: Vec<usize> = (0..n)
+                .map(|_| {
+                    let s = acc;
+                    acc += next(4); // 0 = empty run
+                    s
+                })
+                .collect();
+            for off in 0..acc + 4 {
+                assert_eq!(super::run_index_at(&starts, off), run_index_reference(&starts, off), "{starts:?} @ {off}");
+            }
+        }
+        assert_eq!(super::run_index_at(&[], 5), 0);
+    }
+
+    /// Many runs and paragraphs: the font is probed once per small-caps style per layout, not
+    /// once per style per paragraph, and styles that don't use small caps are never probed.
+    #[test]
+    fn small_caps_probe_runs_once_per_small_caps_style() {
+        let plain = CharStyle { font_family: "Inter".into(), ..Default::default() };
+        let small = CharStyle { caps: Caps::SmallCaps, ..plain.clone() };
+        let text: String = "a\n".repeat(300);
+        let runs = |small_every: usize| -> Vec<TextRun> {
+            (0..text.len()).map(|i| TextRun { len: 1, style: if small_every > 0 && i % small_every == 0 { small.clone() } else { plain.clone() } }).collect()
+        };
+        let mut engine = crate::TextEngine::new();
+        let mut probes = |small_every: usize| {
+            super::SMCP_PROBES.with(|c| c.set(0));
+            let layer = TextLayer { text: text.clone(), runs: runs(small_every), ..Default::default() };
+            let _ = engine.layout(&layer, 72.0);
+            super::SMCP_PROBES.with(|c| c.get())
+        };
+        assert_eq!(probes(0), 0);
+        let styles = text.len().div_ceil(2); // every other index is a small-caps run
+        assert_eq!(probes(2), styles);
+    }
 
     /// A variable font's optical size follows the type size unless the style sets `opsz` (#2985).
     #[test]

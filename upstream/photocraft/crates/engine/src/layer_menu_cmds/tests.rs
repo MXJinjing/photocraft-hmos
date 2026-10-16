@@ -141,6 +141,24 @@ fn global_light_blending_options_scale_effects() {
 }
 
 #[test]
+fn global_light_rejects_numbers_beyond_f32() {
+    let mut s = session(8, "rgb");
+    // In-range values still wrap into -180..=180 and clamp to 0..=90.
+    s.execute("layer.layerStyle.globalLight", json!({"angle": 450, "altitude": 120})).unwrap();
+    assert_eq!((doc(&s).global_light.angle, doc(&s).global_light.altitude), (90.0, 90.0));
+    s.execute("layer.layerStyle.globalLight", json!({"angle": 540, "altitude": 30})).unwrap();
+    assert_eq!((doc(&s).global_light.angle.abs(), doc(&s).global_light.altitude), (180.0, 30.0));
+    let before = doc(&s).global_light;
+    let steps = s.active().unwrap().history.past_len();
+    // 1e39 overflowed f32 to inf, which rem_euclid turned into a stored NaN (#4181).
+    for p in [json!({"angle": 1e39}), json!({"angle": -1e39}), json!({"altitude": 1e39}), json!({"altitude": -1e39})] {
+        assert!(s.execute("layer.layerStyle.globalLight", p.clone()).is_err(), "{p}");
+        assert_eq!(doc(&s).global_light, before, "{p}");
+        assert_eq!(s.active().unwrap().history.past_len(), steps, "{p}");
+    }
+}
+
+#[test]
 fn blending_options_blend_if() {
     for depth in DEPTHS {
         let mut s = session(depth, "rgb");
@@ -570,7 +588,7 @@ fn transfer_effects_moves_or_copies_between_layers() {
     for bad in [
         json!({"from": a.0, "to": a.0}),
         json!({"from": a.0}),
-        json!({"from": a.0, "to": 9999}),
+        json!({"from": a.0, "to": u64::MAX}),
         json!({"from": a.0, "to": b.0, "effect": 7}),
         json!({"from": a.0, "to": b.0, "effect": -1}),
         json!({"from": b.0, "to": a.0}),

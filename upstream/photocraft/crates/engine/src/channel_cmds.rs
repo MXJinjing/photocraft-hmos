@@ -152,6 +152,7 @@ pub(crate) fn fix_view(st: &mut DocState) {
 fn touch(st: &mut DocState) {
     let clean = st.saved_revision == st.revision;
     st.revision += 1;
+    st.view_revision += 1;
     if clean {
         st.saved_revision = st.revision;
     }
@@ -194,8 +195,8 @@ pub fn channel_format(doc: &Document) -> PixelFormat {
     PixelFormat::new(ColorMode::Grayscale, doc.depth, false)
 }
 
-/// Next free "Alpha N" name.
-fn next_alpha_name(doc: &Document, base: &str) -> String {
+/// Next free "`base` N" name (Alpha 1, Spot Color 2, …).
+pub fn next_alpha_name(doc: &Document, base: &str) -> String {
     // `channels.len() + 1` candidates always include a free one.
     (1..=doc.channels.len() + 1).map(|n| format!("{base} {n}")).find(|n| !doc.channels.iter().any(|c| &c.name == n)).unwrap_or_else(|| base.to_string())
 }
@@ -328,9 +329,20 @@ fn native_pixels(doc: &Document, layer: Option<LayerId>) -> Result<(Vec<f32>, us
     }
 }
 
-/// `"layer"` param of a source: a layer id, or `"merged"` (default).
-fn source_layer(p: &Value) -> Option<LayerId> {
-    p.get("layer").and_then(Value::as_u64).map(LayerId)
+/// `"layer"` param of a source: a layer id, a layer name (the topmost of that name, as a loaded
+/// Photoshop action refers to it), or `"merged"` (default). An unknown name is an error.
+fn source_layer(doc: &Document, p: &Value, cmd: &str) -> Result<Option<LayerId>> {
+    match p.get("layer") {
+        Some(Value::Number(n)) => Ok(n.as_u64().map(LayerId)),
+        Some(Value::String(name)) if !name.is_empty() && name != "merged" => doc
+            .walk()
+            .into_iter()
+            .rev()
+            .find(|(_, _, l)| l.name == *name)
+            .map(|(_, _, l)| Some(l.id))
+            .ok_or_else(|| bad(cmd, format!("no source layer named \"{name}\""))),
+        _ => Ok(None),
+    }
 }
 
 /// Planes of channel `r` from document `doc` (`layer` = None: merged). A composite gives one
@@ -425,7 +437,7 @@ fn source(s: &Session, p: &Value, cmd: &str, gray: bool) -> Result<Vec<Vec<f32>>
         return Err(bad(cmd, format!("source document \"{}\" is {}×{}; it must match the target size", st.doc.name, st.doc.size.width, st.doc.size.height)));
     }
     let r = p.get("channel").map_or(Some(ChanRef::Composite), |v| parse_ref(v, &st.doc)).ok_or_else(|| bad(cmd, "unknown `channel`"))?;
-    let layer = source_layer(p);
+    let layer = source_layer(&st.doc, p, cmd)?;
     let mut planes = if gray { vec![gray_plane(&st.doc, layer, st.active_layer, r)?] } else { ref_planes(&st.doc, layer, st.active_layer, r)? };
     // Guard every caller (`.remove(0)` / `src[0]`) against an empty source.
     if planes.is_empty() {
@@ -735,15 +747,16 @@ pub(crate) fn clear_color_channel(doc: &mut Document, id: LayerId, k: usize, bac
     if area.is_empty() {
         return Ok(());
     }
-    let cover = sel.map(|m| (m.read_region(area), m.format().channels().max(1)));
-    let mut px = surf.read_region(area);
+    let cover =
+        sel.as_ref().map(|m| crate::allocation::read_region(m, area, "clearing a channel selection").map(|v| (v, m.format().channels().max(1)))).transpose()?;
+    let mut px = crate::allocation::read_region(surf, area, "clearing a channel")?;
     for (i, p) in px.chunks_exact_mut(n).enumerate() {
         let w = cover.as_ref().map_or(1.0, |(m, mk)| m.get(i * mk).copied().unwrap_or(0.0));
         if let Some(c) = p.get_mut(k) {
             *c += (v - *c) * w.clamp(0.0, 1.0);
         }
     }
-    surf.write_region(area, &px);
+    surf.try_write_region(area, &px)?;
     surf.prune();
     Ok(())
 }
@@ -886,6 +899,20 @@ fn load_selection(s: &mut Session, p: &Value) -> Result<Value> {
     if p.get("channel").is_none() {
         return Err(bad(cmd, "missing `channel`"));
     }
+    // `"targeted"`: the Channels panel's target, as a Photoshop action's "load the target
+    // channel" step records it.
+    let mut targeted = p.clone();
+    if p.get("channel").and_then(Value::as_str) == Some("targeted") {
+        let st = s.active().ok_or(EngineError::NoDocument)?;
+        targeted["channel"] = match st.channel_view.target {
+            ChannelTarget::Composite => json!("composite"),
+            ChannelTarget::Color(k) => json!({ "color": k }),
+            ChannelTarget::Alpha(i) => json!(i),
+            ChannelTarget::LayerMask => json!("mask"),
+            ChannelTarget::VectorMask => json!("vectorMask"),
+        };
+    }
+    let p = &targeted;
     // Composite and colour channels load their luminosity / values, as ⌘-clicking them does.
     let plane = source(s, p, cmd, true)?.into_iter().next().ok_or_else(|| bad(cmd, "the channel has no pixels"))?;
     let doc = &s.active().ok_or(EngineError::NoDocument)?.doc;
@@ -1215,7 +1242,12 @@ fn target(s: &mut Session, t: ChannelTarget) {
         let v = &mut st.channel_view;
         v.target = t;
         match t {
-            ChannelTarget::Composite | ChannelTarget::LayerMask | ChannelTarget::VectorMask => v.color_hidden.clear(),
+            // Like clicking RGB in Photoshop: the alpha overlays go away with their eyes.
+            ChannelTarget::Composite => {
+                v.color_hidden.clear();
+                v.alpha_visible.clear();
+            }
+            ChannelTarget::LayerMask | ChannelTarget::VectorMask => v.color_hidden.clear(),
             ChannelTarget::Color(k) => {
                 v.color_hidden = (0..colors).map(|c| c != k).collect();
                 v.alpha_visible.clear();
@@ -1706,7 +1738,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Load Selection…",
             ["Select"],
             None,
-            r##"{"channel":index|name|"composite"|"red|green|blue|…"|"transparency"|"mask"|"vectorMask"|"quickMask"|"selection","layer":id?,"document":index?,"invert":bool=false,"operation":"new|add|subtract|intersect"="new"}"##,
+            r##"{"channel":index|name|"composite"|"red|green|blue|…"|"transparency"|"mask"|"vectorMask"|"quickMask"|"selection"|"targeted" (the Channels panel's target),"layer":id?,"document":index?,"invert":bool=false,"operation":"new|add|subtract|intersect"="new"}"##,
             has_doc,
             load_selection
         ),
@@ -1716,7 +1748,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Apply Image…",
             ["Image"],
             None,
-            r##"{"source":{"document":index?,"layer":id|"merged"="merged","channel":"composite"|"red|…"|index|"selection"|"transparency"|"mask"="composite","invert":bool=false},"blending":"normal|multiply|screen|overlay|softLight|hardLight|colorDodge|colorBurn|darken|lighten|difference|exclusion|linearBurn|linearDodge|add|subtract|…"="multiply","opacity":0..100=100,"scale":1..2=1,"offset":-255..255=0,"preserveTransparency":bool=false,"mask":{"document","layer","channel","invert"}?,"sourceChannel|sourceDocument|sourceLayer|sourceInvert|maskChannel|…":flat form of source/mask?}"##,
+            r##"{"source":{"document":index?,"layer":id|name|"merged"="merged","channel":"composite"|"red|…"|index|"selection"|"transparency"|"mask"="composite","invert":bool=false},"blending":"normal|multiply|screen|overlay|softLight|hardLight|colorDodge|colorBurn|darken|lighten|difference|exclusion|linearBurn|linearDodge|add|subtract|…"="multiply","opacity":0..100=100,"scale":1..2=1,"offset":-255..255=0,"preserveTransparency":bool=false,"mask":{"document","layer","channel","invert"}?,"sourceChannel|sourceDocument|sourceLayer|sourceInvert|maskChannel|…":flat form of source/mask?}"##,
             has_apply_target,
             apply_image
         ),

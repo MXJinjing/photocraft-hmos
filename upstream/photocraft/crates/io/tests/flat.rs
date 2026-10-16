@@ -53,6 +53,9 @@ codec_rt!(tiff_gray8, "tiff", ColorMode::Grayscale, SampleType::U8, false, 0.0);
 codec_rt!(fits_rgb8, "fits", ColorMode::Rgb, SampleType::U8, false, 0.0);
 codec_rt!(fits_gray16, "fit", ColorMode::Grayscale, SampleType::U16, false, 0.0);
 codec_rt!(fits_rgb32, "fits", ColorMode::Rgb, SampleType::F32, false, 0.0);
+codec_rt!(dpx_gray8, "dpx", ColorMode::Grayscale, SampleType::U8, false, 0.0);
+codec_rt!(dpx_rgb16, "dpx", ColorMode::Rgb, SampleType::U16, false, 0.0);
+codec_rt!(dpx_rgba16, "dpx", ColorMode::Rgb, SampleType::U16, true, 0.0);
 
 fn indexed_bmp_8() -> Vec<u8> {
     const FILE_HEADER_SIZE: usize = 14;
@@ -97,6 +100,24 @@ fn indexed_bmp_opens_with_its_color_table() {
     assert!((px[2] - 50.0 / 255.0).abs() < 1e-6);
 }
 
+/// A palette PNG opens in Indexed Color mode with its whole colour table and its transparent
+/// entry, as in Photoshop (#4804).
+#[test]
+fn indexed_png_opens_with_its_color_table() {
+    let pal = [[10, 20, 30], [200, 100, 50], [7, 8, 9], [0, 255, 0]];
+    let png = photocraft_codecs::encode_png_indexed(2, 2, &[1, 0, 2, 1], &pal, Some(2), None).unwrap();
+    let doc = import("indexed.png", &png).unwrap().document;
+    assert_eq!(doc.mode, ColorMode::Indexed);
+    assert_eq!(doc.depth, SampleType::U8);
+    let table = doc.color_table.as_ref().unwrap();
+    assert_eq!(table.colors, pal, "every entry, used or not");
+    assert_eq!(table.transparent, Some(2));
+    let s = doc.layers[0].surface().unwrap();
+    let px = s.rgba(0, 0);
+    assert!((px[0] - 200.0 / 255.0).abs() < 1e-6 && (px[3] - 1.0).abs() < 1e-6);
+    assert_eq!(s.rgba(0, 1)[3], 0.0, "the tRNS entry is transparent");
+}
+
 /// FITS header cards travel as the document's text metadata, so an astro frame keeps its
 /// OBJECT, EXPTIME and the rest through an edit.
 #[test]
@@ -109,6 +130,25 @@ fn fits_header_cards_round_trip_as_text() {
     for kv in &d.metadata.text {
         assert!(back.metadata.text.contains(kv), "{kv:?}: {:?}", back.metadata.text);
     }
+}
+
+/// DPX header fields travel as the document's text metadata and come back on a DPX export at the
+/// chosen bit depth; the transfer characteristic is reported when the frame is opened (#1049).
+#[test]
+fn dpx_header_fields_and_encoding_notes_round_trip_through_the_document() {
+    let mut d = single(ColorMode::Rgb, SampleType::U16, false);
+    d.metadata.text = vec![("DPX:Project".into(), "Reel 7".into()), ("DPX:Transfer".into(), "3".into()), ("DPX:TimeCode".into(), "01:00:00:12".into())];
+    let mut opts = ExportOptions::default();
+    opts.encode.dpx_bits = Some(DpxBits::Bits10);
+    let r = export(&d, "a.dpx", &opts).unwrap();
+    assert!(r.bytes.starts_with(b"SDPX"));
+    assert_eq!(r.bytes[803], 10, "bits per sample");
+    let back = import("a.dpx", &r.bytes).unwrap();
+    for kv in &d.metadata.text {
+        assert!(back.document.metadata.text.contains(kv), "{kv:?}: {:?}", back.document.metadata.text);
+    }
+    assert!(back.warnings.iter().any(|w| w.contains("transfer characteristic: logarithmic (3)")), "{:?}", back.warnings);
+    assert_eq!(back.document.depth, SampleType::U16);
 }
 
 /// EXR stores linear light: a linear document round-trips exactly; an sRGB (untagged) one is
@@ -503,6 +543,73 @@ fn non_srgb_rgb_is_converted_to_srgb_for_formats_without_a_profile() {
     }
 }
 
+/// A linear gray document needs the same display encoding as linear RGB when its profile
+/// cannot be embedded. Check decoded samples against the transfer function independently.
+#[test]
+fn linear_gray_exports_without_profiles_use_display_encoding() {
+    for depth in [SampleType::U8, SampleType::U16, SampleType::F32] {
+        let mut d = columns(ColorMode::Grayscale, depth, &[&[0.25, 1.0], &[0.5, 1.0]]);
+        d.icc_profile = Some(photocraft_cms::builtin::linear_gray().to_bytes());
+        let stored = column_pixels(&d, 2);
+        for ext in ["tga", "bmp", "gif", "qoi"] {
+            let r = export(&d, ext, &ExportOptions::default()).unwrap();
+            let img = photocraft_codecs::decode(&r.bytes).unwrap();
+            let values = img.to_normalized();
+            let stride = img.layout().channels();
+            for (i, src) in stored.iter().enumerate() {
+                let expected = photocraft_color::convert::linear_to_srgb(src[0]);
+                assert!(
+                    (values[16 * i * stride] - expected).abs() <= 1.5 / 255.0,
+                    "{depth:?} {ext} pixel {i}: got {}, expected {expected}",
+                    values[16 * i * stride]
+                );
+            }
+            assert!(r.warnings.iter().any(|w| w.contains("converted to sGray")), "{depth:?} {ext}: {:?}", r.warnings);
+        }
+    }
+}
+
+#[test]
+fn default_gray_exports_without_profiles_keep_samples() {
+    for depth in [SampleType::U8, SampleType::U16, SampleType::F32] {
+        for icc in [None, Some(photocraft_cms::Builtin::SGray.profile().to_bytes())] {
+            let mut d = columns(ColorMode::Grayscale, depth, &[&[0.25, 1.0], &[0.5, 1.0]]);
+            d.icc_profile = icc;
+            let stored = column_pixels(&d, 2);
+            for ext in ["tga", "bmp", "gif", "qoi"] {
+                let r = export(&d, ext, &ExportOptions::default()).unwrap();
+                let img = photocraft_codecs::decode(&r.bytes).unwrap();
+                let values = img.to_normalized();
+                let stride = img.layout().channels();
+                for (i, src) in stored.iter().enumerate() {
+                    assert!((values[16 * i * stride] - src[0]).abs() <= 1.0 / 255.0, "{depth:?} {ext} pixel {i}");
+                }
+                assert!(!r.warnings.iter().any(|w| w.contains("converted to sGray")), "{depth:?} {ext}: {:?}", r.warnings);
+            }
+        }
+    }
+}
+
+#[test]
+fn linear_gray_export_preserves_alpha_and_embeddable_profiles() {
+    for depth in [SampleType::U8, SampleType::U16, SampleType::F32] {
+        let mut d = columns(ColorMode::Grayscale, depth, &[&[0.25, 0.5]]);
+        d.icc_profile = Some(photocraft_cms::builtin::linear_gray().to_bytes());
+        let stored = column_pixels(&d, 1);
+        let r = export(&d, "tga", &ExportOptions::default()).unwrap();
+        let img = photocraft_codecs::decode(&r.bytes).unwrap();
+        assert_eq!(img.layout(), photocraft_codecs::ChannelLayout::GrayA);
+        let values = img.to_normalized();
+        let expected = photocraft_color::convert::linear_to_srgb(stored[0][0]);
+        assert!((values[0] - expected).abs() <= 1.5 / 255.0, "{depth:?}: gray {} vs {expected}", values[0]);
+        assert!((values[1] - stored[0][1]).abs() <= 1.0 / 255.0, "{depth:?}: alpha changed");
+        let r = export(&d, "png", &ExportOptions::default()).unwrap();
+        let back = import("gray.png", &r.bytes).unwrap().document;
+        assert_eq!(back.icc_profile, d.icc_profile, "{depth:?}: PNG keeps linear gray ICC");
+        assert_colors(&column_pixels(&back, 1), &stored, 1.0 / 255.0, "PNG keeps gray samples");
+    }
+}
+
 /// #518: a JPEG cut off inside its image data opens with a warning, never silently.
 #[test]
 fn truncated_jpeg_imports_with_a_warning() {
@@ -873,4 +980,21 @@ fn tga_default_bits_follow_the_alpha_channels() {
     assert_eq!(tga_default_bits(&spot), TgaBits::Bits24, "spot channel");
     assert_eq!(tga_default_bits(&with_alpha_channel(d, "Alpha 1")), TgaBits::Bits32);
     assert_eq!((TgaBits::from_bits(24), TgaBits::from_bits(32), TgaBits::from_bits(16)), (Some(TgaBits::Bits24), Some(TgaBits::Bits32), None));
+}
+
+#[test]
+fn a_lab_document_with_one_layer_is_not_reported_as_flattened() {
+    // Lab always goes through the sRGB composite, but a lone layer loses nothing to it.
+    let d = single(ColorMode::Lab, SampleType::U8, false);
+    for ext in ["tif", "png", "jpg"] {
+        let r = export(&d, ext, &ExportOptions::default()).unwrap();
+        assert!(r.warnings.iter().all(|w| !w.contains("flattened")), "{ext}: {:?}", r.warnings);
+        assert!(r.warnings.iter().any(|w| w.contains("Lab composite written as sRGB")), "{ext}: {:?}", r.warnings);
+    }
+    // Two layers are flattened, and say so.
+    let mut two = single(ColorMode::Lab, SampleType::U8, false);
+    let fmt = two.pixel_format();
+    two.layers.push(raster("Top", fmt, two.bounds(), 5, true));
+    let r = export(&two, "tif", &ExportOptions::default()).unwrap();
+    assert!(r.warnings.iter().any(|w| w.contains("2 layer(s) flattened")), "{:?}", r.warnings);
 }

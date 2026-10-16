@@ -59,21 +59,22 @@ pub(crate) fn copy(s: &mut Session) -> Result<Option<Value>> {
         return Err(EngineError::Other("Could not copy: the selected area is empty".into()));
     }
     let fmt = PixelFormat::new(ColorMode::Grayscale, doc.pixel_format().sample, true);
-    let values = src.read_region(area);
-    let cover = sel.map(|m| (m.read_region(area), m.format().channels().max(1)));
-    let mut px = Vec::with_capacity(values.len() / n * 2);
+    let values = crate::allocation::read_region(src, area, "copying a channel")?;
+    let cover = sel.map(|m| crate::allocation::read_region(m, area, "copying a channel selection").map(|v| (v, m.format().channels().max(1)))).transpose()?;
+    let len = (values.len() / n).checked_mul(2).ok_or_else(|| EngineError::Other("the channel is too large to copy".into()))?;
+    let mut px = crate::allocation::capacity(len, "copying a channel")?;
     for (i, p) in values.chunks_exact(n).enumerate() {
         px.push(p.get(k).copied().unwrap_or(0.0));
         px.push(cover.as_ref().map_or(1.0, |(m, mk)| m.get(i * mk).copied().unwrap_or(0.0)));
     }
     let mut surface = Surface::new(fmt);
-    surface.write_region(area, &px);
+    surface.try_write_region(area, &px)?;
     surface.prune();
     let bounds = surface.content_bounds();
     if bounds.is_empty() {
         return Err(EngineError::Other("Could not copy: the selected area is empty".into()));
     }
-    s.clipboard = Some(Clip { surface, bounds, layers: None });
+    s.clipboard = Some(Clip { surface, bounds, layers: None, resolution: Some(doc.resolution_dpi) });
     Ok(Some(json!({"bounds": [bounds.x0, bounds.y0, bounds.width(), bounds.height()], "channel": k})))
 }
 

@@ -96,6 +96,8 @@ struct Plan {
     mode: Mode,
     structure: u8,
     color: u8,
+    /// Most pixels the fills may sample around the content ([`MAX_MARGIN`], less for a preview).
+    margin: i32,
 }
 
 /// Transform On Drop's `scaleX` / `scaleY` (%) and `rotate` (degrees): the map from a source point
@@ -193,7 +195,7 @@ fn landed_mask(cov: &[f32], area: Rect, inv: &Homography, rect: Rect) -> Vec<boo
         .collect()
 }
 
-fn plan(s: &Session, p: &Value) -> Result<Plan> {
+fn plan(s: &Session, p: &Value, margin: i32) -> Result<Plan> {
     let mode = match string(p, "mode", "move") {
         "move" => Mode::Move,
         "extend" => Mode::Extend,
@@ -242,7 +244,7 @@ fn plan(s: &Session, p: &Value) -> Result<Plan> {
         }
     };
     let all_layers = flag(p, "sampleAllLayers", false) && targets_pixels(p);
-    Ok(Plan { target: Target { id, all_layers }, canvas, area, offset: (dx, dy), map, dest, mode, structure, color })
+    Ok(Plan { target: Target { id, all_layers }, canvas, area, offset: (dx, dy), map, dest, mode, structure, color, margin })
 }
 
 /// Width in pixels of the edge band re-synthesised at the new place, for Structure 1..7 and content
@@ -293,7 +295,12 @@ fn erode(w: usize, h: usize, m: &[bool], r: usize) -> Vec<bool> {
 /// Where a fill samples from around `r`: Photoshop's Content-Aware window
 /// ([`crate::fill_cmds::sampling_window`]), at most [`MAX_MARGIN`] pixels around `r`.
 pub(super) fn window(r: Rect, canvas: Rect) -> Rect {
-    crate::fill_cmds::sampling_window(r, canvas).intersect(&r.inflate(MAX_MARGIN))
+    window_within(r, canvas, MAX_MARGIN)
+}
+
+/// [`window`] with at most `margin` pixels around `r`.
+fn window_within(r: Rect, canvas: Rect, margin: i32) -> Rect {
+    crate::fill_cmds::sampling_window(r, canvas).intersect(&r.inflate(margin))
 }
 
 /// The pixels a step works on: the targeted surface, or with Sample All Layers the visible
@@ -433,7 +440,7 @@ fn run_move(doc: &mut Document, sel: &Surface, plan: &Plan, p: &Value, ctx: &cra
 
     // 1. The content at its new place: the content with its original surroundings laid over the
     // window there; never sampling the content's old place.
-    let win = window(plan.dest, plan.canvas);
+    let win = window_within(plan.dest, plan.canvas, plan.margin);
     let (content, moved) = match &inv {
         None => {
             let mut content = read(doc, plan.target, p, win.translate(-dx, -dy))?;
@@ -443,7 +450,7 @@ fn run_move(doc: &mut Document, sel: &Surface, plan: &Plan, p: &Value, ctx: &cra
         Some(inv) => {
             // Only the content and a ring around it (the colour fit's reference) matter: read
             // the source behind that, a few pixels past the area, and resample it.
-            let src = mapped_bounds(inv, plan.dest.inflate(8)).intersect(&plan.area.inflate(MAX_MARGIN)).intersect(&plan.canvas);
+            let src = mapped_bounds(inv, plan.dest.inflate(8)).intersect(&plan.area.inflate(plan.margin)).intersect(&plan.canvas);
             let src = if src.is_empty() { plan.area } else { src };
             (resample(&read(doc, plan.target, p, src)?, inv, win), landed_mask(&cov, plan.area, inv, win))
         }
@@ -454,7 +461,7 @@ fn run_move(doc: &mut Document, sel: &Surface, plan: &Plan, p: &Value, ctx: &cra
     // 2. Move: fill the place the content left (where the content didn't land on it).
     if plan.mode == Mode::Move {
         ctx.check()?;
-        let win = window(plan.area, plan.canvas);
+        let win = window_within(plan.area, plan.canvas, plan.margin);
         let (w, h) = (win.width() as usize, win.height() as usize);
         let img = read(doc, plan.target, p, win)?;
         let landed = match &inv {
@@ -478,7 +485,7 @@ fn run_move(doc: &mut Document, sel: &Surface, plan: &Plan, p: &Value, ctx: &cra
 }
 
 pub(super) fn content_aware_move(s: &mut Session, p: &Value) -> Result<Value> {
-    let plan = plan(s, p)?;
+    let plan = plan(s, p, MAX_MARGIN)?;
     let label = if plan.mode == Mode::Move { "Content-Aware Move" } else { "Content-Aware Extend" };
     let d = s.active().ok_or(EngineError::NoDocument)?;
     let doc = d.doc.clone();
@@ -519,4 +526,41 @@ pub(super) fn content_aware_move(s: &mut Session, p: &Value) -> Result<Value> {
             Ok(out)
         },
     )
+}
+
+/// Largest selection (bounding box, in pixels) the live preview computes.
+const PREVIEW_MAX_PIXELS: u64 = 256 * 256;
+/// Sampling margin of a preview: a fraction of the command's, so a preview is a small solve.
+const PREVIEW_MARGIN: i32 = 48;
+
+/// A live preview of `paint.contentAwareMove` that can run on any thread: the document as of
+/// [`preview`], with the move's params. Cheaper than the command (a small sampling margin, and
+/// only small selections), so the result is close to, not the same as, what the command makes.
+pub struct ContentAwarePreview {
+    doc: std::sync::Arc<Document>,
+    plan: Plan,
+    params: Value,
+}
+
+impl ContentAwarePreview {
+    /// The active document with the move applied (nothing is recorded, the session is not
+    /// touched) and the rectangle it changed. Stops with `Cancelled` once `ctx` is cancelled.
+    pub fn run(&self, ctx: &crate::jobs::JobCtx) -> Result<(Document, Rect)> {
+        let mut work = (*self.doc).clone();
+        let sel = self.doc.selection.as_ref().ok_or_else(|| bad(CMD, "select the area to move first"))?;
+        let (_, damage, _) = run_move(&mut work, sel, &self.plan, &self.params, ctx, "Content-Aware Move preview")?;
+        Ok((work, damage))
+    }
+}
+
+/// Prepare the preview of `paint.contentAwareMove` with params `p` on the active document. Errors
+/// like the command does, and for a selection larger than a preview takes.
+pub fn preview(s: &Session, p: &Value) -> Result<ContentAwarePreview> {
+    let plan = plan(s, p, PREVIEW_MARGIN)?;
+    let pixels = u64::from(plan.area.width()) * u64::from(plan.area.height());
+    if pixels > PREVIEW_MAX_PIXELS {
+        return Err(bad(CMD, format!("the selection is too large to preview ({pixels} pixels, at most {PREVIEW_MAX_PIXELS})")));
+    }
+    let d = s.active().ok_or(EngineError::NoDocument)?;
+    Ok(ContentAwarePreview { doc: d.doc.clone(), plan, params: p.clone() })
 }

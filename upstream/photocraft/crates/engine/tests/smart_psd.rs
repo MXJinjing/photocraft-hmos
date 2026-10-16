@@ -468,3 +468,150 @@ fn displace_psd_filter_renders_with_its_embedded_map() {
         }
     }
 }
+
+/// A version-2 `liFD` item, as in Photoshop CS2's `lnkD` block: the fields every version has, and
+/// none of the version 5–7 fields after the file data.
+fn lifd_v2(f: &photocraft_io::linked::LinkedFile) -> Vec<u8> {
+    let mut item = b"liFD".to_vec();
+    item.extend_from_slice(&2u32.to_be_bytes());
+    item.push(f.uuid.len() as u8);
+    item.extend_from_slice(f.uuid.as_bytes());
+    let name: Vec<u16> = f.file_name.encode_utf16().collect();
+    item.extend_from_slice(&(name.len() as u32).to_be_bytes());
+    item.extend(name.iter().flat_map(|u| u.to_be_bytes()));
+    item.extend_from_slice(&photocraft_io::linked::file_type(&f.bytes));
+    item.extend_from_slice(b"8BIM");
+    item.extend_from_slice(&(f.bytes.len() as u64).to_be_bytes());
+    item.push(0); // no open-file descriptor
+    item.extend_from_slice(&f.bytes);
+    let mut out = (item.len() as u64).to_be_bytes().to_vec();
+    out.extend(item);
+    out.resize(out.len().next_multiple_of(4), 0);
+    out
+}
+
+/// `doc` saved as PSD, then rewritten into Photoshop CS2's layout: no `SoLd`, and `lnkD` with
+/// version-2 items.
+fn cs2_layout(doc: &Document) -> Vec<u8> {
+    let out = photocraft_io::export(doc, "psd", &Default::default()).unwrap();
+    let mut file = photocraft_psd::PsdFile::from_bytes(&out.bytes).unwrap();
+    for rec in file.layers_mut() {
+        rec.blocks.retain(|b| !matches!(&b.key, b"SoLd" | b"SoLE"));
+    }
+    assert!(file.layers().iter().any(|l| l.block(b"PlLd").is_some()));
+    let links = file.global_blocks.iter_mut().find(|b| &b.key == b"lnk2").unwrap();
+    let files = photocraft_io::linked::parse_linked_files(&links.data);
+    assert_eq!(files.len(), 1);
+    links.key = *b"lnkD";
+    links.data = files.iter().flat_map(lifd_v2).collect();
+    file.to_bytes().unwrap()
+}
+
+/// Photoshop CS2 predates `SoLd`: its placed layers carry a `PlLd` block alone, and the embedded
+/// file sits in a global `lnkD` block of older `liFD` items. Such a smart object's contents open
+/// (they were "unavailable") and it re-renders in place from them (#2465).
+#[test]
+fn cs2_plld_only_smart_object_opens_its_contents() {
+    let mut s = session(8);
+    s.execute("layer.smartObjects.convertToSmartObject", json!({})).unwrap();
+    let id = s.active().unwrap().active_layer.unwrap().0;
+    s.execute("edit.transform", json!({"layer": id, "matrix": [0.75, 0, 0, 0.75, 10, 4]})).unwrap();
+    let doc = s.active().unwrap().doc.clone();
+    let (_, before) = smart(&doc);
+    let SmartSource::Embedded { bytes: pcraft, .. } = &before.source else { panic!("embedded") };
+    let nested = decode_source("x.pcraft", pcraft).unwrap();
+
+    let back = photocraft_io::import("cs2.psd", &cs2_layout(&doc)).unwrap().document;
+    let (bid, after) = smart(&back);
+    for (a, b) in after.transform.m.iter().zip(before.transform.m) {
+        assert!((a - b).abs() < 1e-9, "transform {:?} vs {:?}", after.transform, before.transform);
+    }
+    let (name, src) = photocraft_engine::smart_cmds::contents_of(&back, photocraft_doc::LayerId(bid)).expect("the contents are available");
+    let inner = decode_source(&name, &src).unwrap();
+    assert_eq!((inner.size, inner.layers.len()), (nested.size, nested.layers.len()));
+    // It re-renders where it was placed.
+    let mut l = back.layer(photocraft_doc::LayerId(bid)).unwrap().clone();
+    assert!(refresh_layer(&back, &mut l).unwrap());
+    let mut rerendered = back.clone();
+    *rerendered.layer_mut(photocraft_doc::LayerId(bid)).unwrap() = l;
+    let d = max_diff(&photocraft_compose::flatten(&rerendered).px, &photocraft_compose::flatten(&doc).px);
+    assert!(d <= 2.0 / 255.0, "re-render differs by {d}");
+    // And Edit Contents (the double-click) opens the nested document.
+    let mut s2 = Session::new();
+    s2.add_document(back, None);
+    s2.select_layer(photocraft_doc::LayerId(bid)).unwrap();
+    s2.execute("layer.smartObjects.editContents", json!({})).unwrap();
+    assert_eq!(s2.active().unwrap().doc.size, nested.size);
+}
+
+/// CS2 can warp a smart object, and `PlLd` keeps the warp after the corners. Now that a
+/// `PlLd`-only layer's contents are available, Free Transform, Image Size and mode changes
+/// re-render it from them: it must come back warped, not silently unwarped (#2465).
+#[test]
+fn cs2_plld_only_warped_smart_object_stays_warped() {
+    let mut s = session(8);
+    s.execute("layer.smartObjects.convertToSmartObject", json!({})).unwrap();
+    let id = s.active().unwrap().active_layer.unwrap().0;
+    s.execute("edit.transform", json!({"layer": id, "matrix": [0.75, 0, 0, 0.75, 10, 4]})).unwrap();
+    s.execute("layer.smartObjects.warp", json!({"style": "wave", "bend": 60})).unwrap();
+    let doc = s.active().unwrap().doc.clone();
+    let (_, before) = smart(&doc);
+    assert!(before.warp.is_some());
+
+    let back = photocraft_io::import("cs2.psd", &cs2_layout(&doc)).unwrap().document;
+    let (bid, after) = smart(&back);
+    assert_eq!(after.warp, before.warp);
+    assert!(photocraft_engine::smart_cmds::contents_of(&back, photocraft_doc::LayerId(bid)).is_ok(), "the contents are available");
+    // Re-rendered from its source, it is still warped where it was placed.
+    let rerender = |warp| {
+        let mut l = back.layer(photocraft_doc::LayerId(bid)).unwrap().clone();
+        let LayerContent::Smart(sm) = &mut l.content else { panic!() };
+        sm.warp = warp;
+        assert!(refresh_layer(&back, &mut l).unwrap());
+        let mut d = back.clone();
+        *d.layer_mut(photocraft_doc::LayerId(bid)).unwrap() = l;
+        max_diff(&photocraft_compose::flatten(&d).px, &photocraft_compose::flatten(&doc).px)
+    };
+    let d = rerender(after.warp.clone());
+    assert!(d <= 2.0 / 255.0, "re-render differs by {d}");
+    assert!(rerender(None) > 0.1, "an unwarped re-render would differ visibly");
+}
+
+/// A CS2 `PlLd`-only smart object is saved as it was while nothing changed it, and with its
+/// current placement once it is moved: the old record was written back unchanged, so the save
+/// reopened at the old place (#2465).
+#[test]
+fn cs2_plld_only_smart_object_saves_its_new_transform() {
+    let mut s = session(8);
+    s.execute("layer.smartObjects.convertToSmartObject", json!({})).unwrap();
+    let id = s.active().unwrap().active_layer.unwrap().0;
+    s.execute("edit.transform", json!({"layer": id, "matrix": [0.75, 0, 0, 0.75, 10, 4]})).unwrap();
+    let cs2 = cs2_layout(&s.active().unwrap().doc);
+    let plld = |bytes: &[u8]| {
+        let f = photocraft_psd::PsdFile::from_bytes(bytes).unwrap();
+        let rec = f.layers().iter().find(|l| l.block(b"PlLd").is_some()).cloned().expect("a placed layer");
+        (rec.block(b"PlLd").unwrap().data.clone(), rec.block(b"SoLd").is_some())
+    };
+    let back = photocraft_io::import("cs2.psd", &cs2).unwrap().document;
+    let (bid, _) = smart(&back);
+
+    // Unedited: the CS2 record is written back as it was.
+    let same = photocraft_io::export(&back, "psd", &Default::default()).unwrap().bytes;
+    assert_eq!(plld(&same), (plld(&cs2).0, false));
+
+    // Moved and scaled: written with the new placement, and it reopens there.
+    let mut s2 = Session::new();
+    s2.add_document(back, None);
+    s2.execute("edit.transform", json!({"layer": bid, "matrix": [0.5, 0, 0, 0.5, 20, 12]})).unwrap();
+    let edited = s2.active().unwrap().doc.clone();
+    let (_, want) = smart(&edited);
+    let saved = photocraft_io::export(&edited, "psd", &Default::default()).unwrap().bytes;
+    assert!(structure_errors(&saved).is_empty(), "{:?}", structure_errors(&saved));
+    assert_ne!(plld(&saved).0, plld(&cs2).0, "the old PlLd record was written back");
+    let again = photocraft_io::import("again.psd", &saved).unwrap().document;
+    let (aid, got) = smart(&again);
+    for (a, b) in got.transform.m.iter().zip(want.transform.m) {
+        assert!((a - b).abs() < 1e-9, "transform {:?} vs {:?}", got.transform, want.transform);
+    }
+    assert!(photocraft_engine::smart_cmds::contents_of(&again, photocraft_doc::LayerId(aid)).is_ok(), "the contents are available");
+}

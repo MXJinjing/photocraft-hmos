@@ -90,14 +90,40 @@ pub fn clamp_axis(center: f32, len: f32, size: f32, zoom: f32) -> f32 {
 /// Apply Preferences › Tools › Overscroll (off) to `view` for a canvas of `size` points on a
 /// display with `ppp` physical pixels per point. True when the view moved (then repaint).
 pub fn clamp_view(view: &mut View, size: egui::Vec2, ppp: f32) -> bool {
+    clamp_view_with_aspect(view, size, ppp, 1.0)
+}
+
+/// Clamp against the displayed image bounds, so rotated tool auto-scroll is not undone by
+/// the next frame's Overscroll-off clamp. `size` is the unmodified screen-space canvas size.
+pub fn clamp_view_with_aspect(view: &mut View, size: egui::Vec2, ppp: f32, aspect: f32) -> bool {
     let [w, h] = view.doc_size;
     if w == 0 || h == 0 {
         return false;
     }
     let zoom = view.zoom / if ppp.is_finite() && ppp > 0.0 { ppp } else { 1.0 };
-    let c = [clamp_axis(view.center[0], w as f32, size.x, zoom), clamp_axis(view.center[1], h as f32, size.y, zoom)];
+    let aspect = if aspect.is_finite() && aspect > 0.0 { aspect } else { 1.0 };
+    let c = if view.rotation.abs() < 1e-8 {
+        [clamp_axis(view.center[0], w as f32, size.x / aspect, zoom), clamp_axis(view.center[1], h as f32, size.y, zoom)]
+    } else {
+        if !zoom.is_finite() || zoom <= 0.0 || !size.is_finite() || size.x <= 0.0 || size.y <= 0.0 {
+            return false;
+        }
+        let center = [
+            if view.center[0].is_finite() { view.center[0] } else { w as f32 / 2.0 },
+            if view.center[1].is_finite() { view.center[1] } else { h as f32 / 2.0 },
+        ];
+        let xf = crate::canvas::ViewXform { rect: egui::Rect::from_min_size(Pos2::ZERO, size), zoom, center, flip: false, rotation: view.rotation, aspect };
+        let image = xf.image_bounds(view.doc_size);
+        if !image.is_finite() {
+            return false;
+        }
+        let offset = xf.rect.center() - image.min;
+        let delta = vec2(clamp_axis(offset.x, image.width(), size.x, 1.0), clamp_axis(offset.y, image.height(), size.y, 1.0)) - offset;
+        let d = xf.unmap_vec(delta) / zoom;
+        [center[0] + d.x, center[1] + d.y]
+    };
     // Ignore sub-pixel float noise so the clamp never keeps requesting frames.
-    let moved = (c[0] - view.center[0]).abs() > 1e-3 || (c[1] - view.center[1]).abs() > 1e-3;
+    let moved = !view.center[0].is_finite() || !view.center[1].is_finite() || (c[0] - view.center[0]).abs() > 1e-3 || (c[1] - view.center[1]).abs() > 1e-3;
     if moved {
         view.center = c;
     }

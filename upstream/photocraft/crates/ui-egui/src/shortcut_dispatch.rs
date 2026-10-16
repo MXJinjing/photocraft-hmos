@@ -241,7 +241,7 @@ pub fn dispatch_pressed(app: &mut PhotocraftApp, ctx: &egui::Context, focus: Foc
             // panels instead, #1313): the shortcut took it, so cancel that move.
             ctx.memory_mut(|m| m.move_focus(egui::FocusDirection::None));
         }
-        let id = delete_key_command(app, id);
+        let id = clip_key_command(app, delete_key_command(app, id));
         let owner = key_owner(app, ctx);
         dispatch(app, ctx, &id);
         ran = true;
@@ -257,7 +257,8 @@ pub fn dispatch_pressed(app: &mut PhotocraftApp, ctx: &egui::Context, focus: Foc
 /// type or shape layer the key did nothing. A selection, a single channel or Quick Mask keeps Clear.
 /// With the active layer's mask targeted the key edits the mask, never the layer's pixels: a
 /// selection is filled with the background colour in the mask (Photoshop's Delete on a mask), and
-/// with no selection the mask itself is deleted, as Layer › Layer Mask › Delete.
+/// with no selection the mask itself is deleted, as Layer › Layer Mask › Delete, unless several
+/// layers are selected: then they are deleted.
 fn delete_key_command(app: &PhotocraftApp, id: String) -> String {
     if id != "edit.clear" {
         return id;
@@ -270,7 +271,10 @@ fn delete_key_command(app: &PhotocraftApp, id: String) -> String {
     let solo_mask = colors_off && has_mask && !alpha_on && st.doc.quick_mask.is_none();
     let layer_mask = st.channel_view.target == photocraft_engine::channel_cmds::ChannelTarget::LayerMask;
     let mask = (app.ui.mask_target || solo_mask || layer_mask) && has_mask;
-    if mask && (composite || layer_mask) {
+    // Several selected layers outrank the active one's targeted mask (#4025): a new adjustment
+    // layer targets its mask, so the first press used to delete only that mask.
+    let several = st.selected_layers().len() > 1;
+    if mask && (composite || layer_mask) && !(several && composite && st.doc.selection.is_none()) {
         let cmd = if st.doc.selection.is_some() { "edit.fillBackground" } else { "layer.layerMask.delete" };
         return cmd.into();
     }
@@ -278,6 +282,26 @@ fn delete_key_command(app: &PhotocraftApp, id: String) -> String {
         return id;
     }
     "layer.delete".into()
+}
+
+/// Create Clipping Mask's key (⌥⌘G) releases when there is nothing left to clip, as in Photoshop,
+/// whose Layer menu has one item that reads Create or Release Clipping Mask with the same
+/// shortcut: pressing it again takes the clip off. That is when the layers Create Clipping Mask
+/// would clip are all clipped already: the selected layer, or with several selected, every one
+/// above the lowest.
+pub(crate) fn clip_key_releases(app: &PhotocraftApp) -> bool {
+    let Some(st) = app.session.active() else { return false };
+    let selected = st.selected_layers();
+    let clips = match selected.as_slice() {
+        [] => return false,
+        [one] => std::slice::from_ref(one),
+        [_lowest, above @ ..] => above,
+    };
+    clips.iter().all(|id| st.doc.layer(*id).is_some_and(|l| l.clipped))
+}
+
+fn clip_key_command(app: &PhotocraftApp, id: String) -> String {
+    if id == "layer.createClippingMask" && clip_key_releases(app) { "layer.releaseClippingMask".into() } else { id }
 }
 
 /// Why `id` can't run now (the engine's reason when it has one).
@@ -298,6 +322,7 @@ fn label(id: &str) -> String {
         .map(|c| c.1)
         .or_else(|| crate::menus::UI_COMMANDS.iter().find(|c| c.0 == id).map(|c| c.1))
         .or_else(|| photocraft_engine::commands::find(id).map(|c| c.label))
+        .or_else(|| crate::tool_shortcuts::tool(id).map(|tool| tool.label()))
         .unwrap_or(id)
         .trim_end_matches('…')
         .to_string()

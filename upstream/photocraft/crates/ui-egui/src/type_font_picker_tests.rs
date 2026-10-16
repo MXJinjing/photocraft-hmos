@@ -463,3 +463,30 @@ fn font_menu_rows_search_both_names_and_sort_by_label() {
     assert_eq!(rows(Some(&labels), "雅黑"), [("Microsoft YaHei".to_string(), "微软雅黑".to_string())]);
     assert!(rows(Some(&labels), "nothing").is_empty());
 }
+
+#[test]
+fn wheel_over_the_closed_font_button_steps_through_the_families() {
+    let mut h = harness();
+    let button = h.query_all_by_role(Role::ComboBox).next().unwrap().rect().center();
+    h.hover_at(button);
+    h.run();
+    let wheel = |h: &mut Harness<'static, State>, y: f32| {
+        h.event(egui::Event::MouseWheel { unit: egui::MouseWheelUnit::Line, delta: vec2(0.0, y), phase: egui::TouchPhase::Move, modifiers: Modifiers::NONE });
+        h.run();
+    };
+    wheel(&mut h, -2.0);
+    assert_eq!(h.state().current, "Family 02", "two notches down pick the second next family");
+    assert!(popup_rect(&h).is_none(), "the list stays closed");
+    wheel(&mut h, 1.0);
+    assert_eq!(h.state().current, "Family 01");
+    wheel(&mut h, 5.0);
+    assert_eq!(h.state().current, "Family 00", "stops at the first family");
+}
+
+#[test]
+fn wheel_family_index_clamps_to_the_ends() {
+    assert_eq!(super::wheel_family_index(0, 3, -5.0), Some(2));
+    assert_eq!(super::wheel_family_index(1, 3, 1.0), Some(0));
+    assert_eq!(super::wheel_family_index(1, 3, 0.0), None);
+    assert_eq!(super::wheel_family_index(0, 0, -1.0), None);
+}

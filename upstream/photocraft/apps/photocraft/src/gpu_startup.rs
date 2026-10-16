@@ -177,6 +177,12 @@ pub fn plan_with_mode(pref: GpuBackend, mode: RenderingMode, crashed: Option<&Ma
     plan(backend, crashed, env, safe_gpu, os)
 }
 
+/// Persist successful hardware fallbacks, but never silently pin CPU mode.
+/// The recovery dialog explicitly stores CPU mode when the user chooses it.
+pub fn backend_to_remember(plan: &Plan) -> Option<GpuBackend> {
+    (plan.remember && plan.backend != GpuBackend::Cpu).then_some(plan.backend)
+}
+
 /// Instance backends for `plan` (`None`: egui's default, which honours `WGPU_BACKEND`).
 pub fn backends(plan: &Plan, os: Os) -> Option<wgpu::Backends> {
     if plan.env.is_some() {
@@ -541,6 +547,27 @@ mod tests {
         assert_eq!(plan(Auto, None, Some("dx12"), true, Os::Windows).backend, Cpu);
     }
 
+    /// #3483: A temporary CPU recovery must not change the next launch.
+    #[test]
+    fn cpu_recovery_requires_explicit_confirmation_to_persist() {
+        let gl_crash = crashed("gl", "gl");
+        let cpu = plan_with_mode(Auto, RenderingMode::Auto, Some(&gl_crash), None, false, Os::Other);
+        assert_eq!((cpu.backend, cpu.remember), (Cpu, true));
+        assert_eq!(backend_to_remember(&cpu), None);
+
+        let safe = plan_with_mode(Auto, RenderingMode::Auto, None, None, true, Os::Other);
+        assert_eq!(safe.backend, Cpu);
+        assert_eq!(backend_to_remember(&safe), None);
+        // An unconfirmed fallback leaves the original automatic selection intact.
+        assert_eq!(plan_with_mode(Auto, RenderingMode::Auto, None, None, false, Os::Other).backend, Auto);
+        // A working hardware fallback can still be remembered.
+        let vk_crash = crashed("auto", "vulkan");
+        let gl = plan_with_mode(Auto, RenderingMode::Auto, Some(&vk_crash), None, false, Os::Other);
+        assert_eq!(backend_to_remember(&gl), Some(Gl));
+        // CPU explicitly selected in preferences still works.
+        assert_eq!(plan_with_mode(Auto, RenderingMode::Cpu, None, None, false, Os::Other).backend, Cpu);
+    }
+
     #[test]
     fn safe_gpu_forces_the_cpu_for_one_launch() {
         let p = plan(Vulkan, Some(&crashed("vulkan", "vulkan")), None, true, Os::Other);
@@ -672,7 +699,7 @@ mod tests {
         } else {
             s.finish();
         }
-        let (prev, _s) = Sentinel::begin(&dir);
+        let (prev, _s) = begin_when_unlocked(&dir);
         assert_eq!(prev, Previous::Clean);
         assert_eq!(plan(Auto, prev.crashed(), None, false, Os::Other).backend, Auto);
         let _ = std::fs::remove_dir_all(&dir);
@@ -682,6 +709,22 @@ mod tests {
         let d = std::env::temp_dir().join(format!("photocraft-gpu-startup-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         d
+    }
+
+    /// `Sentinel::begin`, called again up to 50 times, 10 ms apart, while it returns
+    /// `Previous::Busy`. Other tests in this binary spawn processes: between fork and exec a child
+    /// briefly shares the marker's flock, so `begin` can see the lock as busy just after a test
+    /// drops its sentinel.
+    fn begin_when_unlocked(dir: &Path) -> (Previous, Option<Sentinel>) {
+        let (mut prev, mut s) = Sentinel::begin(dir);
+        for _ in 0..50 {
+            if prev != Previous::Busy {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+            (prev, s) = Sentinel::begin(dir);
+        }
+        (prev, s)
     }
 
     #[test]
@@ -699,16 +742,7 @@ mod tests {
         assert!(none.is_none());
         // The process dies in the driver: the lock goes, the marker stays.
         drop(s);
-        // Another test in this binary spawns a process: between its fork and exec the child briefly
-        // shares this file's flock, so `begin` can see the lock as busy. Retry for a moment.
-        let (mut prev, mut s) = Sentinel::begin(&dir);
-        for _ in 0..50 {
-            if prev != Previous::Busy {
-                break;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(10));
-            (prev, s) = Sentinel::begin(&dir);
-        }
+        let (prev, s) = begin_when_unlocked(&dir);
         let m = prev.crashed().cloned().expect("crash detected");
         assert_eq!((m.adapter.as_str(), m.tried()), ("GPU", Some(Vulkan)));
         // This start succeeds: the next one finds nothing.
@@ -718,6 +752,29 @@ mod tests {
         assert!(!dir.join(MARKER_FILE).exists());
         let (prev, _s) = Sentinel::begin(&dir);
         assert_eq!(prev, Previous::Clean);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn begin_when_unlocked_waits_for_a_briefly_held_lock() {
+        let dir = temp_dir("shared-lock");
+        let (_, s) = Sentinel::begin(&dir);
+        let mut s = s.expect("sentinel");
+        s.write(Marker { backend: "vulkan".into(), ..Default::default() }).unwrap();
+        // After the start dies, a second handle on the marker holds the lock for 50 ms, as a
+        // spawned child's copy of the descriptor does until the child calls exec.
+        let held = File::open(dir.join(MARKER_FILE)).unwrap();
+        drop(s);
+        held.lock().unwrap();
+        assert_eq!(Sentinel::begin(&dir).0, Previous::Busy);
+        let release = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            held.unlock().unwrap();
+        });
+        let (prev, s) = begin_when_unlocked(&dir);
+        release.join().unwrap();
+        assert_eq!(prev.crashed().map(|m| m.backend.as_str()), Some("vulkan"));
+        s.expect("sentinel").finish();
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -738,7 +795,7 @@ mod tests {
             } else {
                 s.finish();
             }
-            let (previous, s) = Sentinel::begin(&dir);
+            let (previous, s) = begin_when_unlocked(&dir);
             assert_eq!(previous.crashed().is_some(), keep, "{name}: {result:?}");
             if !keep {
                 assert_eq!(plan(Vulkan, previous.crashed(), None, false, Os::Other).backend, Vulkan);

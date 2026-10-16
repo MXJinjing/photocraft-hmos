@@ -23,6 +23,7 @@ use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 
 use photocraft_geom::Rect;
+use photocraft_raster::{Cancelled, Interrupt};
 
 use super::grabcut::{self, BG, PR_BG, PR_FG};
 use super::slic::{rgb_to_lab, slic_lab};
@@ -35,13 +36,20 @@ const SIGMA_SPA: f32 = 0.25;
 
 /// Selects the most salient object on the canvas.
 pub fn select_subject(sampler: &dyn Sampler, canvas: Rect) -> Option<Region> {
+    select_subject_with(sampler, canvas, &Interrupt::NONE).unwrap_or_default()
+}
+
+/// [`select_subject`] that stops with `Err(Cancelled)` once `ctl` is cancelled, asked between
+/// stages and inside every min cut (the GrabCut iterations and the full-resolution re-cut).
+pub fn select_subject_with(sampler: &dyn Sampler, canvas: Rect, ctl: &Interrupt) -> Result<Option<Region>, Cancelled> {
     if canvas.width() < 4 || canvas.height() < 4 {
-        return None;
+        return Ok(None);
     }
     let step = super::scale_for(canvas, WORK_PX);
     let img = sampler.rgb_scaled(canvas, step);
     let (w, h) = (img.w, img.h);
     let sal = saliency(&img);
+    ctl.check()?;
     let t = otsu(&sal).clamp(0.15, 0.85);
     let mut trimap = vec![PR_BG; w * h];
     let mut any_fg = false;
@@ -60,15 +68,15 @@ pub fn select_subject(sampler: &dyn Sampler, canvas: Rect) -> Option<Region> {
         }
     }
     if !any_fg {
-        return None;
+        return Ok(None);
     }
-    let (fg, bg) = grabcut::grabcut(&img, &mut trimap, 6)?;
+    let Some((fg, bg)) = grabcut::grabcut_with(&img, &mut trimap, 6, ctl)? else { return Ok(None) };
     let low: Vec<bool> = trimap.iter().map(|v| *v == PR_FG || *v == grabcut::FG).collect();
     let low = super::clean_mask(&low, w, h, 0.2, 0.05);
     if !low.iter().any(|v| *v) {
-        return None;
+        return Ok(None);
     }
-    super::finish_region(sampler, canvas, step, &low, w, h, Some((&fg, &bg)))
+    super::finish_region_with(sampler, canvas, step, &low, w, h, Some((&fg, &bg)), ctl)
 }
 
 /// Per-pixel saliency in `0..=1` (see the module docs).

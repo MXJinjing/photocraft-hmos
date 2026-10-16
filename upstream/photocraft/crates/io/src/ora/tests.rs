@@ -397,3 +397,53 @@ fn group_opacity_and_fill_are_combined_without_affecting_raster_opacity() {
     assert!((back.layers[0].opacity - 0.25).abs() < 1e-6);
     assert_eq!(back.layers[0].children().unwrap()[0].opacity, 1.0);
 }
+
+/// One document per thing OpenRaster can't hold, each also checked against the exporter.
+fn lossy_documents() -> Vec<(&'static str, Document)> {
+    let fmt = PixelFormat::new(ColorMode::Rgb, SampleType::U8, true);
+    let with = |f: &dyn Fn(&mut Document)| {
+        let mut d = doc(SampleType::U8);
+        f(&mut d);
+        d
+    };
+    vec![
+        ("adjustment", with(&|d| d.layers.push(Layer::new("Curves", LayerContent::Adjustment(Adjustment::Invert))))),
+        ("fill", with(&|d| d.layers.push(Layer::new("Fill", LayerContent::Fill(Fill::Solid(Color::rgba(1.0, 0.0, 0.0, 1.0))))))),
+        ("mask", {
+            let mut l = block("Masked", fmt, 0, 0, 20, 20, 9);
+            l.mask = Some(LayerMask::reveal_all());
+            with(&move |d| d.layers.push(l.clone()))
+        }),
+        ("clipped", with(&|d| d.layers[1].clipped = true)),
+        ("fill opacity", with(&|d| d.layers[0].fill_opacity = 0.5)),
+        ("float", doc(SampleType::F32)),
+        ("profile", with(&|d| d.icc_profile = Some(photocraft_cms::Builtin::DisplayP3.profile().to_bytes()))),
+        ("metadata", with(&|d| d.metadata.xmp = Some("<x/>".into()))),
+    ]
+}
+
+/// The exporter's warnings and [`losses`] are one list, so they can't drift apart.
+#[test]
+fn losses_are_exactly_what_the_exporter_warns_about() {
+    for (what, d) in lossy_documents() {
+        let losses = losses(&d);
+        assert!(!losses.is_empty(), "{what}: OpenRaster can't hold it");
+        assert_eq!(losses, export(&d).unwrap().warnings, "{what}");
+    }
+}
+
+/// A document of plain pixel layers and groups loses nothing, so its OpenRaster file can stay its
+/// own; an sRGB profile isn't a loss, as readers assume sRGB.
+#[test]
+fn plain_documents_lose_nothing() {
+    for depth in [SampleType::U8, SampleType::U16] {
+        let mut d = doc(depth);
+        assert_eq!(losses(&d), Vec::<String>::new(), "{depth:?}");
+        d.icc_profile = Some(photocraft_cms::Builtin::Srgb.profile().to_bytes());
+        assert_eq!(losses(&d), Vec::<String>::new(), "{depth:?} tagged sRGB");
+        assert_eq!(export(&d).unwrap().warnings, Vec::<String>::new());
+    }
+    let mut cmyk = doc(SampleType::U8);
+    cmyk.mode = ColorMode::Cmyk;
+    assert_eq!(losses(&cmyk).len(), 1, "a document OpenRaster can't hold at all");
+}

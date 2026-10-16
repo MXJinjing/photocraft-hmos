@@ -273,7 +273,7 @@ fn commands_fail_gracefully() {
     // A zero-length drag still makes a valid gradient.
     s.execute(CREATE, json!({"from": [3, 3], "to": [3, 3]})).unwrap();
     for p in [
-        json!({"layer": 999_999}),
+        json!({"layer": u64::MAX}),
         json!({"from": [0]}),
         json!({"to": [1e30, 0]}),
         json!({"angle": "x"}),

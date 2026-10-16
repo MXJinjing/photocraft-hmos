@@ -60,8 +60,13 @@ fn bad(msg: impl Into<String>) -> AutomationError {
     AutomationError::BadRequest(msg.into())
 }
 
-fn index_of(p: &Value) -> Option<usize> {
-    p.get("index").and_then(Value::as_u64).map(|i| i as usize)
+/// The optional `index` param: missing or null means the active document; anything else must be a
+/// non-negative integer (never silently fall back to the active document, which `doc.close` would close).
+fn index_of(p: &Value) -> Result<Option<usize>, AutomationError> {
+    match p.get("index") {
+        None | Some(Value::Null) => Ok(None),
+        Some(v) => v.as_u64().and_then(|i| usize::try_from(i).ok()).map(Some).ok_or_else(|| bad("`index` must be a non-negative integer")),
+    }
 }
 
 fn str_of<'a>(p: &'a Value, k: &str) -> Option<&'a str> {
@@ -109,20 +114,21 @@ impl Headless {
                 let mut opts = p.as_object().cloned().unwrap_or_default();
                 opts.remove("path");
                 opts.remove("index");
-                self.place(index_of(&p), path, &Value::Object(opts))
+                self.place(index_of(&p)?, path, &Value::Object(opts))
             }
             "doc.new" => self.command_run("file.new", p),
             "doc.save" => {
                 let tga_bits = photocraft_engine::file_cmds::tga_bits_param(&p, "doc.save").map_err(|e| bad(e.to_string()))?;
                 let mut opts =
                     photocraft_io::ExportOptions { tiff_layers: p.get("tiffLayers").and_then(Value::as_bool).unwrap_or(false), tga_bits, ..Default::default() };
+                opts.encode.dpx_bits = photocraft_engine::file_cmds::dpx_bits_param(&p, "doc.save").map_err(|e| bad(e.to_string()))?;
                 if let Some(q) = p.get("quality").and_then(Value::as_u64) {
                     opts.encode.jpeg_quality = q.clamp(1, 100) as u8;
                     opts.encode.webp_quality = q.clamp(1, 100) as u8;
                     opts.encode.webp_lossless = false;
                 }
                 let path = str_of(&p, "path").map(PathBuf::from);
-                self.save(index_of(&p), path.as_deref(), str_of(&p, "format"), &opts)
+                self.save(index_of(&p)?, path.as_deref(), str_of(&p, "format"), &opts)
             }
             "doc.exportLayers" | "doc.exportDataSets" => {
                 let dir = str_of(&p, "dir").ok_or_else(|| bad(format!("{method} needs `dir`")))?;
@@ -130,16 +136,16 @@ impl Headless {
                 opts.remove("dir");
                 opts.remove("index");
                 let opts = Value::Object(opts);
-                if method == "doc.exportLayers" { self.export_layers(index_of(&p), dir, &opts) } else { self.export_data_sets(index_of(&p), dir, &opts) }
+                if method == "doc.exportLayers" { self.export_layers(index_of(&p)?, dir, &opts) } else { self.export_data_sets(index_of(&p)?, dir, &opts) }
             }
             "doc.importDataSets" => {
                 let path = str_of(&p, "path").ok_or_else(|| bad("doc.importDataSets needs `path`"))?;
                 let mut opts = p.as_object().cloned().unwrap_or_default();
                 opts.remove("path");
                 opts.remove("index");
-                self.import_data_sets(index_of(&p), path, &Value::Object(opts))
+                self.import_data_sets(index_of(&p)?, path, &Value::Object(opts))
             }
-            "doc.inspect" => self.inspect(index_of(&p)),
+            "doc.inspect" => self.inspect(index_of(&p)?),
             "doc.render" => {
                 let max = match p.get("maxSide") {
                     None => 1024,
@@ -147,7 +153,7 @@ impl Headless {
                         value.as_u64().and_then(|value| u32::try_from(value).ok()).ok_or_else(|| bad("maxSide must be an unsigned 32-bit integer"))?
                     }
                 };
-                let png = self.render_png(index_of(&p), max)?;
+                let png = self.render_png(index_of(&p)?, max)?;
                 match str_of(&p, "path") {
                     Some(path) => {
                         self.write_render(&PathBuf::from(path), &png)?;
@@ -160,10 +166,10 @@ impl Headless {
                 }
             }
             "doc.select" => {
-                let i = index_of(&p).ok_or_else(|| bad("doc.select needs `index`"))?;
+                let i = index_of(&p)?.ok_or_else(|| bad("doc.select needs `index`"))?;
                 self.select(i)
             }
-            "doc.close" => self.close(index_of(&p)),
+            "doc.close" => self.close(index_of(&p)?),
             "batch" => self.batch(&p),
             "methods" => Ok(json!(METHODS)),
             other => Err(bad(format!("unknown method `{other}` (try `methods`)"))),
@@ -355,6 +361,40 @@ mod tests {
                 assert_eq!(h.lock().unwrap().inspect(None).unwrap(), before);
             }
         }
+    }
+
+    /// Pins the reply shape documented in docs/control-protocol.md › Command list replies
+    /// (#3684): a bare JSON array (not `{"commands": [...]}`), one object per command with
+    /// exactly these keys, from `engine.commands` (filtered or not) and `command.list`.
+    #[test]
+    fn command_list_replies_are_documented_array_of_objects() {
+        let h = session();
+        let mut g = h.lock().unwrap();
+        let all = g.handle("engine.commands", json!({})).unwrap();
+        let filtered = g.handle("engine.commands", json!({"filter": "BLUR"})).unwrap();
+        let engine = g.handle("engine.execute", json!({"command": "command.list"})).unwrap();
+        for (name, reply) in [("engine.commands", &all), ("engine.commands {filter}", &filtered), ("command.list", &engine)] {
+            let items = reply.as_array().unwrap_or_else(|| panic!("{name} must reply with a bare array, got {reply}"));
+            assert!(!items.is_empty(), "{name}");
+            for c in items {
+                let mut keys: Vec<&str> = c.as_object().unwrap().keys().map(String::as_str).collect();
+                keys.sort_unstable();
+                assert_eq!(keys, ["disabledReason", "enabled", "id", "label", "menu", "needsDocument", "params", "shortcut"], "{name}: {c}");
+                assert!(c["id"].is_string() && c["label"].is_string() && c["params"].is_string() && c["enabled"].is_boolean(), "{c}");
+                assert!(c["needsDocument"].is_boolean(), "{c}");
+                assert_eq!(c["disabledReason"].is_null(), c["enabled"] == true, "disabledReason is null exactly when enabled: {c}");
+                assert!(c["menu"].as_array().unwrap().iter().all(Value::is_string), "{c}");
+                assert!(c["shortcut"].is_string() || c["shortcut"].is_null(), "{c}");
+            }
+        }
+        let n_all = all.as_array().unwrap().len();
+        assert_eq!(engine.as_array().unwrap().len(), n_all);
+        let filtered = filtered.as_array().unwrap();
+        assert!(filtered.len() < n_all);
+        assert!(filtered.iter().all(|c| format!("{} {}", c["id"], c["label"]).to_lowercase().contains("blur")));
+        let new = all.as_array().unwrap().iter().find(|c| c["id"] == "file.new").unwrap();
+        assert_eq!((&new["menu"], &new["shortcut"], &new["enabled"]), (&json!(["File"]), &json!("Cmd+N"), &json!(true)), "{new}");
+        assert_eq!((&new["disabledReason"], &new["needsDocument"]), (&Value::Null, &json!(false)), "{new}");
     }
 
     #[test]
@@ -828,5 +868,28 @@ mod tests {
         assert_eq!(v["ok"], false);
         assert_eq!(v["error"], "authentication required");
         assert!(v.get("result").is_none());
+    }
+
+    #[test]
+    fn invalid_document_index_is_rejected_not_the_active_document() {
+        let h = session();
+        for _ in 0..2 {
+            assert_eq!(respond(&h, r#"{"method":"doc.new","params":{"width":8,"height":8}}"#)["ok"], true);
+        }
+        let count = |h: &Mutex<Headless>| h.lock().unwrap().session_list()["documents"].as_array().unwrap().len();
+        for index in [json!("0"), json!(-1), json!(0.5), json!(true)] {
+            for method in ["doc.close", "doc.inspect", "doc.select"] {
+                let reply = respond(&h, &json!({"method": method, "params": {"index": index}}).to_string());
+                assert_eq!(reply["ok"], false, "{method} {index}: {reply}");
+                assert!(reply["error"].as_str().unwrap().contains("`index` must be a non-negative integer"), "{reply}");
+            }
+            assert_eq!(count(&h), 2, "index {index} closed a document");
+        }
+        // Null means "the active document", like a missing `index`.
+        assert_eq!(respond(&h, r#"{"method":"doc.inspect","params":{"index":null}}"#)["ok"], true);
+        // A valid index still closes that document.
+        let reply = respond(&h, r#"{"method":"doc.close","params":{"index":0}}"#);
+        assert_eq!(reply["ok"], true, "{reply}");
+        assert_eq!(count(&h), 1);
     }
 }

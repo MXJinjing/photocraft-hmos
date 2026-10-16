@@ -24,10 +24,15 @@ crc32fast = "1.5"
 blake3 = { version = "1.8", default-features = false, features = ["pure"] }
 ruzstd = "0.9"
 
-# A plain fsync where a file system refuses the full flush (`sync_file`, atomic.rs). Already in
-# Cargo.lock on Apple targets (cap-std), so this adds no new crate.
-[target.'cfg(target_vendor = "apple")'.dependencies]
+# Unix directory cleanup uses no-follow descriptor-relative operations; the same
+# dependency provides the plain-fsync fallback on Apple file systems.
+[target.'cfg(unix)'.dependencies]
 rustix = { version = "1.1", default-features = false, features = ["std", "fs"] }
+
+# rustix does not expose Apple's directory-search open mode. Only the named
+# constant is used; all descriptor operations remain in safe rustix APIs.
+[target.'cfg(target_vendor = "apple")'.dependencies]
+libc = "0.2"
 
 [dev-dependencies]
 proptest = { workspace = true }

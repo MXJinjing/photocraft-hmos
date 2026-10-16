@@ -113,7 +113,7 @@ fn save_a_copy_to_a_targa_asks_and_keeps_the_document_unsaved() {
     crate::menus::invoke(h.state_mut(), &ctx, "file.saveACopy", json!({})).unwrap();
     h.run_steps(3);
     assert_eq!(h.state().targa_options.as_ref().map(|p| (p.bits, p.copy)), Some((TgaBits::Bits32, true)));
-    assert!(targa_options_ui::park(h.state_mut(), "other.tga".into(), false, true).is_err(), "the waiting prompt is kept");
+    assert!(targa_options_ui::park(h.state_mut(), "other.tga".into(), false, "file.saveAs").is_err(), "the waiting prompt is kept");
     assert_eq!(h.state().targa_options.as_ref().map(|p| p.path.as_str()), Some("copy.tga"));
     h.key_press(Key::Enter);
     h.run_steps(3);
@@ -140,8 +140,8 @@ fn targa_options_keeps_a_layered_save_as_a_copy() {
     assert_eq!(st.path, None);
 }
 
-/// An action being recorded keeps a Targa Save As with its bits, answered in Targa Options or
-/// scripted (#2032), and plays it back without asking; the dialog's Save a Copy isn't recorded.
+/// An action being recorded keeps a Targa Save As or Save a Copy with its bits, answered in Targa
+/// Options or scripted (#2032, #4373), and plays them back without asking.
 #[test]
 fn recorded_targa_save_as_keeps_its_bits_and_replays_without_asking() {
     let (mut h, writes) = targa_app(true, "copy.tga");
@@ -164,12 +164,22 @@ fn recorded_targa_save_as_keeps_its_bits_and_replays_without_asking() {
         &[("t.tga".to_string(), asked(Some(24))), ("copy.tga".to_string(), asked(Some(32))), ("s.tga".to_string(), asked(Some(32)))]
     );
     let steps = &h.state().session.actions.list[0].steps;
-    assert_eq!(steps, &[("file.saveAs".into(), json!({"path": "t.tga", "tgaBits": 24})), ("file.saveAs".into(), json!({"path": "s.tga", "tgaBits": 32}))]);
+    assert_eq!(
+        steps,
+        &[
+            ("file.saveAs".into(), json!({"path": "t.tga", "tgaBits": 24})),
+            ("file.saveACopy".into(), json!({"path": "copy.tga", "tgaBits": 32})),
+            ("file.saveAs".into(), json!({"path": "s.tga", "tgaBits": 32}))
+        ]
+    );
     writes.borrow_mut().clear();
     let played = h.state_mut().run("actions.play", json!({"action": 0})).unwrap();
     assert!(played.get("failed").is_none(), "{played}");
     assert!(h.state().targa_options.is_none(), "playback doesn't ask");
-    assert_eq!(writes.borrow().as_slice(), &[("t.tga".to_string(), asked(Some(24))), ("s.tga".to_string(), asked(Some(32)))]);
+    assert_eq!(
+        writes.borrow().as_slice(),
+        &[("t.tga".to_string(), asked(Some(24))), ("copy.tga".to_string(), asked(Some(32))), ("s.tga".to_string(), asked(Some(32)))]
+    );
 }
 
 /// Closing an unsaved document whose save goes to a Targa waits behind Targa Options, then closes.

@@ -33,6 +33,27 @@ pub enum DropTarget {
     Elsewhere,
 }
 
+/// `warnings` from an import, plus one for each font family the active document's type uses that
+/// isn't installed (#4559): Photoshop warns about missing fonts as a file opens, and the CLI and
+/// automation already report them; the type would otherwise silently render in a fallback face.
+pub(crate) fn with_missing_fonts(app: &PhotocraftApp, warnings: Vec<String>) -> Vec<String> {
+    match app.session.active() {
+        Some(st) => with_missing_fonts_of(&st.doc, warnings),
+        None => warnings,
+    }
+}
+
+/// [`with_missing_fonts`] for `doc` itself: a file held back for its profile prompt
+/// (`open_prompt`) isn't the active document yet.
+pub(crate) fn with_missing_fonts_of(doc: &photocraft_doc::Document, mut warnings: Vec<String>) -> Vec<String> {
+    for w in photocraft_engine::type_extra_cmds::missing_font_warnings(doc) {
+        if !warnings.contains(&w) {
+            warnings.push(w);
+        }
+    }
+    warnings
+}
+
 /// A dropped file's name ("dropped" when it has none).
 fn dropped_name(f: &egui::DroppedFileHandle) -> String {
     f.path().file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| "dropped".into())
@@ -57,9 +78,7 @@ impl PhotocraftApp {
             crate::jobs_ui::start_open(self, &display_name(path), Some(path.to_string()), crate::jobs_ui::bytes(bytes))?;
             return Ok(Vec::new());
         }
-        let warnings = self.open_bytes(&display_name(path), bytes)?;
-        self.opened_from(path);
-        Ok(warnings)
+        self.open_bytes_from(&display_name(path), bytes, Some(path))
     }
 
     /// Record that the active document was just opened from `path`: File › Save writes back to it
@@ -154,6 +173,12 @@ impl PhotocraftApp {
             DropTarget::Tabs(slot) => Some(slot),
             DropTarget::Canvas | DropTarget::Elsewhere => None,
         };
+        // A box still open from an earlier drop (or any Free Transform) is applied first (#4833):
+        // the queue below places the next file only once no box is open, so a separate drop
+        // would otherwise wait unseen for ↩. Files dropped together still go one by one.
+        if target == DropTarget::Canvas && self.ui.transform.is_some() && files.iter().any(|f| !crate::preset_files_ui::is_preset_file(&dropped_name(f))) {
+            crate::transform_tool::commit(self);
+        }
         for f in files {
             let name = dropped_name(&f);
             if target == DropTarget::Canvas && !crate::preset_files_ui::is_preset_file(&name) {

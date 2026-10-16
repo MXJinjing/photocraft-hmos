@@ -41,13 +41,13 @@ fn dct_jpeg_size(b: &[u8]) -> Option<(u32, u32)> {
     None
 }
 
-fn candidate(data: &[u8], offset: usize, len: usize) -> Option<Preview<'_>> {
+pub(crate) fn candidate(data: &[u8], offset: usize, len: usize) -> Option<Preview<'_>> {
     let jpeg = data.get(offset..offset.checked_add(len)?)?;
     let (width, height) = dct_jpeg_size(jpeg)?;
     Some(Preview { jpeg, width, height })
 }
 
-/// The largest embedded JPEG preview of a raw file (TIFF-based raws and RAF).
+/// The largest embedded JPEG preview of a raw file (TIFF-based raws, RAF and CR3).
 pub fn embedded_preview(bytes: &[u8]) -> Option<Preview<'_>> {
     embedded_previews(bytes).into_iter().max_by_key(|p| u64::from(p.width) * u64::from(p.height))
 }
@@ -56,7 +56,9 @@ pub fn embedded_preview(bytes: &[u8]) -> Option<Preview<'_>> {
 /// full-size and a smaller rendering of the same picture).
 pub fn embedded_previews(bytes: &[u8]) -> Vec<Preview<'_>> {
     let mut found: Vec<Preview> = Vec::new();
-    if bytes.starts_with(crate::raf::MAGIC) {
+    if bytes.get(4..12) == Some(b"ftypcrx ") {
+        found = crate::cr3::previews(bytes);
+    } else if bytes.starts_with(crate::raf::MAGIC) {
         // RAF header: big-endian JPEG offset and length at bytes 84 and 88.
         if let Some((off, len)) = crate::raf::preview_range(bytes) {
             found.extend(candidate(bytes, off, len));

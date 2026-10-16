@@ -427,7 +427,7 @@ pub(crate) fn effect_reach(e: &GalleryEffect) -> i32 {
         F::Crosshatch => (g("strokeLength") / 3.0) as i32 + gs(1.0) + 2,
         F::DarkStrokes => 9,
         F::InkOutlines => (g("strokeLength") / 2.0) as i32 + 3,
-        F::Spatter => g("sprayRadius").ceil() as i32 + 2,
+        F::Spatter => (g("sprayRadius") * 1.5).ceil() as i32 + 2,
         F::SprayedStrokes => g("sprayRadius").ceil() as i32 + (g("strokeLength") / 2.0) as i32 + 3,
         F::SumiE => gs(g("strokeWidth") * 0.2) + (g("strokeWidth") / 2.0) as i32 + 2,
         F::Glass => (g("distortion") * 2.0).ceil() as i32 + 2,
@@ -768,9 +768,26 @@ fn apply(e: &GalleryEffect, win: &mut Win, ctx: &Ctx) {
                 win.c[i] = map(win.c[i], |v| (v + (1.0 - v) * lt) * (1.0 - dk) * (1.0 - clamp01(ink)));
             }
         }
-        F::Spatter | F::SprayedStrokes => {
+        F::Spatter => {
+            // Smoothness smooths the random displacement: a larger feature size and, as with any
+            // averaged noise, a smaller reach. Low smoothness sprays specks out to the full
+            // radius; high smoothness leaves a torn but attached, hard edge (what Photoshop
+            // shows at Smoothness 15).
             let rad = g("sprayRadius");
-            let sc = if e.filter == F::Spatter { 0.6 + g("smoothness") * 0.25 } else { 1.2 };
+            let feature = 1.0 + g("smoothness") * 0.35;
+            let reach = (rad * 1.2 / feature).min(rad);
+            let src = Win { r: win.r, w, h, c: win.c.clone() };
+            for i in 0..win.c.len() {
+                let (x, y) = win.xy(i);
+                let (fx, fy) = (x as f32 / feature, y as f32 / feature);
+                let dx = (fbm(fx, fy, 91) - 0.5) * 3.0 * reach;
+                let dy = (fbm(fx, fy, 92) - 0.5) * 3.0 * reach;
+                win.c[i] = src.sample(x as f32 + 0.5 + dx, y as f32 + 0.5 + dy);
+            }
+        }
+        F::SprayedStrokes => {
+            let rad = g("sprayRadius");
+            let sc = 1.2;
             let src = Win { r: win.r, w, h, c: win.c.clone() };
             for i in 0..win.c.len() {
                 let (x, y) = win.xy(i);
@@ -779,9 +796,7 @@ fn apply(e: &GalleryEffect, win: &mut Win, ctx: &Ctx) {
                 let dy = (vnoise(fx, fy, 92) - 0.5) * 2.0 * rad;
                 win.c[i] = src.sample(x as f32 + 0.5 + dx, y as f32 + 0.5 + dy);
             }
-            if e.filter == F::SprayedStrokes {
-                line_blur3(&mut win.c, w, h, direction(e.choice("strokeDirection")), (g("strokeLength") / 2.0) as usize);
-            }
+            line_blur3(&mut win.c, w, h, direction(e.choice("strokeDirection")), (g("strokeLength") / 2.0) as usize);
         }
         F::SumiE => {
             let sw = g("strokeWidth");

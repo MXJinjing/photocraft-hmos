@@ -106,6 +106,7 @@ fn add_abr_presets(s: &mut Session, p: &Value, group: String, imp: photocraft_io
         let mut b = pr.brush.clone().picked_over(&s.tools.brush);
         s.load_brush_tips(&mut b).map_err(|e| bad("brush.presets.importAbr", e))?;
         s.tools.brush = b;
+        s.tools.brush_changed();
     }
     // Distinct folder paths the file brought (its Photoshop folders, nested inside `group`).
     let folders: std::collections::BTreeSet<&[String]> =

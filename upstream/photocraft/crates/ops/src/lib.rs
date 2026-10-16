@@ -581,6 +581,44 @@ mod tests {
         }
     }
 
+    /// A pattern fill or layer style copies its pattern into the document, so the pattern's tiles
+    /// count like layer pixels, shared ones once; undoing that step leaves them to the redo states.
+    #[test]
+    fn document_patterns_count_as_document_pixels() {
+        use photocraft_doc::{Pattern, Surface};
+        for depth in SampleType::ALL {
+            let tile = 4 * 256 * 256 * depth.bytes();
+            let mut cur = Arc::new(Document::new("patterns", Size::new(64, 64), ColorMode::Rgb, depth));
+            let mut h = History { max_bytes: usize::MAX, ..History::default() };
+            for name in ["A", "B"] {
+                edit(&mut h, &mut cur, "Rename", |doc| doc.name = name.into());
+                h.trim(&cur);
+            }
+            let mut surface = Surface::new(cur.pixel_format());
+            surface.write_pixel(1, 1, &[0.0, 0.0, 1.0, 1.0]);
+            let pattern = Pattern::new("Pattern", surface, 4, 4);
+            edit(&mut h, &mut cur, "Pattern Fill", |doc| doc.patterns.push(pattern));
+            assert_eq!(h.pixel_bytes(&cur), tile, "the document's pattern");
+            assert_eq!(h.unique_bytes(&cur), 0);
+            assert_counter(&h, &cur);
+            edit(&mut h, &mut cur, "Rename", |doc| doc.name = "C".into());
+            assert_eq!(h.pixel_bytes(&cur), tile, "shared with history, it counts once");
+            assert_counter(&h, &cur);
+            for _ in 0..2 {
+                cur = h.undo(cur).unwrap().0;
+                assert_counter(&h, &cur);
+            }
+            assert!(cur.patterns.is_empty());
+            assert_eq!(h.unique_bytes(&cur), tile, "only the redo states hold the pattern");
+            assert_eq!(h.pixel_bytes(&cur), tile);
+            cur = h.redo(cur).unwrap().0;
+            assert_eq!(h.unique_bytes(&cur), 0);
+            assert_counter(&h, &cur);
+            h.clear();
+            assert_eq!(h.pixel_bytes(&cur), tile);
+        }
+    }
+
     #[test]
     fn counter_tracks_eviction_undo_redo_branching_purge_and_clones() {
         for depth in [SampleType::U8, SampleType::U16, SampleType::F32] {

@@ -124,3 +124,37 @@ sync_github_name = true
 
 [people.arthurdeka]
 sync_github_name = true
+
+[people.aweussom]
+real_name = "Tommy Leonhardsen"
+
+[people.Furash]
+sync_github_name = true
+
+[people.lucAmbr0]
+sync_github_name = true
+
+[people.Hevarh1]
+sync_github_name = true
+
+[people.dotCooCoo]
+real_name = "Robert Lee"
+sync_github_name = true
+
+[people.deadmeu]
+sync_github_name = true
+
+[people.megaDon101]
+display_name = "megadon"
+sync_github_name = false
+
+[people.sssehnsuchttt]
+sync_github_name = true
+
+[people.VanTan666]
+display_name = "VanTan"
+sync_github_name = false
+
+[people.yeniufuklar-com]
+real_name = "Ufuk Efe"
+sync_github_name = true

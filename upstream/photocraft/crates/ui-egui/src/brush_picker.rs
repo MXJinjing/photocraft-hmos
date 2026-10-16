@@ -24,7 +24,7 @@ use photocraft_engine::BrushSettings;
 use photocraft_engine::paint::{BrushPreset, MAX_BRUSH_SIZE, TipShape};
 use serde_json::{Value, json};
 
-use crate::brush_panel::{BrushesPanelState, Renaming, new_preset_name, run_or_status};
+use crate::brush_panel::{BrushesPanelState, Renaming};
 use crate::brushes_tab::{self, Action, ListLayout};
 use crate::stylus::PointerSource;
 use crate::theme::Tokens;
@@ -160,13 +160,11 @@ pub fn apply(app: &mut PhotocraftApp, ctx: &egui::Context, picks: Vec<Pick>) {
         match pick {
             Pick::List(a) => brushes_tab::apply(app, vec![a]),
             Pick::OpenSettings => open_settings(app, ctx),
+            // Photoshop asks for the new preset's name and what it captures first, in a dialog that
+            // takes the picker's place.
             Pick::NewPreset => {
-                let name = new_preset_name(&app.session.tools.presets);
-                run_or_status(app, "brush.presets.save", json!({ "name": name }));
-                // Photoshop asks for the new preset's name: the picker's rename bar does.
-                if app.session.tools.presets.iter().any(|p| p.name == name) {
-                    app.ui.brush_picker_list.renaming = Some(Renaming { group: false, name, folder: Vec::new(), text: String::new() });
-                }
+                close(&mut app.ui);
+                crate::brush_preset_dialog::open(app, None);
             }
             Pick::Import => {
                 let _ = app.open_dialog_file();

@@ -189,6 +189,28 @@ fn missing_pattern_and_tip_are_reported() {
 }
 
 #[test]
+fn disabled_smoothing_tool_options_keep_the_amount_and_mode() {
+    let preset = Descriptor::new("brushPreset")
+        .with("Nm  ", t("Smoothing off"))
+        .with("Brsh", Value::Descriptor(Descriptor::new("computedBrush").with("Dmtr", u(b"#Pxl", 19.0))))
+        .with(
+            "toolOptions",
+            Value::Descriptor(
+                Descriptor::new("currentToolOptions")
+                    .with("smoothing", Value::Boolean(false))
+                    .with("smoothingValue", Value::Integer(40))
+                    .with("smoothingRadiusMode", Value::Boolean(true)),
+            ),
+        );
+    for sub in [1, 2] {
+        let bytes = write_v6(sub, &[], &[], std::slice::from_ref(&preset), true).unwrap();
+        let imported = read_abr(&bytes, "Test").unwrap();
+        let smoothing = &imported.presets[0].brush.smoothing;
+        assert!(!smoothing.enabled && smoothing.amount == 0.4 && smoothing.pulled_string);
+    }
+}
+
+#[test]
 fn file_folders_nest_inside_the_import_group() {
     let named = |n: &str| Descriptor::new("brushPreset").with("Nm  ", t(n));
     let orphan = Descriptor::new("brushPreset").with("Nm  ", t("Orphan")).with("Brsh", Value::Descriptor(sampled_tip("$nowhere")));
@@ -376,4 +398,33 @@ fn low_depth_height_texture_brush_paints() {
         // 13 % depth reaches 1.55 pattern ranges: above the whole darkened Grit pattern.
         assert_eq!(covered, 36, "{mode}: the stroke painted {covered} of 36 pixels");
     }
+}
+
+/// #4809: Photoshop CC presets store the dual tip's spacing in `dualBrush › Brsh › Spcn` and a
+/// `Spcn` of 100 % on the `dualBrush` object beside it; the tip's value is the panel's. A tip
+/// without one still takes the outer value.
+#[test]
+fn dual_brush_spacing_comes_from_its_tip() {
+    let dual = |tip: Descriptor| {
+        Descriptor::new("brushPreset")
+            .with("Nm  ", t("SPACING 10%"))
+            .with("Brsh", Value::Descriptor(Descriptor::new("computedBrush").with("Dmtr", u(b"#Pxl", 30.0))))
+            .with(
+                "dualBrush",
+                Value::Descriptor(
+                    Descriptor::new("dualBrush")
+                        .with("useDualBrush", Value::Boolean(true))
+                        .with("Brsh", Value::Descriptor(tip))
+                        .with("BlnM", en("BlnM", "Ovrl"))
+                        .with("Spcn", prc(100.0)),
+                ),
+            )
+    };
+    let spacing = |preset: Descriptor| {
+        let bytes = write_v6(2, &[], &[], &[preset], false).unwrap();
+        read_abr(&bytes, "Test").unwrap().presets[0].brush.dual_brush.spacing
+    };
+    let tip = Descriptor::new("computedBrush").with("Dmtr", u(b"#Pxl", 40.0));
+    assert!((spacing(dual(tip.clone().with("Spcn", prc(10.0)))) - 0.10).abs() < 1e-6, "the tip's 10 %, not the outer 100 %");
+    assert!((spacing(dual(tip)) - 1.0).abs() < 1e-6, "no tip spacing: the outer value");
 }

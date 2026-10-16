@@ -1,6 +1,6 @@
 //! Rasterizes a [`TextLayout`] into a document-space [`Surface`] of any pixel format.
 
-use photocraft_color::{Color, PixelFormat};
+use photocraft_color::{Color, PixelFormat, SampleType};
 use photocraft_doc::text::AntiAlias;
 use photocraft_geom::{Affine, Rect};
 use photocraft_raster::Surface;
@@ -10,12 +10,12 @@ use skrifa::{GlyphId, MetadataProvider};
 
 use crate::layout::{GlyphOrient, PlacedGlyph, TextLayout};
 use crate::raster::{Bounds, Coverage, LineSink, Pen, Xform, rect_to};
-use crate::warp::Warp;
+use crate::warp::{Placement, Warp};
 
 /// Faux-italic slant in degrees (Photoshop-like).
 pub const FAUX_ITALIC_DEG: f32 = 12.0;
-/// Faux-bold dilation radius as a fraction of the font size.
-pub const FAUX_BOLD_RADIUS: f32 = 0.018;
+/// Faux-bold ring radius as a fraction of the font size (tuned so stem weight stays close to the old summed-coverage look).
+pub const FAUX_BOLD_RADIUS: f32 = 0.036;
 /// Largest raster we produce (pixels), as a guard against absurd sizes.
 const MAX_PIXELS: u64 = 256 * 1024 * 1024;
 
@@ -53,6 +53,30 @@ impl<S: LineSink> LineSink for WarpSink<'_, S> {
 /// when `color` is `None`) into `sink`, through `transform` (text space → sink space), bending
 /// the outlines with `warp` first (in text space).
 fn draw(layout: &TextLayout, transform: &Xform, sink: &mut impl LineSink, only_color: Option<&Color>, warp: Option<&Warp>) {
+    draw_pass(layout, transform, sink, only_color, warp, Pass::All);
+}
+
+/// Which part of the layout [`draw_pass`] emits. Faux bold draws each glyph at several offsets;
+/// summing those into one coverage buffer saturates the antialiased edge pixels (hard, pixelated
+/// stems), so the rasteriser draws every offset into its own buffer and merges them with `max`.
+#[derive(Clone, Copy, PartialEq)]
+enum Pass {
+    /// Everything, all offsets (bounds, outlines).
+    All,
+    /// Non-bold glyphs and decorations.
+    Plain,
+    /// Bold glyphs at one offset (index into [`BOLD_OFFSETS`]).
+    Bold(usize),
+}
+
+const BOLD_OFFSETS: [(f64, f64); 8] = [(-1.0, 0.0), (1.0, 0.0), (0.0, -1.0), (0.0, 1.0), (0.7, 0.7), (-0.7, -0.7), (0.7, -0.7), (-0.7, 0.7)];
+
+fn is_bold(layout: &TextLayout, g: &PlacedGlyph) -> bool {
+    let face_bold = layout.faces.get(g.face as usize).is_some_and(|f| f.embolden);
+    layout.styles.get(g.style as usize).is_some_and(|s| s.faux_bold) || face_bold
+}
+
+fn draw_pass(layout: &TextLayout, transform: &Xform, sink: &mut impl LineSink, only_color: Option<&Color>, warp: Option<&Warp>, pass: Pass) {
     for g in &layout.glyphs {
         let st = &layout.styles[g.style as usize];
         if only_color.is_some_and(|c| c != &st.color) {
@@ -66,15 +90,36 @@ fn draw(layout: &TextLayout, transform: &Xform, sink: &mut impl LineSink, only_c
             continue;
         };
         let coords: Vec<NormalizedCoord> = face.coords.iter().map(|&c| NormalizedCoord::from_bits(c)).collect();
-        let glyph = glyph_xform(layout, g, face.skew_deg);
+        let mut glyph = glyph_xform(layout, g, face.skew_deg);
+        // Type on a path moves each glyph rigidly: turned to the curve at its centre.
+        let mut bend = warp;
+        if let Some(w) = warp {
+            match w.place_glyph(glyph_center(layout, g, &font, face.size_px, &coords)) {
+                Placement::Bend => {}
+                Placement::Hidden => continue,
+                Placement::Frame(m) => {
+                    glyph = Xform(m).mul(&glyph);
+                    bend = None;
+                }
+            }
+        }
         let bold = st.faux_bold || face.embolden;
         let r = (face.size_px * FAUX_BOLD_RADIUS) as f64;
-        let offsets: &[(f64, f64)] =
-            if bold { &[(-1.0, 0.0), (1.0, 0.0), (0.0, -1.0), (0.0, 1.0), (0.7, 0.7), (-0.7, -0.7), (0.7, -0.7), (-0.7, 0.7)] } else { &[(0.0, 0.0)] };
+        let single = [(0.0, 0.0)];
+        let offsets: &[(f64, f64)] = match (pass, bold) {
+            (Pass::Plain, true) => continue,
+            (Pass::Bold(_), false) => continue,
+            (Pass::Bold(k), true) => match BOLD_OFFSETS.get(k..=k) {
+                Some(o) => o,
+                None => continue,
+            },
+            (Pass::All, true) => &BOLD_OFFSETS,
+            (_, false) => &single,
+        };
         for &(ox, oy) in offsets {
             let local = glyph.mul(&Xform([1.0, 0.0, 0.0, 1.0, ox * r, oy * r]));
             let settings = DrawSettings::unhinted(Size::new(face.size_px), LocationRef::new(&coords));
-            match warp {
+            match bend {
                 Some(w) => {
                     let mut ws = WarpSink { inner: &mut *sink, warp: w, post: *transform };
                     let mut pen = Pen::new(&mut ws, local);
@@ -90,6 +135,9 @@ fn draw(layout: &TextLayout, transform: &Xform, sink: &mut impl LineSink, only_c
                 }
             }
         }
+    }
+    if matches!(pass, Pass::Bold(_)) {
+        return;
     }
     for d in &layout.decorations {
         let st = &layout.styles[d.style as usize];
@@ -123,6 +171,22 @@ fn glyph_xform(layout: &TextLayout, g: &PlacedGlyph, face_skew_deg: f32) -> Xfor
         // 90° clockwise: the glyph's up direction (and its baseline shift) points right.
         GlyphOrient::Rotated => Xform([0.0, 1.0, -1.0, 0.0, x, y]).mul(&Xform([hs, 0.0, skew, -vs, 0.0, -shift])),
     }
+}
+
+/// The horizontal centre (text space) of a placed glyph: the pen position plus half its advance.
+fn glyph_center(layout: &TextLayout, g: &PlacedGlyph, font: &skrifa::FontRef, size_px: f32, coords: &[NormalizedCoord]) -> f64 {
+    let hs = layout.styles.get(g.style as usize).map_or(1.0, |st| if st.horizontal_scale > 0.0 { st.horizontal_scale } else { 1.0 });
+    let advance = match g.orient {
+        GlyphOrient::Horizontal => font.glyph_metrics(Size::new(size_px), LocationRef::new(coords)).advance_width(GlyphId::new(g.id)).unwrap_or(0.0),
+        _ => 0.0,
+    };
+    f64::from(g.x) + f64::from(advance * hs) / 2.0
+}
+
+/// The deformation of a type layer: the path it runs along, or its Warp Text settings (None
+/// when neither applies).
+pub fn layout_deform(layout: &TextLayout, layer: &photocraft_doc::TextLayer) -> Option<Warp> {
+    Warp::on_path(&layer.shape).or_else(|| layout_warp(layout, layer.warp.as_ref()))
 }
 
 /// The warp to apply to `layout` (None when `warp` is absent, `warpNone` or flat).
@@ -199,8 +263,17 @@ pub fn rasterize_warped(layout: &TextLayout, transform: &Affine, format: PixelFo
     }
     for c in &colors {
         let mut cov = Coverage::new(w, h);
-        draw(layout, &xf, &mut cov, Some(c), warp);
-        let cov = cov.finish();
+        draw_pass(layout, &xf, &mut cov, Some(c), warp, Pass::Plain);
+        let mut cov = cov.finish();
+        if layout.glyphs.iter().any(|g| is_bold(layout, g)) {
+            for k in 0..BOLD_OFFSETS.len() {
+                let mut bc = Coverage::new(w, h);
+                draw_pass(layout, &xf, &mut bc, Some(c), warp, Pass::Bold(k));
+                for (a, b) in cov.iter_mut().zip(bc.finish()) {
+                    *a = a.max(b);
+                }
+            }
+        }
         let comps = color_in(&format, c);
         let a = c.alpha.clamp(0.0, 1.0);
         for (i, &cv) in cov.iter().enumerate() {
@@ -222,7 +295,10 @@ pub fn rasterize_warped(layout: &TextLayout, transform: &Affine, format: PixelFo
         let a = px[n];
         if a > 0.0 {
             for v in &mut px[..n] {
-                *v = (*v / a).clamp(0.0, 1.0);
+                let straight = *v / a;
+                // Float text can carry HDR and signed colours. Keep integer output bounded
+                // and retain the old handling of non-finite intermediate values.
+                *v = if format.sample == SampleType::F32 && straight.is_finite() { straight } else { straight.clamp(0.0, 1.0) };
             }
         }
     }
@@ -299,8 +375,19 @@ pub fn outlines(layout: &TextLayout, transform: &Affine, warp: Option<&Warp>) ->
             continue;
         };
         let coords: Vec<NormalizedCoord> = face.coords.iter().map(|&c| NormalizedCoord::from_bits(c)).collect();
-        let glyph = glyph_xform(layout, g, face.skew_deg);
-        let mut rec = Recorder { glyph, post: Xform(transform.m), warp, out: Vec::new() };
+        let mut glyph = glyph_xform(layout, g, face.skew_deg);
+        let mut bend = warp;
+        if let Some(w) = warp {
+            match w.place_glyph(glyph_center(layout, g, &font, face.size_px, &coords)) {
+                Placement::Bend => {}
+                Placement::Hidden => continue,
+                Placement::Frame(m) => {
+                    glyph = Xform(m).mul(&glyph);
+                    bend = None;
+                }
+            }
+        }
+        let mut rec = Recorder { glyph, post: Xform(transform.m), warp: bend, out: Vec::new() };
         let settings = DrawSettings::unhinted(Size::new(face.size_px), LocationRef::new(&coords));
         if outline.draw(settings, &mut rec).is_ok() && !rec.out.is_empty() {
             glyphs.push(rec.out);

@@ -31,7 +31,7 @@ id = "TOOL-213-4"
 target = "Content-Aware Move tool reusing inpaint completion"
 status = "partial"
 issue = 213
-note = "paint.contentAwareMove (retouch_cmds/content_aware_move.rs: move/extend, Structure 1-7, Color 0-10, Sample All Layers, Transform On Drop's scaleX/scaleY/rotate; background job) + Tool::ContentAwareMove (J group: lasso, then drag; Transform On Drop puts a scale/rotate box on the dropped patch, cam_transform.rs: Enter commits as one step, Esc cancels). Missing: a live preview of the result (the drag and the box show the outline only)"
+note = "paint.contentAwareMove (retouch_cmds/content_aware_move.rs: move/extend, Structure 1-7, Color 0-10, Sample All Layers, Transform On Drop's scaleX/scaleY/rotate; background job) + Tool::ContentAwareMove (J group: lasso, then drag; Transform On Drop puts a scale/rotate box on the dropped patch, cam_transform.rs: Enter commits as one step, Esc cancels). cam_preview.rs: once the pointer or the box rests, the result shows (a cancellable background job on a smaller sampling window, small selections only, #4385). Missing: a progressive preview for big selections"
 
 [[item]]
 id = "TOOL-213-5"
@@ -59,7 +59,7 @@ id = "TOOL-213-8"
 target = "Clone Source: W/H link, drawn overlay (opacity/blend/clip/auto-hide), Alt target cursor"
 status = "partial"
 issue = 213
-note = "Clone Source overlay drawn with opacity, inversion, circular clipping, auto-hide and the Normal/Darken/Lighten/Difference blend against the image under the brush (canvas.rs draw_clone_preview, clone_source::overlay_blend); W/H link (cloneSource.set linked, panel chain button, #3298); custom-tip clipping remains missing"
+note = "Clone Source overlay drawn with opacity, inversion, circular clipping, auto-hide and the Normal/Darken/Lighten/Difference blend against the image under the brush (canvas.rs draw_clone_preview, clone_source::overlay_blend); a shaped tip (sampled bitmap, rotation, roundness) clips the overlay to its outline (brush_cursor::tip_mask, #4372); W/H link (cloneSource.set linked, panel chain button, #3298)"
 
 [[item]]
 id = "TOOL-213-9"
@@ -127,9 +127,9 @@ note = "canvas.rs marquee_corners: Shift square or circle, Alt from the centre, 
 [[item]]
 id = "TOOL-214-3"
 target = "Color Range test: Sampled Colors at Fuzziness 0 selects the exact match only"
-status = "partial"
+status = "done"
 issue = 214
-note = "Fuzziness-0 tests cover midtones/shadows only (selection_cmds.rs:444-447)"
+note = "color_range_fuzziness_zero_selects_exact_match_only in selection_cmds.rs asserts exact match is selected and 1-level-off pixels are rejected at fuzziness 0; tonal presets covered in color_range_presets"
 
 [[item]]
 id = "TOOL-214-4"

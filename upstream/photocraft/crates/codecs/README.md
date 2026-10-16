@@ -40,11 +40,13 @@ let out = encode(&img, Format::Tiff, &EncodeOptions::default())?;
 | BMP | yes | yes | U8 | RGB, RGBA | yes | no | no | no | no | no | no | `image` |
 | TGA | yes | yes | U8 | Gray, GrayA, RGB, RGBA | yes | no | no | no | no | no | no | `image` |
 | ICO | yes | yes | U8 | RGBA (at most 256×256) | yes | no | no | no | no | no | no | `image` |
+| DDS | yes | **no** | U8 | Gray, GrayA, RGB, RGBA | yes | no | no | no | no | no | n/a | built in |
 | Netpbm (PBM/PGM/PPM/PAM/PFM) | yes | yes | U8, U16, F32 (float: PFM gray/RGB only) | all six (PAM `CMYK`/`CMYK_ALPHA`) | yes (PAM) | no | no | no | no | no | no | built in |
 | QOI | yes | yes | U8 | RGB, RGBA | yes | no | no | no | no | no | no | `image` |
 | OpenEXR | yes | yes | F16, F32 | Y, YA, RGB, RGBA | yes | no | no | no | no | no | no | `exr` |
 | Radiance HDR | yes | yes | F32 | RGB | no | no | no | no | no | no | yes (RGBE) | `image` |
 | FITS | yes | yes | U8, U16, F32 | Gray, RGB | no | no | no | no | no | yes (header cards) | no | built in |
+| DPX | yes | yes | U8, U16 (10/12-bit code values read and written exactly through U16) | Gray, RGB, RGBA | yes | no | no | no | no | DPX header fields only (creator, project, copyright, creation time, transfer, colorimetric, frame position, frame rate, time code) | no | built in |
 | AVIF | **no** | only with feature `avif` | U8 | RGB, RGBA | yes | no | no | no | no | no | yes | `image` + `ravif` |
 | HEIF/HEIC | with feature `heif` | **no** | U8, U16 (10/12-bit decodes to U16) | RGB, RGBA | yes (auxiliary alpha) | yes (`colr` prof) | yes | yes | no | no | n/a | `heic-rs` |
 
@@ -61,10 +63,16 @@ the encode plan, and `fidelity_warnings` reports the conversion when it loses in
 `Image::convert` applies the same ICC rule: it keeps the profile only when the colour model stays
 the same.
 
-Palette BMP pixels decode as RGB in `Image`; `bmp_palette` exposes the embedded table so
-`photocraft-io` can open them in Indexed Color mode.
+Palette BMP and PNG pixels decode as RGB(A) in `Image`; `bmp_palette` and `png_palette` expose the
+embedded table (and a PNG's transparent entry) so `photocraft-io` can open them in Indexed Color mode.
 
 ## Documented asymmetries and limitations
+
+* **DDS.** The top mip level of a 2D texture: uncompressed pixels described by channel masks
+  (8, 16, 24 or 32 bits, RGB or luminance, with or without alpha) or BC1/BC2/BC3 (DXT1/DXT3/DXT5),
+  with the legacy header or the DX10 one. Everything opens as U8; the other mip levels are
+  ignored. Cubemaps, texture arrays, volume textures, premultiplied DXT2/DXT4 and other formats
+  (BC4–BC7, float) are refused with `CodecError::Unsupported`. Writing is not provided.
 
 * **FITS.** The image in the primary HDU, or the first `IMAGE` extension, is read; `NAXIS3 = 3`
   opens as RGB and any other plane count opens the first plane with `DecodeWarning::MorePages`.
@@ -73,6 +81,19 @@ Palette BMP pixels decode as RGB in `Image`; `bmp_palette` exposes the embedded 
   normalised when at most 2 and scaled by 65535 (or the maximum) otherwise. Header cards are
   kept as text (`HIERARCH` for long names). Tile-compressed (fpack) files are refused with
   `CodecError::Unsupported`; Bayer mosaics open undebayered.
+
+* **DPX.** SMPTE 268M frames in either byte order (`SDPX`, `XPDS`): the first image element,
+  descriptor 6 (luma), 50 (RGB) or 51 (RGBA), unsigned and unencoded, at 8, 10, 12 or 16 bits.
+  10-bit data may be packed (0) or filled three to a word (1, method A; 2, method B), 12-bit data
+  packed (0) or one to a 16-bit word (1, method A). 10- and 12-bit code values open as U16
+  `round(c × 65535 / (2^b − 1))`, so a frame written back at its depth keeps them exactly. No
+  colour transform is applied: `DecodeWarning::DpxEncoding` names the transfer characteristic and
+  colorimetric specification, so a log frame is reported as log. More elements than the first
+  give `DecodeWarning::MoreElements`; the image orientation is applied on import. Writing is
+  big-endian, one unencoded element, at `EncodeOptions::dpx_bits` (8/10/12/16; by default 8 for
+  U8 and 16 otherwise), packing 1 for 10 and 12 bits; gray with alpha is written as luma.
+  Other descriptors, signed or run-length-encoded data and other bit depths return
+  `CodecError::Unsupported` naming the field. Cineon (`.cin`) is not supported.
 
 * **Camera raw files** (DNG, CR2, NEF, ARW… which are TIFF-structured) are recognised and refused
   with `CodecError::Unsupported`: they are sensor data, not flat images. `photocraft-raw` decodes

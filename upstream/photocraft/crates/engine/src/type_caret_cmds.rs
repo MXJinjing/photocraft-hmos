@@ -106,9 +106,7 @@ fn topmost(doc: &Document, x: f64, y: f64) -> Option<Frame> {
     let mut ids: Vec<LayerId> = doc
         .walk()
         .into_iter()
-        .filter(|(path, _, layer)| {
-            matches!(layer.content, LayerContent::Text(_)) && (1..=path.len()).all(|n| doc.layer_at(&path[..n]).is_some_and(|ancestor| ancestor.visible))
-        })
+        .filter(|(path, _, layer)| matches!(layer.content, LayerContent::Text(_)) && doc.shown_at(path))
         .map(|(_, _, layer)| layer.id)
         .collect();
     ids.reverse();
@@ -484,7 +482,7 @@ mod tests {
         bad(&mut s, "type.navigate", json!({"layer": id, "index": 9, "move": "end"}));
         bad(&mut s, "type.navigate", json!({"layer": id, "index": 0, "move": "lineNext", "x": "no"}));
         bad(&mut s, "type.navigate", json!({"layer": pixel, "index": 0, "move": "start"}));
-        assert!(matches!(s.execute("type.caret", json!({"layer": 9_999_999, "index": 0})), Err(EngineError::NoLayer(_))));
+        assert!(matches!(s.execute("type.caret", json!({"layer": u64::MAX, "index": 0})), Err(EngineError::NoLayer(_))));
         // A point on the named layer but outside its text still returns a caret, marked outside.
         let far = s.execute("type.hitTest", json!({"layer": id, "x": 390, "y": 290})).unwrap();
         assert_eq!(far["inside"], false);

@@ -55,15 +55,26 @@ fn appearance_defaults_and_legacy_theme_migrate() {
     // New users keep Photoshop's default; following the system is opt-in.
     assert_eq!(p.interface.appearance_mode, AppearanceMode::Dark);
     assert_eq!(p.interface.dark_theme, DarkTheme::ProMedium);
-    assert_eq!(p.interface.light_theme, LightTheme::StudioLight);
+    assert_eq!(p.interface.light_theme, LightTheme::ProLight);
     for (theme, mode, dark, light) in
-        [("pro", AppearanceMode::Dark, DarkTheme::Pro, LightTheme::StudioLight), ("classic", AppearanceMode::Light, DarkTheme::ProMedium, LightTheme::Classic)]
+        [("pro", AppearanceMode::Dark, DarkTheme::Pro, LightTheme::ProLight), ("classic", AppearanceMode::Light, DarkTheme::ProMedium, LightTheme::Classic)]
     {
         let mut s = Session::new();
         s.load_prefs_json(&json!({"interface": {"theme": theme}}).to_string()).unwrap();
         assert_eq!(s.prefs().interface.appearance_mode, mode);
         assert_eq!(s.prefs().interface.dark_theme, dark);
         assert_eq!(s.prefs().interface.light_theme, light);
+    }
+}
+
+#[test]
+fn legacy_theme_migration_preserves_saved_theme_slots() {
+    for (legacy, slot, saved) in [("proMedium", "darkTheme", "solarizedDark"), ("studioLight", "lightTheme", "adwaita")] {
+        let mut interface = json!({"theme": legacy});
+        interface[slot] = json!(saved);
+        let mut session = Session::new();
+        session.load_prefs_json(&json!({"interface": interface}).to_string()).unwrap();
+        assert_eq!(session.prefs_value()["interface"][slot], saved, "explicit {slot} survives migration");
     }
 }
 

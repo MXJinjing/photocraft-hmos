@@ -16,13 +16,13 @@ use std::sync::Arc;
 #[cfg(test)]
 mod recovery_tests;
 
-/// Everything File › Open reads: PhotoCraft, Photoshop, OpenRaster and Affinity documents, flat images, and
+/// Everything File › Open reads: PhotoCraft, Photoshop, OpenRaster, Krita and Affinity documents, flat images, and
 /// Photoshop brushes (.abr), gradients (.grd), swatches (.aco, .ase) and keyboard shortcut sets
 /// (.kys), which go to the preset libraries and Edit › Keyboard Shortcuts.
 const OPEN_EXTS: &[&str] = &[
-    "pcraft", "pdn", "ora", "kra", "psd", "psb", "psdt", "png", "jpg", "jpeg", "tif", "tiff", "webp", "gif", "bmp", "tga", "ico", "qoi", "exr", "hdr", "pbm",
-    "pgm", "ppm", "pam", "pfm", "pcx", "fits", "fit", "fts", "heic", "heif", "hif", "dng", "cr2", "cr3", "nef", "nrw", "arw", "pef", "orf", "rw2", "raf",
-    "abr", "grd", "svg", "svgz", "aco", "ase", "kys", "af", "afdesign", "afphoto", "afpub",
+    "pcraft", "pdn", "ora", "kra", "krz", "psd", "psb", "psdt", "png", "jpg", "jpeg", "tif", "tiff", "webp", "gif", "bmp", "tga", "ico", "qoi", "exr", "hdr",
+    "pbm", "pgm", "ppm", "pam", "pfm", "pcx", "dds", "xpm", "fits", "fit", "fts", "dpx", "heic", "heif", "hif", "dng", "cr2", "cr3", "nef", "nrw", "arw",
+    "pef", "orf", "rw2", "raf", "abr", "grd", "svg", "svgz", "aco", "ase", "kys", "af", "afdesign", "afphoto", "afpub",
 ];
 const SVG_EXTS: &[&str] = &["svg", "svgz"];
 
@@ -43,7 +43,7 @@ fn open_filters() -> Vec<(&'static str, Vec<String>)> {
         ("All Formats", open_filter_extensions(OPEN_EXTS)),
         ("PhotoCraft", open_filter_extensions(&["pcraft"])),
         ("OpenRaster", open_filter_extensions(&["ora"])),
-        ("Krita", open_filter_extensions(&["kra"])),
+        ("Krita", open_filter_extensions(&["kra", "krz"])),
         ("SVG", open_filter_extensions(SVG_EXTS)),
     ]
 }
@@ -60,8 +60,13 @@ const SAVE_FILTERS: &[(&str, &[&str])] = &[
     ("WebP", &["webp"]),
     ("TIFF", &["tif"]),
     ("Targa", &["tga"]),
+    // Also in Photoshop's Save As list; ICO is PhotoCraft's own (#4357): up to 256×256, with alpha.
+    ("BMP", &["bmp"]),
+    ("GIF", &["gif"]),
+    ("ICO", &["ico"]),
     ("OpenEXR", &["exr"]),
     ("FITS", &["fits", "fit"]),
+    ("DPX", &["dpx"]),
 ];
 
 /// Non-document files the shell saves (Swatches panel exports): offered alone, so the dialog
@@ -77,13 +82,31 @@ fn save_filters(suggested: &str) -> Vec<(String, Vec<String>)> {
     let mut v: Vec<(String, Vec<String>)> = SAVE_FILTERS.iter().map(|(name, exts)| (name.to_string(), exts.iter().map(|e| e.to_string()).collect())).collect();
     match v.iter().position(|(_, exts)| exts.contains(&ext)) {
         Some(i) => {
-            let f = v.remove(i);
-            v.insert(0, f);
+            let (name, mut exts) = v.remove(i);
+            // Windows adds the first type's first extension to a bare name: `.psb`, not `.psd`.
+            exts.retain(|e| *e != ext);
+            exts.insert(0, ext);
+            v.insert(0, (name, exts));
         }
         None if !ext.is_empty() => v.insert(0, (ext.to_ascii_uppercase(), vec![ext])),
         None => {}
     }
     v
+}
+
+/// The name the save dialog starts with. On Windows a visible extension stays put when the user
+/// picks another type (with File name extensions shown, `image.psd` saved as PhotoCraft stayed
+/// `image.psd`, #4394), while a bare name gets the chosen type's extension, so there the dialog
+/// gets the stem and the suggested type (listed first by [`save_filters`]) supplies `.psd`. A
+/// stem that still has a dot (`scan.jpg.psd`: Windows could keep `scan.jpg`) or an upper-case
+/// extension (the user's spelling) keeps the whole name. Elsewhere the whole name is kept: the
+/// macOS panel has no type list, and on Linux rfd doesn't report which type was picked.
+fn dialog_file_name(suggested: &str, windows: bool) -> Option<String> {
+    let path = Path::new(suggested);
+    let name = path.file_name()?.to_string_lossy().into_owned();
+    let (Some(stem), Some(ext)) = (path.file_stem(), path.extension().and_then(|e| e.to_str())) else { return Some(name) };
+    let bare = windows && Path::new(stem).extension().is_none() && !ext.is_empty() && ext == ext.to_ascii_lowercase();
+    Some(if bare { stem.to_string_lossy().into_owned() } else { name })
 }
 
 /// Shows an Open or Save dialog without blocking the event loop (#673, #574): rfd's async dialog
@@ -127,8 +150,8 @@ fn show_file_dialog(request: FileDialogRequest, parent: Option<&eframe::Frame>, 
             for (name, exts) in save_filters(&suggested) {
                 dialog = dialog.add_filter(name, &exts);
             }
-            if let Some(name) = Path::new(&suggested).file_name() {
-                dialog = dialog.set_file_name(name.to_string_lossy());
+            if let Some(name) = dialog_file_name(&suggested, cfg!(windows)) {
+                dialog = dialog.set_file_name(name);
             }
             if let Some(dir) = Path::new(&suggested).parent().filter(|p| !p.as_os_str().is_empty()) {
                 dialog = dialog.set_directory(dir);
@@ -217,6 +240,7 @@ fn export_options(settings: &photocraft_ui_egui::ExportSettings) -> photocraft_i
     opts.xmp = if settings.xmp_all { photocraft_io::XmpEmbed::All } else { photocraft_io::XmpEmbed::None };
     opts.tga_bits = settings.tga_bits;
     opts.image_previews = settings.image_previews;
+    opts.psd_maximize_compatibility = settings.psd_maximize_compatibility;
     opts
 }
 
@@ -324,6 +348,43 @@ fn image_from_files(paths: &[PathBuf]) -> Option<(u32, u32, Vec<u8>)> {
     })
 }
 
+/// Largest clipboard image payload read on Wayland (1 GiB, a 16K × 16K RGBA BMP), so no real
+/// screenshot is turned away, while a broken or hostile source can't make us allocate without end.
+#[cfg(target_os = "linux")]
+const MAX_CLIPBOARD_IMAGE_BYTES: u64 = 4 * 16384 * 16384;
+
+/// The clipboard image arboard can't read on Wayland (#2546): arboard 3.6 asks for `image/png`
+/// only, so a screenshot tool or clipboard manager that offers just `image/jpeg`, `image/bmp` or
+/// `image/webp` pasted nothing. Reads the other `image/*` types through the same data-control
+/// protocol arboard uses, and decodes them with our own codecs. `None` off Wayland.
+#[cfg(target_os = "linux")]
+fn wayland_clipboard_image() -> Option<(u32, u32, Vec<u8>)> {
+    use std::io::Read;
+    use wl_clipboard_rs::paste::{ClipboardType, MimeType, Seat, get_contents, get_mime_types_ordered};
+    let offers = get_mime_types_ordered(ClipboardType::Regular, Seat::Unspecified).ok()?;
+    image_from_offers(&offers, |mime| {
+        let (pipe, _) = get_contents(ClipboardType::Regular, Seat::Unspecified, MimeType::Specific(mime)).ok()?;
+        let mut bytes = Vec::new();
+        pipe.take(MAX_CLIPBOARD_IMAGE_BYTES + 1).read_to_end(&mut bytes).ok()?;
+        (bytes.len() as u64 <= MAX_CLIPBOARD_IMAGE_BYTES).then_some(bytes)
+    })
+}
+
+/// The first clipboard offer, in the source's order, that `fetch` returns as a decodable image,
+/// upright as RGBA8. Only `image/*` types are fetched, so text offers are never transferred.
+#[cfg(any(target_os = "linux", test))]
+fn image_from_offers(offers: &[String], mut fetch: impl FnMut(&str) -> Option<Vec<u8>>) -> Option<(u32, u32, Vec<u8>)> {
+    offers.iter().filter(|mime| mime.starts_with("image/")).find_map(|mime| {
+        let bytes = fetch(mime)?;
+        // TGA has no magic number (see `image_from_files`), so trust it only when the type says so.
+        if photocraft_codecs::detect(&bytes)? == photocraft_codecs::Format::Tga && !mime.contains("tga") {
+            return None;
+        }
+        let img = photocraft_codecs::decode(&bytes).ok()?;
+        Some((img.width(), img.height(), img.to_rgba8()))
+    })
+}
+
 /// The shell command that starts this install under XWayland, where winit delivers file drops
 /// (winit 0.30 has none on Wayland, #386). A Flatpak gets the X11 socket only without the Wayland
 /// one, an AppImage relaunches by its own path, and anything else is `photocraft` on the PATH.
@@ -424,8 +485,13 @@ pub fn native(automation: Option<photocraft_automation::AuthorizedWorkspace>) ->
                 if let Some(img) = cb.get().file_list().ok().and_then(|paths| image_from_files(&paths)) {
                     return Some(img);
                 }
-                let img = cb.get_image().ok()?;
-                Some((img.width as u32, img.height as u32, img.bytes.into_owned()))
+                if let Ok(img) = cb.get_image() {
+                    return Some((img.width as u32, img.height as u32, img.bytes.into_owned()));
+                }
+                #[cfg(target_os = "linux")]
+                return wayland_clipboard_image();
+                #[cfg(not(target_os = "linux"))]
+                None
             })
         }),
         load_prefs: Some(Box::new(|| std::fs::read_to_string(prefs_file()?).ok())),
@@ -663,9 +729,64 @@ mod tests {
         .join(" ");
         assert_eq!(exts, want.split(' ').collect::<Vec<_>>());
         for (name, ext) in asked.iter().zip(exts) {
-            assert!(save_filters(name)[0].1.iter().any(|e| e == ext), "{name}: {:?}", save_filters(name)[0]);
+            // The first type's first extension is the one Windows adds to the bare name.
+            assert_eq!(save_filters(name)[0].1.first().map(String::as_str), Some(ext), "{name}: {:?}", save_filters(name)[0]);
         }
         assert_eq!(save_filters("Untitled")[0].0, "PSD Document", "no extension keeps the default");
+    }
+
+    /// Every flat format Save As offers is one PhotoCraft writes, and ICO is among them (#4357).
+    #[test]
+    fn save_as_offers_only_writable_formats_including_ico() {
+        let layered = ["psd", "psb", "pcraft", "ora"];
+        for (name, exts) in SAVE_FILTERS {
+            for ext in exts.iter().filter(|e| !layered.contains(e)) {
+                let format = photocraft_codecs::from_extension(ext).unwrap_or_else(|| panic!("{name}: .{ext} is no known format"));
+                assert!(format.caps().write, "{name}: .{ext} can't be written");
+            }
+        }
+        for ext in ["ico", "gif", "bmp"] {
+            assert!(save_filters("Untitled-1.psd").iter().any(|(_, exts)| exts.iter().any(|e| e == ext)), ".{ext} is offered");
+        }
+        assert_eq!(save_filters("icon.ico")[0].0, "ICO", "an .ico name leads with its own type");
+        // What Save As writes there: an icon up to 256×256, and a clear error past that.
+        let doc = |side: u32| {
+            let mut s = Session::new();
+            s.execute("file.new", json!({"width": side, "height": side})).unwrap();
+            s.active().unwrap().doc.clone()
+        };
+        let opts = export_options(&photocraft_ui_egui::ExportSettings::default());
+        let icon = photocraft_io::export(&doc(256), "icon.ico", &opts).unwrap();
+        assert_eq!(icon.bytes[..4], [0, 0, 1, 0], "an ICO header");
+        let err = photocraft_io::export(&doc(300), "icon.ico", &opts).map(|_| ()).unwrap_err().to_string();
+        assert!(err.contains("256"), "{err}");
+    }
+
+    /// #4394: with File name extensions shown, Windows kept `image.psd` when the type was changed to
+    /// PhotoCraft. Given the bare `image`, it adds the extension of whichever type is picked
+    /// (checked by hand with rfd 0.17.2 on Windows 11), defaulting to the first type's.
+    #[test]
+    fn the_windows_save_dialog_gets_a_bare_name_so_the_type_picks_the_extension() {
+        for (suggested, name, first) in [
+            ("/pics/image.psd", "image", "psd"),
+            ("/pics/image.psb", "image", "psb"),
+            ("/pics/image.pcraft", "image", "pcraft"),
+            ("/pics/sky.fit", "sky", "fit"),
+            ("cat.jpeg", "cat", "jpeg"),
+            ("swatches.aco", "swatches", "aco"),
+        ] {
+            assert_eq!(dialog_file_name(suggested, true).as_deref(), Some(name), "{suggested}");
+            assert_eq!(save_filters(suggested)[0].1[0], first, "{suggested}");
+            // Elsewhere the dialogs keep the whole name (see `dialog_file_name`).
+            let whole = Path::new(suggested).file_name().unwrap().to_string_lossy().into_owned();
+            assert_eq!(dialog_file_name(suggested, false), Some(whole), "{suggested}");
+        }
+        // Kept whole: a second dot (Windows could keep `scan.jpg`), the user's upper case, no
+        // extension, and a dotfile.
+        for name in ["scan.jpg.psd", "my.photo.psd", "transparent.PNG", "Untitled", ".psd"] {
+            assert_eq!(dialog_file_name(name, true).as_deref(), Some(name));
+        }
+        assert_eq!(dialog_file_name("", true), None);
     }
 
     #[test]
@@ -786,6 +907,7 @@ mod tests {
         let mut app = launch(&recovery);
         new_doc(&mut app, "#ff0000");
         let revision = app.session.active().unwrap().revision;
+        assert_ne!(revision, 0, "a sidecar-less bundle lists as revision 0");
         autosave(&mut app, &ctx);
 
         let mut failed = false;
@@ -806,12 +928,16 @@ mod tests {
         std::fs::remove_file(&recovery).unwrap();
         std::fs::create_dir(&recovery).unwrap();
         autosave(&mut app, &ctx);
+        // The worker commits the bundle's manifest before it publishes the sidecar, and
+        // `list_recovery` lists a committed sidecar-less bundle (revision 0) on its own, so
+        // the first non-empty listing can come from the middle of the write. Wait for the write
+        // to finish: the entry then carries the sidecar's revision.
         let mut recovered = Vec::new();
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
         while std::time::Instant::now() < deadline {
             prefs_ui::tick(&mut app, &ctx);
             recovered = list_recovery(&recovery);
-            if !recovered.is_empty() {
+            if recovered.iter().any(|e| e.info.revision == revision) {
                 break;
             }
             std::thread::sleep(std::time::Duration::from_millis(10));
@@ -884,6 +1010,51 @@ mod tests {
         let bad = dir.join("cut.png");
         std::fs::write(&bad, &red_png(8, 8)[..20]).unwrap();
         assert!(image_from_files(&[bad]).is_none());
+    }
+
+    fn encoded(format: photocraft_codecs::Format, w: u32, h: u32) -> Vec<u8> {
+        let img = Image::from_u8(w, h, ChannelLayout::Rgba, [255u8, 0, 0, 255].repeat((w * h) as usize)).unwrap();
+        photocraft_codecs::encode(&img, format, &EncodeOptions::default()).unwrap()
+    }
+
+    #[test]
+    fn non_png_clipboard_images_paste() {
+        // #2546: a screenshot tool that offers only image/bmp or image/jpeg pasted nothing.
+        let bmp = encoded(photocraft_codecs::Format::Bmp, 3, 2);
+        let offers = vec!["text/plain".to_string(), "image/bmp".to_string()];
+        let mut asked = Vec::new();
+        let got = image_from_offers(&offers, |mime| {
+            asked.push(mime.to_string());
+            Some(bmp.clone())
+        });
+        assert_eq!(got, Some((3, 2, [255u8, 0, 0, 255].repeat(6))));
+        assert_eq!(asked, ["image/bmp"], "text offers are never fetched");
+
+        let jpeg = encoded(photocraft_codecs::Format::Jpeg, 16, 8);
+        let offers = vec!["image/jpeg".to_string()];
+        assert_eq!(image_from_offers(&offers, |_| Some(jpeg.clone())).map(|(w, h, _)| (w, h)), Some((16, 8)));
+    }
+
+    #[test]
+    fn undecodable_clipboard_offers_fall_through_to_the_next() {
+        let bmp = encoded(photocraft_codecs::Format::Bmp, 2, 2);
+        let cut = encoded(photocraft_codecs::Format::Png, 8, 8)[..20].to_vec();
+        let offers: Vec<String> = ["image/webp", "image/png", "image/x-tga", "image/bmp"].map(String::from).to_vec();
+        let got = image_from_offers(&offers, |mime| match mime {
+            "image/webp" => None,
+            "image/png" => Some(cut.clone()),
+            "image/x-tga" => Some(b"not an image".to_vec()),
+            _ => Some(bmp.clone()),
+        });
+        assert_eq!(got.map(|(w, h, _)| (w, h)), Some((2, 2)));
+        assert!(image_from_offers(&offers[..3], |_| Some(cut.clone())).is_none());
+        assert!(image_from_offers(&[], |_| Some(bmp.clone())).is_none());
+    }
+
+    #[test]
+    fn clipboard_tga_is_trusted_only_by_its_type() {
+        assert_eq!(image_from_offers(&["image/x-tga".to_string()], |_| Some(tga_1x1())), Some((1, 1, vec![255, 0, 0, 255])));
+        assert!(image_from_offers(&["image/x-unknown".to_string()], |_| Some(tga_1x1())).is_none());
     }
 
     #[test]

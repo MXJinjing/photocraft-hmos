@@ -188,3 +188,56 @@ fn overlays_follow_document_view_transforms_in_every_theme() {
     assert_eq!(crate::i18n::tr(de, "Dual Axis"), "Duale Achse");
     assert_eq!(crate::i18n::tr(de, "Transform Symmetry"), "Symmetrie transformieren");
 }
+/// #4495: while the symmetry is transformed the options bar has ✓ and ⊘ (Enter and Esc were the
+/// only ways out), and the canvas shows the move, rotate or arrow cursor instead of the brush.
+#[test]
+fn transform_has_commit_and_cancel_buttons_and_its_own_cursors() {
+    let mut h = Harness::builder().with_size(vec2(1280.0, 800.0)).with_max_steps(64).build_eframe(|cc| {
+        PhotocraftApp::setup_context(&cc.egui_ctx, Default::default());
+        PhotocraftApp::new(Session::new(), crate::Services::default())
+    });
+    h.state_mut().run("file.new", json!({"width":400,"height":300})).unwrap();
+    h.state_mut().ui.tool = Tool::Brush;
+    h.state_mut().run("paint.setSymmetry", json!({"mode":"dual"})).unwrap();
+    h.run_steps(4);
+    let cursor = |h: &Harness<'_, PhotocraftApp>| h.output().platform_output.cursor_icon;
+    let begin_transform = |h: &mut Harness<'_, PhotocraftApp>| {
+        let ctx = h.ctx.clone();
+        crate::menus::invoke(h.state_mut(), &ctx, "ui.symmetryTransform", json!({})).unwrap();
+        h.run_steps(3);
+    };
+    let xf = ViewXform::active(h.state()).expect("a canvas");
+    let off_handles = xf.to_screen(40.0, 260.0);
+    // Painting: the brush outline replaces the pointer.
+    h.hover_at(off_handles);
+    h.run_steps(2);
+    assert_ne!(cursor(&h), egui::CursorIcon::Default, "the brush cursor while painting");
+    assert!(h.query_by_label("Commit transform").is_none(), "no ✓ outside the transform");
+
+    begin_transform(&mut h);
+    h.hover_at(off_handles);
+    h.run_steps(2);
+    assert_eq!(cursor(&h), egui::CursorIcon::Default, "an arrow, not the brush, away from the handles");
+    let p = h.state().ui.symmetry_transform.as_ref().unwrap().preview;
+    h.hover_at(xf.to_screen(p.center[0] as f32, p.center[1] as f32));
+    h.run_steps(2);
+    assert_eq!(cursor(&h), egui::CursorIcon::Move, "the centre moves");
+    let r = rotation_handle(p, [400.0, 300.0]);
+    h.hover_at(xf.to_screen(r[0] as f32, r[1] as f32));
+    h.run_steps(2);
+    assert_eq!(cursor(&h), egui::CursorIcon::Alias, "the handle rotates");
+
+    // ⊘ drops the preview; ✓ applies it.
+    h.state_mut().ui.symmetry_transform.as_mut().unwrap().preview = PresetSymmetry::new(p.mode, [120.0, 90.0], 30.0).unwrap();
+    h.get_by_label("Cancel transform").click();
+    h.run_steps(3);
+    assert!(h.state().ui.symmetry_transform.is_none());
+    assert_eq!(preset(h.state()).unwrap().center, [200.0, 150.0], "cancel keeps the original");
+    begin_transform(&mut h);
+    h.state_mut().ui.symmetry_transform.as_mut().unwrap().preview = PresetSymmetry::new(p.mode, [120.0, 90.0], 30.0).unwrap();
+    h.get_by_label("Commit transform").click();
+    h.run_steps(3);
+    assert!(h.state().ui.symmetry_transform.is_none());
+    let done = preset(h.state()).unwrap();
+    assert_eq!((done.center, done.rotation), ([120.0, 90.0], 30.0), "commit applies the preview");
+}

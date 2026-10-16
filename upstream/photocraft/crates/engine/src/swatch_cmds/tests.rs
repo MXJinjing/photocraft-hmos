@@ -14,10 +14,11 @@ fn export_bytes(s: &mut Session, p: Value) -> Vec<u8> {
 fn defaults_and_listing() {
     let mut s = Session::new();
     let r = s.execute("swatches.list", json!({})).unwrap();
-    assert_eq!(r["count"], 40);
+    assert_eq!(r["count"], 46);
     assert_eq!(r["groups"][0]["name"], "Grays");
     assert_eq!(r["groups"][0]["swatches"][0], json!({"name": "Black", "model": "rgb", "values": [0.0, 0.0, 0.0], "hex": "#000000"}));
-    assert_eq!(r["groups"][2]["swatches"][0]["hex"], "#e62828");
+    assert_eq!(r["groups"][1]["swatches"][2]["hex"], "#00ff00", "RGB Green is exact (#4302)");
+    assert_eq!(r["groups"][3]["swatches"][0]["hex"], "#e62828");
 }
 
 #[test]
@@ -67,7 +68,7 @@ fn rename_delete_move_and_groups() {
     assert_eq!(s.presets.swatches[0].items[0].name, "White");
     let r = s.execute("swatches.move", json!({"swatch": "White", "to": "Dark", "position": 1})).unwrap();
     assert_eq!(r, json!({"group": "Dark", "position": 1}));
-    assert_eq!(s.presets.swatches[3].items[1].name, "White");
+    assert_eq!(s.presets.swatches[4].items[1].name, "White");
     // Out-of-range positions clamp.
     let r = s.execute("swatches.move", json!({"swatch": "White", "position": 999_999})).unwrap();
     assert_eq!(r["position"], 10);
@@ -80,21 +81,21 @@ fn rename_delete_move_and_groups() {
     assert!(s.execute("swatches.renameGroup", json!({"group": "Favourites", "name": "Dark"})).is_err());
     let r = s.execute("swatches.deleteGroup", json!({"group": "Favourites", "keepSwatches": true})).unwrap();
     assert_eq!(r["kept"], 2);
-    assert!(s.presets.swatches[3].items.iter().any(|i| i.name == "Red"), "kept in the group above");
+    assert!(s.presets.swatches[4].items.iter().any(|i| i.name == "Red"), "kept in the group above");
     s.execute("swatches.deleteGroup", json!({"group": "Mine 1"})).unwrap();
     // Delete several by name, and one by index.
     let r = s.execute("swatches.delete", json!({"swatch": ["Red", "Blue", "Red"]})).unwrap();
     assert_eq!(r["deleted"].as_array().unwrap().len(), 2);
     let r = s.execute("swatches.delete", json!({"index": 0})).unwrap();
     assert_eq!(r["deleted"], json!(["Ink Black"]));
-    assert_eq!(names(&s).len(), 37);
+    assert_eq!(names(&s).len(), 43);
     // Reset restores the defaults; append adds them again with unique names.
     s.execute("swatches.reset", json!({})).unwrap();
-    assert_eq!(names(&s).len(), 40);
+    assert_eq!(names(&s).len(), 46);
     s.execute("swatches.reset", json!({"append": true})).unwrap();
-    assert_eq!(names(&s).len(), 80);
+    assert_eq!(names(&s).len(), 92);
     assert!(names(&s).contains(&"Black 2".to_string()));
-    assert_eq!(s.presets.swatches[4].name, "Grays 1");
+    assert_eq!(s.presets.swatches[5].name, "Grays 1");
 }
 
 #[test]
@@ -220,7 +221,7 @@ fn bad_params_fail_gracefully() {
         ("swatches.delete", json!({"swatch": "Nope"})),
         ("swatches.delete", json!({"swatch": ["Red", 5]})),
         ("swatches.delete", json!({"swatch": ["Red", "Nope"]})),
-        ("swatches.delete", json!({"index": 40})),
+        ("swatches.delete", json!({"index": 46})),
         ("swatches.delete", json!({"index": "0"})),
         ("swatches.delete", json!({"swatch": "Red", "group": "Grays"})),
         ("swatches.rename", json!({"swatch": "Red"})),
@@ -264,7 +265,7 @@ fn bad_params_fail_gracefully() {
     assert_eq!(s.presets.swatches, before, "failed commands change nothing");
     // Empty library: the swatch commands are disabled, not crashing.
     s.execute("swatches.delete", json!({"swatch": names(&s)})).unwrap();
-    for g in ["Grays", "Pastel", "Pure", "Dark"] {
+    for g in ["Grays", "RGB", "Pastel", "Pure", "Dark"] {
         s.execute("swatches.deleteGroup", json!({"group": g})).unwrap();
     }
     for id in ["swatches.delete", "swatches.rename", "swatches.move", "swatches.use", "swatches.export", "swatches.renameGroup", "swatches.deleteGroup"] {
@@ -288,4 +289,75 @@ fn library_limits() {
     cap_library(&mut g);
     assert_eq!(total(&g), MAX_SWATCHES);
     assert_eq!(g[0].name.chars().count(), MAX_NAME);
+}
+
+/// Groups without a name take the import's group name. The import used to number each repeated
+/// group name by searching the library once for every number it tried, so importing about 10,000
+/// unnamed groups took minutes. The test fails when the import takes more than 20 seconds.
+#[test]
+fn unnamed_groups_are_numbered_in_linear_time() {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut s = Session::new();
+        s.execute("swatches.newGroup", json!({"name": "Ink 2"})).unwrap();
+        let n = MAX_GROUPS - s.presets.swatches.len();
+        let paper = AseSwatch { name: "Paper".into(), color: AseColor::Gray(1.0), kind: AseKind::Process };
+        let mut entries = vec![AseEntry::Group { name: String::new(), swatches: Vec::new() }; n];
+        entries[0] = AseEntry::Group { name: String::new(), swatches: vec![paper] };
+        let file = b64_encode(&photocraft_psd::ase::write(&AseFile { entries }).unwrap());
+        let r = s.execute("swatches.import", json!({"data": file, "group": "Ink"})).unwrap();
+        assert_eq!(s.presets.swatches.len(), MAX_GROUPS);
+        let names: Vec<String> = r["groups"].as_array().unwrap().iter().map(|v| v.as_str().unwrap().to_string()).collect();
+        let _ = tx.send(names);
+    });
+    let names = match rx.recv_timeout(std::time::Duration::from_secs(20)) {
+        Ok(names) => names,
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => panic!("importing the groups did not finish"),
+        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => panic!("the import thread panicked"),
+    };
+    // Numbering starts at 1 and skips the number the library already uses.
+    assert_eq!(names[..4], ["Ink", "Ink 1", "Ink 3", "Ink 4"]);
+    assert_eq!(names.last(), Some(&format!("Ink {}", names.len())));
+    assert_eq!(names.iter().collect::<std::collections::HashSet<_>>().len(), names.len());
+}
+
+#[test]
+fn repeated_group_names_take_the_first_free_number() {
+    let mut s = Session::new();
+    for name in ["Brand", "Brand 2"] {
+        s.execute("swatches.newGroup", json!({"name": name})).unwrap();
+    }
+    let paper = AseSwatch { name: "Paper".into(), color: AseColor::Gray(1.0), kind: AseKind::Process };
+    let entries = ["Brand", "Brand", "Brand", "Brand 1"].into_iter().map(|name| AseEntry::Group { name: name.into(), swatches: vec![paper.clone()] }).collect();
+    let file = b64_encode(&photocraft_psd::ase::write(&AseFile { entries }).unwrap());
+    let r = s.execute("swatches.import", json!({"data": file})).unwrap();
+    // The file's "Brand 1" comes after the first "Brand" took that name.
+    assert_eq!(r["groups"], json!(["Brand 1", "Brand 3", "Brand 4", "Brand 1 1"]));
+}
+
+/// A value beyond f32 range used to pass the finite check, become inf as f32 and wrap to a NaN
+/// hue, which the prefs file stores as `null`; the next launch then dropped every saved preset.
+#[test]
+fn values_beyond_f32_range_are_rejected_so_presets_survive_a_restart() {
+    let mut s = Session::new();
+    s.execute("swatches.add", json!({"name": "Keep me", "color": {"model": "lab", "values": [40, 12.5, -7.25]}})).unwrap();
+    let before = s.presets.swatches.clone();
+    for (model, values) in [
+        ("hsb", json!([1e39, 100, 100])),
+        ("hsb", json!([-1e39, 100, 100])),
+        ("rgb", json!([1e39, 0, 0])),
+        ("cmyk", json!([0, 0, 0, -1e300])),
+        ("lab", json!([50, 1e39, 0])),
+        ("gray", json!([1e39])),
+    ] {
+        let r = s.execute("swatches.add", json!({"name": "Bad", "color": {"model": model, "values": values}}));
+        assert!(matches!(r, Err(crate::EngineError::BadParams { .. })), "{model} {values}: {r:?}");
+    }
+    assert_eq!(s.presets.swatches, before, "a rejected colour leaves the library unchanged");
+    // The largest f32 hue is still accepted and stays finite.
+    s.execute("swatches.add", json!({"name": "Big hue", "color": {"model": "hsb", "values": [f64::from(f32::MAX), 100, 100]}})).unwrap();
+    let mut t = Session::new();
+    t.load_prefs_json(&s.prefs_to_json()).unwrap();
+    assert_eq!(t.presets.swatches, s.presets.swatches, "user swatches survive a save and reload");
+    assert!(names(&t).contains(&"Keep me".to_string()));
 }

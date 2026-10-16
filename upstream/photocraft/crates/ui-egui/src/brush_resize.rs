@@ -111,9 +111,17 @@ pub fn release_stale(app: &mut PhotocraftApp, secondary_down: bool) {
 }
 
 fn update(app: &mut PhotocraftApp, r: Resize, x: f64, y: f64) {
-    // Right is bigger on screen, also in a flipped view (View › Flip Horizontal).
-    let dx = (x - r.anchor[0]) * if app.ui.view.flip_horizontal { -1.0 } else { 1.0 };
-    let (size, v) = resized(r.start, dx, y - r.anchor[1], app.point_zoom());
+    // Screen-relative, as in Photoshop (#4228): right is bigger and down harder on screen, however
+    // the view is rotated or flipped. The screen delta over the zoom is in document pixels at 0°.
+    let (dx, dy, zoom) = match ViewXform::active(app) {
+        Some(xf) if xf.zoom.is_finite() && xf.zoom > 0.0 => {
+            let d = xf.to_screen(x as f32, y as f32) - xf.to_screen(r.anchor[0] as f32, r.anchor[1] as f32);
+            (f64::from(d.x / xf.zoom), f64::from(d.y / xf.zoom), xf.zoom)
+        }
+        // No view: document axes, mirrored by View › Flip Horizontal.
+        _ => ((x - r.anchor[0]) * if app.ui.view.flip_horizontal { -1.0 } else { 1.0 }, y - r.anchor[1], app.point_zoom()),
+    };
+    let (size, v) = resized(r.start, dx, dy, zoom);
     // "Vary Round Brush Hardness on HUD" (Preferences ▸ Tools, on by default): off, the vertical
     // movement takes the opacity instead of the hardness, as in Photoshop.
     let vary = app.session.prefs().tools.vary_round_brush_hardness_on_hud;
@@ -482,6 +490,39 @@ mod tests {
                 assert_eq!(app.session.journal.last().unwrap().1["brush"], json!({"size": 40.0f32, "opacity": 0.7f32}));
             }
         }
+    }
+
+    /// One Control+Alt drag by `(dx, dy)` document pixels from (100, 100) in a view turned by
+    /// `rotation` degrees (flipped with `flip`): the resulting (size, hardness).
+    fn drag_in_view(rotation: f32, flip: bool, dx: f64, dy: f64) -> (f32, f32) {
+        let mut app = app(Tool::Brush);
+        app.sync_views();
+        app.ui.views[0].rotation = rotation;
+        app.ui.view.flip_horizontal = flip;
+        tool_event(&mut app, ToolEvent::Down { x: 100.0, y: 100.0, pressure: 1.0 }, CTRL_ALT);
+        tool_event(&mut app, ToolEvent::Up { x: 100.0 + dx, y: 100.0 + dy }, CTRL_ALT);
+        let b = &app.session.tools.brush;
+        (b.size, b.hardness)
+    }
+
+    /// #4228: the HUD is screen-relative, as in Photoshop: horizontal on screen is the size and
+    /// vertical the hardness however the view is rotated or flipped.
+    #[test]
+    fn a_rotated_view_keeps_horizontal_for_size_and_vertical_for_hardness() {
+        // Unrotated, with and without View › Flip Horizontal: unchanged.
+        assert_eq!(drag_in_view(0.0, false, 30.0, 0.0), (100.0, 0.2), "right grows");
+        assert_eq!(drag_in_view(0.0, false, 0.0, 40.0), (40.0, 0.4), "down hardens");
+        assert_eq!(drag_in_view(0.0, true, -30.0, 0.0), (100.0, 0.2), "flipped: screen right grows");
+        assert_eq!(drag_in_view(0.0, true, 0.0, 40.0), (40.0, 0.4), "flipped: down hardens");
+        // 90° clockwise: document +y points screen-left and document +x screen-down.
+        assert_eq!(drag_in_view(90.0, false, 0.0, 10.0), (20.0, 0.2), "screen-left shrinks, the hardness stays");
+        assert_eq!(drag_in_view(90.0, false, 0.0, -30.0), (100.0, 0.2), "screen-right grows");
+        assert_eq!(drag_in_view(90.0, false, 40.0, 0.0), (40.0, 0.4), "screen-down hardens, the size stays");
+        // 180°: document -x is screen right.
+        assert_eq!(drag_in_view(180.0, false, -30.0, 0.0), (100.0, 0.2), "screen right still grows");
+        assert_eq!(drag_in_view(180.0, false, 0.0, -40.0), (40.0, 0.4), "screen down still hardens");
+        // 90° and flipped: document +y points screen-right.
+        assert_eq!(drag_in_view(90.0, true, 0.0, 30.0), (100.0, 0.2), "rotated and flipped: screen right grows");
     }
 
     /// Preferences ▸ Cursors ▸ Brush Preview colour tints the HUD's tip preview (red by default).

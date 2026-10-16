@@ -1,5 +1,5 @@
 use photocraft_color::{ColorMode, PixelFormat, SampleType};
-use photocraft_doc::{Document, LayerId, Pattern};
+use photocraft_doc::{Document, LayerContent, LayerId, Pattern};
 use photocraft_geom::Rect;
 use photocraft_raster::Surface;
 use serde_json::{Value, json};
@@ -130,7 +130,7 @@ fn bad_params_and_states_fail_without_changing_anything() {
         json!({"document": -1}),
         json!({"document": "1"}),
         json!({"document": 1, "source": 9}),
-        json!({"document": 1, "layers": [999_999]}),
+        json!({"document": 1, "layers": [u64::MAX]}),
         json!({"document": 1, "layers": "all"}),
         json!({"document": 1, "layers": []}),
         json!({"document": 1, "at": [1.0]}),
@@ -216,6 +216,118 @@ fn copied_link_groups_are_distinct_from_each_other_and_destination() {
     let second = doc(&s, 1).layer(ids[1]).unwrap().link_group;
     assert!(first.is_some() && second.is_some());
     assert_ne!(first, second);
+}
+
+/// One painted layer, `depth`-bit RGB, as the only layer above the Background.
+fn one_doc(depth: u32) -> (Session, LayerId) {
+    let mut s = Session::new();
+    s.execute("file.new", json!({"width": 40, "height": 30, "depth": depth})).unwrap();
+    let paint = LayerId(s.execute("layer.new.layer", json!({"name": "paint"})).unwrap()["layer"].as_u64().unwrap());
+    s.execute("select.rect", json!({"x": 4, "y": 6, "width": 10, "height": 10})).unwrap();
+    s.execute("edit.fill", json!({"color": "#ff0000"})).unwrap();
+    s.execute("select.deselect", json!({})).unwrap();
+    (s, paint)
+}
+
+#[test]
+fn duplicate_to_a_new_document_keeps_size_pixels_and_place_at_every_depth() {
+    for depth in [8, 16, 32] {
+        let (mut s, paint) = one_doc(depth);
+        let source_before = doc(&s, 0).clone();
+        let r = s.execute("layer.duplicate", json!({"document": "new"})).unwrap();
+        assert_eq!(r["document"], 1);
+        assert_eq!(s.active_index(), Some(1), "the new document becomes active");
+        let (src, dst) = (doc(&s, 0), doc(&s, 1));
+        assert_eq!(*src, source_before, "the source is untouched");
+        assert_eq!(dst.size, src.size, "same canvas, as Photoshop");
+        assert_eq!((dst.mode, dst.depth, dst.resolution_dpi), (src.mode, src.depth, src.resolution_dpi));
+        assert_eq!(dst.name, format!("{} copy", src.name));
+        let layers = r["layers"].as_array().unwrap();
+        assert_eq!(layers.len(), 1);
+        let id = LayerId(layers[0].as_u64().unwrap());
+        assert_eq!(r["layer"], id.0);
+        assert_ne!(id, paint, "a copy has its own id");
+        assert_eq!(dst.layers.len(), 1, "just the duplicated layer");
+        assert_eq!(dst.layers[0].name, "paint");
+        assert_eq!(bounds(&s, 1, id), Rect::new(4, 6, 14, 16), "same canvas position");
+        assert_eq!(
+            dst.layers[0].surface().unwrap().read_region(Rect::new(4, 6, 14, 16)),
+            src.layer(paint).unwrap().surface().unwrap().read_region(Rect::new(4, 6, 14, 16)),
+            "depth {depth}: identical pixels"
+        );
+        assert_eq!(s.active().unwrap().selected_layers(), vec![id]);
+    }
+}
+
+#[test]
+fn duplicate_to_a_new_document_names_the_copy_and_the_document() {
+    let (mut s, _) = one_doc(8);
+    let r = s.execute("layer.duplicate", json!({"document": "new", "name": "Ink", "documentName": "Card"})).unwrap();
+    assert_eq!(doc(&s, 1).name, "Card");
+    assert_eq!(doc(&s, 1).layers[0].name, "Ink");
+    assert_eq!(r["layer"].as_u64(), r["layers"][0].as_u64());
+}
+
+#[test]
+fn duplicate_to_a_new_document_carries_every_selected_layer_in_order() {
+    let (mut s, paint) = one_doc(8);
+    let bg = doc(&s, 0).layers[0].id;
+    s.execute("layer.select", json!({"layer": paint.0, "mode": "add"})).unwrap();
+    s.execute("layer.select", json!({"layer": bg, "mode": "add"})).unwrap();
+    let r = s.execute("layer.duplicate", json!({"document": "new"})).unwrap();
+    let names: Vec<&str> = doc(&s, 1).layers.iter().map(|l| l.name.as_str()).collect();
+    assert_eq!(names, ["Background", "paint"]);
+    assert_eq!(r["layers"].as_array().unwrap().len(), 2);
+    assert!(r.get("layer").is_none(), "no single layer to report");
+    // A duplicated Background stays a Background: the new document has no destination one.
+    let back = &doc(&s, 1).layers[0];
+    assert!(back.locks.transparency && back.locks.position);
+}
+
+#[test]
+fn duplicate_to_a_new_document_cuts_smart_objects_loose_as_a_batch() {
+    let (mut s, _) = one_doc(8);
+    s.execute("layer.smartObjects.convertToSmartObject", json!({})).unwrap();
+    let original = s.active().unwrap().active_layer.unwrap();
+    let sibling = LayerId(s.execute("layer.duplicate", json!({})).unwrap()["layer"].as_u64().unwrap());
+    let contents = |s: &Session, i: usize, id: LayerId| {
+        let LayerContent::Smart(sm) = &doc(s, i).layer(id).unwrap().content else { panic!("smart object") };
+        sm.contents_id
+    };
+    assert_eq!(contents(&s, 0, original), contents(&s, 0, sibling), "instances share contents");
+    s.execute("layer.select", json!({"layer": original.0, "mode": "add"})).unwrap();
+    s.execute("layer.select", json!({"layer": sibling.0, "mode": "add"})).unwrap();
+    let r = s.execute("layer.duplicate", json!({"document": "new"})).unwrap();
+    let ids: Vec<LayerId> = r["layers"].as_array().unwrap().iter().map(|id| LayerId(id.as_u64().unwrap())).collect();
+    assert_eq!(contents(&s, 1, ids[0]), contents(&s, 1, ids[1]), "sharing survives within the batch");
+    assert_ne!(contents(&s, 1, ids[0]), contents(&s, 0, original), "independent of the source");
+}
+
+#[test]
+fn duplicate_destinations_that_are_not_new_fail_cleanly() {
+    let (mut s, _) = one_doc(8);
+    for p in [
+        json!({"document": 1}),
+        json!({"document": 7}),
+        json!({"document": true}),
+        json!({"document": 1.5}),
+        json!({"document": []}),
+        json!({"document": {}}),
+        json!({"document": "other"}),
+        json!({"document": "new", "layer": u64::MAX}),
+    ] {
+        let before = (doc(&s, 0).clone(), s.documents().len(), s.active_index());
+        let err = s.execute("layer.duplicate", p.clone()).unwrap_err().to_string();
+        if p == json!({"document": 1}) {
+            assert!(err.contains("layer.copyToDocument"), "{p}: {err}");
+        }
+        assert_eq!(s.active_index(), before.2, "{p}: the source stays active");
+        assert_eq!(s.documents().len(), before.1, "{p}: no document created");
+        assert_eq!(*doc(&s, 0), before.0, "{p}: the source is untouched");
+    }
+    // One open document: same-document duplicates still work, and stay enabled.
+    assert!(s.is_enabled("layer.duplicate"));
+    s.execute("layer.duplicate", json!({})).unwrap();
 }
 
 #[test]

@@ -63,14 +63,22 @@ impl Cfa {
     /// Colour at data coordinates.
     #[inline]
     pub fn color(&self, x: usize, y: usize) -> u8 {
-        let cx = (x + self.width - self.origin_x % self.width) % self.width;
-        let cy = (y + self.height - self.origin_y % self.height) % self.height;
-        self.colors.get(cy * self.width + cx).copied().unwrap_or(1)
+        fn relative(v: usize, origin: usize, period: usize) -> Option<usize> {
+            if period == 0 {
+                return None;
+            }
+            let (v, origin) = (v % period, origin % period);
+            Some(if v >= origin { v - origin } else { period - (origin - v) })
+        }
+        let Some((cx, cy)) = relative(x, self.origin_x, self.width).zip(relative(y, self.origin_y, self.height)) else {
+            return 1;
+        };
+        cy.checked_mul(self.width).and_then(|i| i.checked_add(cx)).and_then(|i| self.colors.get(i)).copied().unwrap_or(1)
     }
 
     /// The 2×2 colours seen from data coordinates (`x0`, `y0`), row-major.
     pub fn phase(&self, x0: usize, y0: usize) -> [u8; 4] {
-        [self.color(x0, y0), self.color(x0 + 1, y0), self.color(x0, y0 + 1), self.color(x0 + 1, y0 + 1)]
+        [self.color(x0, y0), self.color(x0.saturating_add(1), y0), self.color(x0, y0.saturating_add(1)), self.color(x0.saturating_add(1), y0.saturating_add(1))]
     }
 
     /// `true` for a Bayer pattern: a 2×2 period holding one red, one blue and two
@@ -79,10 +87,11 @@ impl Cfa {
         if self.width == 0 || self.height == 0 || self.width > 16 || self.height > 16 {
             return false;
         }
-        let p = self.phase(self.origin_x, self.origin_y);
-        let periodic = (0..self.height).all(|y| (0..self.width).all(|x| self.color(self.origin_x + x, self.origin_y + y) == p[(y % 2) * 2 + x % 2]));
-        let greens_on_diagonal =
-            (p[0] == 1 && p[3] == 1 && p[1] != 1 && p[2] != 1 && p[1] + p[2] == 2) || (p[1] == 1 && p[2] == 1 && p[0] != 1 && p[3] != 1 && p[0] + p[3] == 2);
+        let (ox, oy) = (self.origin_x % self.width, self.origin_y % self.height);
+        let p = self.phase(ox, oy);
+        let periodic = (0..self.height).all(|y| (0..self.width).all(|x| self.color(ox + x, oy + y) == p[(y % 2) * 2 + x % 2]));
+        let greens_on_diagonal = (p[0] == 1 && p[3] == 1 && p[1] != 1 && p[2] != 1 && u16::from(p[1]) + u16::from(p[2]) == 2)
+            || (p[1] == 1 && p[2] == 1 && p[0] != 1 && p[3] != 1 && u16::from(p[0]) + u16::from(p[3]) == 2);
         periodic && greens_on_diagonal
     }
 }
@@ -110,7 +119,8 @@ impl BlackLevels {
     pub fn at(&self, ax: usize, ay: usize, s: usize, spp: usize) -> f32 {
         let r = ay % self.rows.max(1);
         let c = ax % self.cols.max(1);
-        let base = self.values.get((r * self.cols.max(1) + c) * spp + s).or_else(|| self.values.first()).copied().unwrap_or(0.0);
+        let index = r.checked_mul(self.cols.max(1)).and_then(|i| i.checked_add(c)).and_then(|i| i.checked_mul(spp)).and_then(|i| i.checked_add(s));
+        let base = index.and_then(|i| self.values.get(i)).or_else(|| self.values.first()).copied().unwrap_or(0.0);
         base + self.delta_h.get(ax).copied().unwrap_or(0.0) + self.delta_v.get(ay).copied().unwrap_or(0.0)
     }
 

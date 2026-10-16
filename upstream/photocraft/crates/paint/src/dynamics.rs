@@ -62,7 +62,7 @@ impl Smoother {
     }
 
     fn active(&self) -> bool {
-        self.cfg.amount > 0.0
+        self.cfg.enabled && self.cfg.amount > 0.0
     }
 
     /// Feed one input point; returns the brush positions to paint through.

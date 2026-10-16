@@ -15,7 +15,17 @@
 # Product and technology names (PhotoCraft, ArtCraft, OpenType, CMYK, Lab ...) stay in Latin
 # letters; the trailing "…" of dialog commands is kept.
 
+# Channel Options and New Spot Channel (#3761)
+	Channel Color	チャンネルカラー
+	Color Indicates:	着色表示:
+	Solidity:	濃度:
+	Ink Characteristics	インキの特性
+
 # Guide layout dialog
+
+# Custom print paper (#3820)
+	Paper Width	用紙の幅
+	Paper Height	用紙の高さ
 	Rows	行
 	Number	数
 	Top:	上:
@@ -71,6 +81,8 @@
 	Save	保存
 	Save As…	名前を付けて保存…
 	Save a Copy…	コピーを保存…
+	{name} can't keep everything in this document	{name} にはこのドキュメントの内容をすべて保存できません
+	Choose a format that keeps it, such as Photoshop (PSD), or save a copy.	Photoshop (PSD) などすべてを保持できる形式を選ぶか、コピーを保存してください。
 	Revert	復帰
 	Export	書き出し
 	Quick Export as PNG	PNG としてクイック書き出し
@@ -108,6 +120,14 @@
 	Script Events Manager…	スクリプトイベント管理…
 	Import	読み込み
 	Browse…	参照…
+	Source Files	ソースファイル
+	Use:	使用:
+	Files	ファイル
+	Folder	フォルダー
+	Add Open Files	開いているファイルを追加
+	Sort By Name	名前順に並べ替え
+	Attempt to Automatically Align Source Images	ソース画像の自動整列を試す
+	Create Smart Object after Loading Layers	レイヤーの読み込み後にスマートオブジェクトを作成
 	Reveal in Finder	Finder で表示
 	Show in Explorer	エクスプローラーで表示
 	Show in Folder	フォルダーで表示
@@ -132,6 +152,8 @@
 	Search…	検索…
 	Check Spelling…	スペルチェック…
 	Find and Replace Text…	テキストを検索して置換…
+	Add to Dictionary	辞書に追加
+	No Spelling Suggestions	スペルの候補はありません
 	Fill…	塗りつぶし…
 	Stroke…	境界線を描く…
 	Content-Aware Fill…	コンテンツに応じた塗りつぶし…
@@ -146,6 +168,8 @@
 	Transform Again on a Copy	複製してもう一度変形
 	Scale	拡大・縮小
 	Rotate	回転
+	Set horizontal skew	水平方向の斜体を設定
+	Set vertical skew	垂直方向の斜体を設定
 	Skew	斜体
 	Distort	ゆがみ
 	Perspective	遠近法
@@ -301,7 +325,7 @@
 	Rename Layer	レイヤー名を変更
 	Create Layer	レイヤーを作成
 	Layer Style	レイヤースタイル
-	Blending Options…	レイヤー効果の描画オプション…
+	Blending Options…	レイヤー効果…
 	Bevel & Emboss…	ベベルとエンボス…
 	Use Global Light	グローバルライトを使用
 	Inner Shadow…	シャドウ (内側)…
@@ -357,6 +381,7 @@
 	Update Modified Content	変更されたコンテンツを更新
 	Update All Modified Content	変更されたコンテンツをすべて更新
 	Stack Mode	スタックモード
+	Choose Stack Mode:	スタックモードを選択:
 	Entropy	エントロピー
 	Kurtosis	尖度
 	Maximum	最大値
@@ -528,6 +553,9 @@
 	Blur	ぼかし
 	Blur Gallery	ぼかしギャラリー
 	Field Blur…	フィールドぼかし…
+# Field Blur pins (#3373)
+	No pin selected	ピンが選択されていません
+	Click the image to add a pin; drag a pin to move it, or its ring to change its blur. Delete removes the selected pin.	画像をクリックしてピンを追加します。ピンをドラッグして移動し、リングをドラッグしてぼかしを変更します。Delete キーで選択したピンを削除します。
 	Iris Blur…	虹彩絞りぼかし…
 	Tilt-Shift…	チルトシフト…
 	Path Blur…	パスぼかし…
@@ -726,6 +754,10 @@
 	Breeze Dark Theme	Breeze ダークテーマ
 	Breeze light	Breeze ライト
 	Breeze Light Theme	Breeze ライトテーマ
+	Soft dark	ソフトダーク
+	Soft light	ソフトライト
+	Soft Dark Theme	ソフトダークテーマ
+	Soft Light Theme	ソフトライトテーマ
 	Next Theme	次のテーマ
 	Actions	アクション
 	Brush Settings	ブラシ設定
@@ -827,6 +859,9 @@
 	Appearance	外観
 	Appearance (Layer Style)	外観 (レイヤースタイル)
 	Apply Layer Mask	レイヤーマスクを適用
+	Add Mask to Selection	マスクを選択範囲に追加
+	Subtract Mask from Selection	選択範囲からマスクを削除
+	Intersect Mask with Selection	選択範囲とマスクの共通範囲
 	Apply Per Tip	先端ごとに適用
 	Apply next selected layer comp	次のレイヤーカンプを適用
 	Apply previous selected layer comp	前のレイヤーカンプを適用
@@ -842,11 +877,18 @@
 	Background	背景
 	Background Color	背景色
 	Background Contents	背景の内容
+	Custom background color	カスタム背景色
 	Balance	バランス
 	Baseline	ベースライン
 	Baseline shift	ベースラインシフト
 	Basic	基本
 	Before (Y)	補正前(Y)
+	Save Settings…	設定を保存…
+	Load Settings…	設定を読み込み…
+	Save these settings as a Camera Raw .xmp file	この設定を Camera Raw の .xmp ファイルとして保存
+	Load settings from a Camera Raw .xmp file	Camera Raw の .xmp ファイルから設定を読み込む
+	Loaded Camera Raw settings from {file}	{file} から Camera Raw の設定を読み込みました
+	Loaded Camera Raw settings from {file} ({n} not supported)	{file} から Camera Raw の設定を読み込みました（未対応: {n}）
 	Begin recording	記録を開始
 	Bend:	曲げ:
 	Bicubic	バイキュービック
@@ -861,7 +903,7 @@
 	Black, White	黒、白
 	Blacks	ブラック
 	Blending	合成
-	Blending Options	描画オプション
+	Blending Options	レイヤー効果
 	Blue	青
 	Blue, Red, Yellow	青、赤、黄
 	Both Axes	両方の軸
@@ -877,6 +919,7 @@
 	Camera Raw isn't open	Camera Raw は開いていません
 	Cancel	キャンセル
 	Cancel (Esc)	キャンセル(Esc)
+	Manage submitted jobs in the system print queue	送信済みのジョブはシステムの印刷キューで管理してください
 	Cancel any current edits (Esc)	現在の編集をキャンセル(Esc)
 	Cancel current crop operation  (Esc)	現在の切り抜きをキャンセル(Esc)
 	Cancel transform (Esc)	変形をキャンセル(Esc)
@@ -1148,6 +1191,9 @@
 	Ignore All	すべて無視
 	Image Size	画像サイズ
 	Import Brushes…	ブラシを読み込み…
+	Gradient Preset Options	グラデーションプリセットのオプション
+	Import .GRD	.GRD を読み込み
+	Choose a gradient file (.grd).	グラデーションファイル (.grd) を選択してください。
 	Import brushes (.abr)	ブラシ (.abr) を読み込み
 	Import Presets	プリセットを読み込み
 	Imported	読み込み済み
@@ -1471,7 +1517,7 @@
 	Straighten Layer	レイヤーの角度補正
 	Strength:	強さ:
 	Strikethrough	取り消し線
-	Stroke	線
+	Stroke	境界線
 	Stroke Catch-up	ストロークの追従
 	Stroke:	線:
 	Location:	位置:
@@ -1702,7 +1748,7 @@
 	Original Ratio	元の縦横比
 	Out Of Gamut	色域外
 	Outer Bevel	外側ベベル
-	Outer Glow	光彩(外側)
+	Outer Glow	光彩 (外側)
 	Overlay	オーバーレイ
 	Paint Bucket Tool	塗りつぶしツール
 	Paints from the document's opening state	ドキュメントを開いた時点の状態から描画します
@@ -1777,9 +1823,7 @@
 	Std Dev:	標準偏差:
 	Studio (Dark)	スタジオ (ダーク)
 	Studio (Light)	スタジオ (ライト)
-	Stylus	スタイラス
 	Stylus Wheel	スタイラスホイール
-	Block finger input	指の入力を無効にする
 	Subtract	減算
 	Tabloid	タブロイド
 	Text Replacement	テキストの置き換え
@@ -2086,6 +2130,11 @@
 	Rename Brush…	ブラシの名前を変更…
 	Delete Brush	ブラシを削除
 	New Brush Preset…	新規ブラシプリセット…
+	Capture Brush Size in Preset	ブラシサイズをプリセットに保存
+	Include Tool Settings	ツール設定を含める
+	Include Color	カラーを含める
+	Enter a name for the brush preset	ブラシプリセットの名前を入力してください
+	A brush preset with this name already exists	この名前のブラシプリセットは既に存在します
 	Brush Preset Options	ブラシプリセットのオプション
 	Group name	グループ名
 	Brush name	ブラシ名
@@ -2143,6 +2192,10 @@
 	No path to make a selection from: draw one with the Pen tool or select one in the Paths panel.	選択範囲を作成するパスがありません。ペンツールで描くか、パスパネルでパスを選択してください。
 	Cancel opening	開くのをキャンセル
 	Cancelled opening {name}	{name} を開くのをキャンセルしました
+	The document “{name}” does not have an embedded {mode} profile.	ドキュメント「{name}」には埋め込み {mode} プロファイルがありません。
+	The document “{name}” has an embedded color profile that does not match the current {mode} working space.	ドキュメント「{name}」の埋め込みカラープロファイルは、現在の {mode} 作業用スペースと一致しません。
+	Embedded: {embedded}	埋め込み: {embedded}
+	Working: {working}	作業用スペース: {working}
 	Developing {name}	{name} を現像中
 	Cancelled {label}	{label} をキャンセルしました
 	Esc to cancel	Esc キーでキャンセル
@@ -2352,6 +2405,7 @@ cameraRaw	Color	カラー
 	Violet	紫
 	Reset	初期化
 	Large document: redrawing on the CPU	大きなドキュメント: CPU で再描画しています
+	Redrawing	再描画中
 	This redraw took {seconds} s on the CPU.	この再描画は CPU で {seconds} 秒かかりました。
 	Edits that change the whole document, such as a layer's blend mode, opacity or visibility, redraw all of it.	レイヤーの描画モード、不透明度、表示/非表示など、ドキュメント全体に関わる編集では全体が再描画されます。
 	Its layers don't fit the GPU memory budget. Raising Memory usage in Preferences › Performance raises the budget, up to a quarter of this computer's memory.	レイヤーが GPU メモリの予算に収まりません。環境設定 › パフォーマンスのメモリ使用量を増やすと、このコンピューターのメモリの4分の1まで予算が増えます。
@@ -3259,7 +3313,6 @@ fontWeight	Italic	斜体
 	Exposure Program	露出プログラム
 	Extra Bold	エクストラボールド
 	Extra Light	エクストラライト
-	File Naming	ファイル名の付け方
 	Fill Light	フィルライト
 	First Color Readout	最初のカラー読み取り
 	Flash	フラッシュ
@@ -3502,13 +3555,6 @@ fontWeight	Italic	斜体
 	XOR	XOR
 	Color Burn (Paint.NET)	焼き込みカラー (Paint.NET)
 	Color Dodge (Paint.NET)	覆い焼きカラー (Paint.NET)
-	Double-tap pen body	ペン軸をダブルタップ
-	Current tool and Eraser	現在のツールと消しゴム
-	Previous tool	前のツール
-	Long-press pen body	ペン軸を長押し
-	Show or hide context menu	コンテキストメニューの表示/非表示
-	Choose printer, copies and duplex in the system print dialog.	システムの印刷ダイアログでプリンター、部数、両面印刷を選択します。
-	System print preview opened	システムの印刷プレビューを開きました
 	Stroke Options	線のオプション
 	Solid	実線
 	Dashed	破線
@@ -3610,10 +3656,10 @@ curves	Smooth	スムーズ
 	Smooth the curve values	カーブの値を滑らかにする
 	Drag to draw the curve · {key}-click draws a straight line	ドラッグしてカーブを描画 · {key}+クリックで直線を描画
 	Grid Size:	グリッドサイズ:
-	Vanishing Point: click four corners to create a plane	消点：4 つの角をクリックして面を作成します
+	Vanishing Point: click four corners to create a plane	消点: 4 つの角をクリックして面を作成します
 	Vanishing Point is not active	消点はアクティブではありません
 	Apply Vanishing Point ({key})	消点を適用({key})
-	Fix the red plane first: its corners must form a convex quad	先に赤い面を修正してください：角が凸四角形になる必要があります
+	Fix the red plane first: its corners must form a convex quad	先に赤い面を修正してください: 角が凸四角形になる必要があります
 # Select and Mask view modes (#1754)
 	Onion Skin	オニオンスキン
 	Marching Ants	点線の境界
@@ -3630,6 +3676,7 @@ curves	Smooth	スムーズ
 	Paint over hair or fur on the image; Alt paints the other mode	画像の髪や毛の上をペイントします。Alt で反対のモードでペイント
 	Clear Brush Strokes	ブラシストロークを消去
 	Show rulers	定規を表示
+	Presentation	プレゼンテーション
 
 # Color Sampler (added with the i18n coverage repair)
 	Click to place · Alt-click or drag off-canvas to remove	クリックで配置 · Alt キーを押しながらクリック、またはカンバス外へドラッグで削除
@@ -3660,19 +3707,131 @@ curves	Smooth	スムーズ
 @plural	{n} sample point removed|{n} sample points removed	サンプルポイント {n} 個を削除しました
 @plural	{n} slice|{n} slices	{n} 個のスライス
 @plural	{n} step|{n} steps	{n} ステップ
-@plural	{warning} (+{n} more brush preset warning)|{warning} (+{n} more brush preset warnings)	{warning}(ほかにブラシプリセットの警告 {n} 件)
-@plural	{what} with {n} warning|{what} with {n} warnings	{what}(警告 {n} 件)
+@plural	{warning} (+{n} more brush preset warning)|{warning} (+{n} more brush preset warnings)	{warning} (ほかにブラシプリセットの警告 {n} 件)
+@plural	{what} with {n} warning|{what} with {n} warnings	{what} (警告 {n} 件)
 # View › Guides › New Guide… › Color
 	Light Blue	ライトブルー
 	Light Red	ライトレッド
 	Medium Blue	ミディアムブルー
 	Light Gray	ライトグレー
+	Object Finder	オブジェクトファインダー
+	No object found there — drag a rectangle around it	そこにオブジェクトが見つかりません — 周囲に矩形をドラッグしてください
 	Remove after each stroke	ストロークごとに削除
 	Apply the removal ({key})	削除を適用 ({key})
-	Strokes to remove: {n} (Enter applies, Esc cancels)	削除するストローク: {n}（Enter で適用、Esc で取り消し）
+	Strokes to remove: {n} (Enter applies, Esc cancels)	削除するストローク: {n} (Enter で適用、Esc で取り消し)
 
+# Actions panel: Load/Save Actions (.atn) and kept Photoshop steps
+	Load Actions…	アクションを読み込み…
+	Save Actions…	アクションを保存…
+	{name} (Photoshop)	{name}（Photoshop）
+	{message} ({note})	{message}（{note}）
+@plural	Loaded {n} action from {file}|Loaded {n} actions from {file}	{file} からアクション {n} 個を読み込みました
+@plural	{n} step has no PhotoCraft equivalent yet|{n} steps have no PhotoCraft equivalent yet	{n} 個のステップにはまだ PhotoCraft の対応機能がありません
+@plural	Saved {n} action to {file}|Saved {n} actions to {file}	{file} にアクション {n} 個を保存しました
+@plural	{n} step with no Photoshop equivalent left out|{n} steps with no Photoshop equivalent left out	Photoshop に対応するもののない {n} 個のステップを省きました
 
-# Status bar panel controls
+	File Naming	ファイル名の付け方
+	Starting serial	開始番号
+# Actions panel: set folders, dialog toggle, Insert Stop
+	Insert Stop…	ストップを挿入…
+	Save Set…	セットを保存…
+	Message:	メッセージ:
+	Allow Continue	続行を許可
+	Show dialog during playback	再生中にダイアログを表示
+	Select an action first	先にアクションを選択してください
+	Action playback stopped	アクションの再生を停止しました
+	Step {step} is waiting for its dialog	ステップ {step} はダイアログを待っています
+@plural	{n} action|{n} actions	アクション {n} 個
+
+# Liquify tool names (shown via tl!(tool.label()) in the UI, so they are not found by the static scan)
+	Forward Warp	前方ワープ
+	Twirl Clockwise	時計回りに渦巻き
+	Twirl Counterclockwise	反時計回りに渦巻き
+	Pucker	収縮
+	Bloat	膨張
+	Push Left	ピクセル移動
+	Freeze Mask	ブラシでマスクを描画
+	Thaw Mask	ブラシでマスクを消去
+
+# Panel menu items and section labels passed to tl!() as variables (channels panel, paths panel, layer style)
+	Convert to Alpha Channel	アルファチャンネルに変換
+	Delete Channel	チャンネルを削除
+	Duplicate Channel	チャンネルを複製
+	Exit Quick Mask	クイックマスクを終了
+	Merge Channels…	チャンネルを結合…
+	Merge Spot Channel	スポットチャンネルを結合
+	New Channel…	新規チャンネル…
+	New Spot Channel…	新規スポットチャンネル…
+	Rename Channel…	チャンネル名を変更…
+	Split Channels	チャンネルを分割
+	Save Path	パスを保存
+	General Blending	通常の描画
+
+# Character panel tooltip (shown once the tooltip helpers in type_tool.rs pass their text through tl!)
+	Kerning: Metrics, Optical or a value in 1/1000 em (Alt+←/→ at the caret)	カーニング: メトリクス、オプティカル、または 1/1000 em 単位の値 (キャレット位置で Alt+←/→)
+
+# Glyphs panel "Show" categories (text/src/glyphs.rs; the dropdown passes them through tl!)
+	Basic Latin	基本ラテン文字
+	Latin 1	ラテン 1
+	Latin Extended-A	ラテン拡張 A
+	Latin Extended-B	ラテン拡張 B
+	Greek	ギリシャ文字
+	Cyrillic	キリル文字
+	Numbers	数字
+	Currency	通貨記号
+	Math Symbols	数学記号
+	Arrows	矢印
+
+# Dialog field labels generated from parameter names (Warp Text, Trim, Calculations, Apply Image; not seen by the tl! scanner)
+	Bend	曲げ
+	Horizontal Distortion	水平方向のゆがみ
+	Vertical Distortion	垂直方向のゆがみ
+	Based On	基準
+	Source Channel	ソースのチャンネル
+	Source Invert	ソースを反転
+	Mask Channel	マスクのチャンネル
+	Source1 Channel	ソース 1 のチャンネル
+	Source1 Invert	ソース 1 を反転
+	Source2 Channel	ソース 2 のチャンネル
+	Source2 Invert	ソース 2 を反転
+	R g b	RGB
+
+# Canvas background menu, Blend If labels and Advanced Blending options
+	Dark Gray	ダークグレー
+	Medium Gray	ミディアムグレー
+	Select Custom Color…	カスタムカラーを選択…
+	This Layer:	現在のレイヤー:
+	Underlying Layer:	下のレイヤー:
+	Blend Interior Effects as Group	内部効果をまとめて描画
+	Blend Clipped Layers as Group	クリップされたレイヤーをまとめて描画
+	Transparency Shapes Layer	透明シェイプレイヤー
+	Layer Mask Hides Effects	レイヤーマスクで効果を隠す
+	Vector Mask Hides Effects	ベクトルマスクで効果を隠す
+	Auto Add/Delete	自動追加・削除
+
+# Native Windows printing qualification
+	Don't also tick Mirror Image in Print Settings…: the two flips cancel out.	印刷設定の「鏡像」も有効にしないでください。2回反転すると元に戻ります。
+	Print Settings…	印刷設定…
+	Remember to turn off the printer's own colour management in Print Settings…	印刷設定でプリンター独自のカラーマネジメントを無効にしてください…
+	Sent to {printer}	{printer} に送信しました
+	set in Print Settings…	印刷設定で指定…
+# Restored rows (custom print paper #3820, brush presets, Vanishing Point help, brush panel menu)
+	Drag to pan · Scroll to zoom · Double-click to fit	ドラッグで移動 · スクロールでズーム · ダブルクリックで全体表示
+	Clear Brush Controls	ブラシのコントロールを消去
+	Reset All Locked Settings	ロックされた設定をすべて初期化
+	Copy Texture to Other Tools	テクスチャを他のツールにコピー
+	ICO is limited to 256 × 256 pixels	ICO は 256 × 256 ピクセルまでです
+
+# HarmonyOS host additions retained during upstream sync
+	Stylus	スタイラス
+	Block finger input	指の入力を無効にする
+	Double-tap pen body	ペン軸をダブルタップ
+	Current tool and Eraser	現在のツールと消しゴム
+	Previous tool	前のツール
+	Long-press pen body	ペン軸を長押し
+	Show or hide context menu	コンテキストメニューの表示/非表示
+	Choose printer, copies and duplex in the system print dialog.	システムの印刷ダイアログでプリンター、部数、両面印刷を選択します。
+	System print preview opened	システムの印刷プレビューを開きました
 	Only show canvas	キャンバスのみ表示
 	Right sidebar	右サイドバー
 	Connected pen	接続中のペン

@@ -600,8 +600,18 @@ fn import(s: &mut Session, p: &Value) -> Result<Value> {
     // Names stay unique across the library (agents address swatches by name).
     let mut next: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
     let mut taken: std::collections::HashSet<String> = lib.iter().flat_map(|g| g.items.iter().map(|i| i.name.clone())).collect();
+    // Group names are numbered from 1 as in `unique_group` ("Grays 1"), and the numbering
+    // resumes per base name.
+    let mut group_next: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    let mut group_taken: std::collections::HashSet<String> = lib.iter().map(|g| g.name.clone()).collect();
     for mut g in groups {
-        g.name = unique_group(&lib, &g.name);
+        if group_taken.contains(&g.name) {
+            let from = group_next.get(&g.name).copied().unwrap_or(1);
+            let (i, n) = (from..).map(|i| (i, format!("{} {i}", g.name))).find(|(_, n)| !group_taken.contains(n)).unwrap_or((from, g.name.clone()));
+            group_next.insert(g.name.clone(), i + 1);
+            g.name = n;
+        }
+        group_taken.insert(g.name.clone());
         for sw in &mut g.items {
             if taken.contains(&sw.name) {
                 // Resume numbering per base name, so a file of identical names stays linear.

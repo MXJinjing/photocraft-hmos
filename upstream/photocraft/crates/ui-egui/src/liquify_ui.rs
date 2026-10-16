@@ -151,6 +151,8 @@ pub struct LiquifyDialog {
     zoom: f32,
     center: [f64; 2],
     hover: Option<[f64; 2]>,
+    /// Alt+right-drag (or Control+Alt-drag) resizing the brush: screen anchor, starting size, starting density.
+    brush_resize: Option<(Pos2, f32, f32)>,
     last_dab: f64,
     /// Last dab + proxy update time (ms), shown in the footer.
     pub dab_ms: f64,
@@ -286,6 +288,9 @@ impl LiquifyDialog {
     fn rebuild(&mut self) {
         self.field = LiquifyField::from_strokes(self.canvas, self.cell, &self.strokes);
         self.dirty = Some([0, 0, self.proxy.w, self.proxy.h]);
+        // Undo rebuilds the whole field. The zoomed viewport is a separate buffer; leaving it
+        // clean kept the pre-undo pixels on screen until the next zoom (#4100).
+        self.view_dirty = self.view_bounds;
         self.mask_dirty = true;
         self.render_dirty();
     }
@@ -479,6 +484,7 @@ pub fn open(app: &mut PhotocraftApp, ctx: &egui::Context) -> Result<(), String> 
         zoom: 0.0,
         center,
         hover: None,
+        brush_resize: None,
         last_dab: 0.0,
         dab_ms: 0.0,
         preview_ms: 0.0,
@@ -566,6 +572,21 @@ fn alt_tool(t: LiquifyTool) -> LiquifyTool {
     }
 }
 
+/// Alt+right-drag, and Control+Alt-drag, change the Liquify brush instead of painting (#4702).
+fn brush_resize_gesture(mods: egui::Modifiers, secondary: bool) -> bool {
+    mods.alt && (secondary || mods.ctrl)
+}
+
+/// Horizontal motion sets the diameter (the circle's edge follows the pointer). Vertical motion
+/// sets density, Liquify's edge falloff, over the same 200 px travel the canvas uses for hardness.
+fn resized_brush(start_size: f32, start_density: f32, dx: f32, dy: f32) -> (f32, f32) {
+    let dx = if dx.is_finite() { dx } else { 0.0 };
+    let dy = if dy.is_finite() { dy } else { 0.0 };
+    let size = (start_size + dx).round().clamp(1.0, 15000.0);
+    let density = (start_density + dy * 100.0 / crate::brush_resize::HARDNESS_TRAVEL).clamp(0.0, 100.0);
+    (size, (density * 10.0).round() / 10.0)
+}
+
 /// Pointer in document coordinates (from the preview or the control channel). Alt at
 /// pointer-down subtracts from the freeze mask (lasso), reverses a twirl and swaps Pucker/Bloat;
 /// Shift adds to the mask, same as no modifier.
@@ -605,7 +626,8 @@ pub fn pointer(app: &mut PhotocraftApp, ev: ToolEvent, mods: egui::Modifiers) {
     }
 }
 
-pub fn keys(app: &mut PhotocraftApp, ctx: &egui::Context) {
+/// Ctrl+Z / Ctrl+Shift+Z inside Liquify, including while a slider's text field is focused.
+pub fn history_keys(app: &mut PhotocraftApp, ctx: &egui::Context) {
     let Some(d) = app.distort.liquify.as_mut() else { return };
     let cmd_shift = egui::Modifiers::COMMAND | egui::Modifiers::SHIFT;
     if ctx.input_mut(|i| i.consume_key(cmd_shift, egui::Key::Z)) {
@@ -613,6 +635,11 @@ pub fn keys(app: &mut PhotocraftApp, ctx: &egui::Context) {
     } else if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::Z)) {
         d.undo();
     }
+}
+
+pub fn keys(app: &mut PhotocraftApp, ctx: &egui::Context) {
+    history_keys(app, ctx);
+    let Some(d) = app.distort.liquify.as_mut() else { return };
     // Ctrl+H (Hide Extras) toggles the red freeze-mask overlay; the mask itself stays active.
     if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::H)) {
         d.opts.show_mask = !d.opts.show_mask;
@@ -625,10 +652,11 @@ pub fn keys(app: &mut PhotocraftApp, ctx: &egui::Context) {
         d.global(LiquifyTool::ThawAll, None);
     }
     if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::OpenBracket)) {
-        d.opts.size = (d.opts.size * 0.9).max(1.0);
+        // At least one pixel, or 2 px * 0.9 rounds back to 2 and `[` never reaches 1.
+        d.opts.size = (d.opts.size * 0.9).round().min(d.opts.size - 1.0).clamp(1.0, 15000.0);
     }
     if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::CloseBracket)) {
-        d.opts.size = (d.opts.size * 1.1).min(15000.0);
+        d.opts.size = (d.opts.size * 1.1).round().max(d.opts.size + 1.0).min(15000.0);
     }
     let tools = [
         (egui::Key::W, LiquifyTool::ForwardWarp),
@@ -902,9 +930,26 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
             d.hover = Some(to_doc(d, area, hp));
         }
         clip.rect_stroke(img, 0.0, Stroke::new(1.0, t.separator), egui::StrokeKind::Outside);
-        // Mouse → strokes (Space or middle button pans).
-        let pan = ui.input(|i| i.key_down(egui::Key::Space) || i.pointer.middle_down());
-        if pan && resp.dragged() {
+        // Mouse → strokes (Space or middle button pans). Alt+right-drag resizes the brush (#4702).
+        let (pan, secondary, mods_now) =
+            ui.input(|i| (i.key_down(egui::Key::Space) || i.pointer.middle_down(), i.pointer.button_down(egui::PointerButton::Secondary), i.modifiers));
+        let resize = d.brush_resize.is_some() || (resp.drag_started() && brush_resize_gesture(mods_now, secondary));
+        if resize {
+            if d.brush_resize.is_none()
+                && let Some(p) = resp.interact_pointer_pos()
+            {
+                d.brush_resize = Some((p, d.opts.size, d.opts.density));
+            }
+            if let (Some((anchor, size0, dens0)), Some(p)) = (d.brush_resize, resp.interact_pointer_pos()) {
+                let delta = p - anchor;
+                let (size, density) = resized_brush(size0, dens0, delta.x, delta.y);
+                d.opts.size = size;
+                d.opts.density = density;
+            }
+            if resp.drag_stopped() || !ui.input(|i| i.pointer.any_down()) {
+                d.brush_resize = None;
+            }
+        } else if pan && resp.dragged() {
             let dl = resp.drag_delta();
             d.center = [d.center[0] - f64::from(dl.x / d.zoom), d.center[1] - f64::from(dl.y / d.zoom)];
         } else if let Some(pp) = resp.interact_pointer_pos() {
@@ -1009,6 +1054,18 @@ fn draw_mesh(d: &LiquifyDialog, painter: &egui::Painter, area: ERect) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn alt_right_drag_resizes_the_liquify_brush_and_does_not_paint() {
+        assert!(brush_resize_gesture(egui::Modifiers::ALT, true));
+        assert!(brush_resize_gesture(egui::Modifiers::CTRL | egui::Modifiers::ALT, false));
+        assert!(!brush_resize_gesture(egui::Modifiers::ALT, false), "Alt+left stays the tool's opposite");
+        assert!(!brush_resize_gesture(egui::Modifiers::NONE, true));
+        let (size, density) = resized_brush(40.0, 50.0, 25.0, crate::brush_resize::HARDNESS_TRAVEL);
+        assert_eq!((size, density), (65.0, 100.0));
+        let (size, density) = resized_brush(40.0, 50.0, -100.0, 0.0);
+        assert_eq!((size, density), (1.0, 50.0));
+    }
 
     fn app_with_layer() -> PhotocraftApp {
         let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), Default::default());
@@ -1201,6 +1258,27 @@ mod tests {
         let mut expected = vec![[0u8; 4]; d.proxy.w * d.proxy.h];
         d.proxy.render(&d.field, [0, 0, d.proxy.w, d.proxy.h], &mut expected);
         assert_eq!(d.out, expected, "dirty upload source must match the rebuilt field");
+    }
+
+    #[test]
+    fn undo_dirties_the_zoomed_preview() {
+        let ctx = egui::Context::default();
+        let mut app = app_with_layer();
+        open(&mut app, &ctx).unwrap();
+        control(&mut app, &json!({"tool": "forwardWarp", "size": 40})).unwrap();
+        for ev in [ToolEvent::Down { x: 35.0, y: 40.0, pressure: 1.0 }, ToolEvent::Move { x: 55.0, y: 40.0, pressure: 1.0 }, ToolEvent::Up { x: 55.0, y: 40.0 }]
+        {
+            pointer(&mut app, ev, egui::Modifiers::NONE);
+        }
+        {
+            let d = app.distort.liquify.as_mut().unwrap();
+            d.zoom = 2.0;
+            d.view_bounds = Some(Rect::new(0, 0, 20, 20));
+            d.view_dirty = None;
+        }
+        control(&mut app, &json!({"undo": true})).unwrap();
+        let d = app.distort.liquify.as_ref().unwrap();
+        assert_eq!(d.view_dirty, d.view_bounds);
     }
 
     #[test]

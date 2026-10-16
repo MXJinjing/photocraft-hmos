@@ -83,6 +83,44 @@ pub fn commit(app: &mut PhotocraftApp) {
         let _ = app.run("paint.setSymmetry", json!({"mode":t.preview.mode.id(), "center":t.preview.center,"rotation":t.preview.rotation}));
     }
 }
+/// While the symmetry is being transformed, the options bar names the edit and gives it ✓ and ⊘
+/// buttons, as Free Transform's bar does: Enter and Esc aren't the only ways out, which a pen or
+/// touch user may have no key for (#4495). False (nothing drawn) when no transform is open.
+pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> bool {
+    if app.ui.symmetry_transform.is_none() {
+        return false;
+    }
+    ui.label(egui::RichText::new(tl!("Transform Symmetry")).color(Tokens::get(ui.ctx()).text_dim));
+    widgets::vline(ui, 22.0);
+    let tip = crate::i18n::fmt(tl!("Commit transform ({key})"), &[("key", &crate::shortcuts::pretty("Enter"))]);
+    let commit_btn = icons::button(ui, "check", 26.0, false, &tip);
+    commit_btn.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Commit transform"));
+    if commit_btn.clicked() {
+        commit(app);
+    }
+    let cancel = icons::button(ui, "ban", 26.0, false, tl!("Cancel transform (Esc)"));
+    cancel.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Cancel transform"));
+    if cancel.clicked() {
+        app.ui.symmetry_transform = None;
+    }
+    true
+}
+/// The canvas cursor while the symmetry is being transformed: the move cursor over the centre,
+/// the rotate cursor over the rotation handle and the arrow elsewhere, never the brush outline,
+/// since a press there doesn't paint (#4495). `None` when no transform is open on this document.
+pub fn cursor(app: &PhotocraftApp, xf: &ViewXform, p: [f64; 2]) -> Option<egui::CursorIcon> {
+    let t = app.ui.symmetry_transform.as_ref().filter(|t| app.session.active_index() == Some(t.document))?;
+    let size = app.session.active().map(|s| [f64::from(s.doc.size.width), f64::from(s.doc.size.height)]).unwrap_or([1.0, 1.0]);
+    let tol = 8.0 / f64::from(xf.zoom.max(0.001));
+    let distance = |a: [f64; 2], b: [f64; 2]| (a[0] - b[0]).hypot(a[1] - b[1]);
+    Some(match t.gesture {
+        Some(Gesture::Move { .. }) => egui::CursorIcon::Move,
+        Some(Gesture::Rotate { .. }) => egui::CursorIcon::Alias,
+        None if distance(p, t.preview.center) <= tol => egui::CursorIcon::Move,
+        None if distance(p, rotation_handle(t.preview, size)) <= tol => egui::CursorIcon::Alias,
+        None => egui::CursorIcon::Default,
+    })
+}
 fn valid(app: &PhotocraftApp, t: &Transform) -> bool {
     app.session.active_index() == Some(t.document)
         && app.ui.tool == t.tool

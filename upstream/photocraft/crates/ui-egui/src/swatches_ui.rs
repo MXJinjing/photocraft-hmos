@@ -346,6 +346,23 @@ mod tests {
         assert_eq!(runs[1].style.color.to_rgba8(), [255, 255, 255, 255]);
     }
 
+    /// #4790: the footer (size slider, New Group, New, Delete) stays inside the panel however short
+    /// the dock makes it: the list scrolls instead of pushing the footer out of view.
+    #[test]
+    fn the_footer_fits_below_a_full_list() {
+        use egui_kittest::kittest::Queryable;
+        for h_px in [80.0, 100.0, 120.0, 160.0, 300.0] {
+            let app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+            let mut h = Harness::builder().with_size(vec2(260.0, h_px)).build_ui_state(|ui, app: &mut PhotocraftApp| panel(app, ui), app);
+            PhotocraftApp::setup_context(&h.ctx, Default::default());
+            h.run_steps(3);
+            let bottom = h.ctx.input(|i| i.viewport_rect()).max.y;
+            let slider = h.get_by_role(egui::accesskit::Role::Slider).rect().max.y;
+            let delete = h.get_by_label("Delete").rect().max.y;
+            assert!(slider <= bottom + 0.5 && delete <= bottom + 0.5, "{h_px} px panel: slider ends at {slider}, Delete at {delete}, panel at {bottom}");
+        }
+    }
+
     #[test]
     fn alt_click_sets_the_background_and_selects() {
         let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());

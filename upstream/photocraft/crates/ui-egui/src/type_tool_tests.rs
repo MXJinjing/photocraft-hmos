@@ -14,6 +14,65 @@ use super::{layout, text_layer};
 use crate::PhotocraftApp;
 use crate::canvas::ViewXform;
 
+#[test]
+fn focused_font_search_does_not_type_into_the_canvas_layer() {
+    let mut app = new_app();
+    let id = app.run("type.create", json!({"text": "Sample", "size": 24})).unwrap()["layer"].as_u64().unwrap();
+    app.ui.text_edit = Some(crate::state::TextEdit {
+        layer: id,
+        caret: 6,
+        anchor: 6,
+        session: "s".into(),
+        created: false,
+        mask: false,
+        dragging: false,
+        resize: None,
+        preedit: None,
+    });
+    let mut h = Harness::builder().build_ui_state(
+        |ui, app: &mut PhotocraftApp| {
+            let search_id = egui::Id::new("font-search-regression");
+            let mut query = ui.data(|d| d.get_temp::<String>(search_id)).unwrap_or_default();
+            ui.add(egui::TextEdit::singleline(&mut query).id(search_id)).request_focus();
+            ui.data_mut(|d| d.insert_temp(search_id, query));
+            super::handle_keys(app, ui.ctx());
+        },
+        app,
+    );
+    h.run_steps(2);
+    h.event(egui::Event::Text("Ins".into()));
+    h.run();
+    assert_eq!(h.ctx.data(|d| d.get_temp::<String>(egui::Id::new("font-search-regression"))).as_deref(), Some("Ins"));
+    assert_eq!(super::current_text(h.state_mut(), LayerId(id)).as_deref(), Some("Sample"));
+}
+
+#[test]
+fn numeric_type_fields_have_localized_accessible_names() {
+    let pt = crate::i18n::Lang::from_code("pt-br").unwrap();
+    let mut h = Harness::builder().build_ui_state(
+        move |ui, value: &mut f32| {
+            if !ui.ctx().fonts(|f| f.families().contains(&egui::FontFamily::Name("medium".into()))) {
+                return;
+            }
+            crate::i18n::with_language(pt, || {
+                if let Some(next) = super::num_field(ui, "tT", "Font size", *value, 1.0..=999.0, "pt", 80.0) {
+                    *value = next;
+                }
+            });
+        },
+        24.0,
+    );
+    PhotocraftApp::setup_context(&h.ctx, Default::default());
+    h.run_steps(4);
+    h.get_by_role_and_label(egui::accesskit::Role::SpinButton, "Tamanho da fonte").click();
+    h.run();
+    h.key_press_modifiers(Modifiers::COMMAND, egui::Key::A);
+    h.event(egui::Event::Text("36".into()));
+    h.key_press(egui::Key::Enter);
+    h.run();
+    assert_eq!(*h.state(), 36.0);
+}
+
 fn harness(ppp: f32, app: PhotocraftApp) -> Harness<'static, PhotocraftApp> {
     make_harness(ppp, app, false)
 }
@@ -1333,8 +1392,10 @@ mod multi_layer_formatting {
         h
     }
 
-    fn number(h: &mut Harness<'static, PhotocraftApp>, index: usize, value: &str) {
-        h.get_all_by_role(Role::SpinButton).nth(index).expect("numeric field").click();
+    fn number(h: &mut Harness<'static, PhotocraftApp>, label: &str, value: &str) {
+        // Variable-font axes add numeric fields before size/leading. Select the setting by
+        // its accessible name, so a font scan cannot shift this action onto another control.
+        h.get_by_role_and_label(Role::SpinButton, label).click();
         h.run();
         h.key_press_modifiers(Modifiers::COMMAND, egui::Key::A);
         h.event(egui::Event::Text(value.into()));
@@ -1399,6 +1460,33 @@ mod multi_layer_formatting {
         assert_ne!(text(h.state(), ids[2]).antialias, AntiAlias::Sharp);
     }
 
+    /// Other engines registering fonts and the served catalog growing (tests running in parallel)
+    /// used to move the key of the font menu's preview cache, so its samples re-rendered and asked
+    /// for a repaint every pass and `Harness::run` never settled (a flaky `exceeded max_steps`).
+    /// Here both happen on every pass.
+    #[test]
+    fn the_font_menu_settles_while_other_engines_register_fonts() {
+        let (app, _) = fixture();
+        let mut pass = 0u32;
+        let mut h = Harness::builder().with_size(vec2(1100.0, 800.0)).build_ui_state(
+            move |ui, app| {
+                photocraft_text::TextEngine::new();
+                // The served catalog is process-wide: names that sort last.
+                photocraft_text::served::add_families([format!("zz Churn Test {pass:03}")]);
+                pass = pass.saturating_add(1);
+                if ui.ctx().fonts(|f| f.families().contains(&egui::FontFamily::Name("medium".into()))) {
+                    ui.horizontal(|ui| super::super::options_bar(app, ui));
+                }
+            },
+            app,
+        );
+        PhotocraftApp::setup_context(&h.ctx, Default::default());
+        h.run_steps(4);
+        h.get_all_by_role(Role::ComboBox).next().unwrap().click();
+        h.run();
+        h.run();
+    }
+
     #[test]
     fn properties_edit_shown_metrics_and_paragraphs_with_a_non_type_primary() {
         let (mut app, ids) = fixture();
@@ -1409,16 +1497,16 @@ mod multi_layer_formatting {
         let raster = LayerId(app.run("layer.new.layer", json!({"name": "Selected raster"})).unwrap()["layer"].as_u64().unwrap());
         selected(&mut app, &[ids[0], ids[1], raster]);
         let mut h = controls(app, true);
-        number(&mut h, 0, "60");
+        number(&mut h, "Font size", "60");
         // Differ from the automatic 72 pt leading so this is an actual property change.
-        number(&mut h, 1, "84");
+        number(&mut h, "Leading (set to the font size × auto-leading when Auto)", "84");
         h.get_by_label("Faux Bold").click();
         h.run();
         h.get_by_label("Center text").click();
         h.run();
         h.get_by_label("Hyphenate").click();
         h.run();
-        number(&mut h, 6, "9");
+        number(&mut h, "Indent left margin", "9");
         for (id, scale) in [(ids[0], 2.0), (ids[1], 4.0)] {
             let c = style(h.state(), id, 0);
             assert_eq!(c.size_pt * scale, 60.0);
@@ -1435,7 +1523,7 @@ mod multi_layer_formatting {
         let peer = text(h.state(), ids[1]).char_runs();
         editing(h.state_mut(), ids[0]);
         h.run();
-        number(&mut h, 0, "40");
+        number(&mut h, "Font size", "40");
         assert_eq!((size_at(h.state(), ids[0], 0), size_at(h.state(), ids[0], 1), size_at(h.state(), ids[0], 3)), (30.0, 20.0, 30.0));
         assert_eq!(text(h.state(), ids[1]).char_runs(), peer);
     }

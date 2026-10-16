@@ -7,7 +7,7 @@
 pub(super) const HALF: f32 = 12.5;
 
 /// Distance to the segment `a`–`b`, minus `r` (a capsule; a bare line when `r` is 0).
-fn capsule(x: f32, y: f32, a: [f32; 2], b: [f32; 2], r: f32) -> f32 {
+pub(super) fn capsule(x: f32, y: f32, a: [f32; 2], b: [f32; 2], r: f32) -> f32 {
     let (px, py) = (x - a[0], y - a[1]);
     let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
     let len2 = dx * dx + dy * dy;

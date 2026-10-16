@@ -154,3 +154,79 @@ fn the_cursor_shows_plus_or_minus() {
     assert_eq!(badge(&app, Tool::DeleteAnchorPoint, Modifiers::NONE), Some(Badge::Subtract));
     assert_eq!(badge(&app, Tool::DeleteAnchorPoint, Modifiers::COMMAND), None, "⌘ is Direct Selection");
 }
+
+/// #4144: with Auto Add/Delete (on by default) a Pen click on a segment of the active path adds
+/// an anchor and a click on one of its anchors deletes it, one step each, and no Pen path starts.
+#[test]
+fn the_pen_adds_and_deletes_anchors_on_the_active_path() {
+    let mut app = app(Tool::Pen);
+    assert!(app.ui.tool_options.pen_auto_add_delete, "on by default, as in Photoshop");
+    with_path(&mut app);
+    let n = steps(&app);
+    click(&mut app, [80.0, 120.0], Modifiers::NONE);
+    assert_eq!(work(&app).subpaths[0].knots.len(), 5);
+    assert_eq!(app.session.active().unwrap().history.undo_label(), Some("Add Anchor Point"));
+    assert!(app.ui.pen.is_none(), "no Pen path was started");
+    click(&mut app, [40.0, 120.0], Modifiers::NONE);
+    let p = work(&app);
+    assert_eq!(p.subpaths[0].knots.len(), 4);
+    assert!(!p.subpaths[0].knots.iter().any(|k| k.anchor == Point::new(40.0, 120.0)));
+    assert_eq!(app.session.active().unwrap().history.undo_label(), Some("Delete Anchor Point"));
+    assert_eq!(steps(&app), n + 2);
+    assert!(app.ui.pen.is_none());
+    // Off the path the Pen draws.
+    click(&mut app, [170.0, 170.0], Modifiers::NONE);
+    assert_eq!(app.ui.pen.as_ref().map(|p| p.knots.len()), Some(1));
+}
+
+/// Auto Add/Delete off, or ⇧ held, or a path being drawn: the Pen click places an anchor.
+#[test]
+fn the_pen_draws_over_the_path_with_auto_add_delete_off_shift_or_while_drawing() {
+    let mut app = app(Tool::Pen);
+    with_path(&mut app);
+    let before = work(&app);
+    app.ui.tool_options.pen_auto_add_delete = false;
+    click(&mut app, [80.0, 120.0], Modifiers::NONE);
+    assert_eq!((work(&app), app.ui.pen.as_ref().map(|p| p.knots.len())), (before.clone(), Some(1)));
+    app.ui.pen = None;
+
+    app.ui.tool_options.pen_auto_add_delete = true;
+    click(&mut app, [80.0, 120.0], Modifiers::SHIFT);
+    assert_eq!((work(&app), app.ui.pen.as_ref().map(|p| p.knots.len())), (before.clone(), Some(1)), "⇧ turns it off");
+    app.ui.pen = None;
+
+    click(&mut app, [170.0, 170.0], Modifiers::NONE);
+    click(&mut app, [80.0, 120.0], Modifiers::NONE);
+    assert_eq!((work(&app), app.ui.pen.as_ref().map(|p| p.knots.len())), (before, Some(2)), "a path being drawn takes the click");
+}
+
+/// The end points of an open subpath stay the Pen's; its middle anchors are deleted.
+#[test]
+fn the_pen_leaves_open_end_points_alone() {
+    let mut app = app(Tool::Pen);
+    let path = json!({"subpaths": [{"closed": false, "knots": [[40, 40], [120, 40], [120, 120]]}]});
+    app.run("path.set", json!({"name": "work", "path": path})).unwrap();
+    let before = work(&app);
+    for end in [[40.0, 40.0], [120.0, 120.0]] {
+        click(&mut app, end, Modifiers::NONE);
+        assert_eq!(work(&app), before, "{end:?}");
+        app.ui.pen = None;
+    }
+    click(&mut app, [120.0, 40.0], Modifiers::NONE);
+    assert_eq!(work(&app).subpaths[0].knots.len(), 2);
+}
+
+#[test]
+fn the_pen_cursor_shows_what_auto_add_delete_would_do() {
+    use crate::tool_feedback::{Badge, badge};
+    let mut app = app(Tool::Pen);
+    with_path(&mut app);
+    for (at, want) in [([80.0, 120.0], Some(Badge::Add)), ([40.0, 120.0], Some(Badge::Subtract)), ([80.0, 80.0], None)] {
+        app.hover_doc = Some(at);
+        assert_eq!(badge(&app, Tool::Pen, Modifiers::NONE), want, "{at:?}");
+    }
+    app.hover_doc = Some([80.0, 120.0]);
+    assert_eq!(badge(&app, Tool::Pen, Modifiers::SHIFT), None);
+    app.ui.tool_options.pen_auto_add_delete = false;
+    assert_eq!(badge(&app, Tool::Pen, Modifiers::NONE), None);
+}

@@ -35,6 +35,7 @@ use tiff::encoder::colortype::{self, ColorType as TiffColorType};
 use tiff::encoder::{Rational, TiffEncoder, TiffKind, TiffKindBig, TiffKindStandard, TiffValue};
 use tiff::tags::{PhotometricInterpretation, ResolutionUnit, SampleFormat, Tag, Type};
 
+use super::tiff_exif::{self, ExifDirs};
 use super::tiff_ifd::{self as ifd, File, Ifd};
 use crate::Format;
 use crate::error::CodecError;
@@ -297,6 +298,13 @@ fn metadata(f: &File<'_>, dir: &Ifd, icc: &mut Option<Vec<u8>>) -> Metadata {
         if dir.at == f.first_ifd { photoshop_tags(f.b) } else { (f.tag_bytes(dir, TAG_PHOTOSHOP), f.tag_bytes(dir, TAG_IMAGE_SOURCE_DATA)) };
     meta.photoshop_resources = resources.map(<[u8]>::to_vec);
     meta.photoshop_layers = layers.map(<[u8]>::to_vec);
+    // EXIF: the Exif and GPS directories IFD0 points to, with IFD0's descriptive tags, as an
+    // EXIF block (the other pages are reduced copies or layers of the same image).
+    if dir.at == f.first_ifd
+        && let Some(e) = tiff_exif::read(f.b).filter(ExifDirs::has_directories)
+    {
+        meta.exif = Some(tiff_exif::block(&e));
+    }
     meta
 }
 
@@ -1016,6 +1024,8 @@ custom_colortype!(CmykA32F, f32, PI::CMYK, &[32; 5], &[SampleFormat::IEEEFP; 5],
 
 struct TagSet<'a> {
     icc: Option<&'a [u8]>,
+    /// The EXIF block's directories and IFD0 tags, written as the TIFF's own.
+    exif: Option<ExifDirs>,
     xmp: Option<&'a [u8]>,
     dpi: Option<(f32, f32)>,
     text: Vec<(Tag, &'a str)>,
@@ -1032,6 +1042,16 @@ where
     [C::Inner]: TiffValue,
     K: TiffKind,
 {
+    // The Exif and GPS directories go before the image, outside its chain; IFD0 points to them.
+    let mut sub = |e: &ExifDirs, fields: &[tiff_exif::Field]| (!fields.is_empty()).then(|| tiff_exif::write_directory(enc, fields, e.le)).transpose();
+    let exif_at = match &tags.exif {
+        Some(e) => sub(e, &e.exif)?,
+        None => None,
+    };
+    let gps_at = match &tags.exif {
+        Some(e) => sub(e, &e.gps)?,
+        None => None,
+    };
     let mut im = enc.new_image::<C>(w, h)?;
     if let Some((x, y)) = tags.dpi {
         im.resolution_unit(ResolutionUnit::Inch);
@@ -1051,6 +1071,17 @@ where
     }
     for (tag, s) in &tags.text {
         d.write_tag(*tag, *s)?;
+    }
+    if let Some(e) = &tags.exif {
+        // The EXIF block's descriptive IFD0 tags, unless the text metadata already wrote them.
+        let ifd0: Vec<tiff_exif::Field> = e.ifd0.iter().filter(|f| !tags.text.iter().any(|(t, _)| t.to_u16() == f.tag)).cloned().collect();
+        tiff_exif::write_fields(d, &ifd0, e.le)?;
+    }
+    if let Some(at) = exif_at {
+        d.write_tag(Tag::Unknown(tiff_exif::TAG_EXIF_IFD), at)?;
+    }
+    if let Some(at) = gps_at {
+        d.write_tag(Tag::Unknown(tiff_exif::TAG_GPS_IFD), at)?;
     }
     if let Some(r) = tags.photoshop_resources {
         d.write_tag(Tag::Unknown(TAG_PHOTOSHOP), r)?;
@@ -1099,7 +1130,8 @@ const CLASSIC_LIMIT: u64 = u32::MAX as u64;
 /// room for the directory and strip tables.
 fn estimated_size(img: &Image, tags: &TagSet<'_>) -> u64 {
     let payloads = [tags.icc, tags.xmp, tags.photoshop_resources, tags.photoshop_layers].iter().flatten().map(|p| p.len() as u64).sum::<u64>();
-    let text = tags.text.iter().map(|(_, s)| s.len() as u64).sum::<u64>();
+    let text = tags.text.iter().map(|(_, s)| s.len() as u64).sum::<u64>()
+        + tags.exif.iter().flat_map(|e| e.ifd0.iter().chain(&e.exif).chain(&e.gps)).map(|f| f.value.len() as u64 + 12).sum::<u64>();
     // Strip tables: one offset and one count per strip of about 1 MB.
     let tables = (img.data().len() as u64 / (1 << 20) + 1) * 16;
     (img.data().len() as u64).saturating_add(payloads).saturating_add(text).saturating_add(tables).saturating_add(1 << 20)
@@ -1132,6 +1164,7 @@ pub(crate) fn encode(src: &Image, plan: Plan, opts: &EncodeOptions) -> Result<Ve
     let xmp = if opts.embed_metadata { img.meta.xmp.as_deref().map(|x| crate::resolution::export_xmp(x, img.meta.dpi)) } else { None };
     let tags = TagSet {
         icc: if opts.embed_icc { img.icc.as_deref() } else { None },
+        exif: if opts.embed_metadata { img.meta.exif.as_deref().and_then(|e| tiff_exif::read(crate::orientation::tiff_body(e))) } else { None },
         xmp: xmp.as_deref().map(str::as_bytes),
         dpi: if opts.embed_metadata { img.meta.dpi.filter(|d| d.0 > 0.0 && d.1 > 0.0) } else { None },
         text,

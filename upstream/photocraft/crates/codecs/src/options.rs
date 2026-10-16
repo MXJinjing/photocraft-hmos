@@ -100,12 +100,13 @@ pub enum PngCompression {
     Best,
 }
 
-/// TIFF strip compression.
+/// TIFF strip compression. The default is none, as in Photoshop: uncompressed strips are the
+/// only kind every TIFF reader opens (Deflate and the predictor are not baseline TIFF, #4484).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TiffCompression {
+    #[default]
     None,
     Lzw,
-    #[default]
     Deflate,
     PackBits,
 }
@@ -119,6 +120,38 @@ pub enum ExrCompression {
     #[default]
     Zip16,
     Piz,
+}
+
+/// Bits per sample of a DPX file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DpxBits {
+    Bits8,
+    Bits10,
+    Bits12,
+    Bits16,
+}
+
+impl DpxBits {
+    /// `8`, `10`, `12` or `16` as [`DpxBits`]; any other number is `None`.
+    pub fn from_bits(bits: u64) -> Option<Self> {
+        match bits {
+            8 => Some(DpxBits::Bits8),
+            10 => Some(DpxBits::Bits10),
+            12 => Some(DpxBits::Bits12),
+            16 => Some(DpxBits::Bits16),
+            _ => None,
+        }
+    }
+
+    /// The bits per sample.
+    pub fn bits(self) -> u8 {
+        match self {
+            DpxBits::Bits8 => 8,
+            DpxBits::Bits10 => 10,
+            DpxBits::Bits12 => 12,
+            DpxBits::Bits16 => 16,
+        }
+    }
 }
 
 /// Options for [`crate::encode`].
@@ -141,6 +174,8 @@ pub struct EncodeOptions {
     /// only when it could pass the 4 GiB a classic TIFF can address.
     pub tiff_bigtiff: bool,
     pub exr_compression: ExrCompression,
+    /// DPX bits per sample. `None` follows the image: 8 for 8-bit, 16 otherwise.
+    pub dpx_bits: Option<DpxBits>,
     /// Embed the ICC profile when the format supports it.
     pub embed_icc: bool,
     /// Embed EXIF/XMP/DPI/text when the format supports it.
@@ -156,9 +191,10 @@ impl Default for EncodeOptions {
             png_interlaced: false,
             webp_lossless: true,
             webp_quality: 80,
-            tiff_compression: TiffCompression::Deflate,
+            tiff_compression: TiffCompression::None,
             tiff_bigtiff: false,
             exr_compression: ExrCompression::Zip16,
+            dpx_bits: None,
             embed_icc: true,
             embed_metadata: true,
         }

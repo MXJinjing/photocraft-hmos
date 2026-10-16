@@ -131,7 +131,6 @@ Then append a terse entry to `log/devlog.md` (what landed, numbers, what's still
 - `../craftrules/release/playbook.md`: how every storytold app builds signed release binaries (the canonical recipe; `docs/release-playbook.md` just points there); `docs/releasing.md` is PhotoCraft's specifics.
 - `plan/` (local, gitignored): research, parity plan, execution plan, estimates.
 - `log/` (local, gitignored): the dev log.
-- 
 
 ## 8. Keeping the native format complete
 

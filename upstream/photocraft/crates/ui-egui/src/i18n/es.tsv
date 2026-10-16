@@ -12,7 +12,19 @@
 # Product and technology names (PhotoCraft, ArtCraft, OpenType, CMYK, Lab ...) stay in Latin
 # letters; the trailing "…" of dialog commands is kept.
 
+# Channel Options and New Spot Channel (#3761)
+	Channel Color	Color del canal
+	Color Indicates:	El color indica:
+	Solidity:	Solidez:
+	Masked Areas	Áreas enmascaradas
+	Selected Areas	Áreas seleccionadas
+	Ink Characteristics	Características de la tinta
+
 # Guide layout dialog
+
+# Custom print paper (#3820)
+	Paper Width	Ancho del papel
+	Paper Height	Altura del papel
 	Columns	Columnas
 	Rows	Filas
 	Number	Número
@@ -70,6 +82,8 @@
 	Save	Guardar
 	Save As…	Guardar como…
 	Save a Copy…	Guardar una copia…
+	{name} can't keep everything in this document	{name} no puede conservar todo lo que tiene este documento
+	Choose a format that keeps it, such as Photoshop (PSD), or save a copy.	Elija un formato que lo conserve todo, como Photoshop (PSD), o guarde una copia.
 	Revert	Volver
 	Export	Exportar
 	Quick Export as PNG	Exportación rápida como PNG
@@ -107,6 +121,14 @@
 	Script Events Manager…	Administrador de eventos de secuencias de comandos…
 	Import	Importar
 	Browse…	Examinar…
+	Source Files	Archivos de origen
+	Use:	Usar:
+	Files	Archivos
+	Folder	Carpeta
+	Add Open Files	Añadir archivos abiertos
+	Sort By Name	Ordenar por nombre
+	Attempt to Automatically Align Source Images	Intentar alinear automáticamente las imágenes de origen
+	Create Smart Object after Loading Layers	Crear objeto inteligente tras cargar las capas
 	Reveal in Finder	Mostrar en Finder
 	Show in Explorer	Mostrar en el Explorador
 	Show in Folder	Mostrar en la carpeta
@@ -131,6 +153,8 @@
 	Search…	Buscar…
 	Check Spelling…	Revisar ortografía…
 	Find and Replace Text…	Buscar y reemplazar texto…
+	Add to Dictionary	Añadir al diccionario
+	No Spelling Suggestions	Sin sugerencias ortográficas
 	Fill…	Rellenar…
 	Stroke…	Contornear…
 	Content-Aware Fill…	Relleno según el contenido…
@@ -145,6 +169,8 @@
 	Transform Again on a Copy	Transformar de nuevo una copia
 	Scale	Escalar
 	Rotate	Rotar
+	Set horizontal skew	Definir sesgado horizontal
+	Set vertical skew	Definir sesgado vertical
 	Skew	Sesgar
 	Distort	Distorsionar
 	Perspective	Perspectiva
@@ -357,6 +383,7 @@
 	Update Modified Content	Actualizar contenido modificado
 	Update All Modified Content	Actualizar todo el contenido modificado
 	Stack Mode	Modo de apilamiento
+	Choose Stack Mode:	Elegir modo de apilamiento:
 	Entropy	Entropía
 	Kurtosis	Curtosis
 	Maximum	Máximo
@@ -528,6 +555,9 @@
 	Blur	Desenfocar
 	Blur Gallery	Galería de desenfoque
 	Field Blur…	Desenfoque de campo…
+# Field Blur pins (#3373)
+	No pin selected	Ningún pin seleccionado
+	Click the image to add a pin; drag a pin to move it, or its ring to change its blur. Delete removes the selected pin.	Haga clic en la imagen para añadir un pin; arrastre un pin para moverlo o su anillo para cambiar el desenfoque. Suprimir elimina el pin seleccionado.
 	Iris Blur…	Desenfoque de iris…
 	Tilt-Shift…	Cambio de inclinación…
 	Path Blur…	Desenfoque de trazado…
@@ -726,6 +756,10 @@
 	Breeze Dark Theme	Tema Breeze oscuro
 	Breeze light	Breeze claro
 	Breeze Light Theme	Tema Breeze claro
+	Soft dark	Suave oscuro
+	Soft light	Suave claro
+	Soft Dark Theme	Tema suave oscuro
+	Soft Light Theme	Tema suave claro
 	Next Theme	Tema siguiente
 	Actions	Acciones
 	Brush Settings	Ajustes del pincel
@@ -826,6 +860,9 @@
 	Appearance	Apariencia
 	Appearance (Layer Style)	Apariencia (estilo de capa)
 	Apply Layer Mask	Aplicar máscara de capa
+	Add Mask to Selection	Añadir máscara a la selección
+	Subtract Mask from Selection	Restar máscara de la selección
+	Intersect Mask with Selection	Intersecar máscara con la selección
 	Apply Per Tip	Aplicar por punta
 	Apply next selected layer comp	Aplicar la composición de capa seleccionada siguiente
 	Apply previous selected layer comp	Aplicar la composición de capa seleccionada anterior
@@ -841,11 +878,18 @@
 	Background	Fondo
 	Background Color	Color de fondo
 	Background Contents	Contenido del fondo
+	Custom background color	Color de fondo personalizado
 	Balance	Balance
 	Baseline	Línea de base
 	Baseline shift	Desplazamiento de línea de base
 	Basic	Básico
 	Before (Y)	Antes (Y)
+	Save Settings…	Guardar ajustes…
+	Load Settings…	Cargar ajustes…
+	Save these settings as a Camera Raw .xmp file	Guardar estos ajustes como archivo .xmp de Camera Raw
+	Load settings from a Camera Raw .xmp file	Cargar ajustes desde un archivo .xmp de Camera Raw
+	Loaded Camera Raw settings from {file}	Ajustes de Camera Raw cargados desde {file}
+	Loaded Camera Raw settings from {file} ({n} not supported)	Ajustes de Camera Raw cargados desde {file} ({n} no compatibles)
 	Begin recording	Iniciar grabación
 	Bend:	Curvatura:
 	Bicubic	Bicúbica
@@ -876,6 +920,7 @@
 	Camera Raw isn't open	Camera Raw no está abierto
 	Cancel	Cancelar
 	Cancel (Esc)	Cancelar (Esc)
+	Manage submitted jobs in the system print queue	Gestionar los trabajos enviados en la cola de impresión del sistema
 	Cancel any current edits (Esc)	Cancelar las ediciones actuales (Esc)
 	Cancel current crop operation  (Esc)	Cancelar la operación de recorte actual  (Esc)
 	Cancel transform (Esc)	Cancelar transformación (Esc)
@@ -1147,6 +1192,9 @@
 	Ignore All	Ignorar todo
 	Image Size	Tamaño de imagen
 	Import Brushes…	Importar pinceles…
+	Gradient Preset Options	Opciones de ajustes preestablecidos de degradado
+	Import .GRD	Importar .GRD
+	Choose a gradient file (.grd).	Seleccione un archivo de degradados (.grd).
 	Import brushes (.abr)	Importar pinceles (.abr)
 	Import Presets	Importar ajustes preestablecidos
 	Imported	Importado
@@ -1778,9 +1826,7 @@
 	Std Dev:	Desv. estándar:
 	Studio (Dark)	Estudio (oscuro)
 	Studio (Light)	Estudio (claro)
-	Stylus	Lápiz
 	Stylus Wheel	Rueda de la pluma
-	Block finger input	Bloquear entrada táctil
 	Subtract	Restar
 	Tabloid	Tabloide
 	Text Replacement	Sustitución de texto
@@ -2087,6 +2133,11 @@
 	Rename Brush…	Cambiar el nombre del pincel…
 	Delete Brush	Eliminar pincel
 	New Brush Preset…	Nuevo ajuste preestablecido de pincel…
+	Capture Brush Size in Preset	Capturar tamaño del pincel en el ajuste preestablecido
+	Include Tool Settings	Incluir ajustes de herramienta
+	Include Color	Incluir color
+	Enter a name for the brush preset	Escriba un nombre para el ajuste preestablecido de pincel
+	A brush preset with this name already exists	Ya existe un ajuste preestablecido de pincel con este nombre
 	Brush Preset Options	Opciones de ajustes preestablecidos de pincel
 	Group name	Nombre del grupo
 	Brush name	Nombre del pincel
@@ -2147,6 +2198,10 @@
 	No path to make a selection from: draw one with the Pen tool or select one in the Paths panel.	No hay ningún trazado para crear una selección: dibuje uno con la herramienta Pluma o seleccione uno en el panel Trazados.
 	Cancel opening	Cancelar apertura
 	Cancelled opening {name}	Se canceló la apertura de {name}
+	The document “{name}” does not have an embedded {mode} profile.	El documento «{name}» no tiene un perfil {mode} incrustado.
+	The document “{name}” has an embedded color profile that does not match the current {mode} working space.	El documento «{name}» tiene un perfil de color incrustado que no coincide con el espacio de trabajo {mode} actual.
+	Embedded: {embedded}	Incrustado: {embedded}
+	Working: {working}	Espacio de trabajo: {working}
 	Developing {name}	Revelando {name}
 	Cancelled {label}	Se canceló {label}
 	Esc to cancel	Esc para cancelar
@@ -2392,6 +2447,7 @@ cameraRaw	Amount	Cantidad
 	Click to pick · Esc to cancel	Clic para elegir · Esc para cancelar
 	Pick a screen pixel or press Esc to cancel	Elija un píxel de la pantalla o pulse Esc para cancelar
 	Scroll to zoom	Desplace para ampliar
+	Drag to pan · Scroll to zoom · Double-click to fit	Arrastre para desplazar · Desplace para ampliar · Doble clic para ajustar
 	Show/Hide All Panels	Mostrar/ocultar todos los paneles
 	Show/Hide Panels	Mostrar/ocultar paneles
 	Could not open	No se pudo abrir
@@ -2448,6 +2504,7 @@ cameraRaw	Amount	Cantidad
 	Violet	Violeta
 	Reset	Restaurar
 	Large document: redrawing on the CPU	Documento grande: redibujando en la CPU
+	Redrawing	Redibujando
 	This redraw took {seconds} s on the CPU.	Este redibujado en la CPU tardó {seconds} s.
 	Edits that change the whole document, such as a layer's blend mode, opacity or visibility, redraw all of it.	Las ediciones que cambian todo el documento, como el modo de fusión, la opacidad o la visibilidad de una capa, lo redibujan por completo.
 	Its layers don't fit the GPU memory budget. Raising Memory usage in Preferences › Performance raises the budget, up to a quarter of this computer's memory.	Las capas no caben en el presupuesto de memoria de la GPU. Aumentar Uso de memoria en Preferencias › Rendimiento amplía el presupuesto, hasta una cuarta parte de la memoria de este equipo.
@@ -2554,13 +2611,6 @@ fontWeight	Italic	Cursiva
 	XOR	XOR
 	Color Burn (Paint.NET)	Subexposición de color (Paint.NET)
 	Color Dodge (Paint.NET)	Sobreexposición de color (Paint.NET)
-	Double-tap pen body	Doble toque en el cuerpo del lápiz
-	Current tool and Eraser	Herramienta actual y borrador
-	Previous tool	Herramienta anterior
-	Long-press pen body	Mantener pulsado el cuerpo del lápiz
-	Show or hide context menu	Mostrar u ocultar el menú contextual
-	Choose printer, copies and duplex in the system print dialog.	Elija impresora, copias y dúplex en el diálogo de impresión del sistema.
-	System print preview opened	Vista previa de impresión del sistema abierta
 	Stroke Options	Opciones de trazo
 	Solid	Continuo
 	Dashed	Discontinuo
@@ -2701,6 +2751,7 @@ curves	Smooth	Suavizar
 	Paint over hair or fur on the image; Alt paints the other mode	Pinte sobre el pelo o el pelaje de la imagen; Alt pinta en el otro modo
 	Clear Brush Strokes	Borrar trazos de pincel
 	Show rulers	Mostrar reglas
+	Presentation	Presentación
 
 # Color Sampler (added with the i18n coverage repair)
 	Click to place · Alt-click or drag off-canvas to remove	Clic para colocar · Alt-clic o arrastrar fuera del lienzo para quitar
@@ -2738,12 +2789,57 @@ curves	Smooth	Suavizar
 	Light Red	Rojo claro
 	Medium Blue	Azul medio
 	Light Gray	Gris claro
+	Object Finder	Buscador de objetos
+	No object found there — drag a rectangle around it	No se encontró ningún objeto ahí; arrastra un rectángulo a su alrededor
 	Remove after each stroke	Eliminar después de cada trazo
 	Apply the removal ({key})	Aplicar la eliminación ({key})
 	Strokes to remove: {n} (Enter applies, Esc cancels)	Trazos por eliminar: {n} (Intro aplica, Esc cancela)
+	Clear Brush Controls	Borrar controles de pincel
+	Reset All Locked Settings	Restaurar todos los ajustes bloqueados
+	Copy Texture to Other Tools	Copiar textura en otras herramientas
 
+# Actions panel: Load/Save Actions (.atn) and kept Photoshop steps
+	Load Actions…	Cargar acciones…
+	Save Actions…	Guardar acciones…
+	{name} (Photoshop)	{name} (Photoshop)
+	{message} ({note})	{message} ({note})
+@plural	Loaded {n} action from {file}|Loaded {n} actions from {file}	Se cargó {n} acción de {file}|Se cargaron {n} acciones de {file}
+@plural	{n} step has no PhotoCraft equivalent yet|{n} steps have no PhotoCraft equivalent yet	{n} paso aún no tiene equivalente en PhotoCraft|{n} pasos aún no tienen equivalente en PhotoCraft
+@plural	Saved {n} action to {file}|Saved {n} actions to {file}	Se guardó {n} acción en {file}|Se guardaron {n} acciones en {file}
+@plural	{n} step with no Photoshop equivalent left out|{n} steps with no Photoshop equivalent left out	{n} paso sin equivalente en Photoshop omitido|{n} pasos sin equivalente en Photoshop omitidos
 
-# Status bar panel controls
+	File Naming	Nombres de archivo
+	Starting serial	Número de serie inicial
+# Actions panel: set folders, dialog toggle, Insert Stop
+	Insert Stop…	Insertar detención…
+	Save Set…	Guardar conjunto…
+	Message:	Mensaje:
+	Allow Continue	Permitir continuar
+	Show dialog during playback	Mostrar el cuadro de diálogo durante la reproducción
+	Select an action first	Seleccione primero una acción
+	Action playback stopped	Reproducción de la acción detenida
+	Step {step} is waiting for its dialog	El paso {step} está esperando su cuadro de diálogo
+@plural	{n} action|{n} actions	{n} acción|{n} acciones
+	Auto Add/Delete	Añadir/eliminar automáticamente
+
+# Native Windows printing qualification
+	Don't also tick Mirror Image in Print Settings…: the two flips cancel out.	No actives también Imagen especular en Ajustes de impresión: las dos inversiones se anulan.
+	Print Settings…	Ajustes de impresión…
+	Remember to turn off the printer's own colour management in Print Settings…	Recuerda desactivar la gestión de color de la impresora en Ajustes de impresión…
+	Sent to {printer}	Enviado a {printer}
+	set in Print Settings…	se establece en Ajustes de impresión…
+	ICO is limited to 256 × 256 pixels	ICO está limitado a 256 × 256 píxeles
+
+# HarmonyOS host additions retained during upstream sync
+	Stylus	Lápiz
+	Block finger input	Bloquear entrada táctil
+	Double-tap pen body	Doble toque en el cuerpo del lápiz
+	Current tool and Eraser	Herramienta actual y borrador
+	Previous tool	Herramienta anterior
+	Long-press pen body	Mantener pulsado el cuerpo del lápiz
+	Show or hide context menu	Mostrar u ocultar el menú contextual
+	Choose printer, copies and duplex in the system print dialog.	Elija impresora, copias y dúplex en el diálogo de impresión del sistema.
+	System print preview opened	Vista previa de impresión del sistema abierta
 	Only show canvas	Mostrar solo el lienzo
 	Right sidebar	Barra lateral derecha
 	Connected pen	Lápiz conectado

@@ -441,6 +441,8 @@ impl Default for Pose {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Smoothing {
+    /// Switch smoothing off without discarding its amount or mode. Old presets remain enabled.
+    pub enabled: bool,
     /// 0..1.
     pub amount: f32,
     /// Lazy-mouse: paint only when the pointer pulls a string of `amount × 100 px` taut.
@@ -455,7 +457,7 @@ pub struct Smoothing {
 
 impl Default for Smoothing {
     fn default() -> Self {
-        Self { amount: 0.0, pulled_string: false, catch_up: true, catch_up_on_end: true, adjust_for_zoom: true }
+        Self { enabled: true, amount: 0.0, pulled_string: false, catch_up: true, catch_up_on_end: true, adjust_for_zoom: true }
     }
 }
 
@@ -484,6 +486,11 @@ pub struct BrushSettings {
     pub pressure_opacity: bool,
     /// Straight RGBA colour (display RGB). Commands fill it from the foreground colour.
     pub color: [f32; 4],
+    /// The inks `color` was picked as (its sRGB colour, the CMYK values), for a CMYK target: the
+    /// stroke paints exactly these, since an sRGB round trip does not give them back (#4344).
+    /// Only valid while `color` is that sRGB colour; ignored with Color Dynamics.
+    #[serde(skip)]
+    pub color_cmyk: Option<([f32; 3], [f32; 4])>,
     /// Background colour for Color Dynamics' foreground/background jitter.
     pub background: [f32; 4],
     /// Erase instead of paint.
@@ -543,6 +550,7 @@ impl Default for BrushSettings {
             pressure_size: true,
             pressure_opacity: false,
             color: [0.0, 0.0, 0.0, 1.0],
+            color_cmyk: None,
             background: [1.0, 1.0, 1.0, 1.0],
             erase: false,
             mode: BlendMode::Normal,
@@ -666,4 +674,55 @@ pub struct BrushPreset {
     /// folders of Photoshop's Brushes panel; e.g. an imported `.abr` file's own folders.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub folder: Vec<String>,
+    /// What picking the preset brings besides the tip and its sections: the New Brush Preset
+    /// dialog's boxes.
+    #[serde(default, skip_serializing_if = "PresetCaptures::is_default")]
+    pub captures: PresetCaptures,
+}
+
+/// The New Brush Preset dialog's boxes, kept with the preset. The default is a preset made
+/// without the dialog (a built-in, an import, an older save): picking it brings its size and tool
+/// settings, as it always did, and leaves the foreground colour alone.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct PresetCaptures {
+    /// Capture Brush Size in Preset. Off: picking the preset keeps the tool's size.
+    pub size: bool,
+    /// Include Tool Settings: the options bar's mode, opacity, flow and pressure buttons. Off:
+    /// picking the preset keeps the tool's.
+    pub tool_settings: bool,
+    /// Include Color: picking the preset sets the foreground colour to the brush's `color`.
+    pub color: bool,
+}
+
+impl Default for PresetCaptures {
+    fn default() -> Self {
+        Self { size: true, tool_settings: true, color: false }
+    }
+}
+
+impl PresetCaptures {
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
+impl BrushPreset {
+    /// The tool's brush once this preset is picked while `current` is the tool's brush: the
+    /// preset's brush ([`BrushSettings::picked_over`]), with the size and tool settings it didn't
+    /// capture left as they were.
+    pub fn picked_over(&self, current: &BrushSettings) -> BrushSettings {
+        let mut b = self.brush.clone().picked_over(current);
+        if !self.captures.size {
+            b.size = current.size;
+        }
+        if !self.captures.tool_settings {
+            b.mode = current.mode;
+            b.opacity = current.opacity;
+            b.flow = current.flow;
+            b.pressure_size = current.pressure_size;
+            b.pressure_opacity = current.pressure_opacity;
+        }
+        b
+    }
 }

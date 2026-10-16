@@ -17,9 +17,9 @@
 //! caret to the pointer on any press), so Copy and Cut act on it.
 //!
 //! The right-click belongs to the field: the canvas and its tool menus only see pointer presses
-//! on the canvas, which a field drawn above it takes. Spelling suggestions are not in this menu
-//! yet: the spell checker (`edit.checkSpelling`, whose `suggest` action lists them) is not wired
-//! into text fields.
+//! on the canvas, which a field drawn above it takes. Spelling suggestions are not in this menu:
+//! the spell checker (`edit.checkSpelling`) checks type layers, so they head the Type tool's edit
+//! menu instead (`canvas_tool_menu`, over a misspelled word of the text being edited, #4370).
 
 use egui::text::CCursorRange;
 use egui::{Context, Event, Id, Key, Modifiers, PointerButton, Pos2, RawInput, SurrenderFocusOn, Ui};

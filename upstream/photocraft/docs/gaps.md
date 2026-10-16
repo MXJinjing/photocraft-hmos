@@ -1,6 +1,6 @@
 # Where PhotoCraft falls short of Photoshop
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-11 · **Change:** minor (G8: Character panel OpenType buttons landed, TYPE-218-5 stays partial; G8: triple-, quadruple- and five-click type selection landed, TYPE-218-8 done; Czech UI localization evidence added to G13; G14: D5100 crop and Camera Raw tuning validation) · **Target:** Adobe Photoshop 2026
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-13 · **Change:** minor (G7: Field Blur's on-canvas pins, #3373; G4: Hue Jitter amount track, #3825 partial; G4: minimum field interaction, #3825 partial; G1: CMYK Invert, Posterize and Threshold on the inks, 16-bit Lab Invert; Photoshop-oracle floor 145/258; G11: `.atn` import maps 112 events: Select and Mask, Filter Gallery Spatter, Ripple, Crystallize, Pattern Fill layers, mask targeting, Step Backward, nudges in points, Bitmap mode; G5: Free Transform H/V skew fields; G9: toolbar tool shortcut editing; refreshed against main: G2, G5, G7, G9, G10, G13, G14, G17 items that landed; G10: DPX read and write, #1049; G4: checkbox-only Brush Settings rows; G11: Load/Save Actions `.atn` landed, AUTO-219-2 partial; G5: hold-a-key spring-loaded tools landed, #2672; G1: #2465 fixed; stale missing-tool rows corrected: Color Replacement, Red Eye and Add/Delete Anchor Point are live tools, so only Art History Brush is missing; no estimate changed) · **Target:** Adobe Photoshop 2026
 
 Every known shortfall against Photoshop 2026 (27.11.0), one entry each, ranked by user impact
 on the way to beta. This is the work list agents pick from: take the highest-ranked entry that
@@ -43,19 +43,18 @@ what an agent can't finish alone.
 - **Missing:** PSDs we write are not always accepted by Photoshop, and Photoshop-authored files
   don't always render as Photoshop renders them.
 - **Evidence:** corpus floors (`crates/io/tests/corpus.rs`, scorecard): Photoshop-authored
-  oracles 133/256 (52%), io corpus 146/170 (86%), psd-tools 236/309 (76%); round trips ~100%
+  oracles 145/258 (56%; CMYK Invert, Posterize and Threshold on the inks 2026-10-12), io corpus 146/170 (86%), psd-tools 236/309 (76%); round trips ~100%
   within the corpus. Smart-filter re-render matches 5/30. User reports: a PSD with text layers
   re-saved unmodified would not reopen (#2374, closed 2026-10-10), Photoshop 26.6 cannot reopen our files (#1281), "PSD not
-  opening in Photoshop" (#2469), a CS2-era smart object unavailable (#2465), PSB smart object
-  blank (#1764), perspective placed layers flattened (#579), PSB > 4 GB fails on Windows (#375).
+  opening in Photoshop" (#2469), a CS2-era smart object unavailable (#2465, fixed 2026-10-12), PSB smart object
+  blank (#1764), perspective placed layers flattened (#579, fixed by #426), PSB > 4 GB fails on Windows (#375).
   No test opens our exports in a third-party editor (FILE-216-4).
 - **Impact:** PSD is the format professionals exchange. Beta requires it to be reliable.
 - **Estimate:** 150–250 h. **Human:** opening exports in Photoshop on the owner's Mac (or a
   scripted check there) is the only real oracle.
 
 ### G6. Missing tools
-- **Missing (4 of 68):** Color Replacement (engine command exists), Art
-  History Brush, Add Anchor Point, Delete Anchor Point. Convert Point landed (#3204). Freeform
+- **Missing (1 of 68):** Art History Brush. Convert Point landed (#3204). Freeform
   Pen and Curvature Pen landed (#1054); Color Sampler landed (#1046, `view.colorSamplers.*`); Horizontal and Vertical Type Mask landed (#1055,
   `type.createSelection`); Perspective Crop landed (#1043, `image.perspectiveCrop`); Frame landed
   (#2914).
@@ -67,8 +66,11 @@ what an agent can't finish alone.
 ### G7. Workspaces shown as parameter dialogs
 - **Missing:** Select and Mask workspace layout
   (TOOL-214-1, Refine Hair #2671; its view modes preview live since #1754, Refine Edge Brush #2972); Content-Aware Fill workspace with a paintable sampling area
-  (TOOL-214-15); Vanishing Point plane editor (TOOL-214-14); Content-Aware Scale through the
-  transform box (TOOL-214-7); Content-Aware Move's Transform On Drop (TOOL-213-4).
+  (TOOL-214-15); Vanishing Point plane editor (TOOL-214-14); Content-Aware Move's live preview
+  of the result (TOOL-213-4; Transform On Drop and Content-Aware Scale through the transform box,
+  TOOL-214-7, are done).
+  Blur Gallery: Field Blur has its on-canvas pins (2026-10-11, #3373); Iris, Tilt-Shift, Spin and
+  Path Blur still edit their pins as parameter dialogs.
 - **Evidence:** scorecard rows above, all partial or missing.
 - **Impact:** these are the tools retouchers and compositors use daily; a slider dialog is not a
   substitute.
@@ -87,9 +89,32 @@ what an agent can't finish alone.
 - **Estimate:** 120–200 h.
 
 ### G11. Actions and scripting
-- **Missing:** document-independent action recording (AUTO-219-1), a full Actions panel with
-  step toggles and .atn import (AUTO-219-2), replay tests (AUTO-219-4), Batch recursion and
-  naming (AUTO-219-5), ExtendScript/UXP compatibility.
+- **2026-10-13 evidence:** Batch supports [output naming templates](batch-naming.md) using
+  `{name}`, `{serial}` and a captured UTC `{date}`, with a starting serial number. Colliding
+  names remain errors; custom output names cannot replace inputs. AUTO-219-5 stays partial.
+- **Missing:** document-independent action recording (AUTO-219-1), Batch recursion, open-document inputs, progress/cancel and an error-log file
+  (AUTO-219-5), ExtendScript/UXP compatibility. `.atn` steps outside the
+  mapped events (paths, scripts, Generative Fill, Filter Gallery effects other than Spatter,
+  Duplicate Layers into a new document, Bitmap halftone screens…) load as kept Photoshop steps
+  that fail at playback by name.
+- **Done 2026-10-12:** Load/Save Actions `.atn` in the panel menu, `batch --actions set.atn`
+  and `actions.load`/`actions.save`; 112 Photoshop events map to commands both ways (Transform,
+  Apply Image, Save for Web, smart-object edits, Gradient Map, Quick Mask, polygon selections,
+  Place, Open, Image Size in percent, the Paint Bucket and Insert Conditional since the third
+  and fourth PRs; Select and Mask, Filter Gallery Spatter, Ripple, Crystallize, Pattern Fill
+  layers, targeting the layer mask or composite channel, loading the targeted channel, Step
+  Backward/Forward, removing a layer from the selection, nudges in points, Layer From Background,
+  Grayscale and Bitmap mode objects and Image Size with Resample keeping the print size since the
+  fifth), Play, Stop and conditional steps included; layer steps replay by layer name in any
+  document. Four TrueGrit Texture Supply sets (Debaser, Distress Press, Halftone Zine Machine,
+  Transparency) import with 3 of 533 steps unmapped and play end to end. Filter Gallery Spatter's Smoothness
+  now smooths the spray's displacement, so high values tear an edge without detaching specks, as
+  Photoshop's does (calibrated by eye on the Distress Press guide's screenshots). Crystallize
+  fills each cell with the colour at its point instead of the cell's average, so a black-and-white
+  mask keeps hard edges (not yet checked against a Photoshop render). The panel groups actions
+  in set folders, has the dialog toggle column (playback pauses on the step's dialog and resumes
+  on OK) and Insert Stop…; `actions.insert`, `actions.dialog`, `actions.assignSet` for agents
+  (AUTO-219-2 done).
 - **Ahead of Photoshop:** CLI, MCP and the JSON control channel drive every command.
 - **Estimate:** 120–200 h. **Human:** whether to support a JavaScript scripting dialect at all
   (AGENTS.md forbids JS in the app).
@@ -98,7 +123,7 @@ what an agent can't finish alone.
 - **Missing:** CR3 (detected, unsupported), compressed RAF, lossy DNG (FILE-215-11), .xmp
   sidecars, masking and calibration in the Camera Raw dialog, per-camera colour for non-DNG
   cameras, lens profiles.
-- **Evidence:** `crates/raw/src/lib.rs:219` (CR3), scorecard FILE-215-11/12, #50.
+- **Evidence:** `crates/raw/src/lib.rs:228` (CR3), scorecard FILE-215-11/12, #50.
 - **Progress (2026-10-11):** on the embedded-JPEG rendering work in #2135, Camera Raw
   tuning retains the fitted look and applies user gains afterwards. Three D5100 NEFs
   establish a guarded 4928 × 3264 image area. This is an estimated rendering, not a
@@ -130,6 +155,15 @@ what an agent can't finish alone.
 - **Estimate:** 250–400 h (many overlap with other gaps; count each fix once).
 
 ### G4. Brush feel
+- **Progress (2026-10-13, #3825 partial):** Hue Jitter shows a standard themed
+  percentage-amount track rather than a hue spectrum. Other Brush Settings layout
+  and brush-behaviour gaps remain open.
+- **Progress (2026-10-13, #3825 partial):** Shape Dynamics' Minimum Diameter / Minimum
+  Roundness and Transfer's four Minimum rows disable editing when their Control is Off,
+  retaining the configured values. The other layout and control gaps in #3825 remain open.
+- **Progress (2026-10-12, #4283):** the five checkbox-only Brush Settings rows keep the open
+  controls selected; Smoothing can be disabled without discarding its amount or mode. This
+  closes that panel interaction gap, not the stroke-quality or performance gaps below.
 - **Missing:** lag with big brushes (#2619, #1994) and under the cursor (#2566, #1343); jumpy
   pressure on Windows (#2046) and tap sensitivity (#1933); stair-stepped line weights (#1776),
   interpolation and smoothing problems (#2138), edge falloff (#2149), pixelated cursor vs
@@ -140,23 +174,27 @@ what an agent can't finish alone.
 - **Estimate:** 100–180 h. **Human:** checking feel on real tablets.
 
 ### G5. Transform, handles and modifiers
-- **Missing:** right-click menu during Free Transform (TOOL-214-5); commit/cancel buttons in the
-  options bar (#2442); H/V skew fields and the full interpolation list; transform keeps layer
-  order and blend mode in its preview (#2439); Hand tool interrupting a transform (#2302);
-  blend mode/opacity edits during a transform (#1384); locked layers refused before the drag
-  (#2585); ⌘-drag temporary Move without box or snapping (#2681), Auto-Select box follows the
-  previous layer (#2666); ⌘-arrow layer nudge (#2474); path-point nudge; polygonal lasso Shift
-  angles (#2352); autoscroll at the edge while selecting (#2231); hold-a-key spring-loaded tools
-  (#2672); double-click Zoom tool to 100% (#2508); wheel and pinch behaviour (#2485, #2463,
-  #1989); toolbar press-and-hold flyouts (#2301); tool-key memory in a group (#2608).
+- **Missing:** the full interpolation list; blend mode/opacity edits during
+  a transform (#1384); path-point nudge; autoscroll at the edge while selecting (#2231);
+  wheel and pinch behaviour (#2485, #2463, #1989);
+  toolbar press-and-hold flyouts (#2301).
+- **Done since the re-measure (2026-10-10 to 12):** right-click menu during Free Transform
+  (TOOL-214-5); commit/cancel buttons in the options bar (#2442); transform keeps the layer's
+  place in the stack (#2439, #2480); Hand tool no longer interrupts a transform (#2302, #2327);
+  locked layers refused before the drag (#2585, #2609); ⌘-drag temporary Move with box and
+  snapping (#2681, #2684); Auto-Select box follows the picked layer (#2666, #2675); ⌘-arrow
+  layer nudge (#2474, #2556); polygonal lasso Shift angles (#2352, #2396); double-click Zoom tool
+  to 100% (#2508, #2527); tool-key memory in a group (#2608, #2625); hold-a-key spring-loaded
+  tools (#2672); H/V skew fields in the Free Transform options bar.
 - **Detail:** [`ui-parity.md`](ui-parity.md).
 - **Estimate:** 60–110 h.
 
 ### G9. Panels, preferences and workspace
-- **Missing:** 46 of 149 preferences do nothing (scorecard prefs audit); panel groups can't
+- **Progress (2026-10-12):** toolbar tool shortcuts can be reassigned, removed and reset (#4086),
+  with saved bindings, matching toolbar hints and regression coverage (`ui-egui/src/tool_shortcuts.rs`).
+- **Missing:** 27 of 156 preferences do nothing (scorecard prefs audit); panel groups can't
   float or tear off into OS windows (UI-217-5, #1828, #1213, #2305); Color panel lacks wheel and
-  slider modes (UI-217-17, #2569); UI scale presets (UI-217-9, #2492); more themes (UI-217-11,
-  #2661); Stamp Visible (UI-217-22); layer clipboard
+  slider modes (UI-217-17, #2569); more themes (UI-217-11, #2661); layer clipboard
   (UI-217-23, #2670); tool-specific context menus beyond brushes, selections and Pen
   ([context-menu-parity.md](context-menu-parity.md)); Libraries, Comments, Contextual Task Bar
   panels.
@@ -173,8 +211,7 @@ what an agent can't finish alone.
   loaded machine): layer move with styles 321 ms p50 against 25 ms, opacity change 276 ms
   against 20 ms, paste 12 MP 1.2 s against 100 ms, layer move on 15000×10000 16-bit 2.7 s,
   Content-Aware Scale 24 MP 954 s against 3 s, Select Subject 559 ms against 100 ms; the
-  150-layer nudge crashes the GPU compositor (P12); a 50 MP PSB with feathered masks redraws in
-  ~10 s (#2377); menus slow with thousands of layers (#2460); old machines lag (#2687).
+  150-layer nudge crashes the GPU compositor (P12); menus slow with thousands of layers (#2460); old machines lag (#2687).
 - **Estimate:** 200–350 h. Serial in places (compositor architecture).
 
 ## File-format gaps
@@ -182,9 +219,9 @@ what an agent can't finish alone.
 ### G10. Missing and partial file formats
 - **Missing:** JPEG Options dialog (FILE-215-19), Photoshop PDF read and write and multi-page PDF
   (FILE-215-10, #2541), AVIF read (#463) and default-build AVIF write, JPEG XL, JPEG 2000 (#1047),
-  DPX/Cineon (#1049), DICOM, EPS/DCS, PCX, Pixar, IFF, WBMP, MPO/JPS, PICT, Scitex CT, Photoshop
+  Cineon (DPX landed, #1049), DICOM, EPS/DCS, PCX, Pixar, IFF, WBMP, MPO/JPS, PICT, Scitex CT, Photoshop
   Raw; layered TIFF extra alpha channels (FILE-215-7); spot plates (FILE-215-17); .atn, .asl,
-  .shc, .csh presets (FILE-215-15); TGA/PNG alpha channels on open (#2225); C2PA (#1050).
+  .shc, .csh presets (FILE-215-15); C2PA (#1050).
 - **Detail:** [`file-format-parity.md`](file-format-parity.md).
 - **Estimate:** 120–220 h.
 
@@ -203,7 +240,7 @@ what an agent can't finish alone.
 
 ### G13. Hindi, Arabic, Vietnamese, RTL and engine messages
 - **Missing:** catalogs for Hindi, Arabic and Vietnamese (3 of the 12 key languages); right-to-
-  left UI layout; Devanagari/Thai/Khmer fallback fonts; engine error and status messages in
+  left UI layout; Devanagari fallback fonts (Thai #1909 and Khmer, Lao and Myanmar #3259 landed); engine error and status messages in
   English in every language; browser-locale detection and CJK fonts on the web; Japanese IME on
   Windows (#590); installed Japanese fonts missing from the font list (#2330); Arabic layer names
   as tofu (#1408, #1693).
@@ -215,8 +252,8 @@ what an agent can't finish alone.
 ## Platform gaps
 
 ### G17. Platforms and distribution
-- **Missing:** Windows code signing (material not obtained), Windows ARM64 (DIST-220-2), in-app
-  update check (DIST-220-1, #2650, #2375), in-app bug report (DIST-220-3), Flathub (#173),
+- **Missing:** Windows code signing (material not obtained), in-app update check (DIST-220-1,
+  #2650, #2375), in-app bug report (DIST-220-3), Flathub (#173),
   starting without a GPU adapter (#2519, #2412), Windows 7 (#2310, out of scope), Intel Macs with
   OpenCore (#1859).
 - **Estimate:** 30–60 h. **Human:** signing certificates.
@@ -225,6 +262,20 @@ what an agent can't finish alone.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-13 | minor | G6: stale "missing tool" list corrected against `main` — Color Replacement (`paint.colorReplacement`), Red Eye (`paint.redEye`) and Add/Delete Anchor Point (P flyout, #4144) are live tools, so the toolbox is 67 of 68 and Art History Brush is the only one missing; no percentage or estimate changed |
+| 2026-10-13 | minor | G4: Hue Jitter amount-track appearance (#3825, partial); no readiness percentage or estimate changed |
+| 2026-10-13 | minor | G4: minimum inputs in Shape Dynamics and Transfer follow their Control (#3825, partial); no readiness percentage or estimate changed |
+| 2026-10-12 | minor | G5: Free Transform options bar H/V skew fields done |
+| 2026-10-12 | minor | G11: `.atn` import maps 112 events (Select and Mask, Spatter, Ripple, Crystallize, Pattern Fill, mask targeting, Step Backward, points, Bitmap) |
+| 2026-10-12 | minor | G9: toolbar tool shortcut editing (#4086); the remaining workspace gaps stay open |
+| 2026-10-12 | minor | G1: #2465 (CS2 `PlLd`-only smart objects) marked fixed |
+| 2026-10-12 | minor | G1: CMYK Invert, Posterize and Threshold work on the inks, 16-bit Lab Invert keeps greys neutral; Photoshop-oracle floor 133 → 145 of 258 (145 already passed on main) |
+| 2026-10-12 | minor | G5: spring-loaded tool letters done (#2672) |
+| 2026-10-12 | minor | G10: DPX read and write (#1049); Cineon remains open |
+| 2026-10-12 | minor | G4: checkbox-only Brush Settings rows preserve the open controls and Smoothing settings (#4283); no readiness percentage or estimate changed |
+| 2026-10-12 | minor | G11: Load/Save Actions `.atn` landed (AUTO-219-2 partial); remaining panel work listed |
+| 2026-10-12 | minor | Refreshed against main: G5 items fixed by #2480, #2327, #2609, #2684, #2675, #2556, #2396, #2527, #2625 and TOOL-214-5/#2442; G7 TOOL-214-7 and Transform On Drop done; G2 #2377 fixed (#2417); G9 UI scale (UI-217-9) and Stamp Visible (UI-217-22) done, prefs 27 of 156; G10 #2225 done (#2482); G13 Khmer, Lao, Myanmar fallback (#3259); G14 CR3 line; G17 Windows ARM64 done (DIST-220-2) |
+| 2026-10-11 | minor | G7: Field Blur pins are placed, dragged and tuned on the image (#3373); the other Blur Gallery filters remain dialogs |
 | 2026-10-11 | minor | D5100 image area and Camera Raw tuning validation; G14 remains open |
 | 2026-10-11 | minor | G13: Czech dynamic UI text localized; engine messages and native review remain open |
 | 2026-10-11 | minor | G8: triple/quadruple/five-click type selection done (TYPE-218-8, #3493); Type evidence recounted |

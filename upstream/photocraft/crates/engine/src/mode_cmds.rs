@@ -27,6 +27,14 @@ fn num(p: &Value, key: &str, default: f32) -> f32 {
     p.get(key).and_then(Value::as_f64).map_or(default, |v| v as f32)
 }
 
+/// A finite number param, `default` when absent or null; anything else is a bad-params error.
+fn finite_num(p: &Value, cmd: &str, key: &str, default: f64) -> Result<f64> {
+    match p.get(key) {
+        None | Some(Value::Null) => Ok(default),
+        Some(v) => v.as_f64().filter(|f| f.is_finite()).ok_or_else(|| bad(cmd, format!("`{key}` must be a number"))),
+    }
+}
+
 fn str_or<'a>(p: &'a Value, key: &str, default: &'a str) -> &'a str {
     p.get(key).and_then(Value::as_str).unwrap_or(default)
 }
@@ -321,8 +329,14 @@ fn color_table(s: &mut Session, p: &Value) -> Result<Value> {
     }
     match p.get("transparent") {
         Some(Value::Null) => table.transparent = None,
-        Some(v) => table.transparent = v.as_u64().filter(|&i| (i as usize) < table.colors.len()).map(|i| i as u8).or(table.transparent),
-        None => {}
+        Some(v) => {
+            let len = table.colors.len();
+            let i =
+                v.as_u64().filter(|&i| i < len as u64).ok_or_else(|| bad(CMD, format!("transparent: an index from 0 to {} or null", len.saturating_sub(1))))?;
+            table.transparent = u8::try_from(i).ok();
+        }
+        // A shrunk table can't keep a transparent entry past its end (#4186).
+        None => table.transparent = table.transparent.filter(|&i| usize::from(i) < table.colors.len()),
     }
     let report = |t: &ColorTable| json!({"colors": t.colors.iter().map(|c| hex(*c)).collect::<Vec<_>>(), "transparent": t.transparent});
     if table == cur {
@@ -382,9 +396,14 @@ fn bitmap(s: &mut Session, p: &Value) -> Result<Value> {
         "pattern" => BitmapMethod::Pattern,
         "diffusion" => BitmapMethod::Diffusion,
         "halftone" => {
-            let freq = num(p, "frequency", 53.0).clamp(1.0, 999.0);
+            // Photoshop's Halftone Screen: frequency 1..999 lines/inch, angle -180..180 degrees.
+            let freq = finite_num(p, CMD, "frequency", 53.0)?.clamp(1.0, 999.0) as f32;
+            let angle = finite_num(p, CMD, "angle", 45.0)?;
+            if !(-180.0..=180.0).contains(&angle) {
+                return Err(bad(CMD, format!("angle {angle} is outside -180..180")));
+            }
             let shape = HalftoneShape::from_id(str_or(p, "shape", "round")).ok_or_else(|| bad(CMD, "shape: round|ellipse|line|square|diamond|cross"))?;
-            BitmapMethod::Halftone { cell: (dpi / freq).max(2.0), angle: num(p, "angle", 45.0), shape }
+            BitmapMethod::Halftone { cell: (dpi / freq).max(2.0), angle: angle as f32, shape }
         }
         m => {
             return Err(bad(CMD, format!("method `{m}` (threshold|pattern|diffusion|halftone)")));

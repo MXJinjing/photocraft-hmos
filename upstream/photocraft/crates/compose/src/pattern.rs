@@ -159,7 +159,7 @@ impl Tile {
                 if wx == 0.0 {
                     continue;
                 }
-                let p = self.at(x0 + dx, y0 + dy);
+                let p = self.at(x0.saturating_add(dx), y0.saturating_add(dy));
                 let k = wx * wy;
                 for c in 0..4 {
                     acc[c] += p[c] * k;
@@ -286,5 +286,15 @@ mod tests {
         let rot = Placement::new(Rect::EMPTY, false, (0.0, 0.0), 1.0, 90.0);
         let (u, v) = rot.map(1.0, 3.0);
         assert!((u - -3.0).abs() < 1e-9 && (v - 1.0).abs() < 1e-9, "{u},{v}");
+    }
+
+    #[test]
+    fn sampling_at_hostile_phases_does_not_overflow() {
+        let patterns = [checker()];
+        let prepared = PreparedPatterns::new(&patterns, PREPARED_PATTERN_BYTES);
+        let t = prepared.get(&patterns[0].id, "").unwrap();
+        for u in [1.0e30, -1.0e30, f64::INFINITY, f64::NAN] {
+            let _ = t.sample(u, u);
+        }
     }
 }

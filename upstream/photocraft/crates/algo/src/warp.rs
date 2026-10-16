@@ -4,7 +4,7 @@
 //! The source rectangle is subdivided into a fine grid whose vertices are mapped forward; each
 //! cell's two triangles are rasterized in destination space with the source position
 //! interpolated barycentrically, then the source is sampled there (premultiplied, nearest /
-//! bilinear / Catmull-Rom bicubic, like Free Transform). Cells are a few source pixels across, so
+//! bilinear / Photoshop's Keys bicubic, like Free Transform). Cells are a few source pixels across, so
 //! the piecewise-affine inverse is within a small fraction of a pixel of the true one; affine
 //! maps (the identity included) are reproduced exactly. Where the warp shrinks the source, each
 //! pixel instead averages a grid of bilinear subsamples over its source footprint (about one per
@@ -15,13 +15,7 @@ use photocraft_color::PixelFormat;
 use photocraft_geom::Rect;
 use photocraft_raster::Surface;
 
-use crate::transform::Interp;
-
-fn catmull_rom(t: f64) -> [f64; 4] {
-    let t2 = t * t;
-    let t3 = t2 * t;
-    [-0.5 * t3 + t2 - 0.5 * t, 1.5 * t3 - 2.5 * t2 + 1.0, -1.5 * t3 + 2.0 * t2 + 0.5 * t, 0.5 * t3 - 0.5 * t2]
-}
+use crate::transform::{Interp, bicubic};
 
 /// Grid cell size (source px) used to approximate the map.
 const CELL: f64 = 4.0;
@@ -290,7 +284,7 @@ pub fn warp_triangles(src: &Surface, src_rect: Rect, verts: &[([f64; 2], [f64; 2
                     let snap = |t: f64| if (t - t.round()).abs() < 1e-7 { t.round() } else { t };
                     let (u, v) = (snap(u), snap(v));
                     let (ix, iy) = (u.floor() as i32, v.floor() as i32);
-                    let (wx, wy) = (catmull_rom(u - f64::from(ix)), catmull_rom(v - f64::from(iy)));
+                    let (wx, wy) = (bicubic(u - f64::from(ix)), bicubic(v - f64::from(iy)));
                     for (j, wyj) in wy.iter().enumerate() {
                         for (i, wxi) in wx.iter().enumerate() {
                             let k = wxi * wyj;
