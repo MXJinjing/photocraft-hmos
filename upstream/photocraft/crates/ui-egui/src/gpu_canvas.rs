@@ -1002,7 +1002,7 @@ impl GpuInfo {
                 let template = "Image compositor: {processor}";
                 let processor = match self.canvas.as_str() {
                     "gpu" => "GPU",
-                    "pending" => tl!("unknown"),
+                    "pending" => "unknown",
                     _ => "CPU",
                 };
                 crate::i18n::fmt(tl!(template), &[("processor", processor)])
