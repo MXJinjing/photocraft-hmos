@@ -9,6 +9,7 @@ import { i18n } from '@kit.LocalizationKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { KeyboardAvoidMode } from '@kit.ArkUI';
 import { applySystemBars, LOADING_CHROME, normalizeChrome } from '../SystemBars';
+import { NavigationGeometry, NavigationIndicatorInset } from '../NavigationInset';
 import { setOpenListener, takeOpens } from '../openInbox';
 import { allowConfirmedClose, setCloseRequest } from '../closeGuard';
 import { HarmonyStylusAdapter } from '../stylus/HarmonyStylusAdapter';
@@ -67,6 +68,10 @@ struct Index {
   private editorOriginY: number = 0;
   @StorageLink('photocraftTitleRight') @Watch('onTitlebarChanged') private titleRight: number = 0;
   @StorageLink('photocraftTitleHeight') @Watch('onTitlebarChanged') private titleHeight: number = 0;
+  // 内容延伸到底部导航条（小横条）之下；被覆盖的高度以物理像素交给原生编辑器避让。
+  private bottomInset: NavigationIndicatorInset = new NavigationIndicatorInset((geometry: NavigationGeometry): void => {
+    this.sendBottomInset(geometry);
+  });
   private context: common.UIAbilityContext = this.getUIContext().getHostContext() as common.UIAbilityContext;
   private generation: number = 0;
   // 页面离开或重新初始化后，旧的异步结果不能继续操作当前页面。
@@ -134,6 +139,7 @@ struct Index {
         (id: number, message: string, data: ArrayBuffer) => { this.receive(id, message, data); });
       this.initialized = true;
       this.onTitlebarChanged();
+      this.startBottomInset(generation);
       this.failure = '';
       setOpenListener(() => this.drainOpens());
       setCloseRequest((): void => { native.close(); });
@@ -154,6 +160,7 @@ struct Index {
     this.stylus.stop();
     this.ime.stop();
     this.cursor.reset();
+    this.bottomInset.stop();
     setOpenListener(null);
     setCloseRequest(null);
     native.active(false);
@@ -165,6 +172,24 @@ struct Index {
     input.kind = 'titlebar';
     input.dx = this.getUIContext().vp2px(this.titleRight);
     input.dy = this.getUIContext().vp2px(this.titleHeight);
+    native.input(JSON.stringify(input));
+  }
+  private startBottomInset(generation: number): void {
+    window.getLastWindow(this.context).then((win: window.Window) => {
+      if (this.alive && generation === this.generation) { this.bottomInset.start(win); }
+    }).catch((error: BusinessError) => {
+      console.info(`Navigation indicator inset unavailable: ${error.code} ${error.message}`);
+    });
+  }
+  private sendBottomInset(geometry: NavigationGeometry): void {
+    // 协议统一使用物理像素：dy=导航条高度，dx=窗口高度，y=编辑器表面顶边。
+    // 是否真有遮挡由 Rust 用实际表面尺寸判断（悬浮窗、分屏、键盘 RESIZE 时为 0）。
+    if (!this.alive || !this.initialized) { return; }
+    let input = new NativeInput();
+    input.kind = 'bottom_inset';
+    input.dy = geometry.indicator;
+    input.dx = geometry.windowHeight;
+    input.y = geometry.contentTop;
     native.input(JSON.stringify(input));
   }
   onBackPress(): boolean {
@@ -181,7 +206,7 @@ struct Index {
     if (request.kind !== 'ime') { console.info(`PhotoCraft native ${request.kind}: ${request.text}`); }
     if (!this.alive) { if (id > 0) native.reply(id, false, 'cancelled', new ArrayBuffer(0)); return; }
     if (request.kind === 'error') { this.failure = request.text; }
-    else if (request.kind === 'ready') { this.failure = ''; this.onTitlebarChanged(); }
+    else if (request.kind === 'ready') { this.failure = ''; this.onTitlebarChanged(); this.bottomInset.resend(); }
     else if (request.kind === 'window_move' || request.kind === 'window_maximize') {
       window.getLastWindow(this.context).then((win: window.Window) => {
         return request.kind === 'window_move' ? moveWindow(win) : toggleWindowMaximize(win);
@@ -355,10 +380,13 @@ struct Index {
       if (this.initialized) {
       XComponent({ id: 'photocraft-native', type: XComponentType.SURFACE, libraryname: 'photocraft' })
         .width('100%').height('100%')
+        .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
         .onLoad(() => { this.restoreEditorFocus(); })
         .onAreaChange((_oldArea: Area, area: Area): void => {
           this.editorOriginX = Number(area.globalPosition.x);
           this.editorOriginY = Number(area.globalPosition.y);
+          // 顶边不受向下延伸影响；表面底边由 Rust 按真实表面高度计算。
+          this.bottomInset.setContentTop(this.getUIContext().vp2px(this.editorOriginY));
           this.ime.setOrigin(this.getUIContext().vp2px(this.editorOriginX),
             this.getUIContext().vp2px(this.editorOriginY));
         })
@@ -393,5 +421,7 @@ struct Index {
         }.padding(24).backgroundColor('#DD262626').borderRadius(8).width('80%')
       }
     }.width('100%').height('100%').backgroundColor(this.chrome)
+    // 仅向下延伸到导航条（小横条）后面；状态栏仍由系统布局避让，键盘避让（RESIZE）不受影响。
+    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
   }
 }

@@ -72,8 +72,9 @@ export default class EntryAbility extends UIAbility {
         console.error(`PhotoCraft page failed: ${error.code} ${error.message}`);
         return;
       }
-      // The page does not draw into the status-bar and navigation-indicator avoid areas. Colour
-      // those from the window, then let the page replace this with the theme chrome.
+      // The page does not draw into the status-bar avoid area, and extends under the navigation
+      // indicator only through Index's bottom expandSafeArea. Colour both from the window, then
+      // let the page replace this with the theme chrome.
       try {
         let win = windowStage.getMainWindowSync();
         paintWindow(win, AppStorage.get<string>('photocraftChrome') ?? LOADING_CHROME);
