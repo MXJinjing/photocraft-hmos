@@ -9,7 +9,7 @@ OHPM="${PHOTOCRAFT_OHPM:-/Applications/DevEco-Studio.app/Contents/tools/ohpm/bin
 export DEVECO_SDK_HOME="${DEVECO_SDK_HOME:-/Applications/DevEco-Studio.app/Contents/sdk}"
 export JAVA_HOME="${JAVA_HOME:-/Applications/DevEco-Studio.app/Contents/jbr/Contents/Home}"
 export PATH="/Applications/DevEco-Studio.app/Contents/tools/node/bin:$PATH"
-BUNDLE=io.github.storytold.photocraft.hmos
+BUNDLE=io.github.mxjinjing.photocraft
 one_device() {
   local count
   count="$("$HDC" list targets | tr -d '\r' | awk 'NF && $0 != "[Empty]" {n++} END {print n+0}')"
