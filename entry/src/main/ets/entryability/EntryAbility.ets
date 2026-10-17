@@ -8,6 +8,7 @@ import { restorePointerVisibility } from '../input/NativeCursorAdapter';
 import { acceptOpenWant } from '../openInbox';
 import { requestWindowClose, resetCloseGuard } from '../closeGuard';
 import { WindowChrome } from '../WindowChrome';
+import { applyFullscreen, fullscreenToggleAvailable, logFullscreenError } from '../FullscreenToggle';
 
 class SystemThemeInput {
   kind: string = 'system_theme';
@@ -52,6 +53,11 @@ export default class EntryAbility extends UIAbility {
     // 系统窗口在后台可能改变装饰和颜色，恢复前台时重新查询并唤醒渲染 worker。
     this.windowChrome?.refresh();
     applySystemBars(this.context, AppStorage.get<string>('photocraftChrome') ?? LOADING_CHROME);
+    // Re-assert immersive fullscreen after resume; system may restore bars while backgrounded.
+    if (fullscreenToggleAvailable() && AppStorage.get<boolean>('photocraftFullscreen') === true) {
+      window.getLastWindow(this.context).then((win: window.Window) => applyFullscreen(win, true))
+        .catch((error: BusinessError) => { logFullscreenError('resume', error); });
+    }
     // Re-read in case the colour scheme changed while we were backgrounded without a config event.
     this.syncSystemTheme(this.context.config?.colorMode);
     native.active(true);

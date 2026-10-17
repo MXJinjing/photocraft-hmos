@@ -19,6 +19,11 @@ import { IMAGE_DROP_TYPES, NativeDropAdapter } from '../input/NativeDropAdapter'
 import { DropPreview, DropTargetFeedback, localDropPoint } from '../input/DropPreview';
 import { isFiniteHoverPoint, penHoverLeaveMessage, penHoverMoveMessage } from '../input/PenHoverPreview';
 import { moveWindow, toggleWindowMaximize } from '../WindowChrome';
+import {
+  applyFullscreen,
+  fullscreenToggleAvailable,
+  logFullscreenError
+} from '../FullscreenToggle';
 import { window } from '@kit.ArkUI';
 import { configureDisplayColor } from '../DisplayColor';
 import { SYSTEM_THEME_DARK, SYSTEM_THEME_LIGHT } from '../SystemTheme';
@@ -63,6 +68,10 @@ struct Index {
   @State private failure: string = '';
   @State private initialized: boolean = false;
   @State private dropPreview: DropPreview = new DropPreview();
+  // Immersive fullscreen hides system bars; false on 2in1 where WindowChrome owns freeform.
+  @State private fullscreen: boolean = false;
+  @State private fullscreenBusy: boolean = false;
+  private readonly fullscreenButtonVisible: boolean = fullscreenToggleAvailable();
   private editorOriginX: number = 0;
   private editorOriginY: number = 0;
   @StorageLink('photocraftTitleRight') @Watch('onTitlebarChanged') private titleRight: number = 0;
@@ -111,6 +120,7 @@ struct Index {
     this.printing.start();
     this.generation++;
     this.getUIContext().setKeyboardAvoidMode(KeyboardAvoidMode.RESIZE);
+    this.fullscreen = AppStorage.get<boolean>('photocraftFullscreen') === true;
     this.initializeHost(this.generation);
     applySystemBars(this.context, this.chrome);
   }
@@ -350,6 +360,24 @@ struct Index {
     if (isHover || !this.alive || !this.initialized) { return; }
     native.input(penHoverLeaveMessage());
   }
+  private toggleFullscreen(): void {
+    if (!this.fullscreenButtonVisible || this.fullscreenBusy) { return; }
+    this.fullscreenBusy = true;
+    let next: boolean = !this.fullscreen;
+    window.getLastWindow(this.context).then(async (win: window.Window) => {
+      await applyFullscreen(win, next);
+      if (!this.alive) { return; }
+      this.fullscreen = next;
+      AppStorage.setOrCreate('photocraftFullscreen', next);
+      // Leaving immersive must repaint theme chrome on the restored system bars.
+      if (!next) { applySystemBars(this.context, this.chrome); }
+      console.info(`PhotoCraft fullscreen: ${next ? 'on' : 'off'}`);
+    }).catch((error: BusinessError) => {
+      logFullscreenError(next ? 'enter' : 'exit', error);
+    }).then((): void => {
+      this.fullscreenBusy = false;
+    });
+  }
   build() {
     Stack() {
       if (this.initialized) {
@@ -380,6 +408,19 @@ struct Index {
           .position({ x: this.dropPreview.left, y: this.dropPreview.top })
           .backgroundColor('#142D64F5').border({ width: 2, color: '#2D64F5' })
           .hitTestBehavior(HitTestMode.None)
+      }
+      if (this.initialized && this.fullscreenButtonVisible) {
+        // Host-layer control overlaid on the egui status-bar strip; does not modify upstream.
+        Button(this.fullscreen ? '退出全屏' : '全屏')
+          .fontSize(12)
+          .fontColor('#FFFFFFFF')
+          .height(22)
+          .padding({ left: 10, right: 10 })
+          .backgroundColor('#99000000')
+          .borderRadius(4)
+          .enabled(!this.fullscreenBusy)
+          .onClick((): void => { this.toggleFullscreen(); })
+          .position({ right: 12, bottom: 4 })
       }
       if (this.failure.length > 0) {
         Column() {

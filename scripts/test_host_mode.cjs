@@ -28,12 +28,19 @@ function load(name, dependencies) {
       '@kit.AbilityKit': { UIAbility: class {} },
       '@kit.ArkUI': {}, '@kit.BasicServicesKit': {},
       '../SystemBars': { LOADING_CHROME: '#FF262626', paintWindow() {}, applySystemBars() {} },
+      '../SystemTheme': { publishSystemTheme() {}, systemThemeFromColorMode: () => 'dark' },
       '../WindowChrome': { WindowChrome: class { start() {} stop() {} refresh() {} } },
+      '../FullscreenToggle': {
+        fullscreenToggleAvailable: () => false,
+        applyFullscreen: async () => {},
+        logFullscreenError() {}
+      },
       '../input/NativeCursorAdapter': { restorePointerVisibility() {} },
       '../openInbox': { acceptOpenWant: want => calls.push(['open', want.uri]) },
       '../closeGuard': { resetCloseGuard() {}, requestWindowClose() {} },
     });
     const app = new EntryAbility();
+    app.context = { config: { colorMode: 0 } };
     app.onCreate({ parameters: { 'photocraft.dev': request } }, {});
     const pages = [];
     const stage = { on() {}, getMainWindowSync() { return {}; }, loadContent(page, cb) { pages.push(page); cb({ code: 0 }); } };
