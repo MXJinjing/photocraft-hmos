@@ -55,6 +55,7 @@ const { default: EntryAbility } = load('entryability/EntryAbility', {
   '@kit.ArkUI': {}, '@kit.BasicServicesKit': {},
   '../SystemBars': bars,
   '../SystemTheme': systemTheme,
+  '../Immersive': { enableImmersiveLayout: () => Promise.resolve() },
   '../WindowChrome': { WindowChrome: class { start() {} stop() {} refresh() {} } },
       '../input/NativeCursorAdapter': { restorePointerVisibility() {} },
       '../openInbox': { acceptOpenWant() {} }, '../closeGuard': { resetCloseGuard() {}, requestWindowClose() {} }
@@ -65,12 +66,15 @@ async function main() {
   let loaded;
   const stage = { on() {}, getMainWindowSync: () => win, loadContent: (_page, cb) => { loaded = cb; } };
   app.onWindowStageCreate(stage);
+  // Immersive layout resolves first; the page loads right after it.
+  await Promise.resolve();
   assert.equal(storage.get('photocraftChrome'), bars.LOADING_CHROME);
   // The first native theme arrives before loadContent completes: it must not be overwritten.
   storage.set('photocraftChrome', '#FFF6F6F8');
   loaded({ code: 0 });
   assert.equal(painted.at(-1)[1].statusBarColor, '#FFF6F6F8');
   app.onWindowStageCreate(stage);
+  await Promise.resolve();
   assert.equal(storage.get('photocraftChrome'), '#FFF6F6F8', 'stage recreation retains the current theme');
   loaded({ code: 0 });
   app.onForeground();

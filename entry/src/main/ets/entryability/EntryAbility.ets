@@ -8,6 +8,7 @@ import { restorePointerVisibility } from '../input/NativeCursorAdapter';
 import { acceptOpenWant } from '../openInbox';
 import { requestWindowClose, resetCloseGuard } from '../closeGuard';
 import { WindowChrome } from '../WindowChrome';
+import { enableImmersiveLayout } from '../Immersive';
 
 class SystemThemeInput {
   kind: string = 'system_theme';
@@ -67,25 +68,32 @@ export default class EntryAbility extends UIAbility {
     if (AppStorage.get<string>('photocraftSystemTheme') === undefined) {
       this.syncSystemTheme(this.context.config?.colorMode);
     }
-    windowStage.loadContent('pages/Index', (error: BusinessError) => {
-      if (error.code) {
-        console.error(`PhotoCraft page failed: ${error.code} ${error.message}`);
-        return;
-      }
-      // The page does not draw into the status-bar avoid area, and extends under the navigation
-      // indicator through Index's bottom ignoreLayoutSafeArea. Colour both from the window, then
-      // let the page replace this with the theme chrome.
-      try {
-        let win = windowStage.getMainWindowSync();
-        paintWindow(win, AppStorage.get<string>('photocraftChrome') ?? LOADING_CHROME);
-        this.windowChrome?.stop();
-        this.windowChrome = new WindowChrome(win);
-        this.windowChrome.start();
-      } catch (err) {
-        let failure = err as BusinessError;
-        console.error(`System bars failed: ${failure.code} ${failure.message}`);
-      }
-    });
+    // Immersive layout must be in place before the first layout, or the page jumps afterwards.
+    let load = (): void => {
+      windowStage.loadContent('pages/Index', (error: BusinessError) => {
+        if (error.code) {
+          console.error(`PhotoCraft page failed: ${error.code} ${error.message}`);
+          return;
+        }
+        // Colour the system bars from the window, then let the page replace this with the theme
+        // chrome. In immersive layout the page keeps controls out of those bars via native insets.
+        try {
+          let win = windowStage.getMainWindowSync();
+          paintWindow(win, AppStorage.get<string>('photocraftChrome') ?? LOADING_CHROME);
+          this.windowChrome?.stop();
+          this.windowChrome = new WindowChrome(win);
+          this.windowChrome.start();
+        } catch (err) {
+          let failure = err as BusinessError;
+          console.error(`System bars failed: ${failure.code} ${failure.message}`);
+        }
+      });
+    };
+    try {
+      enableImmersiveLayout(windowStage.getMainWindowSync()).then(load);
+    } catch (error) {
+      load();
+    }
   }
 
   onWindowStageDestroy(): void { this.windowChrome?.stop(); this.windowChrome = undefined; }

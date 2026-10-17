@@ -1,35 +1,39 @@
 import { window } from '@kit.ArkUI';
 import { BusinessError } from '@kit.BasicServicesKit';
 
-// Page content extends under the navigation indicator (the small bar at the bottom of the screen)
-// through `ignoreLayoutSafeArea` + `LayoutPolicy.matchParent`. This watches the window and reports
-// the geometry the native editor needs, in physical pixels: the indicator height, the window
-// height, and where the editor surface sits after layout. Rust compares them with the real surface
-// size, so an inset exists only while the surface really reaches under the indicator (not in
-// floating / split windows, not when the keyboard has shrunk the page, and not if the platform
-// declined to extend the component).
+// With the window in immersive layout (Immersive.ets) the page covers the status bar and the
+// navigation-indicator strip. This watches the window and decides, in physical pixels, how much of
+// the top and bottom of the editor surface those system areas really cover:
+//
+//   system area height  = avoid area from getWindowAvoidArea (status bar on top; navigation
+//                         indicator / navigation bar on the bottom, taking the larger of the
+//                         NAVIGATION_INDICATOR and SYSTEM reports)
+//   already avoided     = distance between the surface and the window edge, measured from the
+//                         laid-out XComponent (this is what the on-screen keyboard shrinks under
+//                         KeyboardAvoidMode.RESIZE, and what a non-immersive layout leaves free)
+//   inset               = max(0, system area height - already avoided)
+//
+// The native editor receives only the final insets. Nothing is guessed on the Rust side.
 
-export class NavigationGeometry {
-  // Height of the navigation indicator avoid area; 0 when the window does not touch it.
-  indicator: number = 0;
-  // Window height.
-  windowHeight: number = 0;
-  // Top edge of the editor surface in window coordinates.
-  contentTop: number = 0;
-  // Layout height of the editor surface (includes the bottom extension once ignoreLayoutSafeArea
-  // takes effect). 0 until the first onAreaChange.
-  contentHeight: number = 0;
-  constructor(indicator: number, windowHeight: number, contentTop: number, contentHeight: number = 0) {
-    this.indicator = indicator;
-    this.windowHeight = windowHeight;
-    this.contentTop = contentTop;
-    this.contentHeight = contentHeight;
+export class SafeInsets {
+  top: number = 0;
+  bottom: number = 0;
+  constructor(top: number, bottom: number) { this.top = top; this.bottom = bottom; }
+  equals(other: SafeInsets | undefined): boolean {
+    return other !== undefined && other.top === this.top && other.bottom === this.bottom;
   }
-  equals(other: NavigationGeometry | undefined): boolean {
-    return other !== undefined && other.indicator === this.indicator &&
-      other.windowHeight === this.windowHeight && other.contentTop === this.contentTop &&
-      other.contentHeight === this.contentHeight;
+}
+
+export function insetsFor(systemTop: number, systemBottom: number, windowHeight: number,
+  contentTop: number, contentHeight: number): SafeInsets {
+  let top: number = systemTop > 0 ? Math.max(0, systemTop - Math.max(0, contentTop)) : 0;
+  let bottom: number = 0;
+  if (systemBottom > 0) {
+    // Unknown window height: the surface cannot be compared, so assume it reaches the edge.
+    let gap: number = windowHeight > 0 ? Math.max(0, windowHeight - (contentTop + contentHeight)) : 0;
+    bottom = Math.max(0, systemBottom - gap);
   }
+  return new SafeInsets(Math.round(top), Math.round(bottom));
 }
 
 // Avoid area, window size and component layout reach the app in separate transactions;
@@ -42,17 +46,22 @@ function finiteOrZero(value: number): number {
 
 export class NavigationIndicatorInset {
   private win: window.Window | undefined = undefined;
+  private immersive: boolean = false;
   private contentTop: number = 0;
   private contentHeight: number = 0;
-  private sent: NavigationGeometry | undefined = undefined;
+  private laidOut: boolean = false;
+  private sent: SafeInsets | undefined = undefined;
   private settle: number = -1;
-  private publish: (geometry: NavigationGeometry) => void;
-  private avoidChanged = (data: window.AvoidAreaOptions): void => {
-    if (data.type === window.AvoidAreaType.TYPE_NAVIGATION_INDICATOR) { this.refresh(); }
-  };
+  private publish: (insets: SafeInsets) => void;
+  private report: (text: string) => void;
+  private avoidChanged = (_data: window.AvoidAreaOptions): void => { this.refresh(); };
   private sizeChanged = (_size: window.Size): void => { this.refresh(); };
 
-  constructor(publish: (geometry: NavigationGeometry) => void) { this.publish = publish; }
+  // `report` receives one diagnostic line per change (hilog and the optional on-screen overlay).
+  constructor(publish: (insets: SafeInsets) => void, report: (text: string) => void) {
+    this.publish = publish;
+    this.report = report;
+  }
 
   start(win: window.Window): void {
     this.stop();
@@ -67,10 +76,18 @@ export class NavigationIndicatorInset {
     this.update();
   }
 
+  // Whether the window runs in immersive layout; without it the page is already inside the safe
+  // area and no inset exists.
+  setImmersive(on: boolean): void {
+    this.immersive = on;
+    this.update();
+  }
+
   // Top edge and layout height of the editor surface, physical pixels in window coordinates.
   setContentBounds(topPx: number, heightPx: number): void {
     this.contentTop = finiteOrZero(topPx);
     this.contentHeight = finiteOrZero(heightPx);
+    this.laidOut = true;
     this.update();
   }
 
@@ -85,6 +102,7 @@ export class NavigationIndicatorInset {
     let win = this.win;
     this.win = undefined;
     this.sent = undefined;
+    this.laidOut = false;
     if (win === undefined) { return; }
     try {
       win.off('avoidAreaChange', this.avoidChanged);
@@ -100,15 +118,25 @@ export class NavigationIndicatorInset {
     this.settle = setTimeout((): void => { this.settle = -1; this.update(); }, SETTLE_MS);
   }
 
-  private read(win: window.Window): NavigationGeometry | undefined {
+  private read(win: window.Window): SafeInsets | undefined {
+    if (!this.immersive) {
+      this.report(`immersive=false insets=0/0`);
+      return new SafeInsets(0, 0);
+    }
+    if (!this.laidOut) { return undefined; }
     try {
-      let indicator: number = finiteOrZero(
-        win.getWindowAvoidArea(window.AvoidAreaType.TYPE_NAVIGATION_INDICATOR).bottomRect.height);
-      if (indicator === 0) {
-        return new NavigationGeometry(0, 0, 0, 0);
-      }
-      let height: number = finiteOrZero(win.getWindowProperties().windowRect.height);
-      return new NavigationGeometry(indicator, height, this.contentTop, this.contentHeight);
+      let system = win.getWindowAvoidArea(window.AvoidAreaType.TYPE_SYSTEM);
+      let nav = win.getWindowAvoidArea(window.AvoidAreaType.TYPE_NAVIGATION_INDICATOR);
+      let systemTop: number = finiteOrZero(system.topRect.height);
+      let systemBottom: number = Math.max(finiteOrZero(nav.bottomRect.height), finiteOrZero(system.bottomRect.height));
+      let windowHeight: number = 0;
+      try { windowHeight = finiteOrZero(win.getWindowProperties().windowRect.height); }
+      catch (error) { console.info('Window height unavailable'); }
+      let insets = insetsFor(systemTop, systemBottom, windowHeight, this.contentTop, this.contentHeight);
+      this.report(`immersive=true avoid(sysTop=${systemTop} sysBottom=${finiteOrZero(system.bottomRect.height)} ` +
+        `navBottom=${finiteOrZero(nav.bottomRect.height)}) window=${windowHeight} ` +
+        `content(top=${this.contentTop} h=${this.contentHeight}) insets=${insets.top}/${insets.bottom}`);
+      return insets;
     } catch (error) {
       // A transient failure must neither invent nor erase an inset: keep what native already has.
       return undefined;
@@ -118,9 +146,9 @@ export class NavigationIndicatorInset {
   private update(): void {
     let win = this.win;
     if (win === undefined) { return; }
-    let geometry = this.read(win);
-    if (geometry === undefined || geometry.equals(this.sent)) { return; }
-    this.sent = geometry;
-    this.publish(geometry);
+    let insets = this.read(win);
+    if (insets === undefined || insets.equals(this.sent)) { return; }
+    this.sent = insets;
+    this.publish(insets);
   }
 }

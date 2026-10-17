@@ -502,8 +502,8 @@ fn worker(config: Config, rx: mpsc::Receiver<Message>) {
     let mut close = false;
     let mut chrome = chrome::ChromeSync::default();
     let mut titlebar_pixels = egui::Vec2::ZERO;
-    // Navigation-indicator geometry from ArkTS; the surface overlap becomes the egui inset.
-    let mut indicator = safe_inset::Indicator::default();
+    // Status-bar and navigation-indicator heights from ArkTS (physical pixels).
+    let mut safe_pixels = safe_inset::Pixels::default();
     // 输入、窗口生命周期和帧消息共用一个队列，编辑器状态仅在 worker 上修改。
     let mut cursor = cursor::CursorSync::default();
     loop {
@@ -627,16 +627,14 @@ fn worker(config: Config, rx: mpsc::Receiver<Message>) {
                             deadline = Some(Instant::now());
                             return Ok(());
                         }
-                        if value.kind == "bottom_inset" {
+                        if value.kind == "safe_inset" {
                             // Not a pointer or key event: never forward it to the input queue.
-                            let next = safe_inset::Indicator {
-                                height: value.dy,
-                                window_height: value.dx,
-                                surface_top: value.y,
-                                layout_height: value.x,
+                            let next = safe_inset::Pixels {
+                                top: value.dx,
+                                bottom: value.dy,
                             };
-                            if next != indicator {
-                                indicator = next;
+                            if next != safe_pixels {
+                                safe_pixels = next;
                                 deadline = Some(Instant::now());
                             }
                             return Ok(());
@@ -714,11 +712,18 @@ fn worker(config: Config, rx: mpsc::Receiver<Message>) {
                             events: std::mem::take(&mut events),
                             system_theme: appearance.current(),
                             // Always `Some`: `None` would keep the previous frame's inset.
-                            safe_area_insets: Some(safe_inset::insets(safe_inset::bottom_points(
-                                indicator.overlap(render.height as f32),
-                                config.scale * ctx.zoom_factor(),
-                                size.y,
-                            ))),
+                            safe_area_insets: Some(safe_inset::insets(
+                                safe_inset::to_points(
+                                    safe_pixels.top,
+                                    config.scale * ctx.zoom_factor(),
+                                    size.y,
+                                ),
+                                safe_inset::to_points(
+                                    safe_pixels.bottom,
+                                    config.scale * ctx.zoom_factor(),
+                                    size.y,
+                                ),
+                            )),
                             ..Default::default()
                         };
                         let viewport = raw.viewports.entry(egui::ViewportId::ROOT).or_default();

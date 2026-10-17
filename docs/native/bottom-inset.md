@@ -1,80 +1,79 @@
-# Bottom navigation indicator (小横条) inset
+# Status bar and bottom navigation indicator (小横条) insets
 
 Status: experimental, needs on-device acceptance (branch `feat/hmos-bottom-inset`).
 
-## Behaviour
+## Goal
 
-On tablets the system reserves a strip at the bottom of the screen for the navigation indicator.
-Before this change the page laid out above it, so the strip stayed an empty system-coloured band.
-Now the editor surface extends underneath the indicator and the editor keeps its own controls
-above it:
+On tablets the system reserves a strip at the bottom of the screen for the navigation indicator
+(and one at the top for the status bar). The editor should paint to the screen edges while its
+controls (toolbar, panels, canvas, dialogs) stay inside the strips.
 
-- The status bar is unchanged: the page still avoids it (only the **bottom** edge is extended).
-- Toolbars, panels, dialogs, windows and the canvas (including its scrollbars and click targets)
-  lay out inside `egui::Context::content_rect()`, i.e. above the indicator.
-- The strip under the indicator is painted by the host: the status-bar colour while the status bar
-  is shown, the canvas backdrop otherwise, black in full-screen mode.
+## History: what did not work on device
 
-## Why `expandSafeArea` was not enough
+1. `expandSafeArea([SYSTEM], [BOTTOM])` (commit `818d5de2`): drawing-only, does not change layout
+   size. The white strip stayed and no inset was reported.
+2. `ignoreLayoutSafeArea` + `LayoutPolicy.matchParent` (commit `02b5dc65`, API 20): still no
+   avoidance, and the theme fill disappeared. Root cause not proven (no hilog). Suspects: the
+   matchParent root/Stack sizing, and Rust's guessed "overlap" staying 0. Either way the design
+   depended on ArkUI layout semantics and on Rust inferring geometry, which cannot be checked
+   without a device. It was dropped.
 
-The first trial used `expandSafeArea([SYSTEM], [BOTTOM])` on the root `Stack` and the `XComponent`.
-Official docs describe that API as **drawing-only**: it does not change layout size, and with a
-fixed/`'100%'` height the downward extension is especially unreliable. On device the white strip
-stayed and Rust's overlap stayed 0 because the NativeWindow surface never grew under the
-indicator. `setWindowLayoutFullScreen(true)` was not used either: it is app-wide, interacts with
-the status bar and freeform title bar, and can cause window jumps.
+## Current design (deterministic, documented API route)
 
-## How it works now
+`setWindowLayoutFullScreen(true)` + `getWindowAvoidArea` + `avoidAreaChange` is the route the
+official immersive-window guide describes. It is applied only where it is safe:
 
-ArkTS (`entry/src/main/ets`)
+- `Immersive.ets` / `EntryAbility.ets`: before `loadContent`, the main window is put in immersive
+  layout (the page covers the whole window). Skipped on `2in1` (freeform windows and the integrated
+  title bar are handled by `WindowChrome`); if the call fails, the flag `photocraftImmersive`
+  stays false and the old avoided layout (no insets) remains.
+- `NavigationInset.ets`: measures, in physical pixels,
+  - system area heights: top = `TYPE_SYSTEM.topRect` (status bar); bottom = the larger of
+    `TYPE_NAVIGATION_INDICATOR.bottomRect` and `TYPE_SYSTEM.bottomRect` (some devices report a
+    navigation bar under SYSTEM);
+  - what the layout already avoids: the editor surface's laid-out box from `onAreaChange`
+    against the window height. The keyboard (`KeyboardAvoidMode.RESIZE`) shrinks that box, so the
+    bottom inset becomes 0 while the keyboard is up; a non-immersive layout yields 0 as well;
+  - `inset = max(0, system area - already avoided)`, for top and bottom.
+  It listens to `avoidAreaChange` and `windowSizeChange`, re-reads 250 ms later, publishes only
+  changes, and keeps the last value if a query fails. Nothing is hard-coded.
+- `Index.ets`: root `Stack` is `100% x 100%` with `backgroundColor(chrome)` (theme fill under
+  everything). Sends `safe_inset` (`dx` top px, `dy` bottom px), resends on native `ready`.
+  `setKeyboardAvoidMode(RESIZE)` is unchanged.
+- Rust (`native/rust/src/safe_inset.rs`): converts pixels to points with `native scale * UI zoom`
+  (same as the title bar), caps each inset at 25 % of the window height, and passes them as
+  `RawInput::safe_area_insets` (always `Some`). `host_ui` lays the editor out in
+  `content_rect()` and fills the top/bottom strips with an **opaque** theme colour (chrome colour;
+  canvas colour at the bottom when the status bar panel is hidden; black in full-screen mode).
+  With zero insets nothing is added. The upstream subtree is not modified.
 
-- `pages/Index.ets`: the root `Stack` and the `XComponent` use
-  `ignoreLayoutSafeArea([LayoutSafeAreaType.SYSTEM], [LayoutSafeAreaEdge.BOTTOM])` together with
-  `width/height(LayoutPolicy.matchParent)`. Docs for API 20+: without `LayoutPolicy.matchParent`,
-  `ignoreLayoutSafeArea` only shifts position; with it, **size and position** both grow into the
-  system safe area. Compatible with `targetSdkVersion` / `compatibleSdkVersion` `6.0.0(20)`.
-  `setKeyboardAvoidMode(RESIZE)` is unchanged (`SafeAreaType.KEYBOARD` is not requested).
-- `NavigationInset.ets` (`NavigationIndicatorInset`): reads
-  `getWindowAvoidArea(TYPE_NAVIGATION_INDICATOR).bottomRect.height` and the window height, listens
-  to `avoidAreaChange` (navigation-indicator type only) and `windowSizeChange`, re-reads once after
-  250 ms for late transactions, and publishes only changes. Nothing is hard-coded: floating windows,
-  split screen and fullscreen report different values. A failed query keeps the last value.
-- Message `bottom_inset` (through `native.input`), **physical pixels**: `dy` indicator height,
-  `dx` window height, `y` top of the editor surface, `x` layout height from `onAreaChange`
-  (includes the bottom extension once layout grows). The window geometry is resent on every native
-  `ready`. A short `PhotoCraft bottom inset: …` log line is emitted on each publish for hilog.
+## Diagnostics
 
-Rust (`native/rust/src/safe_inset.rs`)
+- hilog keyword `PhotoCraft bottom inset`: one line per change with the raw avoid areas
+  (`sysTop`, `sysBottom`, `navBottom`), window height, laid-out content box and resulting insets,
+  plus `PhotoCraft bottom inset sent: top=… bottom=…`. `PhotoCraft immersive layout enabled` /
+  `unavailable` shows whether the window accepted full-screen layout.
+- On-screen overlay: set `INSET_DEBUG = true` at the top of `pages/Index.ets` and rebuild; the same
+  line is drawn at the top-left. Default off.
 
-- The worker stores the geometry and, each frame, computes the real overlap
-  `clamp(surface_top + tallest - (window_height - indicator), 0, indicator)` where `tallest` is the
-  larger of the NativeWindow surface height and the ArkTS layout height (layout often updates one
-  frame before the surface resize). The inset therefore exists only while content really reaches
-  under the indicator: it is 0 in floating windows and split screen, when the keyboard has shrunk
-  the page (RESIZE), and if the platform did not extend the component (the expandSafeArea-only
-  failure mode).
-- Pixels become points with the same `native scale * UI zoom` used for the title-bar geometry, are
-  capped at 25 % of the window height, and are handed to egui as `RawInput::safe_area_insets`
-  (always `Some`, because `None` means "same as last frame").
-- `safe_inset::host_ui` lays the upstream editor out in `content_rect()` and fills the strip. The
-  upstream subtree is not modified.
+## Known risks
 
-## Known risk: strokes that start at the bottom edge
-
-The system swipe-up gesture (home / recents) starts in the indicator strip. egui no longer places
-controls or the canvas there, but pen or finger strokes that start at the very bottom of the screen
-can still be taken by the system gesture, and the pointer events in the strip are not forwarded to
-any canvas. Start strokes slightly above the screen edge.
+- If `setWindowLayoutFullScreen` is rejected by a device or window mode, nothing changes visually
+  (no insets, old layout).
+- If the system reports 0 for both bottom avoid-area types on a device, no bottom inset is applied
+  although the page is full-window; the overlay/hilog line shows this immediately.
+- Strokes that start in the bottom strip: the system swipe-up gesture (home / recents) starts
+  there. egui no longer places controls or the canvas in the strip, but strokes that start at the
+  very bottom of the screen can still be taken by the system gesture. Start slightly above the edge.
 
 ## Verification
 
-- `cargo test --lib` (native/rust): inset conversion, overlap rules (including layout-vs-surface),
-  and an egui layout test that checks the status bar and panels end at the inset and the host strip
-  fills the rest.
-- `node scripts/test_navigation_inset.cjs`: avoid-area / size listeners, change-only publishing,
-  failure retention, resend, cleanup, and a source check that Index uses
-  `ignoreLayoutSafeArea` + `LayoutPolicy.matchParent` (not `expandSafeArea`).
-- On device (hilog): look for `PhotoCraft bottom inset: indicator=… layout=…`. After the layout
-  fix, `layout` should be roughly `window - top` (reaching the bottom), and the white strip should
-  disappear with the editor chrome sitting above the indicator. Checklist: tablet default, floating
-  window, split screen, keyboard, bottom strokes and swipe-up.
+- `cargo test --lib`: unit conversion, strips (top and bottom) filled opaque, layout ends at the
+  insets, zero insets leave the layout untouched.
+- `node scripts/test_navigation_inset.cjs`: inset rule (full layout, already avoided, keyboard,
+  floating), SYSTEM-reported bottom bar, avoid/size events, failure retention, immersive helper
+  (tablet / 2in1 / failure), source wiring (immersive before `loadContent`, no safe-area
+  expansion calls in Index, root background kept).
+- `scripts/test_system_bars.cjs` updated: the page now loads right after the immersive promise.
+- Not verifiable without a device: whether the window accepts immersive layout, and the real
+  avoid-area values.

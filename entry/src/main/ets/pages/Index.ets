@@ -9,7 +9,8 @@ import { i18n } from '@kit.LocalizationKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { KeyboardAvoidMode } from '@kit.ArkUI';
 import { applySystemBars, LOADING_CHROME, normalizeChrome } from '../SystemBars';
-import { NavigationGeometry, NavigationIndicatorInset } from '../NavigationInset';
+import { NavigationIndicatorInset, SafeInsets } from '../NavigationInset';
+import { IMMERSIVE_KEY } from '../Immersive';
 import { setOpenListener, takeOpens } from '../openInbox';
 import { allowConfirmedClose, setCloseRequest } from '../closeGuard';
 import { HarmonyStylusAdapter } from '../stylus/HarmonyStylusAdapter';
@@ -23,6 +24,9 @@ import { moveWindow, toggleWindowMaximize } from '../WindowChrome';
 import { window } from '@kit.ArkUI';
 import { configureDisplayColor } from '../DisplayColor';
 import { SYSTEM_THEME_DARK, SYSTEM_THEME_LIGHT } from '../SystemTheme';
+
+// Set to true and rebuild to show the measured safe-area numbers on screen (also in hilog).
+const INSET_DEBUG: boolean = false;
 
 class NativeConfig {
   files: string;
@@ -66,12 +70,16 @@ struct Index {
   @State private dropPreview: DropPreview = new DropPreview();
   private editorOriginX: number = 0;
   private editorOriginY: number = 0;
+  private lastInsetDiag: string = '';
   @StorageLink('photocraftTitleRight') @Watch('onTitlebarChanged') private titleRight: number = 0;
   @StorageLink('photocraftTitleHeight') @Watch('onTitlebarChanged') private titleHeight: number = 0;
-  // 内容延伸到底部导航条（小横条）之下；被覆盖的高度以物理像素交给原生编辑器避让。
-  private bottomInset: NavigationIndicatorInset = new NavigationIndicatorInset((geometry: NavigationGeometry): void => {
-    this.sendBottomInset(geometry);
-  });
+  // 窗口为沉浸式布局时页面覆盖状态栏与底部导航条（小横条）；两处被覆盖的高度以物理像素交给原生编辑器避让。
+  @StorageLink('photocraftImmersive') @Watch('onImmersiveChanged') private immersive: boolean = false;
+  // 调试诊断：把 INSET_DEBUG 改为 true 重新构建即可在左上角显示实测数值；默认关闭。
+  @StorageLink('photocraftInsetDiag') private insetDiag: string = '';
+  private bottomInset: NavigationIndicatorInset = new NavigationIndicatorInset((insets: SafeInsets): void => {
+    this.sendSafeInset(insets);
+  }, (text: string): void => { this.reportInset(text); });
   private context: common.UIAbilityContext = this.getUIContext().getHostContext() as common.UIAbilityContext;
   private generation: number = 0;
   // 页面离开或重新初始化后，旧的异步结果不能继续操作当前页面。
@@ -176,23 +184,31 @@ struct Index {
   }
   private startBottomInset(generation: number): void {
     window.getLastWindow(this.context).then((win: window.Window) => {
-      if (this.alive && generation === this.generation) { this.bottomInset.start(win); }
+      if (this.alive && generation === this.generation) {
+        this.bottomInset.setImmersive(this.immersive);
+        this.bottomInset.start(win);
+      }
     }).catch((error: BusinessError) => {
       console.info(`Navigation indicator inset unavailable: ${error.code} ${error.message}`);
     });
   }
-  private sendBottomInset(geometry: NavigationGeometry): void {
-    // 协议统一使用物理像素：dy=导航条高度，dx=窗口高度，y=表面顶边，x=布局高度（含延伸）。
-    // 是否真有遮挡由 Rust 用布局高度与表面尺寸共同判断（悬浮窗、分屏、键盘 RESIZE 时为 0）。
+  private onImmersiveChanged(): void { this.bottomInset.setImmersive(this.immersive); }
+  private reportInset(text: string): void {
+    if (text !== this.lastInsetDiag) {
+      this.lastInsetDiag = text;
+      console.info(`PhotoCraft bottom inset: ${text}`);
+      if (INSET_DEBUG) { AppStorage.setOrCreate('photocraftInsetDiag', text); }
+    }
+  }
+  private sendSafeInset(insets: SafeInsets): void {
+    // 协议统一使用物理像素：dx=顶部（状态栏）遮挡，dy=底部（导航条）遮挡；Rust 只做单位换算。
     if (!this.alive || !this.initialized) { return; }
     let input = new NativeInput();
-    input.kind = 'bottom_inset';
-    input.dy = geometry.indicator;
-    input.dx = geometry.windowHeight;
-    input.y = geometry.contentTop;
-    input.x = geometry.contentHeight;
+    input.kind = 'safe_inset';
+    input.dx = insets.top;
+    input.dy = insets.bottom;
     native.input(JSON.stringify(input));
-    console.info(`PhotoCraft bottom inset: indicator=${geometry.indicator} window=${geometry.windowHeight} top=${geometry.contentTop} layout=${geometry.contentHeight}`);
+    console.info(`PhotoCraft bottom inset sent: top=${insets.top} bottom=${insets.bottom}`);
   }
   onBackPress(): boolean {
     let input = new NativeInput(); input.kind = 'key'; input.code = 2070;
@@ -381,14 +397,12 @@ struct Index {
     Stack() {
       if (this.initialized) {
       XComponent({ id: 'photocraft-native', type: XComponentType.SURFACE, libraryname: 'photocraft' })
-        // LayoutPolicy.matchParent is required: ignoreLayoutSafeArea alone only shifts fixed sizes.
-        .width(LayoutPolicy.matchParent).height(LayoutPolicy.matchParent)
-        .ignoreLayoutSafeArea([LayoutSafeAreaType.SYSTEM], [LayoutSafeAreaEdge.BOTTOM])
+        .width('100%').height('100%')
         .onLoad(() => { this.restoreEditorFocus(); })
         .onAreaChange((_oldArea: Area, area: Area): void => {
           this.editorOriginX = Number(area.globalPosition.x);
           this.editorOriginY = Number(area.globalPosition.y);
-          // Layout size now includes the bottom indicator; Rust derives the overlap from it.
+          // 布局框位置/高度用于判断系统区域是否已被避让（键盘 RESIZE 会缩小它）。
           this.bottomInset.setContentBounds(
             this.getUIContext().vp2px(this.editorOriginY),
             this.getUIContext().vp2px(Number(area.height)));
@@ -425,10 +439,11 @@ struct Index {
           }
         }.padding(24).backgroundColor('#DD262626').borderRadius(8).width('80%')
       }
-    }.width(LayoutPolicy.matchParent).height(LayoutPolicy.matchParent).backgroundColor(this.chrome)
-    // 布局延伸到导航条（小横条）后面；状态栏仍由系统布局避让，键盘避让（RESIZE）不受影响。
-    // Drawing-only safe-area expansion left the XComponent surface short; ignoreLayoutSafeArea
-    // with LayoutPolicy.matchParent grows layout size (API 20+, matches targetSdk 6.0.0(20)).
-    .ignoreLayoutSafeArea([LayoutSafeAreaType.SYSTEM], [LayoutSafeAreaEdge.BOTTOM])
+      if (INSET_DEBUG && this.insetDiag.length > 0) {
+        Text(this.insetDiag).fontSize(11).fontColor('#FFFFFF').backgroundColor('#99000000')
+          .padding(4).width('70%')
+          .position({ x: 8, y: 96 }).hitTestBehavior(HitTestMode.None)
+      }
+    }.width('100%').height('100%').backgroundColor(this.chrome)
   }
 }
