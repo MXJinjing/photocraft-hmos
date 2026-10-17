@@ -30,6 +30,8 @@ mod ime;
 mod input;
 #[cfg(any(target_env = "ohos", test))]
 mod recovery;
+#[cfg(any(target_env = "ohos", test))]
+mod viewports;
 #[cfg(target_env = "ohos")]
 mod render;
 #[cfg(any(target_env = "ohos", test))]
@@ -73,6 +75,10 @@ enum Message {
     Attach(usize, u32, u32),
     Resize(u32, u32),
     Detach,
+    /// Native sub-window (floating document window) surface lifecycle, by window key.
+    WinAttach(u32, usize, u32, u32),
+    WinResize(u32, u32, u32),
+    WinDetach(u32),
     Frame,
     Active(bool),
     Input(input::Input),
@@ -404,6 +410,22 @@ pub unsafe extern "C" fn pc_attach(window: usize, w: u32, h: u32) {
 pub extern "C" fn pc_resize(w: u32, h: u32) {
     send(Message::Resize(w, h));
 }
+/// # Safety
+/// Same contract as [`pc_attach`], for the native sub-window with the given key (> 0).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pc_win_attach(key: u32, window: usize, w: u32, h: u32) {
+    if window != 0 && key != 0 {
+        send(Message::WinAttach(key, window, w, h));
+    }
+}
+#[unsafe(no_mangle)]
+pub extern "C" fn pc_win_resize(key: u32, w: u32, h: u32) {
+    send(Message::WinResize(key, w, h));
+}
+#[unsafe(no_mangle)]
+pub extern "C" fn pc_win_detach(key: u32) {
+    send(Message::WinDetach(key));
+}
 #[unsafe(no_mangle)]
 pub extern "C" fn pc_detach() {
     bridge::cancel();
@@ -502,6 +524,13 @@ fn worker(config: Config, rx: mpsc::Receiver<Message>) {
             return;
         }
     };
+    // Floating document windows are native HarmonyOS sub-windows, each with its own surface.
+    let registry = std::rc::Rc::new(std::cell::RefCell::new(viewports::Registry::new(
+        config.scale,
+        app.stylus.feed.clone(),
+    )));
+    viewports::install(registry.clone());
+    app.native_doc_windows = true;
     let ui_pass_in_progress = std::cell::Cell::new(false);
     let mut active = true;
     let mut visible = false;
@@ -596,6 +625,52 @@ fn worker(config: Config, rx: mpsc::Receiver<Message>) {
                         render.detach();
                         input.cancel(egui::Pos2::ZERO, &mut events);
                     }
+                    Message::WinAttach(key, ptr, w, h) => {
+                        // The native reference is owned from here on; dropping it unrefs.
+                        let window = render::Window(ptr);
+                        if render.recovery.halted || !registry.borrow().knows(key) {
+                            return Ok(());
+                        }
+                        let attached = std::panic::catch_unwind(std::panic::AssertUnwindSafe(
+                            || render.attach_child(key, window, w, h),
+                        ))
+                        .unwrap_or_else(|_| Err("native sub-window surface panicked".into()));
+                        match attached {
+                            Ok(()) => registry.borrow_mut().attach(key, w, h),
+                            Err(error) => {
+                                bridge::notify(
+                                    0,
+                                    "diagnostic",
+                                    &format!("Native sub-window {key} unavailable: {error}"),
+                                    &[],
+                                );
+                                render.remove_child(key);
+                                registry.borrow_mut().request_close(key);
+                            }
+                        }
+                        deadline = Some(Instant::now());
+                    }
+                    Message::WinResize(key, w, h) => {
+                        if render.recovery.halted {
+                            return Ok(());
+                        }
+                        let resized = std::panic::catch_unwind(std::panic::AssertUnwindSafe(
+                            || render.resize_child(key, w, h),
+                        ))
+                        .unwrap_or_else(|_| Err("native sub-window resize panicked".into()));
+                        if let Err(error) = resized {
+                            bridge::notify(0, "diagnostic", &error, &[]);
+                            render.remove_child(key);
+                            registry.borrow_mut().request_close(key);
+                        }
+                        registry.borrow_mut().resize(key, w, h);
+                        deadline = Some(Instant::now());
+                    }
+                    Message::WinDetach(key) => {
+                        render.detach_child(key);
+                        registry.borrow_mut().detach(key);
+                        deadline = Some(Instant::now());
+                    }
                     Message::Active(value) => {
                         active = value;
                         if active {
@@ -609,7 +684,7 @@ fn worker(config: Config, rx: mpsc::Receiver<Message>) {
                             input.cancel(egui::Pos2::ZERO, &mut events);
                         }
                     }
-                    Message::Input(value) => {
+                    Message::Input(mut value) => {
                         #[cfg(feature = "host-recovery-test")]
                         if value.kind == "key" && value.action == 0 && value.ctrl && value.alt {
                             if value.code == 2032 {
@@ -623,6 +698,34 @@ fn worker(config: Config, rx: mpsc::Receiver<Message>) {
                                 render.inject_fault();
                                 deadline = Some(Instant::now());
                                 return Ok(());
+                            }
+                        }
+                        if value.win != 0 {
+                            // Pointer/touch/pinch input belongs to that sub-window's own
+                            // egui viewport; keyboard shortcuts stay with the root.
+                            let key = std::mem::take(&mut value.win);
+                            let kind = value.kind.clone();
+                            match kind.as_str() {
+                                "key" => {}
+                                "win_close" => {
+                                    registry.borrow_mut().request_close(key);
+                                    deadline = Some(Instant::now());
+                                    return Ok(());
+                                }
+                                "blur" => {
+                                    registry.borrow_mut().cancel(key);
+                                    deadline = Some(Instant::now());
+                                    return Ok(());
+                                }
+                                _ => {
+                                    registry.borrow_mut().push_input(
+                                        key,
+                                        value,
+                                        ctx.pixels_per_point(),
+                                    );
+                                    deadline = Some(Instant::now());
+                                    return Ok(());
+                                }
                             }
                         }
                         if value.kind == "drop_hover" {
@@ -736,6 +839,11 @@ fn worker(config: Config, rx: mpsc::Receiver<Message>) {
                             config.scale * ctx.zoom_factor(),
                         );
                         ime.pointer_input(&raw.events);
+                        registry.borrow_mut().begin_frame(
+                            started.elapsed().as_secs_f64(),
+                            appearance.current(),
+                            ctx.zoom_factor(),
+                        );
                         ui_pass_in_progress.set(true);
                         let mut output = editor_frame(&ctx, &mut app, raw);
                         ui_pass_in_progress.set(false);
@@ -745,13 +853,29 @@ fn worker(config: Config, rx: mpsc::Receiver<Message>) {
                         ) {
                             deadline = Some(Instant::now());
                         }
+                        // Child passes ran inside the root pass: collect their results, close
+                        // windows the app stopped showing, and tell ArkTS.
+                        let finished = registry.borrow_mut().finish_frame(&output.viewport_output);
+                        for key in &finished.closed {
+                            render.remove_child(*key);
+                        }
+                        for command in registry.borrow_mut().take_outbox() {
+                            bridge::notify(0, "window", &command.json(), &[]);
+                        }
+                        for url in &finished.urls {
+                            bridge::notify(0, "url", url, &[]);
+                        }
                         // Preferences and menu actions have applied the theme by this point.
                         if let Some(color) = chrome.update(app.ui.theme) {
                             bridge::notify(0, "chrome", &color, &[]);
                         }
-                        if !initial_textures.is_empty() {
-                            initial_textures.append(std::mem::take(&mut output.textures_delta));
-                            output.textures_delta = std::mem::take(&mut initial_textures);
+                        // Texture deltas apply in pass order: start-up atlas, child windows
+                        // (they ran inside the root pass), then the root pass itself.
+                        {
+                            let mut textures = std::mem::take(&mut initial_textures);
+                            textures.append(finished.textures);
+                            textures.append(std::mem::take(&mut output.textures_delta));
+                            output.textures_delta = textures;
                         }
                         if let Some(icon) =
                             cursor.update(input.cursor_icon(output.platform_output.cursor_icon))
@@ -784,12 +908,28 @@ fn worker(config: Config, rx: mpsc::Receiver<Message>) {
                                 bridge::notify(0, "url", &url.url, &[]);
                             }
                         }
+                        // Sub-windows repaint with the root pass; honour their repaint requests.
                         let delay = output
                             .viewport_output
-                            .get(&egui::ViewportId::ROOT)
-                            .map(|v| v.repaint_delay)
+                            .iter()
+                            .filter(|(id, v)| {
+                                **id == egui::ViewportId::ROOT
+                                    || v.class == egui::ViewportClass::Immediate
+                            })
+                            .map(|(_, v)| v.repaint_delay)
+                            .min()
                             .unwrap_or(Duration::MAX);
-                        if render.paint(&ctx, output)? {
+                        let painted = render.paint(&ctx, output, finished.frames)?;
+                        // A sub-window whose surface failed is asked to close; the root keeps going.
+                        let failed = render.take_failed_children();
+                        if !failed.is_empty() {
+                            let mut registry = registry.borrow_mut();
+                            for key in failed {
+                                registry.request_close(key);
+                            }
+                            deadline = Some(Instant::now());
+                        }
+                        if painted {
                             if let Some(next) = Instant::now().checked_add(delay) {
                                 deadline = Some(deadline.map_or(next, |d| d.min(next)));
                             }
@@ -820,6 +960,11 @@ fn worker(config: Config, rx: mpsc::Receiver<Message>) {
             );
             recovery::stop_gpu(&mut app, &reason);
             if ui_pass_in_progress.get() {
+                // A panic inside a sub-window pass leaves its egui pass open too.
+                let nested = std::mem::take(&mut registry.borrow_mut().depth);
+                for _ in 0..nested {
+                    let _ = recovery::finish_interrupted_pass(&ctx);
+                }
                 let _ = recovery::finish_interrupted_pass(&ctx);
                 ui_pass_in_progress.set(false);
                 // Already mirrored at startup; replaying the older atlas over the
