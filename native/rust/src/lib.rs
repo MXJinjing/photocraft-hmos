@@ -31,6 +31,8 @@ mod recovery;
 #[cfg(target_env = "ohos")]
 mod render;
 #[cfg(any(target_env = "ohos", test))]
+mod safe_inset;
+#[cfg(any(target_env = "ohos", test))]
 mod working_directory;
 #[cfg(target_env = "ohos")]
 use photocraft_ui_egui::PhotocraftApp;
@@ -500,6 +502,8 @@ fn worker(config: Config, rx: mpsc::Receiver<Message>) {
     let mut close = false;
     let mut chrome = chrome::ChromeSync::default();
     let mut titlebar_pixels = egui::Vec2::ZERO;
+    // Navigation-indicator geometry from ArkTS; the surface overlap becomes the egui inset.
+    let mut indicator = safe_inset::Indicator::default();
     // 输入、窗口生命周期和帧消息共用一个队列，编辑器状态仅在 worker 上修改。
     let mut cursor = cursor::CursorSync::default();
     loop {
@@ -623,6 +627,19 @@ fn worker(config: Config, rx: mpsc::Receiver<Message>) {
                             deadline = Some(Instant::now());
                             return Ok(());
                         }
+                        if value.kind == "bottom_inset" {
+                            // Not a pointer or key event: never forward it to the input queue.
+                            let next = safe_inset::Indicator {
+                                height: value.dy,
+                                window_height: value.dx,
+                                surface_top: value.y,
+                            };
+                            if next != indicator {
+                                indicator = next;
+                                deadline = Some(Instant::now());
+                            }
+                            return Ok(());
+                        }
                         if value.kind == "titlebar" {
                             titlebar_pixels = egui::vec2(value.dx, value.dy);
                         }
@@ -695,6 +712,12 @@ fn worker(config: Config, rx: mpsc::Receiver<Message>) {
                             time: Some(started.elapsed().as_secs_f64()),
                             events: std::mem::take(&mut events),
                             system_theme: appearance.current(),
+                            // Always `Some`: `None` would keep the previous frame's inset.
+                            safe_area_insets: Some(safe_inset::insets(safe_inset::bottom_points(
+                                indicator.overlap(render.height as f32),
+                                config.scale * ctx.zoom_factor(),
+                                size.y,
+                            ))),
                             ..Default::default()
                         };
                         let viewport = raw.viewports.entry(egui::ViewportId::ROOT).or_default();
@@ -862,7 +885,7 @@ fn editor_frame(
         }
         #[cfg(feature = "host-recovery-test")]
         fault_injection::check();
-        app.host_ui(ui);
+        safe_inset::host_ui(app, ui);
     })
 }
 #[cfg(test)]
