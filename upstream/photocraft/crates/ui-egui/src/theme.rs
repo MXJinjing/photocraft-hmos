@@ -677,7 +677,7 @@ impl Tokens {
                 danger: Color32::from_rgb(232, 64, 38),
                 warning: Color32::from_rgb(237, 111, 33),
                 online: Color32::from_rgb(46, 184, 92),
-                radius_sm: 5.0,
+                radius_sm: 8.0,
                 radius: 5.0,
                 radius_lg: 6.0,
                 bevel: false,
@@ -720,7 +720,7 @@ impl Tokens {
                 danger: Color32::from_rgb(217, 72, 56),
                 warning: Color32::from_rgb(219, 107, 66),
                 online: Color32::from_rgb(80, 190, 125),
-                radius_sm: 5.0,
+                radius_sm: 8.0,
                 radius: 5.0,
                 radius_lg: 6.0,
                 bevel: false,
@@ -1441,6 +1441,7 @@ mod tests {
             assert_eq!(t.row_selected, Color32::TRANSPARENT);
             assert_eq!(t.accent, accent);
             assert_eq!(t.chrome, chrome);
+            assert!(t.radius_sm > Tokens::for_kind(ThemeKind::Studio).radius_sm, "{kind:?}: rounder buttons and fields");
             assert_ne!(t.canvas, t.chrome, "{kind:?}: canvas must separate from chrome");
             assert_ne!(t.canvas_dot, t.canvas, "{kind:?}: Studio-style canvas dots");
             assert!(contrast(t.text, t.card) >= 4.5, "{kind:?}: text on card");
