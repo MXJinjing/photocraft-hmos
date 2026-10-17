@@ -1,10 +1,12 @@
 import native from 'libphotocraft.so';
 import { applicationDocumentUri } from '../documentDirectory';
 import { LocalDocuments } from '../LocalDocuments';
+import { OpenSourceDialog } from '../OpenSourceDialog';
 import { savePickerOptions, SaveTargets } from '../savePicker';
 import { NativePrintAdapter } from '../NativePrintAdapter';
 import { abilityAccessCtrl, common } from '@kit.AbilityKit';
 import { fileIo, fileUri, picker } from '@kit.CoreFileKit';
+import { photoAccessHelper } from '@kit.MediaLibraryKit';
 import { i18n } from '@kit.LocalizationKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { KeyboardAvoidMode } from '@kit.ArkUI';
@@ -226,10 +228,16 @@ struct Index {
     }
   }
   private async openFile(id: number): Promise<void> {
+    // File › Open / homepage Open / Ctrl+O all arrive here via native pick_open → kind "open".
+    // Show a source dialog before the system Document or Gallery picker.
+    this.ime.stop(); this.cursor.reset();
     let generation = this.generation;
     try {
-      let options = new picker.DocumentSelectOptions(); options.maxSelectNumber = 1;
-      let uris = await new picker.DocumentViewPicker(this.context).select(options);
+      let source = await this.chooseOpenSource();
+      if (!this.alive || generation !== this.generation || source.length === 0) {
+        native.reply(id, false, 'cancelled', new ArrayBuffer(0)); return;
+      }
+      let uris = source === 'gallery' ? await this.selectGalleryUris() : await this.selectDocumentUris();
       if (!this.alive || generation !== this.generation || uris.length === 0) {
         native.reply(id, false, 'cancelled', new ArrayBuffer(0)); return;
       }
@@ -247,6 +255,39 @@ struct Index {
     } finally {
       this.restoreEditorFocus();
     }
+  }
+  private chooseOpenSource(): Promise<string> {
+    return new Promise<string>((resolve: (value: string) => void) => {
+      let settled: boolean = false;
+      let finish = (value: string): void => {
+        if (settled) { return; }
+        settled = true;
+        resolve(value);
+      };
+      let dialog = new CustomDialogController({
+        builder: OpenSourceDialog({
+          onFiles: (): void => { finish('files'); },
+          onGallery: (): void => { finish('gallery'); },
+          onCancel: (): void => { finish(''); },
+        }),
+        autoCancel: true,
+        alignment: DialogAlignment.Center,
+        cancel: (): void => { finish(''); },
+      });
+      dialog.open();
+    });
+  }
+  private async selectDocumentUris(): Promise<Array<string>> {
+    let options = new picker.DocumentSelectOptions();
+    options.maxSelectNumber = 1;
+    return await new picker.DocumentViewPicker(this.context).select(options);
+  }
+  private async selectGalleryUris(): Promise<Array<string>> {
+    let options = new photoAccessHelper.PhotoSelectOptions();
+    options.MIMEType = photoAccessHelper.PhotoViewMIMETypes.IMAGE_TYPE;
+    options.maxSelectNumber = 1;
+    let result = await new photoAccessHelper.PhotoViewPicker().select(options);
+    return result.photoUris;
   }
   private async selectSave(id: number, suggested: string, ordinary: boolean = false): Promise<void> {
     this.ime.stop(); this.cursor.reset();
