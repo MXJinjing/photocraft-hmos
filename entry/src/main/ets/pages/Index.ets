@@ -1,7 +1,6 @@
 import native from 'libphotocraft.so';
 import { applicationDocumentUri } from '../documentDirectory';
 import { LocalDocuments } from '../LocalDocuments';
-import { OpenSourceDialog } from '../OpenSourceDialog';
 import { savePickerOptions, SaveTargets } from '../savePicker';
 import { NativePrintAdapter } from '../NativePrintAdapter';
 import { abilityAccessCtrl, common } from '@kit.AbilityKit';
@@ -229,7 +228,7 @@ struct Index {
   }
   private async openFile(id: number): Promise<void> {
     // File › Open / homepage Open / Ctrl+O all arrive here via native pick_open → kind "open".
-    // Show a source dialog before the system Document or Gallery picker.
+    // Show a native ActionSheet before the system Document or Gallery picker.
     this.ime.stop(); this.cursor.reset();
     let generation = this.generation;
     try {
@@ -257,6 +256,8 @@ struct Index {
     }
   }
   private chooseOpenSource(): Promise<string> {
+    // Native ArkUI ActionSheet via UIContext — avoids CustomDialogController crashes
+    // when opened from the async native pick_open bridge path.
     return new Promise<string>((resolve: (value: string) => void) => {
       let settled: boolean = false;
       let finish = (value: string): void => {
@@ -264,17 +265,22 @@ struct Index {
         settled = true;
         resolve(value);
       };
-      let dialog = new CustomDialogController({
-        builder: OpenSourceDialog({
-          onFiles: (): void => { finish('files'); },
-          onGallery: (): void => { finish('gallery'); },
-          onCancel: (): void => { finish(''); },
-        }),
+      this.getUIContext().showActionSheet({
+        title: '打开文件',
+        message: '请选择文件来源',
         autoCancel: true,
-        alignment: DialogAlignment.Center,
+        sheets: [
+          {
+            title: '从文件管理选取',
+            action: (): void => { finish('files'); },
+          },
+          {
+            title: '从图库选取',
+            action: (): void => { finish('gallery'); },
+          },
+        ],
         cancel: (): void => { finish(''); },
       });
-      dialog.open();
     });
   }
   private async selectDocumentUris(): Promise<Array<string>> {
