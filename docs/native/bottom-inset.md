@@ -35,8 +35,13 @@ official immersive-window guide describes. It is applied only where it is safe:
     against the window height. The keyboard (`KeyboardAvoidMode.RESIZE`) shrinks that box, so the
     bottom inset becomes 0 while the keyboard is up; a non-immersive layout yields 0 as well;
   - `inset = max(0, system area - already avoided)`, for top and bottom.
-  It listens to `avoidAreaChange` and `windowSizeChange`, re-reads 250 ms later, publishes only
-  changes, and keeps the last value if a query fails. Nothing is hard-coded.
+  It listens to `avoidAreaChange` and `windowSizeChange`, re-reads at 250 ms / 1 s / 2.5 s (the
+  system may publish the bars after the first query), publishes only changes, and keeps the last
+  value if a query fails. Nothing is hard-coded. Before the first `onAreaChange` the immersive
+  page is assumed to fill the window, so the top inset exists from the first frame; the laid-out
+  box survives `start()`/`stop()` (a layout that arrived before the window query resolved used to
+  be wiped, which left both insets at 0 — a plausible cause of the "whole top overflows into the
+  status bar" report).
 - `Index.ets`: root `Stack` is `100% x 100%` with `backgroundColor(chrome)` (theme fill under
   everything). Sends `safe_inset` (`dx` top px, `dy` bottom px), resends on native `ready`.
   `setKeyboardAvoidMode(RESIZE)` is unchanged.
@@ -46,6 +51,14 @@ official immersive-window guide describes. It is applied only where it is safe:
   `content_rect()` and fills the top/bottom strips with an **opaque** theme colour (chrome colour;
   canvas colour at the bottom when the status bar panel is hidden; black in full-screen mode).
   With zero insets nothing is added. The upstream subtree is not modified.
+
+## Top inset covers the whole host layout
+
+Insets reach egui as `RawInput::safe_area_insets`, and the host lays the *entire* upstream editor
+out inside `ctx.content_rect()` (`safe_inset::host_ui`), so title bar, menu, options bar, toolbar,
+dock, canvas top edge, windows and modals all start below the status bar. A unit test renders a
+frame with a 30 pt top inset and asserts that no rect or text shape other than the host strip
+starts inside it.
 
 ## Diagnostics
 

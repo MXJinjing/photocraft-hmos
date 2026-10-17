@@ -125,6 +125,26 @@ fn status_bar_inset_pushes_the_title_bar_down_and_fills_the_top_strip() {
             .any(|r| r.top() == 776.0 && r.bottom() == 800.0 && r.width() == 1280.0),
         "bottom strip: {rects:?}"
     );
+    // The whole host layout (title bar, menu, options bar, toolbar, dock, canvas top edge) starts
+    // below the status-bar inset: no shape other than the host strip begins inside it.
+    let in_top_strip = output
+        .shapes
+        .iter()
+        .filter_map(|clipped| match &clipped.shape {
+            egui::Shape::Rect(rect)
+                if rect.rect.top() >= 0.0
+                    && rect.rect.top() < 30.0
+                    && rect.rect.bottom() > rect.rect.top() =>
+            {
+                Some(rect.rect)
+            }
+            egui::Shape::Text(text) if (0.0..30.0).contains(&text.pos.y) => {
+                Some(Rect::from_min_size(text.pos, egui::Vec2::ZERO))
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(in_top_strip.len(), 1, "{in_top_strip:?}");
     output.drop_without_applying_deltas();
 }
 

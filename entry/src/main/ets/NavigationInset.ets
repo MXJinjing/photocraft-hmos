@@ -36,9 +36,10 @@ export function insetsFor(systemTop: number, systemBottom: number, windowHeight:
   return new SafeInsets(Math.round(top), Math.round(bottom));
 }
 
-// Avoid area, window size and component layout reach the app in separate transactions;
-// read once more after they settle.
-const SETTLE_MS: number = 250;
+// Avoid area, window size and component layout reach the app in separate transactions, and the
+// first avoid-area query can run before the system has published the bars. Read again after they
+// settle (same idea as the title-bar geometry retries).
+const SETTLE_MS: number[] = [250, 1000, 2500];
 
 function finiteOrZero(value: number): number {
   return Number.isFinite(value) && value > 0 ? Math.round(value) : 0;
@@ -51,7 +52,7 @@ export class NavigationIndicatorInset {
   private contentHeight: number = 0;
   private laidOut: boolean = false;
   private sent: SafeInsets | undefined = undefined;
-  private settle: number = -1;
+  private settles: number[] = [];
   private publish: (insets: SafeInsets) => void;
   private report: (text: string) => void;
   private avoidChanged = (_data: window.AvoidAreaOptions): void => { this.refresh(); };
@@ -73,7 +74,7 @@ export class NavigationIndicatorInset {
       let failure = error as BusinessError;
       console.info(`Navigation indicator listeners unavailable: ${failure.code} ${failure.message}`);
     }
-    this.update();
+    this.refresh();
   }
 
   // Whether the window runs in immersive layout; without it the page is already inside the safe
@@ -97,12 +98,13 @@ export class NavigationIndicatorInset {
     this.update();
   }
 
+  // The laid-out box is kept across stop()/start(): the page may lay out before the window query
+  // resolves, and no further area event would follow to replace a wiped value.
   stop(): void {
-    if (this.settle >= 0) { clearTimeout(this.settle); this.settle = -1; }
+    this.cancelSettles();
     let win = this.win;
     this.win = undefined;
     this.sent = undefined;
-    this.laidOut = false;
     if (win === undefined) { return; }
     try {
       win.off('avoidAreaChange', this.avoidChanged);
@@ -114,8 +116,15 @@ export class NavigationIndicatorInset {
 
   private refresh(): void {
     this.update();
-    if (this.settle >= 0) { clearTimeout(this.settle); }
-    this.settle = setTimeout((): void => { this.settle = -1; this.update(); }, SETTLE_MS);
+    this.cancelSettles();
+    for (let delay of SETTLE_MS) {
+      this.settles.push(setTimeout((): void => { this.update(); }, delay));
+    }
+  }
+
+  private cancelSettles(): void {
+    for (let timer of this.settles) { clearTimeout(timer); }
+    this.settles = [];
   }
 
   private read(win: window.Window): SafeInsets | undefined {
@@ -123,7 +132,6 @@ export class NavigationIndicatorInset {
       this.report(`immersive=false insets=0/0`);
       return new SafeInsets(0, 0);
     }
-    if (!this.laidOut) { return undefined; }
     try {
       let system = win.getWindowAvoidArea(window.AvoidAreaType.TYPE_SYSTEM);
       let nav = win.getWindowAvoidArea(window.AvoidAreaType.TYPE_NAVIGATION_INDICATOR);
@@ -132,10 +140,14 @@ export class NavigationIndicatorInset {
       let windowHeight: number = 0;
       try { windowHeight = finiteOrZero(win.getWindowProperties().windowRect.height); }
       catch (error) { console.info('Window height unavailable'); }
-      let insets = insetsFor(systemTop, systemBottom, windowHeight, this.contentTop, this.contentHeight);
+      // Before the first layout report the immersive page is assumed to fill the window, so the
+      // top inset exists from the very first frame instead of waiting for onAreaChange.
+      let insets = this.laidOut ?
+        insetsFor(systemTop, systemBottom, windowHeight, this.contentTop, this.contentHeight) :
+        new SafeInsets(systemTop, systemBottom);
       this.report(`immersive=true avoid(sysTop=${systemTop} sysBottom=${finiteOrZero(system.bottomRect.height)} ` +
         `navBottom=${finiteOrZero(nav.bottomRect.height)}) window=${windowHeight} ` +
-        `content(top=${this.contentTop} h=${this.contentHeight}) insets=${insets.top}/${insets.bottom}`);
+        `content(laidOut=${this.laidOut} top=${this.contentTop} h=${this.contentHeight}) insets=${insets.top}/${insets.bottom}`);
       return insets;
     } catch (error) {
       // A transient failure must neither invent nor erase an inset: keep what native already has.

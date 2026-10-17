@@ -61,13 +61,31 @@ function scenario(options = {}) {
   s.inset.start(s.win);
   assert.deepEqual(s.published, [{ top: 0, bottom: 0 }], 'not immersive: no inset');
   s.inset.setImmersive(true);
-  assert.equal(s.published.length, 1, 'immersive but not laid out yet: wait');
+  assert.deepEqual(s.published.at(-1), { top: 24, bottom: 28 }, 'before the first layout the page is assumed to fill the window');
   s.inset.setContentBounds(0, 1600);
   assert.deepEqual(s.published.at(-1), { top: 24, bottom: 28 });
   const n = s.published.length;
   s.inset.setContentBounds(0, 1600);
   assert.equal(s.published.length, n, 'unchanged insets are not re-sent');
   assert.ok(s.reports.some(r => r.includes('navBottom=28') && r.includes('insets=24/28')), 'diagnostic line carries the raw numbers');
+}
+
+// The page may lay out before the window query resolves (start() runs later): bounds must survive.
+{
+  const s = scenario();
+  s.inset.setImmersive(true);
+  s.inset.setContentBounds(0, 1600);
+  s.inset.start(s.win);
+  assert.deepEqual(s.published.at(-1), { top: 24, bottom: 28 });
+  assert.ok(s.reports.at(-1).includes('laidOut=true'), 'bounds were not wiped by start()');
+  // A status bar that the system publishes late is still picked up without any event.
+  const late = scenario();
+  late.state.sysTop = 0; late.state.navBottom = 0;
+  late.inset.setImmersive(true); late.inset.setContentBounds(0, 1600); late.inset.start(late.win);
+  assert.deepEqual(late.published.at(-1), { top: 0, bottom: 0 });
+  late.state.sysTop = 24; late.state.navBottom = 28;
+  late.flush();
+  assert.deepEqual(late.published.at(-1), { top: 24, bottom: 28 });
 }
 
 // Navigation bar reported under SYSTEM instead of NAVIGATION_INDICATOR still counts.
