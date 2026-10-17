@@ -21,31 +21,48 @@ function load(name, dependencies) {
   }, { filename });
   return module.exports;
 }
+async function main() {
   for (const request of [undefined, false, true, 'true', 1]) {
     const calls = [];
     const { default: EntryAbility } = load('entryability/EntryAbility', {
       'libphotocraft.so': { default: { active: value => calls.push(['active', value]) } },
       '@kit.AbilityKit': { UIAbility: class {} },
-      '@kit.ArkUI': {}, '@kit.BasicServicesKit': {},
+      '@kit.ArkUI': { window: { getLastWindow: () => Promise.resolve({}) } },
+      '@kit.BasicServicesKit': {},
       '../SystemBars': { LOADING_CHROME: '#FF262626', paintWindow() {}, applySystemBars() {} },
+      '../SystemTheme': { publishSystemTheme() {}, systemThemeFromColorMode: () => 'dark' },
       '../WindowChrome': { WindowChrome: class { start() {} stop() {} refresh() {} } },
+      '../Immersive': {
+        immersiveWanted: () => true,
+        enableImmersiveFullscreen: async () => {},
+        logImmersiveError() {}
+      },
       '../input/NativeCursorAdapter': { restorePointerVisibility() {} },
       '../openInbox': { acceptOpenWant: want => calls.push(['open', want.uri]) },
       '../closeGuard': { resetCloseGuard() {}, requestWindowClose() {} },
     });
     const app = new EntryAbility();
+    app.context = { config: {} };
     app.onCreate({ parameters: { 'photocraft.dev': request } }, {});
     const pages = [];
     const stage = { on() {}, getMainWindowSync() { return {}; }, loadContent(page, cb) { pages.push(page); cb({ code: 0 }); } };
     app.onWindowStageCreate(stage);
+    await Promise.resolve();
+    await Promise.resolve();
     const expected = 'pages/Index';
     assert.equal(pages[0], expected);
-    app.onForeground(); app.onBackground();
+    app.onForeground();
+    app.onBackground();
+    await Promise.resolve();
     assert.deepEqual(calls.filter(c => c[0] === 'active'), [['active', true], ['active', false]]);
     app.onNewWant({ uri: 'file://example.psd', parameters: { 'photocraft.dev': request !== true } });
     assert.equal(pages.length, 1, 'new Wants must not replace a live editor');
     assert.ok(calls.some(c => c[0] === 'open' && c[1] === 'file://example.psd'), 'file Wants still reach the active editor');
     app.onWindowStageCreate(stage);
+    await Promise.resolve();
+    await Promise.resolve();
     assert.equal(pages[1], expected, 'the selected host survives window-stage recreation');
   }
-console.log('Passed: native-only routing regardless of legacy Want flags, lifecycle, stage recreation and file Wants.');
+  console.log('Passed: native-only routing regardless of legacy Want flags, lifecycle, stage recreation and file Wants.');
+}
+main().catch(error => { console.error(error); process.exitCode = 1; });

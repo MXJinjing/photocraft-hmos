@@ -48,11 +48,16 @@ const { default: EntryAbility } = load('entryability/EntryAbility', {
     AbilityConstant: {},
     ConfigurationConstant
   },
-  '@kit.ArkUI': {},
+  '@kit.ArkUI': { window: { getLastWindow: () => Promise.resolve({}) } },
   '@kit.BasicServicesKit': {},
   '../SystemBars': bars,
   '../SystemTheme': theme,
   '../WindowChrome': { WindowChrome: class { start() {} stop() {} refresh() {} } },
+  '../Immersive': {
+    immersiveWanted: () => false,
+    enableImmersiveFullscreen: async () => {},
+    logImmersiveError() {}
+  },
   '../input/NativeCursorAdapter': { restorePointerVisibility() {} },
   '../openInbox': { acceptOpenWant() {} },
   '../closeGuard': { resetCloseGuard() {}, requestWindowClose() {} }

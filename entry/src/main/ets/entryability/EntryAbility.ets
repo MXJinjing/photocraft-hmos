@@ -8,6 +8,7 @@ import { restorePointerVisibility } from '../input/NativeCursorAdapter';
 import { acceptOpenWant } from '../openInbox';
 import { requestWindowClose, resetCloseGuard } from '../closeGuard';
 import { WindowChrome } from '../WindowChrome';
+import { enableImmersiveFullscreen, immersiveWanted, logImmersiveError } from '../Immersive';
 
 class SystemThemeInput {
   kind: string = 'system_theme';
@@ -52,6 +53,11 @@ export default class EntryAbility extends UIAbility {
     // 系统窗口在后台可能改变装饰和颜色，恢复前台时重新查询并唤醒渲染 worker。
     this.windowChrome?.refresh();
     applySystemBars(this.context, AppStorage.get<string>('photocraftChrome') ?? LOADING_CHROME);
+    // Re-assert immersive fullscreen after resume; the system may restore bars while backgrounded.
+    if (immersiveWanted()) {
+      window.getLastWindow(this.context).then((win: window.Window) => enableImmersiveFullscreen(win))
+        .catch((error: BusinessError) => { logImmersiveError('resume', error); });
+    }
     // Re-read in case the colour scheme changed while we were backgrounded without a config event.
     this.syncSystemTheme(this.context.config?.colorMode);
     native.active(true);
@@ -67,24 +73,32 @@ export default class EntryAbility extends UIAbility {
     if (AppStorage.get<string>('photocraftSystemTheme') === undefined) {
       this.syncSystemTheme(this.context.config?.colorMode);
     }
-    windowStage.loadContent('pages/Index', (error: BusinessError) => {
-      if (error.code) {
-        console.error(`PhotoCraft page failed: ${error.code} ${error.message}`);
-        return;
-      }
-      // The page does not draw into the status-bar and navigation-indicator avoid areas. Colour
-      // those from the window, then let the page replace this with the theme chrome.
-      try {
-        let win = windowStage.getMainWindowSync();
-        paintWindow(win, AppStorage.get<string>('photocraftChrome') ?? LOADING_CHROME);
-        this.windowChrome?.stop();
-        this.windowChrome = new WindowChrome(win);
-        this.windowChrome.start();
-      } catch (err) {
-        let failure = err as BusinessError;
-        console.error(`System bars failed: ${failure.code} ${failure.message}`);
-      }
-    });
+    // Immersive fullscreen must be in place before the first layout, or the page jumps afterwards.
+    let load = (): void => {
+      windowStage.loadContent('pages/Index', (error: BusinessError) => {
+        if (error.code) {
+          console.error(`PhotoCraft page failed: ${error.code} ${error.message}`);
+          return;
+        }
+        // Paint the window background from the theme chrome. System bars are hidden on
+        // immersive devices; 2in1 keeps them under WindowChrome without host dyeing.
+        try {
+          let win = windowStage.getMainWindowSync();
+          paintWindow(win, AppStorage.get<string>('photocraftChrome') ?? LOADING_CHROME);
+          this.windowChrome?.stop();
+          this.windowChrome = new WindowChrome(win);
+          this.windowChrome.start();
+        } catch (err) {
+          let failure = err as BusinessError;
+          console.error(`Window chrome failed: ${failure.code} ${failure.message}`);
+        }
+      });
+    };
+    try {
+      enableImmersiveFullscreen(windowStage.getMainWindowSync()).then(load);
+    } catch (error) {
+      load();
+    }
   }
 
   onWindowStageDestroy(): void { this.windowChrome?.stop(); this.windowChrome = undefined; }

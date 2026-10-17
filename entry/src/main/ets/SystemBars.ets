@@ -32,7 +32,7 @@ export function normalizeChrome(color: string): string {
   return '#' + hex.toUpperCase();
 }
 
-// White status-bar icons on a dark chrome, black icons on a light one.
+// White caption icons on a dark chrome, black icons on a light one (2in1 decor buttons).
 function lightIcons(argb: string): boolean {
   let r: number = parseInt(argb.substring(3, 5), 16);
   let g: number = parseInt(argb.substring(5, 7), 16);
@@ -54,13 +54,15 @@ function paintDecorButtons(win: window.Window, dark: boolean): void {
   }
 }
 
+// Theme chrome for the host window background and (on 2in1) caption-button style.
+// Status / navigation bar dyeing via setWindowSystemBarProperties is intentionally omitted:
+// immersive fullscreen hides those bars (Immersive.ets), and on 2in1 the system owns their look.
 export function paintWindow(win: window.Window, color: string): void {
   let argb: string = normalizeChrome(color);
   if (argb.length === 0) {
     return;
   }
-  let content: string = lightIcons(argb) ? '#FFFFFFFF' : '#FF1A1A1A';
-  let light: boolean = content === '#FFFFFFFF';
+  let light: boolean = lightIcons(argb);
   paintDecorButtons(win, light);
   try {
     win.setWindowBackgroundColor(argb);
@@ -68,17 +70,6 @@ export function paintWindow(win: window.Window, color: string): void {
     let failure = error as BusinessError;
     console.error(`Window background failed: ${failure.code} ${failure.message}`);
   }
-  let props: window.SystemBarProperties = {
-    statusBarColor: argb,
-    navigationBarColor: argb,
-    statusBarContentColor: content,
-    navigationBarContentColor: content,
-    isStatusBarLightIcon: light,
-    isNavigationBarLightIcon: light
-  };
-  win.setWindowSystemBarProperties(props).catch((error: BusinessError) => {
-    console.error(`System bar properties failed: ${error.code} ${error.message}`);
-  });
 }
 
 export function applySystemBars(ctx: common.UIAbilityContext, color: string): void {
@@ -89,6 +80,6 @@ export function applySystemBars(ctx: common.UIAbilityContext, color: string): vo
   window.getLastWindow(ctx).then((win: window.Window) => {
     paintWindow(win, argb);
   }).catch((error: BusinessError) => {
-    console.error(`System bars failed: ${error.code} ${error.message}`);
+    console.error(`Window chrome paint failed: ${error.code} ${error.message}`);
   });
 }
