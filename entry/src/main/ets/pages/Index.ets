@@ -19,6 +19,7 @@ import { IMAGE_DROP_TYPES, NativeDropAdapter } from '../input/NativeDropAdapter'
 import { DropPreview, DropTargetFeedback, localDropPoint } from '../input/DropPreview';
 import { isFiniteHoverPoint, penHoverLeaveMessage, penHoverMoveMessage } from '../input/PenHoverPreview';
 import { moveWindow, toggleWindowMaximize } from '../WindowChrome';
+import { subWindowHost, WindowRequest } from '../SubWindowHost';
 import { window } from '@kit.ArkUI';
 import { configureDisplayColor } from '../DisplayColor';
 import { SYSTEM_THEME_DARK, SYSTEM_THEME_LIGHT } from '../SystemTheme';
@@ -154,6 +155,7 @@ struct Index {
     this.stylus.stop();
     this.ime.stop();
     this.cursor.reset();
+    subWindowHost.closeAll();
     setOpenListener(null);
     setCloseRequest(null);
     native.active(false);
@@ -190,6 +192,7 @@ struct Index {
     else if (request.kind === 'drop_target') {
       this.dropPreview.apply(JSON.parse(request.text) as DropTargetFeedback, this.getUIContext().vp2px(1));
     }
+    else if (request.kind === 'window') { subWindowHost.handle(JSON.parse(request.text) as WindowRequest); }
     else if (request.kind === 'cursor') { this.cursor.update(request.text); }
     else if (request.kind === 'ime') { this.ime.update(JSON.parse(request.text) as NativeImeState); }
     else if (request.kind === 'chrome') {

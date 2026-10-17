@@ -24,6 +24,10 @@ pub struct StylusPacket {
 #[derive(Deserialize, Default)]
 pub struct Input {
     pub kind: String,
+    /// Native sub-window key; 0 is the main window.
+    #[serde(default)]
+    #[cfg_attr(not(target_env = "ohos"), allow(dead_code))]
+    pub win: u32,
     #[serde(default)]
     pub points: Vec<Contact>,
     #[serde(default)]

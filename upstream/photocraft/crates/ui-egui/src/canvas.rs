@@ -5697,6 +5697,17 @@ pub(crate) fn finish_touch_stroke(app: &mut PhotocraftApp) -> bool {
 
 /// Extra OS windows showing documents (multi-window / multi-monitor).
 pub fn extra_windows(app: &mut PhotocraftApp, ctx: &egui::Context) {
+    // A host with per-viewport native windows opts in here, so only these windows leave the
+    // in-app embedding; other viewports keep the host's default.
+    let embedded = ctx.embed_viewports();
+    if app.native_doc_windows {
+        ctx.set_embed_viewports(false);
+    }
+    extra_windows_in(app, ctx);
+    ctx.set_embed_viewports(embedded);
+}
+
+fn extra_windows_in(app: &mut PhotocraftApp, ctx: &egui::Context) {
     let wins = app.ui.windows.clone();
     for w in wins.into_iter().filter(|w| w.open) {
         let Some(st) = app.session.documents().get(w.document) else { continue };

@@ -8,6 +8,7 @@ import { restorePointerVisibility } from '../input/NativeCursorAdapter';
 import { acceptOpenWant } from '../openInbox';
 import { requestWindowClose, resetCloseGuard } from '../closeGuard';
 import { WindowChrome } from '../WindowChrome';
+import { subWindowHost } from '../SubWindowHost';
 
 class SystemThemeInput {
   kind: string = 'system_theme';
@@ -61,6 +62,10 @@ export default class EntryAbility extends UIAbility {
 
   onWindowStageCreate(windowStage: window.WindowStage): void {
     windowStage.on('windowStageClose', () => requestWindowClose());
+    // Floating document windows are sub-windows of this stage; their close requests go to Rust.
+    subWindowHost.attach(windowStage, (message: string): void => {
+      try { native.input(message); } catch (error) { console.info('Sub-window input unavailable'); }
+    });
     if (AppStorage.get<string>('photocraftChrome') === undefined) {
       AppStorage.setOrCreate('photocraftChrome', LOADING_CHROME);
     }
@@ -87,5 +92,9 @@ export default class EntryAbility extends UIAbility {
     });
   }
 
-  onWindowStageDestroy(): void { this.windowChrome?.stop(); this.windowChrome = undefined; }
+  onWindowStageDestroy(): void {
+    subWindowHost.closeAll();
+    this.windowChrome?.stop();
+    this.windowChrome = undefined;
+  }
 }
