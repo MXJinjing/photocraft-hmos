@@ -12,6 +12,8 @@
 //! - **Breeze** (Light and Dark): the Studio layout adapted to the look of KDE Plasma's Breeze
 //!   (blue-grey surfaces, Breeze blue accent, 5 px corners), so the app sits with the rest of a
 //!   Plasma desktop.
+//! - **ArkUI** (Light and Dark): the Breeze layout filled with HarmonyOS ArkUI system colours
+//!   (emphasize blue accent, background / sub_background surfaces), the default on HarmonyOS.
 //!
 //! - **Pro (Light Gray)** and **Pro (Light)**: Photoshop's third and fourth interface brightness
 //!   levels (#B8B8B8 and #F0F0F0 panels) with the Pro layout (#2661).
@@ -52,10 +54,14 @@ pub enum ThemeKind {
     SoftDark,
     /// A low-contrast light theme: pale violet-grey surfaces, softened dark text and a periwinkle accent.
     SoftLight,
+    /// HarmonyOS ArkUI light system colours on the Breeze / Studio layout.
+    ArkuiLight,
+    /// HarmonyOS ArkUI dark system colours on the Breeze / Studio layout.
+    ArkuiDark,
 }
 
 impl ThemeKind {
-    pub const ALL: [ThemeKind; 14] = [
+    pub const ALL: [ThemeKind; 16] = [
         ThemeKind::Pro,
         ThemeKind::ProMedium,
         ThemeKind::ProLightGray,
@@ -70,6 +76,8 @@ impl ThemeKind {
         ThemeKind::BreezeDark,
         ThemeKind::SoftDark,
         ThemeKind::SoftLight,
+        ThemeKind::ArkuiLight,
+        ThemeKind::ArkuiDark,
     ];
     pub fn label(self) -> &'static str {
         match self {
@@ -87,6 +95,8 @@ impl ThemeKind {
             ThemeKind::BreezeDark => "Breeze Dark",
             ThemeKind::SoftDark => "Soft Dark",
             ThemeKind::SoftLight => "Soft Light",
+            ThemeKind::ArkuiLight => "ArkUI Light",
+            ThemeKind::ArkuiDark => "ArkUI Dark",
         }
     }
     /// The canonical name: `ui.set {theme}` accepts it and the Window › Theme commands are
@@ -107,6 +117,8 @@ impl ThemeKind {
             ThemeKind::BreezeDark => "breezeDark",
             ThemeKind::SoftDark => "softDark",
             ThemeKind::SoftLight => "softLight",
+            ThemeKind::ArkuiLight => "arkuiLight",
+            ThemeKind::ArkuiDark => "arkuiDark",
         }
     }
     /// Photoshop-grammar layout (tab strips, flat panels): the four Pro brightness levels.
@@ -139,6 +151,10 @@ impl ThemeKind {
             "breezedark" | "kdedark" | "plasmadark" => Some(ThemeKind::BreezeDark),
             "softdark" => Some(ThemeKind::SoftDark),
             "softlight" => Some(ThemeKind::SoftLight),
+            "arkuilight" | "arkui" | "harmony" | "harmonyos" | "harmonyoslight" | "ohos" | "ohoslight" => {
+                Some(ThemeKind::ArkuiLight)
+            }
+            "arkuidark" | "harmonydark" | "harmonyosdark" | "ohosdark" => Some(ThemeKind::ArkuiDark),
             _ => None,
         }
     }
@@ -630,6 +646,92 @@ impl Tokens {
                 caption_close_text: Color32::WHITE,
                 scrim: Color32::from_black_alpha(110),
             },
+
+            // HarmonyOS ArkUI light system colours mapped into the Breeze / Studio token slots:
+            // background chrome, sub_background canvas/dock, emphasize blue accent.
+            ThemeKind::ArkuiLight => Tokens {
+                kind,
+                chrome: Color32::from_rgb(255, 255, 255),
+                canvas: Color32::from_rgb(241, 243, 245),
+                canvas_dot: Color32::from_rgb(241, 243, 245),
+                dock: Color32::from_rgb(241, 243, 245),
+                card: Color32::from_rgb(255, 255, 255),
+                card_border: Color32::from_rgb(229, 229, 229),
+                field: Color32::from_rgb(241, 243, 245),
+                field_border: Color32::from_rgb(214, 214, 214),
+                hover: Color32::from_rgb(232, 235, 240),
+                pressed: Color32::from_rgb(220, 225, 232),
+                text: Color32::from_rgb(0, 0, 0),
+                text_dim: Color32::from_rgb(92, 92, 92),
+                text_faint: Color32::from_rgb(138, 138, 138),
+                icon: Color32::from_rgb(26, 26, 26),
+                accent: Color32::from_rgb(10, 89, 247),
+                accent_soft: Color32::from_rgba_unmultiplied(10, 89, 247, 51),
+                accent_border: Color32::from_rgba_unmultiplied(10, 89, 247, 170),
+                accent_text: Color32::from_rgb(8, 75, 207),
+                separator: Color32::from_rgb(229, 229, 229),
+                shadow: Color32::from_black_alpha(45),
+                primary_bg: Color32::from_rgb(8, 75, 207),
+                primary_text: Color32::WHITE,
+                danger: Color32::from_rgb(232, 64, 38),
+                warning: Color32::from_rgb(237, 111, 33),
+                online: Color32::from_rgb(46, 184, 92),
+                radius_sm: 5.0,
+                radius: 5.0,
+                radius_lg: 6.0,
+                bevel: false,
+                pro: false,
+                round_chips: true,
+                tab_strip: Color32::TRANSPARENT,
+                row_selected: Color32::TRANSPARENT,
+                histogram_bg: Color32::from_rgb(0, 0, 0),
+                histogram_level: 240,
+                caption_close: Color32::from_rgb(232, 64, 38),
+                caption_close_text: Color32::WHITE,
+                scrim: Color32::from_black_alpha(110),
+            },
+            // HarmonyOS ArkUI dark system colours on the same Breeze / Studio layout.
+            ThemeKind::ArkuiDark => Tokens {
+                kind,
+                chrome: Color32::from_rgb(0, 0, 0),
+                canvas: Color32::from_rgb(0, 0, 0),
+                canvas_dot: Color32::from_rgb(0, 0, 0),
+                dock: Color32::from_rgb(20, 20, 20),
+                card: Color32::from_rgb(26, 26, 26),
+                card_border: Color32::from_rgb(42, 42, 42),
+                field: Color32::from_rgb(34, 34, 34),
+                field_border: Color32::from_rgb(58, 58, 58),
+                hover: Color32::from_rgb(42, 42, 42),
+                pressed: Color32::from_rgb(51, 51, 51),
+                text: Color32::WHITE,
+                text_dim: Color32::from_rgb(192, 192, 192),
+                text_faint: Color32::from_rgb(140, 140, 140),
+                icon: Color32::from_rgb(229, 229, 229),
+                accent: Color32::from_rgb(49, 122, 247),
+                accent_soft: Color32::from_rgba_unmultiplied(49, 122, 247, 64),
+                accent_border: Color32::from_rgba_unmultiplied(49, 122, 247, 160),
+                accent_text: Color32::from_rgb(122, 176, 255),
+                separator: Color32::from_rgb(34, 34, 34),
+                shadow: Color32::from_black_alpha(150),
+                primary_bg: Color32::from_rgb(31, 113, 255),
+                primary_text: Color32::WHITE,
+                danger: Color32::from_rgb(217, 72, 56),
+                warning: Color32::from_rgb(219, 107, 66),
+                online: Color32::from_rgb(80, 190, 125),
+                radius_sm: 5.0,
+                radius: 5.0,
+                radius_lg: 6.0,
+                bevel: false,
+                pro: false,
+                round_chips: true,
+                tab_strip: Color32::TRANSPARENT,
+                row_selected: Color32::TRANSPARENT,
+                histogram_bg: Color32::from_rgb(0, 0, 0),
+                histogram_level: 225,
+                caption_close: Color32::from_rgb(217, 72, 56),
+                caption_close_text: Color32::WHITE,
+                scrim: Color32::from_black_alpha(110),
+            },
             // Soft Dark: our own low-contrast palette on the Studio layout. Muted violet-grey
             // surfaces (never near-black), softened off-white text and a periwinkle accent; the
             // text colours still hold 4.5:1 on every surface (checked by the tests).
@@ -837,6 +939,7 @@ impl Tokens {
                 | ThemeKind::AdwaitaDark
                 | ThemeKind::BreezeDark
                 | ThemeKind::SoftDark
+                | ThemeKind::ArkuiDark
         )
     }
 }
@@ -1304,6 +1407,44 @@ mod tests {
             assert!(contrast(t.primary_text, t.primary_bg) >= 3.0, "{kind:?}: suggested-action button label");
         }
         assert_eq!(ThemeKind::from_name("gnome dark"), Some(ThemeKind::AdwaitaDark));
+    }
+
+    #[test]
+    fn arkui_themes_parse_and_use_breeze_layout() {
+        for (kind, aliases, accent, chrome) in [
+            (
+                ThemeKind::ArkuiLight,
+                ["arkui", "ArkUI Light", "arkui_light", "harmonyos", "ohos"],
+                Color32::from_rgb(10, 89, 247),
+                Color32::WHITE,
+            ),
+            (
+                ThemeKind::ArkuiDark,
+                ["arkui dark", "ArkUI Dark", "arkui_dark", "harmonyos dark", "ohos-dark"],
+                Color32::from_rgb(49, 122, 247),
+                Color32::BLACK,
+            ),
+        ] {
+            assert_eq!(ThemeKind::from_name(kind.id()), Some(kind));
+            assert_eq!(ThemeKind::from_name(kind.label()), Some(kind));
+            for alias in aliases {
+                assert_eq!(ThemeKind::from_name(alias), Some(kind), "{alias}");
+            }
+            assert!(ThemeKind::ALL.contains(&kind));
+            let t = Tokens::for_kind(kind);
+            assert_eq!(t.kind, kind);
+            assert_eq!(t.dark(), kind == ThemeKind::ArkuiDark);
+            assert!(!t.pro && !t.bevel && t.round_chips, "{kind:?} uses the Breeze/Studio layout");
+            assert_eq!(t.tab_strip, Color32::TRANSPARENT);
+            assert_eq!(t.row_selected, Color32::TRANSPARENT);
+            assert_eq!(t.accent, accent);
+            assert_eq!(t.chrome, chrome);
+            assert!(contrast(t.text, t.card) >= 4.5, "{kind:?}: text on card");
+            assert!(contrast(t.text_dim, t.card) >= 3.0, "{kind:?}: dim text on card");
+            // ArkUI dark primary (#1F71FF) is a system brand blue; hold UI-component contrast (3:1).
+            assert!(contrast(t.primary_text, t.primary_bg) >= 3.0, "{kind:?}: primary label");
+            assert_eq!(kind.chrome_css(), if t.dark() { "#000000" } else { "#FFFFFF" });
+        }
     }
 
     #[test]
