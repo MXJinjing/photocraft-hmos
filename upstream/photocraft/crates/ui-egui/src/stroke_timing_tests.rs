@@ -187,7 +187,7 @@ fn the_pressure_curve_shapes_the_committed_stroke() {
 fn pressure_sized_brush(h: &mut Harness<'static, PhotocraftApp>) {
     let app = h.state_mut();
     app.run("layer.new.layer", json!({})).unwrap();
-    let brush = json!({"size": 40, "hardness": 1.0, "smoothing": {"amount": 0.0}, "shapeDynamics": {"enabled": true, "size": {"control": "penPressure"}}});
+    let brush = json!({"size": 40, "hardness": 1.0, "pressureSize": true, "smoothing": {"amount": 0.0}, "shapeDynamics": {"enabled": true, "size": {"control": "penPressure"}}});
     app.run("tools.setBrush", json!({ "brush": brush })).unwrap();
     h.run_steps(1);
 }
