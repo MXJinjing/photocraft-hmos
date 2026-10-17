@@ -13,10 +13,13 @@ controls (toolbar, panels, canvas, dialogs) stay inside the strips.
 1. `expandSafeArea([SYSTEM], [BOTTOM])` (commit `818d5de2`): drawing-only, does not change layout
    size. The white strip stayed and no inset was reported.
 2. `ignoreLayoutSafeArea` + `LayoutPolicy.matchParent` (commit `02b5dc65`, API 20): still no
-   avoidance, and the theme fill disappeared. Root cause not proven (no hilog). Suspects: the
-   matchParent root/Stack sizing, and Rust's guessed "overlap" staying 0. Either way the design
-   depended on ArkUI layout semantics and on Rust inferring geometry, which cannot be checked
-   without a device. It was dropped.
+   avoidance, and the theme fill disappeared. Dropped.
+3. Immersive window + `inset = system - alreadyAvoided` for **both** edges (commits through
+   `510487ef`): bottom worked on device (screenshot), top did not — menu icons overlapped the
+   status bar. Cause: `top = systemTop - contentTop` cancelled the status-bar inset whenever the
+   laid-out top was reported near the status-bar height (stale/misreported), while the surface
+   still painted underneath it. Fixed by using the full status-bar height for the top inset and
+   caching it before fullscreen.
 
 ## Current design (deterministic, documented API route)
 
@@ -27,21 +30,22 @@ official immersive-window guide describes. It is applied only where it is safe:
   layout (the page covers the whole window). Skipped on `2in1` (freeform windows and the integrated
   title bar are handled by `WindowChrome`); if the call fails, the flag `photocraftImmersive`
   stays false and the old avoided layout (no insets) remains.
+- `Immersive.ets`: before `setWindowLayoutFullScreen`, caches the status-bar height
+  (`TYPE_SYSTEM.topRect` / `TYPE_CUTOUT.topRect`) into `photocraftStatusBarPx`. Some devices report
+  a zero top avoid area after fullscreen; the cache is the fallback.
 - `NavigationInset.ets`: measures, in physical pixels,
-  - system area heights: top = `TYPE_SYSTEM.topRect` (status bar); bottom = the larger of
-    `TYPE_NAVIGATION_INDICATOR.bottomRect` and `TYPE_SYSTEM.bottomRect` (some devices report a
-    navigation bar under SYSTEM);
-  - what the layout already avoids: the editor surface's laid-out box from `onAreaChange`
-    against the window height. The keyboard (`KeyboardAvoidMode.RESIZE`) shrinks that box, so the
-    bottom inset becomes 0 while the keyboard is up; a non-immersive layout yields 0 as well;
-  - `inset = max(0, system area - already avoided)`, for top and bottom.
-  It listens to `avoidAreaChange` and `windowSizeChange`, re-reads at 250 ms / 1 s / 2.5 s (the
-  system may publish the bars after the first query), publishes only changes, and keeps the last
-  value if a query fails. Nothing is hard-coded. Before the first `onAreaChange` the immersive
-  page is assumed to fill the window, so the top inset exists from the first frame; the laid-out
-  box survives `start()`/`stop()` (a layout that arrived before the window query resolved used to
-  be wiped, which left both insets at 0 — a plausible cause of the "whole top overflows into the
-  status bar" report).
+  - **top** = live status-bar height (`max(TYPE_SYSTEM.top, TYPE_CUTOUT.top)`), falling back to the
+    pre-fullscreen cache when live is 0. **Never** subtracts the laid-out content top: a stale or
+    misreported `contentTop ≈ statusBarHeight` used to cancel the top inset while the surface still
+    painted under the status bar (device screenshot: menu icons overlapping the system clock /
+    Wi-Fi icons, while the bottom strip was already correct).
+  - **bottom** = the larger of `TYPE_NAVIGATION_INDICATOR.bottomRect` and `TYPE_SYSTEM.bottomRect`,
+    minus the gap the laid-out surface already leaves at the window bottom. Keyboard
+    (`KeyboardAvoidMode.RESIZE`) shrinks that surface and drives the bottom inset to 0.
+  It listens to `avoidAreaChange` and `windowSizeChange`, re-reads at 250 ms / 1 s / 2.5 s,
+  publishes only changes, and keeps the last value if a query fails. Before the first
+  `onAreaChange` the immersive page is assumed to fill the window so both insets exist from the
+  first frame; the laid-out box survives `start()`/`stop()`.
 - `Index.ets`: root `Stack` is `100% x 100%` with `backgroundColor(chrome)` (theme fill under
   everything). Sends `safe_inset` (`dx` top px, `dy` bottom px), resends on native `ready`.
   `setKeyboardAvoidMode(RESIZE)` is unchanged.
@@ -66,8 +70,9 @@ starts inside it.
   (`sysTop`, `sysBottom`, `navBottom`), window height, laid-out content box and resulting insets,
   plus `PhotoCraft bottom inset sent: top=… bottom=…`. `PhotoCraft immersive layout enabled` /
   `unavailable` shows whether the window accepted full-screen layout.
-- On-screen overlay: set `INSET_DEBUG = true` at the top of `pages/Index.ets` and rebuild; the same
-  line is drawn at the top-left. Default off.
+- On-screen overlay: `INSET_DEBUG` at the top of `pages/Index.ets` is currently **true** on this
+  experimental branch so the next device screenshot shows `sysTopUsed` / `insets=top/bottom`.
+  Flip it back to `false` once the status-bar inset is confirmed.
 
 ## Known risks
 

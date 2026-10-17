@@ -1,17 +1,16 @@
 import { window } from '@kit.ArkUI';
 import { BusinessError } from '@kit.BasicServicesKit';
+import { STATUS_BAR_PX_KEY, readStatusBarPx } from './Immersive';
 
 // With the window in immersive layout (Immersive.ets) the page covers the status bar and the
 // navigation-indicator strip. This watches the window and decides, in physical pixels, how much of
-// the top and bottom of the editor surface those system areas really cover:
+// the top and bottom of the editor surface those system areas really cover.
 //
-//   system area height  = avoid area from getWindowAvoidArea (status bar on top; navigation
-//                         indicator / navigation bar on the bottom, taking the larger of the
-//                         NAVIGATION_INDICATOR and SYSTEM reports)
-//   already avoided     = distance between the surface and the window edge, measured from the
-//                         laid-out XComponent (this is what the on-screen keyboard shrinks under
-//                         KeyboardAvoidMode.RESIZE, and what a non-immersive layout leaves free)
-//   inset               = max(0, system area height - already avoided)
+// Top (status bar): always the full system-area height while immersive. Never subtract the
+// laid-out content top — a stale or misreported top used to cancel the inset while the surface
+// still painted underneath the status bar (see device screenshot with overlapping menu icons).
+// Bottom (navigation indicator): system area minus the gap the layout already leaves at the
+// window bottom (keyboard RESIZE shrinks the surface and drives this to 0).
 //
 // The native editor receives only the final insets. Nothing is guessed on the Rust side.
 
@@ -26,7 +25,8 @@ export class SafeInsets {
 
 export function insetsFor(systemTop: number, systemBottom: number, windowHeight: number,
   contentTop: number, contentHeight: number): SafeInsets {
-  let top: number = systemTop > 0 ? Math.max(0, systemTop - Math.max(0, contentTop)) : 0;
+  // Immersive surface covers the status bar: use the full height. contentTop is ignored on purpose.
+  let top: number = systemTop > 0 ? systemTop : 0;
   let bottom: number = 0;
   if (systemBottom > 0) {
     // Unknown window height: the surface cannot be compared, so assume it reaches the edge.
@@ -85,6 +85,8 @@ export class NavigationIndicatorInset {
   }
 
   // Top edge and layout height of the editor surface, physical pixels in window coordinates.
+  // Only the bottom gap (windowHeight - top - height) is used; the top edge never cancels the
+  // status-bar inset.
   setContentBounds(topPx: number, heightPx: number): void {
     this.contentTop = finiteOrZero(topPx);
     this.contentHeight = finiteOrZero(heightPx);
@@ -127,6 +129,14 @@ export class NavigationIndicatorInset {
     this.settles = [];
   }
 
+  private systemTopPx(win: window.Window): number {
+    // Live avoid areas first; fall back to the pre-fullscreen cache when the system reports 0.
+    let live: number = readStatusBarPx(win);
+    if (live > 0) { return live; }
+    let cached = AppStorage.get<number>(STATUS_BAR_PX_KEY);
+    return finiteOrZero(cached ?? 0);
+  }
+
   private read(win: window.Window): SafeInsets | undefined {
     if (!this.immersive) {
       this.report(`immersive=false insets=0/0`);
@@ -135,19 +145,21 @@ export class NavigationIndicatorInset {
     try {
       let system = win.getWindowAvoidArea(window.AvoidAreaType.TYPE_SYSTEM);
       let nav = win.getWindowAvoidArea(window.AvoidAreaType.TYPE_NAVIGATION_INDICATOR);
-      let systemTop: number = finiteOrZero(system.topRect.height);
+      let systemTop: number = this.systemTopPx(win);
       let systemBottom: number = Math.max(finiteOrZero(nav.bottomRect.height), finiteOrZero(system.bottomRect.height));
       let windowHeight: number = 0;
       try { windowHeight = finiteOrZero(win.getWindowProperties().windowRect.height); }
       catch (error) { console.info('Window height unavailable'); }
-      // Before the first layout report the immersive page is assumed to fill the window, so the
-      // top inset exists from the very first frame instead of waiting for onAreaChange.
+      // Before the first layout report the immersive page is assumed to fill the window, so both
+      // insets exist from the very first frame instead of waiting for onAreaChange.
       let insets = this.laidOut ?
         insetsFor(systemTop, systemBottom, windowHeight, this.contentTop, this.contentHeight) :
         new SafeInsets(systemTop, systemBottom);
-      this.report(`immersive=true avoid(sysTop=${systemTop} sysBottom=${finiteOrZero(system.bottomRect.height)} ` +
+      this.report(`immersive=true avoid(sysTopLive=${finiteOrZero(system.topRect.height)} ` +
+        `sysTopUsed=${systemTop} sysBottom=${finiteOrZero(system.bottomRect.height)} ` +
         `navBottom=${finiteOrZero(nav.bottomRect.height)}) window=${windowHeight} ` +
-        `content(laidOut=${this.laidOut} top=${this.contentTop} h=${this.contentHeight}) insets=${insets.top}/${insets.bottom}`);
+        `content(laidOut=${this.laidOut} top=${this.contentTop} h=${this.contentHeight}) ` +
+        `insets=${insets.top}/${insets.bottom}`);
       return insets;
     } catch (error) {
       // A transient failure must neither invent nor erase an inset: keep what native already has.

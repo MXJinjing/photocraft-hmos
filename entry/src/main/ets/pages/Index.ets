@@ -26,7 +26,8 @@ import { configureDisplayColor } from '../DisplayColor';
 import { SYSTEM_THEME_DARK, SYSTEM_THEME_LIGHT } from '../SystemTheme';
 
 // Set to true and rebuild to show the measured safe-area numbers on screen (also in hilog).
-const INSET_DEBUG: boolean = false;
+// Temporary: leave on until the status-bar inset is confirmed on device; then flip back to false.
+const INSET_DEBUG: boolean = true;
 
 class NativeConfig {
   files: string;
