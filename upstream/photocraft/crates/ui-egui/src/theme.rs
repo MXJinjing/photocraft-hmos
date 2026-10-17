@@ -652,8 +652,9 @@ impl Tokens {
             ThemeKind::ArkuiLight => Tokens {
                 kind,
                 chrome: Color32::from_rgb(255, 255, 255),
-                canvas: Color32::from_rgb(241, 243, 245),
-                canvas_dot: Color32::from_rgb(241, 243, 245),
+                // Recessed from white chrome; dots darker like Studio Light so the grid reads.
+                canvas: Color32::from_rgb(232, 235, 239),
+                canvas_dot: Color32::from_rgb(206, 211, 217),
                 dock: Color32::from_rgb(241, 243, 245),
                 card: Color32::from_rgb(255, 255, 255),
                 card_border: Color32::from_rgb(229, 229, 229),
@@ -684,7 +685,7 @@ impl Tokens {
                 round_chips: true,
                 tab_strip: Color32::TRANSPARENT,
                 row_selected: Color32::TRANSPARENT,
-                histogram_bg: Color32::from_rgb(0, 0, 0),
+                histogram_bg: Color32::from_rgb(232, 235, 239),
                 histogram_level: 240,
                 caption_close: Color32::from_rgb(232, 64, 38),
                 caption_close_text: Color32::WHITE,
@@ -694,8 +695,9 @@ impl Tokens {
             ThemeKind::ArkuiDark => Tokens {
                 kind,
                 chrome: Color32::from_rgb(0, 0, 0),
-                canvas: Color32::from_rgb(0, 0, 0),
-                canvas_dot: Color32::from_rgb(0, 0, 0),
+                // Lifted off pure-black chrome; lighter dots like Studio Dark for the coordinate grid.
+                canvas: Color32::from_rgb(12, 12, 14),
+                canvas_dot: Color32::from_rgb(44, 44, 48),
                 dock: Color32::from_rgb(20, 20, 20),
                 card: Color32::from_rgb(26, 26, 26),
                 card_border: Color32::from_rgb(42, 42, 42),
@@ -726,7 +728,7 @@ impl Tokens {
                 round_chips: true,
                 tab_strip: Color32::TRANSPARENT,
                 row_selected: Color32::TRANSPARENT,
-                histogram_bg: Color32::from_rgb(0, 0, 0),
+                histogram_bg: Color32::from_rgb(12, 12, 14),
                 histogram_level: 225,
                 caption_close: Color32::from_rgb(217, 72, 56),
                 caption_close_text: Color32::WHITE,
@@ -1439,6 +1441,8 @@ mod tests {
             assert_eq!(t.row_selected, Color32::TRANSPARENT);
             assert_eq!(t.accent, accent);
             assert_eq!(t.chrome, chrome);
+            assert_ne!(t.canvas, t.chrome, "{kind:?}: canvas must separate from chrome");
+            assert_ne!(t.canvas_dot, t.canvas, "{kind:?}: Studio-style canvas dots");
             assert!(contrast(t.text, t.card) >= 4.5, "{kind:?}: text on card");
             assert!(contrast(t.text_dim, t.card) >= 3.0, "{kind:?}: dim text on card");
             // ArkUI dark primary (#1F71FF) is a system brand blue; hold UI-component contrast (3:1).
