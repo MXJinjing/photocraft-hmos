@@ -96,11 +96,12 @@ fn layout_stays_above_the_inset_and_the_host_fills_the_strip() {
     back.drop_without_applying_deltas();
 }
 
-fn indicator(height: f32, window_height: f32, surface_top: f32) -> Indicator {
+fn indicator(height: f32, window_height: f32, surface_top: f32, layout_height: f32) -> Indicator {
     Indicator {
         height,
         window_height,
         surface_top,
+        layout_height,
     }
 }
 
@@ -108,29 +109,42 @@ fn indicator(height: f32, window_height: f32, surface_top: f32) -> Indicator {
 fn overlap_is_the_part_of_the_indicator_the_surface_covers() {
     // 2000 px tall window, 60 px indicator, surface from the top of the page.
     // Extended under the indicator: surface fills the window.
-    assert_eq!(indicator(60.0, 2000.0, 0.0).overlap(2000.0), 60.0);
+    assert_eq!(indicator(60.0, 2000.0, 0.0, 0.0).overlap(2000.0), 60.0);
     // Not extended: the surface stops where the indicator starts.
-    assert_eq!(indicator(60.0, 2000.0, 0.0).overlap(1940.0), 0.0);
+    assert_eq!(indicator(60.0, 2000.0, 0.0, 0.0).overlap(1940.0), 0.0);
     // Partly covered, for instance while the layout settles.
-    assert_eq!(indicator(60.0, 2000.0, 0.0).overlap(1970.0), 30.0);
+    assert_eq!(indicator(60.0, 2000.0, 0.0, 0.0).overlap(1970.0), 30.0);
     // A page header above the surface shifts it down but the bottom edge decides.
-    assert_eq!(indicator(60.0, 2000.0, 100.0).overlap(1840.0), 0.0);
-    assert_eq!(indicator(60.0, 2000.0, 100.0).overlap(1960.0), 60.0);
+    assert_eq!(indicator(60.0, 2000.0, 100.0, 0.0).overlap(1840.0), 0.0);
+    assert_eq!(indicator(60.0, 2000.0, 100.0, 0.0).overlap(1960.0), 60.0);
     // Keyboard RESIZE shrinks the surface well above the indicator.
-    assert_eq!(indicator(60.0, 2000.0, 0.0).overlap(1200.0), 0.0);
+    assert_eq!(indicator(60.0, 2000.0, 0.0, 0.0).overlap(1200.0), 0.0);
     // The surface cannot cover more than the indicator itself.
-    assert_eq!(indicator(60.0, 2000.0, 0.0).overlap(2400.0), 60.0);
+    assert_eq!(indicator(60.0, 2000.0, 0.0, 0.0).overlap(2400.0), 60.0);
+}
+
+#[test]
+fn overlap_prefers_the_taller_of_surface_and_layout_height() {
+    // Layout already grew under the indicator while the NativeWindow is still short.
+    assert_eq!(indicator(60.0, 2000.0, 0.0, 2000.0).overlap(1940.0), 60.0);
+    // Surface already grew; layout height not yet reported.
+    assert_eq!(indicator(60.0, 2000.0, 0.0, 0.0).overlap(2000.0), 60.0);
+    // Both short: still no inset (expandSafeArea-only failure mode).
+    assert_eq!(indicator(60.0, 2000.0, 0.0, 1940.0).overlap(1940.0), 0.0);
 }
 
 #[test]
 fn overlap_is_zero_without_indicator_or_with_bad_geometry() {
     // Floating or split-screen windows report no indicator.
     assert_eq!(Indicator::default().overlap(2000.0), 0.0);
-    assert_eq!(indicator(0.0, 2000.0, 0.0).overlap(2000.0), 0.0);
+    assert_eq!(indicator(0.0, 2000.0, 0.0, 0.0).overlap(2000.0), 0.0);
     // Window height unknown (query failed): never invent an inset.
-    assert_eq!(indicator(60.0, 0.0, 0.0).overlap(2000.0), 0.0);
-    assert_eq!(indicator(60.0, 2000.0, 0.0).overlap(0.0), 0.0);
-    assert_eq!(indicator(f32::NAN, 2000.0, 0.0).overlap(2000.0), 0.0);
-    assert_eq!(indicator(60.0, 2000.0, f32::INFINITY).overlap(2000.0), 0.0);
-    assert_eq!(indicator(-60.0, 2000.0, 0.0).overlap(2000.0), 0.0);
+    assert_eq!(indicator(60.0, 0.0, 0.0, 0.0).overlap(2000.0), 0.0);
+    assert_eq!(indicator(60.0, 2000.0, 0.0, 0.0).overlap(0.0), 0.0);
+    assert_eq!(indicator(f32::NAN, 2000.0, 0.0, 0.0).overlap(2000.0), 0.0);
+    assert_eq!(
+        indicator(60.0, 2000.0, f32::INFINITY, 0.0).overlap(2000.0),
+        0.0
+    );
+    assert_eq!(indicator(-60.0, 2000.0, 0.0, 0.0).overlap(2000.0), 0.0);
 }

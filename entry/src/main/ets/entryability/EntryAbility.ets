@@ -73,7 +73,7 @@ export default class EntryAbility extends UIAbility {
         return;
       }
       // The page does not draw into the status-bar avoid area, and extends under the navigation
-      // indicator only through Index's bottom expandSafeArea. Colour both from the window, then
+      // indicator through Index's bottom ignoreLayoutSafeArea. Colour both from the window, then
       // let the page replace this with the theme chrome.
       try {
         let win = windowStage.getMainWindowSync();

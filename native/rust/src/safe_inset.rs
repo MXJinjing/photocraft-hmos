@@ -1,13 +1,13 @@
 //! Bottom system-gesture inset (HarmonyOS navigation indicator).
 //!
-//! The ArkTS page lets the XComponent extend underneath the navigation indicator and reports the
-//! window geometry in **physical pixels** (`bottom_inset` input: `dy` indicator height, `dx` window
-//! height, `y` top of the surface in the window). The worker compares it with the real surface
-//! height, so an inset exists only while the surface truly reaches under the indicator. egui lays
-//! out in points, so the host converts with the same `native scale * zoom` as the title-bar
-//! geometry and hands the result to egui as `RawInput::safe_area_insets`. Panels, windows and
-//! modals then stay above the strip, while the host paints the strip itself so the surface reaches
-//! the screen edge.
+//! The ArkTS page grows the XComponent under the navigation indicator with
+//! `ignoreLayoutSafeArea` + `LayoutPolicy.matchParent` (API 20) and reports the window geometry in
+//! **physical pixels** (`bottom_inset` input: `dy` indicator height, `dx` window height, `y` top of
+//! the surface, `x` layout height). The worker compares them with the real surface height, so an
+//! inset exists only while the surface truly reaches under the indicator. egui lays out in points,
+//! so the host converts with the same `native scale * zoom` as the title-bar geometry and hands the
+//! result to egui as `RawInput::safe_area_insets`. Panels, windows and modals then stay above the
+//! strip, while the host paints the strip itself so the surface reaches the screen edge.
 //!
 //! Only the host layer is involved: the upstream editor is not modified.
 
@@ -27,26 +27,28 @@ pub struct Indicator {
     pub window_height: f32,
     /// Top edge of the editor surface in window coordinates.
     pub surface_top: f32,
+    /// Layout height from `onAreaChange` (includes the bottom extension once layout grows).
+    pub layout_height: f32,
 }
 
 impl Indicator {
     /// Pixels of the indicator strip that a surface of `surface_height` actually covers.
+    ///
+    /// Uses the taller of the native surface and the ArkTS layout height: layout often updates
+    /// one frame before the NativeWindow resize callback, and either one alone can under-report
+    /// while the other has already grown under the indicator.
     pub fn overlap(&self, surface_height: f32) -> f32 {
-        let values = [
-            self.height,
-            self.window_height,
-            self.surface_top,
-            surface_height,
-        ];
+        let tallest = surface_height.max(self.layout_height);
+        let values = [self.height, self.window_height, self.surface_top, tallest];
         if values.iter().any(|v| !v.is_finite() || *v < 0.0)
             || self.height <= 0.0
             || self.window_height <= 0.0
-            || surface_height <= 0.0
+            || tallest <= 0.0
         {
             return 0.0;
         }
         let indicator_top = self.window_height - self.height;
-        let surface_bottom = self.surface_top + surface_height;
+        let surface_bottom = self.surface_top + tallest;
         (surface_bottom - indicator_top).clamp(0.0, self.height)
     }
 }

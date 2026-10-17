@@ -182,15 +182,17 @@ struct Index {
     });
   }
   private sendBottomInset(geometry: NavigationGeometry): void {
-    // 协议统一使用物理像素：dy=导航条高度，dx=窗口高度，y=编辑器表面顶边。
-    // 是否真有遮挡由 Rust 用实际表面尺寸判断（悬浮窗、分屏、键盘 RESIZE 时为 0）。
+    // 协议统一使用物理像素：dy=导航条高度，dx=窗口高度，y=表面顶边，x=布局高度（含延伸）。
+    // 是否真有遮挡由 Rust 用布局高度与表面尺寸共同判断（悬浮窗、分屏、键盘 RESIZE 时为 0）。
     if (!this.alive || !this.initialized) { return; }
     let input = new NativeInput();
     input.kind = 'bottom_inset';
     input.dy = geometry.indicator;
     input.dx = geometry.windowHeight;
     input.y = geometry.contentTop;
+    input.x = geometry.contentHeight;
     native.input(JSON.stringify(input));
+    console.info(`PhotoCraft bottom inset: indicator=${geometry.indicator} window=${geometry.windowHeight} top=${geometry.contentTop} layout=${geometry.contentHeight}`);
   }
   onBackPress(): boolean {
     let input = new NativeInput(); input.kind = 'key'; input.code = 2070;
@@ -379,14 +381,17 @@ struct Index {
     Stack() {
       if (this.initialized) {
       XComponent({ id: 'photocraft-native', type: XComponentType.SURFACE, libraryname: 'photocraft' })
-        .width('100%').height('100%')
-        .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
+        // LayoutPolicy.matchParent is required: ignoreLayoutSafeArea alone only shifts fixed sizes.
+        .width(LayoutPolicy.matchParent).height(LayoutPolicy.matchParent)
+        .ignoreLayoutSafeArea([LayoutSafeAreaType.SYSTEM], [LayoutSafeAreaEdge.BOTTOM])
         .onLoad(() => { this.restoreEditorFocus(); })
         .onAreaChange((_oldArea: Area, area: Area): void => {
           this.editorOriginX = Number(area.globalPosition.x);
           this.editorOriginY = Number(area.globalPosition.y);
-          // 顶边不受向下延伸影响；表面底边由 Rust 按真实表面高度计算。
-          this.bottomInset.setContentTop(this.getUIContext().vp2px(this.editorOriginY));
+          // Layout size now includes the bottom indicator; Rust derives the overlap from it.
+          this.bottomInset.setContentBounds(
+            this.getUIContext().vp2px(this.editorOriginY),
+            this.getUIContext().vp2px(Number(area.height)));
           this.ime.setOrigin(this.getUIContext().vp2px(this.editorOriginX),
             this.getUIContext().vp2px(this.editorOriginY));
         })
@@ -420,8 +425,10 @@ struct Index {
           }
         }.padding(24).backgroundColor('#DD262626').borderRadius(8).width('80%')
       }
-    }.width('100%').height('100%').backgroundColor(this.chrome)
-    // 仅向下延伸到导航条（小横条）后面；状态栏仍由系统布局避让，键盘避让（RESIZE）不受影响。
-    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
+    }.width(LayoutPolicy.matchParent).height(LayoutPolicy.matchParent).backgroundColor(this.chrome)
+    // 布局延伸到导航条（小横条）后面；状态栏仍由系统布局避让，键盘避让（RESIZE）不受影响。
+    // Drawing-only safe-area expansion left the XComponent surface short; ignoreLayoutSafeArea
+    // with LayoutPolicy.matchParent grows layout size (API 20+, matches targetSdk 6.0.0(20)).
+    .ignoreLayoutSafeArea([LayoutSafeAreaType.SYSTEM], [LayoutSafeAreaEdge.BOTTOM])
   }
 }

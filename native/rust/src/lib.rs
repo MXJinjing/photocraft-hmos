@@ -633,6 +633,7 @@ fn worker(config: Config, rx: mpsc::Receiver<Message>) {
                                 height: value.dy,
                                 window_height: value.dx,
                                 surface_top: value.y,
+                                layout_height: value.x,
                             };
                             if next != indicator {
                                 indicator = next;

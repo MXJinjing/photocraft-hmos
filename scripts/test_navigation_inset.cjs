@@ -44,13 +44,13 @@ function scenario(options = {}) {
 // Reports pixels, rounds, and publishes only changes.
 {
   const s = scenario();
-  s.inset.setContentTop(0);
+  s.inset.setContentBounds(0, 0);
   assert.equal(s.published.length, 0, 'nothing before the window is known');
   s.inset.start(s.win);
-  assert.deepEqual(s.published, [{ indicator: 60, windowHeight: 2000, contentTop: 0 }]);
-  s.inset.setContentTop(0);
-  s.inset.setContentTop(100.4);
-  assert.deepEqual(s.published.at(-1), { indicator: 60, windowHeight: 2000, contentTop: 100 });
+  assert.deepEqual(s.published, [{ indicator: 60, windowHeight: 2000, contentTop: 0, contentHeight: 0 }]);
+  s.inset.setContentBounds(0, 0);
+  s.inset.setContentBounds(100.4, 1940.6);
+  assert.deepEqual(s.published.at(-1), { indicator: 60, windowHeight: 2000, contentTop: 100, contentHeight: 1941 });
   assert.equal(s.published.length, 2, 'unchanged geometry is not re-sent');
 }
 
@@ -63,10 +63,10 @@ function scenario(options = {}) {
   s.listeners.get('avoidAreaChange')({ type: AvoidAreaType.TYPE_SYSTEM });
   assert.equal(s.published.length, before, 'status-bar changes do not matter');
   s.listeners.get('avoidAreaChange')({ type: AvoidAreaType.TYPE_NAVIGATION_INDICATOR });
-  assert.deepEqual(s.published.at(-1), { indicator: 0, windowHeight: 0, contentTop: 0 }, 'floating / split: no indicator');
+  assert.deepEqual(s.published.at(-1), { indicator: 0, windowHeight: 0, contentTop: 0, contentHeight: 0 }, 'floating / split: no indicator');
   s.state.indicator = 48; s.state.height = 1500;
   s.listeners.get('windowSizeChange')({ width: 1000, height: 1500 });
-  assert.deepEqual(s.published.at(-1), { indicator: 48, windowHeight: 1500, contentTop: 0 });
+  assert.deepEqual(s.published.at(-1), { indicator: 48, windowHeight: 1500, contentTop: 0, contentHeight: 0 });
   // A late transaction is picked up by the settle timer without another event.
   s.state.height = 1600;
   s.flush();
@@ -87,7 +87,7 @@ function scenario(options = {}) {
   s.inset.stop();
   assert.equal(s.listeners.size, 0);
   assert.equal(s.timers.size, 0);
-  s.inset.setContentTop(10);
+  s.inset.setContentBounds(10, 100);
   assert.equal(s.published.length, count + 1, 'stopped watcher is silent');
 }
 
@@ -96,5 +96,14 @@ function scenario(options = {}) {
   const s = scenario({ listenFails: true });
   s.inset.start(s.win);
   assert.equal(s.published.length, 1);
+}
+
+// Index.ets must use ignoreLayoutSafeArea + LayoutPolicy.matchParent, not expandSafeArea alone.
+{
+  const page = fs.readFileSync(path.resolve(__dirname, '../entry/src/main/ets/pages/Index.ets'), 'utf8');
+  assert.match(page, /ignoreLayoutSafeArea\(\[LayoutSafeAreaType\.SYSTEM\],\s*\[LayoutSafeAreaEdge\.BOTTOM\]\)/);
+  assert.match(page, /LayoutPolicy\.matchParent/);
+  assert.doesNotMatch(page, /\.expandSafeArea\s*\(/);
+  assert.match(page, /PhotoCraft bottom inset:/);
 }
 console.log('navigation inset: ok');

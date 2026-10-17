@@ -2,11 +2,12 @@ import { window } from '@kit.ArkUI';
 import { BusinessError } from '@kit.BasicServicesKit';
 
 // Page content extends under the navigation indicator (the small bar at the bottom of the screen)
-// through `expandSafeArea`. This watches the window and reports the geometry the native editor
-// needs, in physical pixels: the indicator height, the window height and where the editor
-// surface starts. Rust compares them with the real surface size, so an inset exists only while the
-// surface really reaches under the indicator (not in floating / split windows, not when the
-// keyboard has shrunk the page, and not if the platform declined to extend the component).
+// through `ignoreLayoutSafeArea` + `LayoutPolicy.matchParent`. This watches the window and reports
+// the geometry the native editor needs, in physical pixels: the indicator height, the window
+// height, and where the editor surface sits after layout. Rust compares them with the real surface
+// size, so an inset exists only while the surface really reaches under the indicator (not in
+// floating / split windows, not when the keyboard has shrunk the page, and not if the platform
+// declined to extend the component).
 
 export class NavigationGeometry {
   // Height of the navigation indicator avoid area; 0 when the window does not touch it.
@@ -15,12 +16,19 @@ export class NavigationGeometry {
   windowHeight: number = 0;
   // Top edge of the editor surface in window coordinates.
   contentTop: number = 0;
-  constructor(indicator: number, windowHeight: number, contentTop: number) {
-    this.indicator = indicator; this.windowHeight = windowHeight; this.contentTop = contentTop;
+  // Layout height of the editor surface (includes the bottom extension once ignoreLayoutSafeArea
+  // takes effect). 0 until the first onAreaChange.
+  contentHeight: number = 0;
+  constructor(indicator: number, windowHeight: number, contentTop: number, contentHeight: number = 0) {
+    this.indicator = indicator;
+    this.windowHeight = windowHeight;
+    this.contentTop = contentTop;
+    this.contentHeight = contentHeight;
   }
   equals(other: NavigationGeometry | undefined): boolean {
     return other !== undefined && other.indicator === this.indicator &&
-      other.windowHeight === this.windowHeight && other.contentTop === this.contentTop;
+      other.windowHeight === this.windowHeight && other.contentTop === this.contentTop &&
+      other.contentHeight === this.contentHeight;
   }
 }
 
@@ -35,6 +43,7 @@ function finiteOrZero(value: number): number {
 export class NavigationIndicatorInset {
   private win: window.Window | undefined = undefined;
   private contentTop: number = 0;
+  private contentHeight: number = 0;
   private sent: NavigationGeometry | undefined = undefined;
   private settle: number = -1;
   private publish: (geometry: NavigationGeometry) => void;
@@ -58,9 +67,10 @@ export class NavigationIndicatorInset {
     this.update();
   }
 
-  // Top edge of the editor surface, physical pixels in window coordinates.
-  setContentTop(px: number): void {
-    this.contentTop = finiteOrZero(px);
+  // Top edge and layout height of the editor surface, physical pixels in window coordinates.
+  setContentBounds(topPx: number, heightPx: number): void {
+    this.contentTop = finiteOrZero(topPx);
+    this.contentHeight = finiteOrZero(heightPx);
     this.update();
   }
 
@@ -94,9 +104,11 @@ export class NavigationIndicatorInset {
     try {
       let indicator: number = finiteOrZero(
         win.getWindowAvoidArea(window.AvoidAreaType.TYPE_NAVIGATION_INDICATOR).bottomRect.height);
-      if (indicator === 0) { return new NavigationGeometry(0, 0, 0); }
+      if (indicator === 0) {
+        return new NavigationGeometry(0, 0, 0, 0);
+      }
       let height: number = finiteOrZero(win.getWindowProperties().windowRect.height);
-      return new NavigationGeometry(indicator, height, this.contentTop);
+      return new NavigationGeometry(indicator, height, this.contentTop, this.contentHeight);
     } catch (error) {
       // A transient failure must neither invent nor erase an inset: keep what native already has.
       return undefined;
