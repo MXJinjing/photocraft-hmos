@@ -160,9 +160,9 @@ fn services(
         })),
         load_prefs: Some(Box::new(move || {
             std::fs::read_to_string(&load).ok().or_else(|| {
-                // First launch on HarmonyOS: ArkUI Light/Dark, following the system colour scheme.
+                // First launch on HarmonyOS: ArkUI Pro Light/Dark, following the system colour scheme.
                 Some(
-                    r#"{"interface":{"appearanceMode":"auto","lightTheme":"arkuiLight","darkTheme":"arkuiDark"}}"#
+                    r#"{"interface":{"appearanceMode":"auto","lightTheme":"arkuiProLight","darkTheme":"arkuiProDark"}}"#
                         .into(),
                 )
             })
