@@ -3152,3 +3152,7 @@ curves	Smooth	Haluskan
 	No pen connected	Tidak ada pena terhubung
 	Battery unavailable	Baterai tidak tersedia
 	Battery: {percent}%	Baterai: {percent}%
+
+# Window full screen (HarmonyOS host)
+	Enter Full Screen	Masuk layar penuh
+	Exit Full Screen	Keluar dari layar penuh

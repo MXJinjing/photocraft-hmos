@@ -3650,3 +3650,7 @@ curves	Smooth	Làm mượt
 	Current tool and Eraser	Công cụ hiện tại và Tẩy
 	Previous tool	Công cụ trước
 	Show or hide context menu	Hiện hoặc ẩn trình đơn ngữ cảnh
+
+# Window full screen (HarmonyOS host)
+	Enter Full Screen	Vào chế độ toàn màn hình
+	Exit Full Screen	Thoát chế độ toàn màn hình

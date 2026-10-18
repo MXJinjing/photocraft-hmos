@@ -3953,3 +3953,7 @@ layerLabel	No Color	Sem cor
 	No pen connected	Nenhuma caneta conectada
 	Battery unavailable	Bateria indisponível
 	Battery: {percent}%	Bateria: {percent}%
+
+# Window full screen (HarmonyOS host)
+	Enter Full Screen	Entrar em tela cheia
+	Exit Full Screen	Sair da tela cheia

@@ -24,6 +24,8 @@ mod drop_import;
 mod fault_injection;
 mod file_open;
 #[cfg(any(target_env = "ohos", test))]
+mod fullscreen;
+#[cfg(any(target_env = "ohos", test))]
 mod ime;
 mod input;
 #[cfg(any(target_env = "ohos", test))]
@@ -59,6 +61,9 @@ struct Config {
     display_p3: bool,
     #[serde(default, rename = "systemTheme")]
     system_theme: String,
+    /// ArkTS offers window full screen (false on 2in1, where WindowChrome owns the window).
+    #[serde(default)]
+    fullscreen: bool,
 }
 fn default_scale() -> f32 {
     1.
@@ -450,6 +455,12 @@ fn worker(config: Config, rx: mpsc::Receiver<Message>) {
         photocraft_engine::Session::new(),
         services(&config.files, documents.clone(), &appearance),
     );
+    let host_fullscreen = fullscreen::Fullscreen::default();
+    if config.fullscreen {
+        app.services.window_fullscreen = Some(host_fullscreen.service(|kind| {
+            bridge::notify(0, fullscreen::NOTIFY_KIND, kind, &[]);
+        }));
+    }
     // Native file opens and drag imports must decode off the render worker so the
     // editor keeps drawing the opening tab and its progress indicator.
     app.background_jobs = true;
@@ -618,6 +629,13 @@ fn worker(config: Config, rx: mpsc::Receiver<Message>) {
                                 drop_import::feedback(&app, &ctx, value.x, value.y, value.code)
                             {
                                 bridge::notify(0, "drop_target", &feedback, &[]);
+                            }
+                            return Ok(());
+                        }
+                        if value.kind == fullscreen::INPUT_KIND {
+                            if host_fullscreen.report(&value.text) {
+                                ctx.request_repaint();
+                                deadline = Some(Instant::now());
                             }
                             return Ok(());
                         }

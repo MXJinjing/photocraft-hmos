@@ -29,11 +29,14 @@ function load(name, dependencies) {
       '@kit.ArkUI': {}, '@kit.BasicServicesKit': {},
       '../SystemBars': { LOADING_CHROME: '#FF262626', paintWindow() {}, applySystemBars() {} },
       '../WindowChrome': { WindowChrome: class { start() {} stop() {} refresh() {} } },
+      '../SystemTheme': { publishSystemTheme() {}, systemThemeFromColorMode: () => 'dark' },
+      '../Fullscreen': { FullscreenSync: class { start() {} stop() {} reassert() {} } },
       '../input/NativeCursorAdapter': { restorePointerVisibility() {} },
       '../openInbox': { acceptOpenWant: want => calls.push(['open', want.uri]) },
       '../closeGuard': { resetCloseGuard() {}, requestWindowClose() {} },
     });
     const app = new EntryAbility();
+    app.context = { config: { colorMode: 0 } };
     app.onCreate({ parameters: { 'photocraft.dev': request } }, {});
     const pages = [];
     const stage = { on() {}, getMainWindowSync() { return {}; }, loadContent(page, cb) { pages.push(page); cb({ code: 0 }); } };

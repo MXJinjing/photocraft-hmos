@@ -3861,3 +3861,7 @@ curves	Smooth	Εξομάλυνση
 	No pen connected	Δεν έχει συνδεθεί γραφίδα
 	Battery unavailable	Η στάθμη μπαταρίας δεν είναι διαθέσιμη
 	Battery: {percent}%	Μπαταρία: {percent}%
+
+# Window full screen (HarmonyOS host)
+	Enter Full Screen	Είσοδος σε πλήρη οθόνη
+	Exit Full Screen	Έξοδος από πλήρη οθόνη

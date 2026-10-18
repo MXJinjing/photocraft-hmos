@@ -3338,3 +3338,7 @@ curves	Smooth	매끄럽게
 	No pen connected	연결된 펜 없음
 	Battery unavailable	배터리 정보 없음
 	Battery: {percent}%	배터리: {percent}%
+
+# Window full screen (HarmonyOS host)
+	Enter Full Screen	전체 화면 시작
+	Exit Full Screen	전체 화면 종료

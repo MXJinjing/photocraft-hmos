@@ -4126,3 +4126,7 @@ navigator	Zoom	Zoom
 	No pen connected	Nessuna penna connessa
 	Battery unavailable	Batteria non disponibile
 	Battery: {percent}%	Batteria: {percent}%
+
+# Window full screen (HarmonyOS host)
+	Enter Full Screen	Attiva schermo intero
+	Exit Full Screen	Esci da schermo intero

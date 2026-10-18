@@ -3161,3 +3161,7 @@ curves	Smooth	Glätten
 	No pen connected	Kein Stift verbunden
 	Battery unavailable	Akkustand nicht verfügbar
 	Battery: {percent}%	Akku: {percent}%
+
+# Window full screen (HarmonyOS host)
+	Enter Full Screen	Vollbild aktivieren
+	Exit Full Screen	Vollbild beenden

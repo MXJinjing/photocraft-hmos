@@ -3895,3 +3895,7 @@ cameraData	Lens	Lens
 	Current tool and Eraser	Geçerli araç ve Silgi
 	Previous tool	Önceki araç
 	Show or hide context menu	Bağlam menüsünü göster veya gizle
+
+# Window full screen (HarmonyOS host)
+	Enter Full Screen	Tam ekrana geç
+	Exit Full Screen	Tam ekrandan çık

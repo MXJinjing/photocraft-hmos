@@ -53,6 +53,7 @@ const { default: EntryAbility } = load('entryability/EntryAbility', {
   '../SystemBars': bars,
   '../SystemTheme': theme,
   '../WindowChrome': { WindowChrome: class { start() {} stop() {} refresh() {} } },
+  '../Fullscreen': { FullscreenSync: class { start() {} stop() {} reassert() {} } },
   '../input/NativeCursorAdapter': { restorePointerVisibility() {} },
   '../openInbox': { acceptOpenWant() {} },
   '../closeGuard': { resetCloseGuard() {}, requestWindowClose() {} }

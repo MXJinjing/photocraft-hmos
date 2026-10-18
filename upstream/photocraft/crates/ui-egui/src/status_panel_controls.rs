@@ -14,9 +14,21 @@ pub(crate) fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui, size: f32) -> Rec
     let gap = 4.0;
     let mut buttons = ui.new_child(UiBuilder::new().id_salt("panel-controls").max_rect(rect).layout(Layout::right_to_left(Align::Center)));
     buttons.spacing_mut().item_spacing.x = gap;
+    // Host full screen (HarmonyOS only): the far-right button, set apart from the two panel
+    // buttons by a wider gap and drawn as four corner arrows, unlike "Only show canvas".
+    if crate::window_fullscreen::available(app) {
+        let on = crate::window_fullscreen::active(app);
+        let label = crate::window_fullscreen::label(on);
+        let response = icons::button_with_icon_size(&mut buttons, crate::window_fullscreen::icon(on), size, 15.0, on, label);
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, buttons.is_enabled(), label));
+        if response.clicked() {
+            crate::window_fullscreen::toggle(app);
+        }
+        buttons.add_space(8.0);
+    }
     // Right-to-left layout places the canvas button immediately left of the sidebar button.
     for (icon, label, shortcut, command) in
-        [("panel-right", tl!("Right sidebar"), "Shift+Tab", "window.toggle.dock"), ("maximize-2", tl!("Only show canvas"), "Tab", "window.togglePanels")]
+        [("panel-right", tl!("Right sidebar"), "Shift+Tab", "window.toggle.dock"), ("canvas-only", tl!("Only show canvas"), "Tab", "window.togglePanels")]
     {
         let response = icons::button_with_icon_size(&mut buttons, icon, size, 14.0, false, &format!("{label} ({shortcut})"));
         response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, buttons.is_enabled(), label));

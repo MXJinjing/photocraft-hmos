@@ -3923,3 +3923,7 @@ curves	Smooth	Vloeiend maken
 	No pen connected	Geen pen verbonden
 	Battery unavailable	Batterijniveau niet beschikbaar
 	Battery: {percent}%	Batterij: {percent}%
+
+# Window full screen (HarmonyOS host)
+	Enter Full Screen	Volledig scherm inschakelen
+	Exit Full Screen	Volledig scherm verlaten
