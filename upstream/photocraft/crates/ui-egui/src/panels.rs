@@ -1063,7 +1063,7 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                                 if tool == Tool::Eraser {
                                     app.ui.tool_options.eraser_pressure_opacity = !pressure_opacity;
                                 } else {
-                                    b.pressure_opacity = !pressure_opacity;
+                                    b.set_opacity_uses_pen_pressure(!pressure_opacity);
                                 }
                             }
                         });
@@ -1088,7 +1088,7 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                             if tool == Tool::Eraser {
                                 app.ui.tool_options.eraser_pressure_size = !pressure_size;
                             } else {
-                                b.pressure_size = !pressure_size;
+                                b.set_size_uses_pen_pressure(!pressure_size);
                             }
                         }
                     }
@@ -1141,8 +1141,14 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                             widgets::toggle(ui, &mut app.ui.tool_options.eraser_pressure_size, tl!("Pressure for Size"));
                             widgets::toggle(ui, &mut app.ui.tool_options.eraser_pressure_opacity, tl!("Pressure for Opacity"));
                         } else {
-                            widgets::toggle(ui, &mut b.pressure_size, tl!("Pressure for Size"));
-                            widgets::toggle(ui, &mut b.pressure_opacity, tl!("Pressure for Opacity"));
+                            let mut size_on = b.pressure_size;
+                            if widgets::toggle(ui, &mut size_on, tl!("Pressure for Size")).changed() {
+                                b.set_size_uses_pen_pressure(size_on);
+                            }
+                            let mut opacity_on = b.pressure_opacity;
+                            if widgets::toggle(ui, &mut opacity_on, tl!("Pressure for Opacity")).changed() {
+                                b.set_opacity_uses_pen_pressure(opacity_on);
+                            }
                         }
                     }
                     Tool::MixerBrush => {

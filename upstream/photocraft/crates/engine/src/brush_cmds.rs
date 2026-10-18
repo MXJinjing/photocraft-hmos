@@ -908,6 +908,8 @@ pub(crate) fn set_brush(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(name) = p.get("preset").and_then(Value::as_str) {
         let preset = find_preset(s, name, cmd)?;
         b = preset.picked_over(&s.tools.brush);
+        // Older saves may keep Pen Pressure in dynamics without the options-bar flags.
+        b.sync_pressure_flags_from_dynamics();
         picked_color = preset.captures.color.then_some(preset.brush.color);
         picked = Some(name.to_string());
     }
