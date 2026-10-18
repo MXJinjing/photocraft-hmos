@@ -628,7 +628,24 @@ fn worker(config: Config, rx: mpsc::Receiver<Message>) {
                     Message::WinAttach(key, ptr, w, h) => {
                         // The native reference is owned from here on; dropping it unrefs.
                         let window = render::Window(ptr);
-                        if render.recovery.halted || !registry.borrow().knows(key) {
+                        if render.recovery.halted {
+                            bridge::notify(
+                                0,
+                                "diagnostic",
+                                &format!("Native sub-window {key} attach ignored (recovery halted)"),
+                                &[],
+                            );
+                            return Ok(());
+                        }
+                        if !registry.borrow().knows(key) {
+                            bridge::notify(
+                                0,
+                                "diagnostic",
+                                &format!(
+                                    "Native sub-window {key} attach ignored (unknown key; surface before open?)"
+                                ),
+                                &[],
+                            );
                             return Ok(());
                         }
                         let attached = std::panic::catch_unwind(std::panic::AssertUnwindSafe(

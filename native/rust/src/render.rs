@@ -283,7 +283,10 @@ impl GpuRender {
             .map_err(|e| e.to_string())?;
         let caps = surface.get_capabilities(&self.adapter);
         if !caps.formats.contains(&self.config.format) {
-            return Err("sub-window surface format differs from the main window".into());
+            return Err(format!(
+                "sub-window formats {:?} lack main format {:?}",
+                caps.formats, self.config.format
+            ));
         }
         // Same format/present mode as the root: one egui_wgpu renderer serves every surface.
         let mut config = self.config.clone();
@@ -291,6 +294,9 @@ impl GpuRender {
         config.height = h.max(1);
         surface.configure(&self.device, &config);
         declare_color(&window, self.color.p3)?;
+        // Clear once now: otherwise the XComponent stays pure black until the next
+        // root vsync paints egui shapes (and a missed/late first paint looks "broken").
+        let _ = Self::clear_present(&self.device, &self.queue, &surface, &config);
         self.children.insert(
             key,
             Child {
@@ -299,6 +305,58 @@ impl GpuRender {
                 config,
             },
         );
+        Ok(())
+    }
+
+    /// Present a solid clear with no egui geometry (first-frame / attach handshake).
+    fn clear_present(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        surface: &wgpu::Surface<'static>,
+        config: &wgpu::SurfaceConfiguration,
+    ) -> Result<(), String> {
+        let frame = match surface.get_current_texture() {
+            wgpu::CurrentSurfaceTexture::Success(f)
+            | wgpu::CurrentSurfaceTexture::Suboptimal(f) => f,
+            wgpu::CurrentSurfaceTexture::Outdated => {
+                return Err("sub-window clear-present outdated".into());
+            }
+            wgpu::CurrentSurfaceTexture::Lost => {
+                return Err("sub-window clear-present lost".into());
+            }
+            wgpu::CurrentSurfaceTexture::Timeout
+            | wgpu::CurrentSurfaceTexture::Occluded => {
+                return Err("sub-window clear-present not ready".into());
+            }
+            wgpu::CurrentSurfaceTexture::Validation => {
+                return Err("sub-window clear-present validation failed".into());
+            }
+        };
+        let view = frame.texture.create_view(&Default::default());
+        let mut encoder = device.create_command_encoder(&Default::default());
+        {
+            let _pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("PhotoCraft sub-window clear"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color {
+                            r: 0.15,
+                            g: 0.15,
+                            b: 0.15,
+                            a: 1.,
+                        }),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                ..Default::default()
+            });
+        }
+        let _ = config.width;
+        queue.submit(std::iter::once(encoder.finish()));
+        queue.present(frame);
         Ok(())
     }
 

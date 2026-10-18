@@ -80,3 +80,16 @@ registers the same callback set from `onLoad(context)` on the sub-window's XComp
 Document windows only (stylus BLE feed is global and works per window). Not wired per
 sub-window: IME composition, drag-and-drop import, pen-contact `host_input` hooks, cursor
 icon, per-display DPI (uses the main window's scale), window position restore.
+
+## Black content / maximize (device notes)
+
+* Sub-window XComponent must register with an explicit key (`registerWindow(context, key)`).
+  Relying only on parsing `pc-win-<N>` failed when `@LocalStorageProp` was still `0` on the
+  first build (`pc-win-0` → registration rejected → `SurfaceCreated` never bound → solid black).
+  `SubWindowHost` sets a sync pending key before `loadContent`; `SubWindow.aboutToAppear` reads it.
+* Maximize: `maximizeSupported: true` plus `setWindowTitleButtonVisible(true, true, true)`.
+  Ability declares `supportWindowMode: [fullscreen, split, floating]`. On status change to
+  `MAXIMIZE` / `FULL_SCREEN`, the host resizes the sub-window to the main window rect so the
+  XComponent surface tracks the chrome. System maximize can still be a no-op if the parent is
+  not free-floating; Rust may emit `{op:"maximize"}` to call the same `maximize`/`recover` path
+  as the main window.

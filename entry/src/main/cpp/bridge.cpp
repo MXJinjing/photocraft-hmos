@@ -132,12 +132,24 @@ void Json(const std::string& s) {
 void SurfaceCreated(OH_NativeXComponent* c,void* window) {
     auto* state=Enter(c);
     OH_LOG_Print(LOG_APP, LOG_INFO, 0xD001, "PhotoCraft", "Surface created window=%{public}u", state?state->key:0u);
-    if(!state)return;
+    if(!state) {
+        OH_LOG_Print(LOG_APP, LOG_ERROR, 0xD001, "PhotoCraft",
+            "SurfaceCreated with no WinState (registerWindow missing or too late)");
+        return;
+    }
     uint64_t w=0,h=0;
-    if(!window||OH_NativeXComponent_GetXComponentSize(c,window,&w,&h)!=OH_NATIVEXCOMPONENT_RESULT_SUCCESS)return;
+    if(!window||OH_NativeXComponent_GetXComponentSize(c,window,&w,&h)!=OH_NATIVEXCOMPONENT_RESULT_SUCCESS) {
+        OH_LOG_Print(LOG_APP, LOG_ERROR, 0xD001, "PhotoCraft",
+            "SurfaceCreated size failed window=%{public}u", state->key);
+        return;
+    }
     auto ref=OH_NativeWindow_NativeObjectReference(window);
-    OH_LOG_Print(LOG_APP, LOG_INFO, 0xD001, "PhotoCraft", "Window %{public}llu x %{public}llu reference %{public}d", static_cast<unsigned long long>(w),static_cast<unsigned long long>(h),ref);
-    if(ref!=0)return;
+    OH_LOG_Print(LOG_APP, LOG_INFO, 0xD001, "PhotoCraft", "Window %{public}llu x %{public}llu reference %{public}d key=%{public}u", static_cast<unsigned long long>(w),static_cast<unsigned long long>(h),ref,state->key);
+    if(ref!=0) {
+        OH_LOG_Print(LOG_APP, LOG_ERROR, 0xD001, "PhotoCraft",
+            "NativeObjectReference failed %{public}d key=%{public}u", ref, state->key);
+        return;
+    }
     // 将取得的原生窗口引用转交 Rust 的 Window；后者负责在 surface 释放后解除引用。
     if(state->key!=0) {
         pc_win_attach(state->key,reinterpret_cast<uintptr_t>(window),static_cast<uint32_t>(w),static_cast<uint32_t>(h));
@@ -299,33 +311,43 @@ void Hover(OH_NativeXComponent* c,bool isHover) {
 OH_NativeXComponent_Callback callbacks{SurfaceCreated,SurfaceChanged,SurfaceDestroyed,Touch};
 OH_NativeXComponent_MouseEvent_Callback mouseCallbacks{Mouse,Hover};
 
-// Register the shared callback set for one XComponent. The window key comes from its id:
-// 'photocraft-native' is the main window, 'pc-win-<N>' is native sub-window N.
-bool RegisterComponent(OH_NativeXComponent* c) {
+// Register the shared callback set for one XComponent.
+// Main window id is 'photocraft-native' (key 0). Sub-windows use 'pc-win-<N>' and SHOULD pass
+// key explicitly from ArkTS: LocalStorageProp can still be 0 on first build, which used to
+// reject registration (parsed<=0) and leave the sub-window surface forever black.
+bool RegisterComponent(OH_NativeXComponent* c, uint32_t explicit_key) {
     if(!c)return false;
     char id[OH_XCOMPONENT_ID_LEN_MAX+1]={0};
     uint64_t size=OH_XCOMPONENT_ID_LEN_MAX+1;
     if(OH_NativeXComponent_GetXComponentId(c,id,&size)!=OH_NATIVEXCOMPONENT_RESULT_SUCCESS)return false;
-    uint32_t key=0;
+    uint32_t key=explicit_key;
     const std::string name(id);
     const std::string prefix="pc-win-";
-    if(name.compare(0,prefix.size(),prefix)==0) {
+    if(key==0 && name.compare(0,prefix.size(),prefix)==0) {
         const long parsed=std::strtol(name.c_str()+prefix.size(),nullptr,10);
-        if(parsed<=0||parsed>0x7fffffff)return false;
+        if(parsed<=0||parsed>0x7fffffff) {
+            OH_LOG_Print(LOG_APP, LOG_ERROR, 0xD001, "PhotoCraft",
+                "Rejecting XComponent id=%{public}s (need key>0)", id);
+            return false;
+        }
         key=static_cast<uint32_t>(parsed);
     }
     {
         std::lock_guard<std::mutex> lock(winMutex);
-        // A destroyed XComponent's address can be reused by another window: trust the id, and
+        // A destroyed XComponent's address can be reused by another window: trust the key, and
         // always re-register callbacks (the object may be new).
         auto it=windows.find(c);
         if(it==windows.end()||it->second->key!=key) {
             auto state=std::make_shared<WinState>();
             state->key=key;
             windows[c]=state;
+        } else {
+            it->second->key=key;
         }
     }
-    OH_LOG_Print(LOG_APP, LOG_INFO, 0xD001, "PhotoCraft", "Registering XComponent callbacks id=%{public}s window=%{public}u",id,key);
+    OH_LOG_Print(LOG_APP, LOG_INFO, 0xD001, "PhotoCraft",
+        "Registering XComponent callbacks id=%{public}s window=%{public}u explicit=%{public}u",
+        id, key, explicit_key);
     OH_NativeXComponent_RegisterCallback(c,&callbacks);
     OH_NativeXComponent_RegisterMouseEventCallback(c,&mouseCallbacks);
     OH_NativeXComponent_RegisterKeyEventCallbackWithResult(c,Key);
@@ -333,14 +355,20 @@ bool RegisterComponent(OH_NativeXComponent* c) {
     OH_NativeXComponent_RegisterUIInputEventCallback(c,Axis,ARKUI_UIINPUTEVENT_TYPE_AXIS);
     return true;
 }
-// ArkTS XComponent.onLoad(context) → native.registerWindow(context): bind a sub-window's XComponent.
+// ArkTS XComponent.onLoad(context[, key]) → bind a sub-window's XComponent to viewport key.
 napi_value RegisterWindow(napi_env env,napi_callback_info info) {
-    size_t n=1;napi_value arg;napi_get_cb_info(env,info,&n,&arg,nullptr,nullptr);
+    size_t n=2;napi_value args[2];napi_get_cb_info(env,info,&n,args,nullptr,nullptr);
     bool ok=false;
-    if(n){
+    uint32_t key=0;
+    if(n>=2) {
+        double value=0;
+        if(napi_get_value_double(env,args[1],&value)==napi_ok && value>0 && value<=0x7fffffff)
+            key=static_cast<uint32_t>(value);
+    }
+    if(n>=1){
         napi_value value;OH_NativeXComponent* c=nullptr;
-        if(napi_get_named_property(env,arg,OH_NATIVE_XCOMPONENT_OBJ,&value)==napi_ok&&
-           napi_unwrap(env,value,reinterpret_cast<void**>(&c))==napi_ok)ok=RegisterComponent(c);
+        if(napi_get_named_property(env,args[0],OH_NATIVE_XCOMPONENT_OBJ,&value)==napi_ok&&
+           napi_unwrap(env,value,reinterpret_cast<void**>(&c))==napi_ok)ok=RegisterComponent(c,key);
     }
     napi_value result;napi_get_boolean(env,ok,&result);return result;
 }
@@ -460,7 +488,7 @@ napi_value Init(napi_env env,napi_value exports) {
     napi_define_properties(env,exports,sizeof(props)/sizeof(props[0]),props);
     napi_value value;OH_NativeXComponent* c=nullptr;
     if(napi_get_named_property(env,exports,OH_NATIVE_XCOMPONENT_OBJ,&value)==napi_ok&&napi_unwrap(env,value,reinterpret_cast<void**>(&c))==napi_ok&&c) {
-        RegisterComponent(c);
+        RegisterComponent(c,0);
     }
     napi_add_env_cleanup_hook(env,Cleanup,nullptr);
     return exports;
