@@ -21,6 +21,7 @@ export class HarmonyStylusAdapter implements StylusAdapter {
   private accessGranted: boolean = false;
   private requestInfoAccess: (() => Promise<boolean>) | undefined;
   private poll: number = -1;
+  private startupDelay: number = -1;
   private doubleTapListening: boolean = false;
   private squeezeListening: boolean = false;
   private deviceListening: boolean = false;
@@ -75,8 +76,16 @@ export class HarmonyStylusAdapter implements StylusAdapter {
     } catch (error) {
       this.reportError('device listen', error as BusinessError);
     }
-    this.refreshConnection();
-    this.poll = setInterval((): void => this.refreshConnection(), 1000);
+    // Defer the first InputKit scan so surface/GPU startup is not racing Binder calls
+    // on the ArkTS thread (PC 2in1 emulator has shown APP_INPUT_BLOCK here).
+    let generation: number = this.generation;
+    this.startupDelay = setTimeout((): void => {
+      this.startupDelay = -1;
+      if (this.active && generation === this.generation) {
+        this.refreshConnection();
+      }
+    }, 1500);
+    this.poll = setInterval((): void => this.refreshConnection(), 5000);
   }
 
   stop(): void {
@@ -85,6 +94,10 @@ export class HarmonyStylusAdapter implements StylusAdapter {
     }
     this.active = false;
     this.generation++;
+    if (this.startupDelay >= 0) {
+      clearTimeout(this.startupDelay);
+      this.startupDelay = -1;
+    }
     if (this.poll >= 0) {
       clearInterval(this.poll);
       this.poll = -1;
@@ -120,16 +133,20 @@ export class HarmonyStylusAdapter implements StylusAdapter {
     this.refreshConnection();
   }
 
-  private isStylusDevice(id: number): boolean {
+  // Async only: Sync InputKit probes can block the ArkTS thread on some emulators
+  // (APP_INPUT_BLOCK). Prefer Promise APIs so the UI can keep marking input.
+  private async isStylusDevice(id: number): Promise<boolean> {
     try {
-      if (inputDevice.getKeyboardTypeSync(id) === inputDevice.KeyboardType.HANDWRITING_PEN) {
+      let keyboardType: inputDevice.KeyboardType = await inputDevice.getKeyboardType(id);
+      if (keyboardType === inputDevice.KeyboardType.HANDWRITING_PEN) {
         return true;
       }
     } catch (error) {
       // Some pointer devices have no keyboard type; use their device name below.
     }
     try {
-      let name: string = inputDevice.getDeviceInfoSync(id).name.toLowerCase();
+      let info: inputDevice.InputDeviceData = await inputDevice.getDeviceInfo(id);
+      let name: string = info.name.toLowerCase();
       return name.includes('pencil') || name.includes('stylus') || name.includes('handwriting') || name.includes('wacom');
     } catch (error) {
       return false;
@@ -142,44 +159,58 @@ export class HarmonyStylusAdapter implements StylusAdapter {
     }
     let generation: number = this.generation;
     let scan: number = ++this.scan;
-    inputDevice.getDeviceList().then((ids: Array<number>) => {
-      if (!this.active || generation !== this.generation || scan !== this.scan) {
-        return;
-      }
-      let id: number = -1;
-      let penCount: number = 0;
-      for (let i = 0; i < ids.length; i++) {
-        if (this.isStylusDevice(ids[i])) {
-          if (id < 0) { id = ids[i]; }
-          penCount++;
+    this.scanDevices(generation, scan).catch((error: BusinessError) => this.reportError('device scan', error));
+  }
+
+  private async scanDevices(generation: number, scan: number): Promise<void> {
+    let ids: Array<number>;
+    try {
+      ids = await inputDevice.getDeviceList();
+    } catch (error) {
+      this.reportError('device list', error as BusinessError);
+      return;
+    }
+    if (!this.active || generation !== this.generation || scan !== this.scan) {
+      return;
+    }
+    let id: number = -1;
+    let penCount: number = 0;
+    for (let i = 0; i < ids.length; i++) {
+      if (await this.isStylusDevice(ids[i])) {
+        if (!this.active || generation !== this.generation || scan !== this.scan) {
+          return;
         }
+        if (id < 0) { id = ids[i]; }
+        penCount++;
       }
-      let info: inputDevice.InputDeviceData | undefined = undefined;
-      if (id >= 0) {
-        try { info = inputDevice.getDeviceInfoSync(id); } catch (error) { /* Name may be unavailable. */ }
-      }
-      let name: string | undefined = info?.name.trim() || undefined;
-      if (id !== this.deviceId) {
-        this.deviceId = id;
-        this.deviceRevision++;
-        this.publish(id >= 0, name, undefined);
-      } else if (!this.accessGranted) {
-        this.publish(id >= 0, name, undefined);
-      } else {
-        this.publish(id >= 0, this.deviceName, this.batteryPercent);
-      }
-      if (id < 0) { return; }
-      if (!this.accessRequested && this.requestInfoAccess !== undefined) {
-        this.accessRequested = true;
-        this.requestInfoAccess().then((granted: boolean) => {
-          if (!this.active || generation !== this.generation) { return; }
-          this.accessGranted = granted;
-          if (granted) { this.refreshConnection(); }
-        }).catch((error: BusinessError) => this.reportError('Bluetooth permission', error));
-      } else if (this.accessGranted && info !== undefined && !this.infoPending) {
-        this.refreshDeviceInfo(info, generation, this.deviceRevision, penCount);
-      }
-    }).catch((error: BusinessError) => this.reportError('device list', error));
+    }
+    let info: inputDevice.InputDeviceData | undefined = undefined;
+    if (id >= 0) {
+      try { info = await inputDevice.getDeviceInfo(id); } catch (error) { /* Name may be unavailable. */ }
+    }
+    if (!this.active || generation !== this.generation || scan !== this.scan) {
+      return;
+    }
+    let name: string | undefined = info?.name.trim() || undefined;
+    if (id !== this.deviceId) {
+      this.deviceId = id;
+      this.deviceRevision++;
+      this.publish(id >= 0, name, undefined);
+    } else if (!this.accessGranted) {
+      this.publish(id >= 0, name, undefined);
+    } else {
+      this.publish(id >= 0, this.deviceName, this.batteryPercent);
+    }
+    if (id < 0) { return; }
+    // Do not auto-prompt for Bluetooth during startup: on PC 2in1 emulator the
+    // permission sheet can fail to appear while still holding input, which trips
+    // APP_INPUT_BLOCK. Battery enrichment runs only after an earlier grant.
+    if (!this.accessRequested && this.requestInfoAccess !== undefined) {
+      this.accessRequested = true;
+      console.info('HarmonyOS stylus: deferring Bluetooth permission until pen settings need battery');
+    } else if (this.accessGranted && info !== undefined && !this.infoPending) {
+      await this.refreshDeviceInfo(info, generation, this.deviceRevision, penCount);
+    }
   }
 
   private publish(connected: boolean, name?: string, battery?: number): void {
@@ -232,7 +263,7 @@ export class HarmonyStylusAdapter implements StylusAdapter {
     }
     if (this.active && generation === this.generation) {
       this.infoPending = false;
-      // A one-second poll must not discard a slower battery read. Only device/lifetime changes invalidate it.
+      // A slower battery read must not be discarded by a later poll. Only device/lifetime changes invalidate it.
       if (revision === this.deviceRevision) { this.publish(true, name, battery); }
     }
   }

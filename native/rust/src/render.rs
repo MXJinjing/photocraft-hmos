@@ -54,17 +54,32 @@ impl GpuRender {
         let surface = instance
             .create_surface(window.clone())
             .map_err(|e| e.to_string())?;
+        // Stage marks help diagnose emulator APP_INPUT_BLOCK vs GPU stalls: these
+        // block_on calls run on the render worker, not the ArkTS input thread.
+        crate::bridge::notify(0, "stage", "native GPU requesting adapter", &[]);
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
             compatible_surface: Some(&surface),
             ..Default::default()
         }))
         .map_err(|e| e.to_string())?;
+        crate::bridge::notify(
+            0,
+            "stage",
+            &format!(
+                "native GPU adapter ready ({:?}/{:?})",
+                adapter.get_info().backend,
+                adapter.get_info().device_type
+            ),
+            &[],
+        );
+        crate::bridge::notify(0, "stage", "native GPU requesting device", &[]);
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
             label: Some("PhotoCraft For HarmonyOS"),
             required_limits: adapter.limits(),
             ..Default::default()
         }))
         .map_err(|e| e.to_string())?;
+        crate::bridge::notify(0, "stage", "native GPU device ready", &[]);
         let mut config = surface
             .get_default_config(&adapter, w.max(1), h.max(1))
             .ok_or("no native surface configuration")?;

@@ -3,7 +3,7 @@ import { applicationDocumentUri } from '../documentDirectory';
 import { LocalDocuments } from '../LocalDocuments';
 import { savePickerOptions, SaveTargets } from '../savePicker';
 import { NativePrintAdapter } from '../NativePrintAdapter';
-import { abilityAccessCtrl, common } from '@kit.AbilityKit';
+import { common } from '@kit.AbilityKit';
 import { fileIo, fileUri, picker } from '@kit.CoreFileKit';
 import { i18n } from '@kit.LocalizationKit';
 import { BusinessError } from '@kit.BasicServicesKit';
@@ -75,11 +75,10 @@ struct Index {
   private documentUri: string = '';
   // Ordinary Save retains its authorized URI; Save As consumes its URI once.
   private saveTargets: SaveTargets = new SaveTargets();
+  // Bluetooth permission is not requested at startup: on PC 2in1 emulator the
+  // permission sheet can fail to appear while still holding input (APP_INPUT_BLOCK).
   private stylus: HarmonyStylusAdapter = new HarmonyStylusAdapter((packet: StylusPacket): void => {
     if (this.alive) { native.input(JSON.stringify(new NativeStylusInput(packet))); }
-  }, async (): Promise<boolean> => {
-    let result = await abilityAccessCtrl.createAtManager().requestPermissionsFromUser(this.context, ['ohos.permission.ACCESS_BLUETOOTH']);
-    return result.authResults.length > 0 && result.authResults[0] === 0;
   });
   private cursor: NativeCursorAdapter = new NativeCursorAdapter(this.getUIContext());
   private dropping: NativeDropAdapter = new NativeDropAdapter(this.context.cacheDir,
