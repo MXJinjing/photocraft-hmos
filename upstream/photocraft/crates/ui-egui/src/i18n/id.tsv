@@ -3139,6 +3139,7 @@ curves	Smooth	Haluskan
 # HarmonyOS host additions retained during upstream sync
 	Stylus	Stylus
 	Block finger input	Blokir masukan jari
+	Stylus hover preview	Pratinjau saat stylus melayang
 	Double-tap pen body	Ketuk dua kali badan stylus
 	Current tool and Eraser	Alat saat ini dan penghapus
 	Previous tool	Alat sebelumnya

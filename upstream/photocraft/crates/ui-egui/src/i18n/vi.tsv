@@ -3636,6 +3636,7 @@ curves	Smooth	Làm mượt
 
 # HarmonyOS native controls
 	Block finger input	Chặn thao tác bằng ngón tay
+	Stylus hover preview	Xem trước khi bút di chuột
 	Choose printer, copies and duplex in the system print dialog.	Chọn máy in, số bản sao và in hai mặt trong hộp thoại in của hệ thống.
 	Connected pen	Bút đã kết nối
 	Double-tap pen body	Chạm hai lần vào thân bút

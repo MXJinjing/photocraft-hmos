@@ -3152,6 +3152,7 @@ curves	Smooth	Lisser
 # HarmonyOS host additions retained during upstream sync
 	Stylus	Stylet
 	Block finger input	Bloquer la saisie au doigt
+	Stylus hover preview	Aperçu du stylet au survol
 	Double-tap pen body	Double-clic sur le corps du stylet
 	Current tool and Eraser	Outil actuel et gomme
 	Previous tool	Outil précédent

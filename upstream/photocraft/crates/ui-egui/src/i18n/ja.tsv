@@ -3827,6 +3827,7 @@ curves	Smooth	スムーズ
 # HarmonyOS host additions retained during upstream sync
 	Stylus	スタイラス
 	Block finger input	指の入力を無効にする
+	Stylus hover preview	スタイラスのホバープレビュー
 	Double-tap pen body	ペン軸をダブルタップ
 	Current tool and Eraser	現在のツールと消しゴム
 	Previous tool	前のツール

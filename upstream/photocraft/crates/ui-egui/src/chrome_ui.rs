@@ -237,7 +237,14 @@ pub fn stylus_menu(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         ui.separator();
         let on = app.session.prefs().tools.block_finger_input;
         if ui.add(egui::Button::selectable(on, tl!("Block finger input"))).clicked() {
-            app.session.edit_prefs(|p| p.tools.block_finger_input = !on);
+            app.session.edit_prefs(|p| {
+                p.tools.block_finger_input = !on;
+                p.tools.block_finger_input_configured = true;
+            });
+        }
+        let on = app.session.prefs().tools.stylus_hover_preview;
+        if ui.add(egui::Button::selectable(on, tl!("Stylus hover preview"))).clicked() {
+            app.session.edit_prefs(|p| p.tools.stylus_hover_preview = !on);
         }
         ui.separator();
         ui.label(RichText::new(tl!("Double-tap pen body")).color(t.text_dim));
@@ -258,6 +265,12 @@ pub fn stylus_menu(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
 
 /// Apply normalised stylus actions queued by any input adapter.
 pub fn drain_stylus_gestures(app: &mut PhotocraftApp, ctx: &egui::Context) {
+    if app.stylus.feed.connected() && !app.session.prefs().tools.block_finger_input_configured {
+        app.session.edit_prefs(|p| {
+            p.tools.block_finger_input = true;
+            p.tools.block_finger_input_configured = true;
+        });
+    }
     app.stylus.note_tool(app.ui.tool);
     let gestures = app.stylus.feed.take_gestures();
     if gestures.is_empty() {
@@ -417,6 +430,8 @@ mod tests {
         let d = doc();
         assert_eq!(ChromeState::default().status_info, "dimensions");
         assert!(!photocraft_engine::prefs::Tools::default().block_finger_input);
+        assert!(!photocraft_engine::prefs::Tools::default().block_finger_input_configured);
+        assert!(!photocraft_engine::prefs::Tools::default().stylus_hover_preview);
         assert_eq!(photocraft_engine::prefs::Tools::default().stylus_double_tap, StylusDoubleTap::Eraser);
         assert_eq!(photocraft_engine::prefs::Tools::default().stylus_long_press, StylusLongPress::ContextMenu);
         assert_eq!(status_info_text(&d, "dimensions", "", ""), "2400 px x 1500 px (72 ppi)");
@@ -664,6 +679,11 @@ mod tests {
         h.get_by_label("Block finger input").click();
         h.run();
         assert!(h.state().session.prefs().tools.block_finger_input, "the stylus menu toggles block finger input");
+        assert!(h.state().session.prefs().tools.block_finger_input_configured);
+        assert!(!h.state().session.prefs().tools.stylus_hover_preview);
+        h.get_by_label("Stylus hover preview").click();
+        h.run();
+        assert!(h.state().session.prefs().tools.stylus_hover_preview);
         assert!(h.query_by_label("Previous tool").is_some(), "an internal click keeps the stylus menu open");
         h.get_by_label("Previous tool").click();
         h.run();
@@ -680,6 +700,7 @@ mod tests {
         assert_eq!(crate::i18n::tr(zh, "Stylus"), "手写笔");
         assert_eq!(crate::i18n::tr(crate::i18n::Lang::EN, "Stylus"), "Stylus");
         assert_eq!(crate::i18n::tr(zh, "No pen connected"), "未连接笔");
+        assert_eq!(crate::i18n::tr(zh, "Stylus hover preview"), "手写笔悬停预览");
         assert_eq!(crate::i18n::tr(zh, "Double-tap pen body"), "双击笔身");
         assert_eq!(crate::i18n::tr(zh, "Long-press pen body"), "轻捏笔身");
 
@@ -693,6 +714,25 @@ mod tests {
         crate::PhotocraftApp::setup_context(&status.ctx, crate::theme::ThemeKind::Studio);
         status.run_steps(3);
         assert!(status.query_by_label_contains("Block finger input").is_none(), "status bar no longer hosts the stylus menu");
+    }
+
+    #[test]
+    fn first_connection_enables_finger_blocking_once_and_respects_a_later_user_choice() {
+        let mut app = crate::PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        assert!(!app.session.prefs().tools.block_finger_input);
+        assert!(!app.session.prefs().tools.block_finger_input_configured);
+
+        app.stylus.feed.set_connected(true);
+        drain_stylus_gestures(&mut app, &egui::Context::default());
+        assert!(app.session.prefs().tools.block_finger_input);
+        assert!(app.session.prefs().tools.block_finger_input_configured);
+
+        app.session.edit_prefs(|p| p.tools.block_finger_input = false);
+        app.stylus.feed.set_connected(false);
+        drain_stylus_gestures(&mut app, &egui::Context::default());
+        app.stylus.feed.set_connected(true);
+        drain_stylus_gestures(&mut app, &egui::Context::default());
+        assert!(!app.session.prefs().tools.block_finger_input, "a reconnect must not override the user's saved choice");
     }
 
     #[test]

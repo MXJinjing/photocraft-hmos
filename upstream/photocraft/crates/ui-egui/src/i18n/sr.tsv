@@ -25,6 +25,7 @@
 # Guide layout dialog
 # HarmonyOS native controls
 	Block finger input	Blokiraj unos prstom
+	Stylus hover preview	Pregled olovke pri lebdenju
 	Choose printer, copies and duplex in the system print dialog.	Izaberite štampač, broj kopija i dvostranu štampu u sistemskom dijalogu za štampanje.
 	Connected pen	Povezana olovka
 	Double-tap pen body	Dvostruki dodir tela olovke

@@ -2745,6 +2745,7 @@ curves	Smooth	平滑
 # HarmonyOS host additions retained during upstream sync
 	Stylus	手寫筆
 	Block finger input	停用手指輸入
+	Stylus hover preview	手寫筆懸停預覽
 	Double-tap pen body	雙擊筆身
 	Current tool and Eraser	目前工具與橡皮擦
 	Previous tool	上一個工具

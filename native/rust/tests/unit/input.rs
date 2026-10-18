@@ -841,6 +841,65 @@ fn pen_hover_move_sets_hover_pos_without_pressing() {
     );
 }
 
+#[test]
+fn disabled_pen_hover_hides_the_preview_until_it_is_enabled_again() {
+    let mut state = super::State::default();
+    let mut events = vec![];
+    state.set_pen_hover_preview(false, &mut events);
+    push_mouse(&mut state, 80., 40., &mut events);
+    events.clear();
+
+    push_pen(&mut state, 2, 200., 100., 0., &mut events);
+    assert!(matches!(events.as_slice(), [egui::Event::PointerGone]));
+    assert_eq!(state.feed.source(), super::PointerSource::Pen);
+    assert_eq!(
+        state.cursor_icon(egui::CursorIcon::Crosshair),
+        egui::CursorIcon::None
+    );
+    events.clear();
+
+    push_pen(&mut state, 2, 240., 120., 0., &mut events);
+    assert!(
+        events.is_empty(),
+        "disabled hover must not move the egui pointer"
+    );
+    assert!(!state.set_pen_hover_preview(true, &mut events));
+    push_pen(&mut state, 2, 260., 140., 0., &mut events);
+    assert!(
+        matches!(events.as_slice(), [egui::Event::PointerMoved(p)] if *p == egui::pos2(130., 70.))
+    );
+}
+
+#[test]
+fn disabling_a_visible_pen_preview_still_allows_pen_contact() {
+    let mut state = super::State::default();
+    let mut events = vec![];
+    push_pen(&mut state, 2, 200., 100., 0., &mut events);
+    events.clear();
+    assert!(state.set_pen_hover_preview(false, &mut events));
+    assert!(matches!(events.as_slice(), [egui::Event::PointerGone]));
+    events.clear();
+    push_pen(&mut state, 0, 200., 100., 0.7, &mut events);
+    assert!(
+        events
+            .iter()
+            .any(|event| matches!(event, egui::Event::PointerButton { pressed: true, .. }))
+    );
+    events.clear();
+    push_pen(&mut state, 2, 240., 120., 0.8, &mut events);
+    assert!(
+        matches!(events.as_slice(), [egui::Event::PointerMoved(p)] if *p == egui::pos2(120., 60.))
+    );
+    events.clear();
+    push_pen(&mut state, 1, 240., 120., 0., &mut events);
+    assert!(
+        events
+            .iter()
+            .any(|event| matches!(event, egui::Event::PointerButton { pressed: false, .. }))
+    );
+    assert!(matches!(events.last(), Some(egui::Event::PointerGone)));
+}
+
 fn push_pen(
     state: &mut super::State,
     action: i32,

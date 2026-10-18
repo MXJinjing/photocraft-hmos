@@ -495,6 +495,8 @@ fn stylus_tools_preferences_persist_validate_and_default_for_old_settings() {
         "prefs.set",
         json!({"values": {
             "tools.blockFingerInput": true,
+            "tools.blockFingerInputConfigured": true,
+            "tools.stylusHoverPreview": true,
             "tools.stylusDoubleTap": "previous",
             "tools.stylusLongPress": "off"
         }}),
@@ -503,6 +505,8 @@ fn stylus_tools_preferences_persist_validate_and_default_for_old_settings() {
     let mut restored = Session::new();
     restored.load_prefs_json(&s.prefs_to_json()).unwrap();
     assert!(restored.prefs().tools.block_finger_input);
+    assert!(restored.prefs().tools.block_finger_input_configured);
+    assert!(restored.prefs().tools.stylus_hover_preview);
     assert_eq!(restored.prefs().tools.stylus_double_tap, StylusDoubleTap::Previous);
     assert_eq!(restored.prefs().tools.stylus_long_press, StylusLongPress::Off);
     let before = s.prefs().clone();
@@ -514,8 +518,15 @@ fn stylus_tools_preferences_persist_validate_and_default_for_old_settings() {
     }
     restored.load_prefs_json(r#"{"tools":{"useTabletPressure":false}}"#).unwrap();
     assert!(!restored.prefs().tools.block_finger_input);
+    assert!(!restored.prefs().tools.block_finger_input_configured);
+    assert!(!restored.prefs().tools.stylus_hover_preview);
     assert_eq!(restored.prefs().tools.stylus_double_tap, StylusDoubleTap::Eraser);
     assert_eq!(restored.prefs().tools.stylus_long_press, StylusLongPress::ContextMenu);
+    for blocked in [false, true] {
+        restored.load_prefs_json(&json!({"tools": {"blockFingerInput": blocked}}).to_string()).unwrap();
+        assert_eq!(restored.prefs().tools.block_finger_input, blocked);
+        assert!(restored.prefs().tools.block_finger_input_configured, "legacy saved choices survive the first connection");
+    }
 }
 
 /// #2022: notices auto-hide after a user-set delay by default; both settings round-trip.

@@ -4113,6 +4113,7 @@ navigator	Zoom	Zoom
 # HarmonyOS host additions retained during upstream sync
 	Stylus	Stilo
 	Block finger input	Blocca input dito
+	Stylus hover preview	Anteprima stilo al passaggio
 	Double-tap pen body	Doppio tocco sul corpo della penna
 	Current tool and Eraser	Strumento attuale e gomma
 	Previous tool	Strumento precedente

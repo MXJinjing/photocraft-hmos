@@ -3940,6 +3940,7 @@ layerLabel	No Color	Sem cor
 # HarmonyOS host additions retained during upstream sync
 	Stylus	Caneta
 	Block finger input	Bloquear entrada por dedo
+	Stylus hover preview	Visualização da caneta ao pairar
 	Double-tap pen body	Toque duplo no corpo da caneta
 	Current tool and Eraser	Ferramenta atual e borracha
 	Previous tool	Ferramenta anterior

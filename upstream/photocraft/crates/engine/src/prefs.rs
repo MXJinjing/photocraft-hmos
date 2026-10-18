@@ -381,6 +381,11 @@ pub struct Tools {
     pub use_tablet_pressure: bool,
     /// Fingers navigate the canvas while the pen operates the current tool.
     pub block_finger_input: bool,
+    /// Whether the user or first-connection setup has chosen the finger-input policy.
+    /// Kept out of the generic preferences rows; the stylus controls own it.
+    pub block_finger_input_configured: bool,
+    /// Show the tool/cursor preview while a pen is hovering above the surface.
+    pub stylus_hover_preview: bool,
     pub stylus_double_tap: StylusDoubleTap,
     pub stylus_long_press: StylusLongPress,
     /// Pen pressure response: `[input, output]` control points in 0..1 that the pen's pressure
@@ -404,6 +409,8 @@ impl Default for Tools {
             right_click_with_painting_tools: RightClickPaint::BrushPicker,
             use_tablet_pressure: true,
             block_finger_input: false,
+            block_finger_input_configured: false,
+            stylus_hover_preview: false,
             stylus_double_tap: StylusDoubleTap::Eraser,
             stylus_long_press: StylusLongPress::ContextMenu,
             pressure_curve: vec![[0.0, 0.0], [1.0, 1.0]],
@@ -1569,6 +1576,13 @@ impl Session {
     /// defaults and unknown keys are ignored, so files from older and newer versions load.
     pub fn load_prefs_json(&mut self, s: &str) -> std::result::Result<(), String> {
         let mut v: Value = serde_json::from_str(s).map_err(|e| format!("preferences: {e}"))?;
+        // Older settings did not record whether finger blocking was explicitly chosen.
+        // Preserve a saved policy rather than overriding a possible user opt-out.
+        if let Some(tools) = v.get_mut("tools").and_then(Value::as_object_mut)
+            && tools.get("blockFingerInput").is_some_and(Value::is_boolean)
+        {
+            tools.entry("blockFingerInputConfigured").or_insert(json!(true));
+        }
         // Saved preferences before appearance modes had one concrete theme. Preserve its
         // appearance instead of silently switching established users to Auto.
         if let Some(interface) = v.get_mut("interface").and_then(Value::as_object_mut)

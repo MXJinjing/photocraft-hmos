@@ -3325,6 +3325,7 @@ curves	Smooth	매끄럽게
 # HarmonyOS host additions retained during upstream sync
 	Stylus	스타일러스
 	Block finger input	손가락 입력 차단
+	Stylus hover preview	스타일러스 호버 미리보기
 	Double-tap pen body	펜 몸통 두 번 탭
 	Current tool and Eraser	현재 도구와 지우개
 	Previous tool	이전 도구

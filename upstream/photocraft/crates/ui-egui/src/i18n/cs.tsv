@@ -3758,6 +3758,7 @@ navigator	Zoom	Zvětšení
 # HarmonyOS host additions retained during upstream sync
 	Stylus	Stylus
 	Block finger input	Blokovat zadávání prstem
+	Stylus hover preview	Náhled při najetí stylusu
 	Double-tap pen body	Dvojité klepnutí na tělo pera
 	Current tool and Eraser	Aktuální nástroj a guma
 	Previous tool	Předchozí nástroj

@@ -3148,6 +3148,7 @@ curves	Smooth	Glätten
 # HarmonyOS host additions retained during upstream sync
 	Stylus	Stift
 	Block finger input	Fingereingabe blockieren
+	Stylus hover preview	Stiftvorschau beim Schweben
 	Double-tap pen body	Stiftgehäuse doppeltippen
 	Current tool and Eraser	Aktuelles Werkzeug und Radierer
 	Previous tool	Vorheriges Werkzeug

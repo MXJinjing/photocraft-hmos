@@ -3116,6 +3116,7 @@ curves	Smooth	Сгладить
 # HarmonyOS host additions retained during upstream sync
 	Stylus	Стилус
 	Block finger input	Блокировать ввод пальцем
+	Stylus hover preview	Предпросмотр пера при наведении
 	Double-tap pen body	Двойное нажатие на корпус пера
 	Current tool and Eraser	Текущий инструмент и ластик
 	Previous tool	Предыдущий инструмент
