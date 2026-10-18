@@ -56,3 +56,12 @@ Verification: 889 UI tests passed, 3 ignored; one unrelated GPU shortcut test wa
 The API 20 simulator's independent `io.github.storytold.photocraft.savepickertest` bundle displayed the full picker at the application's download directory for Ctrl+S. The system presents this package directory as “PhotoCraft” in its breadcrumb. Renaming to `picker-default.psd` saved successfully and updated both title and document tab. Ctrl+J modified the document; another Ctrl+S reused the same target and cleared the unsaved indicator without a picker. Screenshots (2880 × 1920): [first Save picker](save-picker-first.jpeg), [saved title](save-picker-saved.jpeg), [edited then saved again](save-picker-repeat.jpeg). Previous simple-dialog screenshot: [before](save-title-before.jpeg).
 
 Additional existing checks remain outside this change: host-platform native all-target clippy reports dead-code and test unwrap warnings; `test_host_mode.cjs` lacks a mock for the existing `WindowChrome` import. Production OHOS library clippy and the native unit suite passed. No real Pad deployment or original simulator-app restart was performed.
+
+## Startup DOWNLOAD hang (2in1 emulator)
+
+On some PC 2in1 emulator builds, `DocumentViewPicker.save(DOWNLOAD)` surfaces a
+`downloadAuth` flow that never completes and the ability hits `APP_INPUT_BLOCK`
+(~8s). `applicationDocumentUri` now: reuses a cached URI when present; bounds
+DOWNLOAD to 3s; on timeout/failure falls back to `filesDir/Documents` (sandbox)
+without caching the fallback so a later launch can still obtain the real download
+directory.
