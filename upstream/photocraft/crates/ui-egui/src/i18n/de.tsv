@@ -755,6 +755,8 @@
 	Soft Light Theme	Weiches Design (Hell)
 	ArkUI Light Theme	ArkUI-Design (Hell)
 	ArkUI Dark Theme	ArkUI-Design (Dunkel)
+	ArkUI Pro Light Theme	ArkUI Pro-Design (Hell)
+	ArkUI Pro Dark Theme	ArkUI Pro-Design (Dunkel)
 	Next Theme	Nächstes Design
 	Actions	Aktionen
 	Brush Settings	Pinseleinstellungen
@@ -3160,3 +3162,7 @@ curves	Smooth	Glätten
 	Right sidebar	Rechte Seitenleiste
 	Connected pen	Verbundener Stift
 	No pen connected	Kein Stift verbunden
+
+# Window full screen (HarmonyOS host)
+	Enter Full Screen	Vollbild aktivieren
+	Exit Full Screen	Vollbild beenden

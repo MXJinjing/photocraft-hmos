@@ -766,6 +766,8 @@
 	Soft Light Theme	Jemné světlé téma
 	ArkUI Light Theme	Světlý motiv ArkUI
 	ArkUI Dark Theme	Tmavý motiv ArkUI
+	ArkUI Pro Light Theme	Světlý motiv ArkUI Pro
+	ArkUI Pro Dark Theme	Tmavý motiv ArkUI Pro
 	Next Theme	Další motiv
 	Actions	Akce
 	Brush Settings	Nastavení štětce
@@ -3770,3 +3772,7 @@ navigator	Zoom	Zvětšení
 	Right sidebar	Pravý postranní panel
 	Connected pen	Připojené pero
 	No pen connected	Žádné pero není připojeno
+
+# Window full screen (HarmonyOS host)
+	Enter Full Screen	Přejít na celou obrazovku
+	Exit Full Screen	Ukončit celou obrazovku

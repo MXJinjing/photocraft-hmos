@@ -1463,6 +1463,8 @@
 	Soft Light Theme	Мягкая светлая тема
 	ArkUI Light Theme	Светлая тема ArkUI
 	ArkUI Dark Theme	Тёмная тема ArkUI
+	ArkUI Pro Light Theme	Светлая тема ArkUI Pro
+	ArkUI Pro Dark Theme	Тёмная тема ArkUI Pro
 	Studio Theme	Тема Studio
 	Studio Light Theme	Светлая тема Studio
 	Adwaita Light Theme	Светлая тема Adwaita
@@ -3128,3 +3130,7 @@ curves	Smooth	Сгладить
 	Right sidebar	Правая боковая панель
 	Connected pen	Подключённое перо
 	No pen connected	Перо не подключено
+
+# Window full screen (HarmonyOS host)
+	Enter Full Screen	Полноэкранный режим
+	Exit Full Screen	Выйти из полноэкранного режима

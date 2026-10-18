@@ -8,6 +8,7 @@ import { restorePointerVisibility } from '../input/NativeCursorAdapter';
 import { acceptOpenWant } from '../openInbox';
 import { requestWindowClose, resetCloseGuard } from '../closeGuard';
 import { WindowChrome } from '../WindowChrome';
+import { FullscreenSync } from '../Fullscreen';
 
 class SystemThemeInput {
   kind: string = 'system_theme';
@@ -17,6 +18,7 @@ class SystemThemeInput {
 
 export default class EntryAbility extends UIAbility {
   private windowChrome: WindowChrome | undefined = undefined;
+  private fullscreenSync: FullscreenSync | undefined = undefined;
 
   private syncSystemTheme(colorMode: number | undefined): void {
     let theme = systemThemeFromColorMode(colorMode);
@@ -52,6 +54,8 @@ export default class EntryAbility extends UIAbility {
     // 系统窗口在后台可能改变装饰和颜色，恢复前台时重新查询并唤醒渲染 worker。
     this.windowChrome?.refresh();
     applySystemBars(this.context, AppStorage.get<string>('photocraftChrome') ?? LOADING_CHROME);
+    // Only acts when the user turned full screen on; the default (off) path is unchanged.
+    this.fullscreenSync?.reassert();
     // Re-read in case the colour scheme changed while we were backgrounded without a config event.
     this.syncSystemTheme(this.context.config?.colorMode);
     native.active(true);
@@ -80,6 +84,11 @@ export default class EntryAbility extends UIAbility {
         this.windowChrome?.stop();
         this.windowChrome = new WindowChrome(win);
         this.windowChrome.start();
+        this.fullscreenSync?.stop();
+        this.fullscreenSync = new FullscreenSync(win, (): void => {
+          applySystemBars(this.context, AppStorage.get<string>('photocraftChrome') ?? LOADING_CHROME);
+        });
+        this.fullscreenSync.start();
       } catch (err) {
         let failure = err as BusinessError;
         console.error(`System bars failed: ${failure.code} ${failure.message}`);
@@ -87,5 +96,8 @@ export default class EntryAbility extends UIAbility {
     });
   }
 
-  onWindowStageDestroy(): void { this.windowChrome?.stop(); this.windowChrome = undefined; }
+  onWindowStageDestroy(): void {
+    this.windowChrome?.stop(); this.windowChrome = undefined;
+    this.fullscreenSync?.stop(); this.fullscreenSync = undefined;
+  }
 }

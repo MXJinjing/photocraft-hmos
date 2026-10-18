@@ -334,23 +334,27 @@ fn tip_shape(ui: &mut egui::Ui, b: &mut BrushSettings, presets: &[BrushPreset], 
 }
 
 fn shape_dynamics(ui: &mut egui::Ui, b: &mut BrushSettings) {
-    let sd = &mut b.shape_dynamics;
-    pct(ui, tl!("Size Jitter"), &mut sd.size.jitter, 1.0);
-    control_row(ui, "brush-size-ctl", &mut sd.size, false);
-    minimum_row(ui, tl!("Minimum Diameter"), &mut sd.size);
-    // Tilt Scale applies with the size control on Pen Tilt (greyed out otherwise, like Photoshop).
-    let tilt = sd.size.control == Control::PenTilt;
-    ui.add_enabled_ui(tilt, |ui| pct(ui, tl!("Tilt Scale"), &mut sd.tilt_scale, 2.0));
-    ui.add_space(6.0);
-    dynamic(ui, "brush-angle-ctl", tl!("Angle Jitter"), &mut sd.angle, 1.0, None, true);
-    dynamic(ui, "brush-round-ctl", tl!("Roundness Jitter"), &mut sd.roundness, 1.0, Some(tl!("Minimum Roundness")), false);
-    ui.horizontal(|ui| {
-        widgets::checkbox(ui, &mut sd.flip_x_jitter, tl!("Flip X Jitter"));
-        ui.add_space(8.0);
-        widgets::checkbox(ui, &mut sd.flip_y_jitter, tl!("Flip Y Jitter"));
-    });
-    ui.add_space(2.0);
-    widgets::checkbox(ui, &mut sd.brush_projection, tl!("Brush Projection")).on_hover_text(tl!("Apply the pen's tilt and rotation to the tip shape"));
+    {
+        let sd = &mut b.shape_dynamics;
+        pct(ui, tl!("Size Jitter"), &mut sd.size.jitter, 1.0);
+        control_row(ui, "brush-size-ctl", &mut sd.size, false);
+        minimum_row(ui, tl!("Minimum Diameter"), &mut sd.size);
+        // Tilt Scale applies with the size control on Pen Tilt (greyed out otherwise, like Photoshop).
+        let tilt = sd.size.control == Control::PenTilt;
+        ui.add_enabled_ui(tilt, |ui| pct(ui, tl!("Tilt Scale"), &mut sd.tilt_scale, 2.0));
+        ui.add_space(6.0);
+        dynamic(ui, "brush-angle-ctl", tl!("Angle Jitter"), &mut sd.angle, 1.0, None, true);
+        dynamic(ui, "brush-round-ctl", tl!("Roundness Jitter"), &mut sd.roundness, 1.0, Some(tl!("Minimum Roundness")), false);
+        ui.horizontal(|ui| {
+            widgets::checkbox(ui, &mut sd.flip_x_jitter, tl!("Flip X Jitter"));
+            ui.add_space(8.0);
+            widgets::checkbox(ui, &mut sd.flip_y_jitter, tl!("Flip Y Jitter"));
+        });
+        ui.add_space(2.0);
+        widgets::checkbox(ui, &mut sd.brush_projection, tl!("Brush Projection")).on_hover_text(tl!("Apply the pen's tilt and rotation to the tip shape"));
+    }
+    // Pen Pressure on Size lights the options-bar Pressure for Size button.
+    b.sync_pressure_flags_from_dynamics();
 }
 
 fn scattering(ui: &mut egui::Ui, b: &mut BrushSettings) {
@@ -519,11 +523,15 @@ fn color_dynamics(ui: &mut egui::Ui, b: &mut BrushSettings) {
 }
 
 fn transfer(ui: &mut egui::Ui, b: &mut BrushSettings) {
-    let tr = &mut b.transfer;
-    dynamic(ui, "brush-opacity-ctl", tl!("Opacity Jitter"), &mut tr.opacity, 1.0, Some(tl!("Minimum")), false);
-    dynamic(ui, "brush-flow-ctl", tl!("Flow Jitter"), &mut tr.flow, 1.0, Some(tl!("Minimum")), false);
-    dynamic(ui, "brush-wet-ctl", tl!("Wetness Jitter"), &mut tr.wetness, 1.0, Some(tl!("Minimum")), false);
-    dynamic(ui, "brush-mix-ctl", tl!("Mix Jitter"), &mut tr.mix, 1.0, Some(tl!("Minimum")), false);
+    {
+        let tr = &mut b.transfer;
+        dynamic(ui, "brush-opacity-ctl", tl!("Opacity Jitter"), &mut tr.opacity, 1.0, Some(tl!("Minimum")), false);
+        dynamic(ui, "brush-flow-ctl", tl!("Flow Jitter"), &mut tr.flow, 1.0, Some(tl!("Minimum")), false);
+        dynamic(ui, "brush-wet-ctl", tl!("Wetness Jitter"), &mut tr.wetness, 1.0, Some(tl!("Minimum")), false);
+        dynamic(ui, "brush-mix-ctl", tl!("Mix Jitter"), &mut tr.mix, 1.0, Some(tl!("Minimum")), false);
+    }
+    // Pen Pressure on Opacity lights the options-bar Pressure for Opacity button.
+    b.sync_pressure_flags_from_dynamics();
 }
 
 /// The Mixer Brush options the brush carries (Photoshop shows them in the Mixer Brush's options

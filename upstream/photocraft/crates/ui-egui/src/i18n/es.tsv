@@ -762,6 +762,8 @@
 	Soft Light Theme	Tema suave claro
 	ArkUI Light Theme	Tema ArkUI claro
 	ArkUI Dark Theme	Tema ArkUI oscuro
+	ArkUI Pro Light Theme	Tema ArkUI Pro claro
+	ArkUI Pro Dark Theme	Tema ArkUI Pro oscuro
 	Next Theme	Tema siguiente
 	Actions	Acciones
 	Brush Settings	Ajustes del pincel
@@ -2847,3 +2849,7 @@ curves	Smooth	Suavizar
 	Right sidebar	Barra lateral derecha
 	Connected pen	Lápiz conectado
 	No pen connected	Ningún lápiz conectado
+
+# Window full screen (HarmonyOS host)
+	Enter Full Screen	Entrar en pantalla completa
+	Exit Full Screen	Salir de pantalla completa

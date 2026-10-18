@@ -759,6 +759,8 @@
 	Soft Light Theme	Łagodny jasny motyw
 	ArkUI Light Theme	Jasny motyw ArkUI
 	ArkUI Dark Theme	Ciemny motyw ArkUI
+	ArkUI Pro Light Theme	Jasny motyw ArkUI Pro
+	ArkUI Pro Dark Theme	Ciemny motyw ArkUI Pro
 	Next Theme	Następny motyw
 	Actions	Akcje
 	Brush Settings	Ustawienia pędzla
@@ -3760,3 +3762,7 @@ curves	Smooth	Wygładź
 	Right sidebar	Prawy panel boczny
 	Connected pen	Podłączone pióro
 	No pen connected	Brak podłączonego pióra
+
+# Window full screen (HarmonyOS host)
+	Enter Full Screen	Przejdź do pełnego ekranu
+	Exit Full Screen	Wyjdź z pełnego ekranu

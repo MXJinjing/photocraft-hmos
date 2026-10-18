@@ -58,10 +58,14 @@ pub enum ThemeKind {
     ArkuiLight,
     /// HarmonyOS ArkUI dark system colours on the Breeze / Studio layout.
     ArkuiDark,
+    /// ArkUI light colours with the Photoshop-grammar Pro layout.
+    ArkuiProLight,
+    /// ArkUI dark colours with the Photoshop-grammar Pro layout.
+    ArkuiProDark,
 }
 
 impl ThemeKind {
-    pub const ALL: [ThemeKind; 16] = [
+    pub const ALL: [ThemeKind; 18] = [
         ThemeKind::Pro,
         ThemeKind::ProMedium,
         ThemeKind::ProLightGray,
@@ -78,6 +82,8 @@ impl ThemeKind {
         ThemeKind::SoftLight,
         ThemeKind::ArkuiLight,
         ThemeKind::ArkuiDark,
+        ThemeKind::ArkuiProLight,
+        ThemeKind::ArkuiProDark,
     ];
     pub fn label(self) -> &'static str {
         match self {
@@ -97,6 +103,8 @@ impl ThemeKind {
             ThemeKind::SoftLight => "Soft Light",
             ThemeKind::ArkuiLight => "ArkUI Light",
             ThemeKind::ArkuiDark => "ArkUI Dark",
+            ThemeKind::ArkuiProLight => "ArkUI Pro Light",
+            ThemeKind::ArkuiProDark => "ArkUI Pro Dark",
         }
     }
     /// The canonical name: `ui.set {theme}` accepts it and the Window › Theme commands are
@@ -119,11 +127,21 @@ impl ThemeKind {
             ThemeKind::SoftLight => "softLight",
             ThemeKind::ArkuiLight => "arkuiLight",
             ThemeKind::ArkuiDark => "arkuiDark",
+            ThemeKind::ArkuiProLight => "arkuiProLight",
+            ThemeKind::ArkuiProDark => "arkuiProDark",
         }
     }
     /// Photoshop-grammar layout (tab strips, flat panels): the four Pro brightness levels.
     pub fn is_pro(self) -> bool {
-        matches!(self, ThemeKind::Pro | ThemeKind::ProMedium | ThemeKind::ProLightGray | ThemeKind::ProLight)
+        matches!(
+            self,
+            ThemeKind::Pro
+                | ThemeKind::ProMedium
+                | ThemeKind::ProLightGray
+                | ThemeKind::ProLight
+                | ThemeKind::ArkuiProLight
+                | ThemeKind::ArkuiProDark
+        )
     }
     pub fn next(self) -> Self {
         let i = Self::ALL.iter().position(|k| *k == self).unwrap_or(0);
@@ -151,6 +169,8 @@ impl ThemeKind {
             "breezedark" | "kdedark" | "plasmadark" => Some(ThemeKind::BreezeDark),
             "softdark" => Some(ThemeKind::SoftDark),
             "softlight" => Some(ThemeKind::SoftLight),
+            "arkuiprolight" | "arkuiprolighttheme" => Some(ThemeKind::ArkuiProLight),
+            "arkuiprodark" | "arkuiprodarktheme" => Some(ThemeKind::ArkuiProDark),
             "arkuilight" | "arkui" | "harmony" | "harmonyos" | "harmonyoslight" | "ohos" | "ohoslight" => {
                 Some(ThemeKind::ArkuiLight)
             }
@@ -734,6 +754,32 @@ impl Tokens {
                 caption_close_text: Color32::WHITE,
                 scrim: Color32::from_black_alpha(110),
             },
+            // ArkUI colours on the Pro (Photoshop-grammar) layout: Pro radii / tab strips /
+            // flat chips, keeping the tuned ArkUI palette (including canvas dots).
+            ThemeKind::ArkuiProLight => Tokens {
+                kind,
+                radius_sm: 3.0,
+                radius: 4.0,
+                radius_lg: 6.0,
+                bevel: false,
+                pro: true,
+                round_chips: false,
+                tab_strip: Color32::from_rgb(241, 243, 245),
+                row_selected: Color32::from_rgb(232, 235, 240),
+                ..Tokens::for_kind(ThemeKind::ArkuiLight)
+            },
+            ThemeKind::ArkuiProDark => Tokens {
+                kind,
+                radius_sm: 3.0,
+                radius: 4.0,
+                radius_lg: 6.0,
+                bevel: false,
+                pro: true,
+                round_chips: false,
+                tab_strip: Color32::from_rgb(20, 20, 20),
+                row_selected: Color32::from_rgb(42, 42, 42),
+                ..Tokens::for_kind(ThemeKind::ArkuiDark)
+            },
             // Soft Dark: our own low-contrast palette on the Studio layout. Muted violet-grey
             // surfaces (never near-black), softened off-white text and a periwinkle accent; the
             // text colours still hold 4.5:1 on every surface (checked by the tests).
@@ -942,6 +988,7 @@ impl Tokens {
                 | ThemeKind::BreezeDark
                 | ThemeKind::SoftDark
                 | ThemeKind::ArkuiDark
+                | ThemeKind::ArkuiProDark
         )
     }
 }
@@ -1450,6 +1497,55 @@ mod tests {
             assert!(contrast(t.primary_text, t.primary_bg) >= 3.0, "{kind:?}: primary label");
             assert_eq!(kind.chrome_css(), if t.dark() { "#000000" } else { "#FFFFFF" });
         }
+    }
+
+    #[test]
+    fn arkui_pro_themes_use_pro_layout_with_arkui_colours() {
+        for (kind, aliases, base) in [
+            (
+                ThemeKind::ArkuiProLight,
+                ["arkui pro light", "ArkUI Pro Light", "arkui_pro_light"],
+                ThemeKind::ArkuiLight,
+            ),
+            (
+                ThemeKind::ArkuiProDark,
+                ["arkui pro dark", "ArkUI Pro Dark", "arkui_pro_dark"],
+                ThemeKind::ArkuiDark,
+            ),
+        ] {
+            assert_eq!(ThemeKind::from_name(kind.id()), Some(kind));
+            assert_eq!(ThemeKind::from_name(kind.label()), Some(kind));
+            for alias in aliases {
+                assert_eq!(ThemeKind::from_name(alias), Some(kind), "{alias}");
+            }
+            assert!(ThemeKind::ALL.contains(&kind));
+            assert!(kind.is_pro(), "{kind:?}");
+            let t = Tokens::for_kind(kind);
+            let base = Tokens::for_kind(base);
+            assert_eq!(t.kind, kind);
+            assert_eq!(t.dark(), kind == ThemeKind::ArkuiProDark);
+            assert!(t.pro && !t.bevel && !t.round_chips, "{kind:?} uses the Pro layout");
+            assert_eq!(t.radius_sm, Tokens::for_kind(ThemeKind::Pro).radius_sm);
+            assert_eq!(t.radius, Tokens::for_kind(ThemeKind::Pro).radius);
+            assert_eq!(t.radius_lg, Tokens::for_kind(ThemeKind::Pro).radius_lg);
+            // Palette matches the tuned ArkUI themes.
+            assert_eq!(t.chrome, base.chrome);
+            assert_eq!(t.canvas, base.canvas);
+            assert_eq!(t.canvas_dot, base.canvas_dot);
+            assert_eq!(t.dock, base.dock);
+            assert_eq!(t.card, base.card);
+            assert_eq!(t.accent, base.accent);
+            assert_eq!(t.text, base.text);
+            assert_ne!(t.canvas, t.chrome, "{kind:?}: canvas must separate from chrome");
+            assert_ne!(t.canvas_dot, t.canvas, "{kind:?}: Studio-style canvas dots");
+            assert_ne!(t.tab_strip, Color32::TRANSPARENT, "{kind:?}: Pro tab strip");
+            assert_ne!(t.row_selected, Color32::TRANSPARENT, "{kind:?}: Pro row selection");
+            assert!(contrast(t.text, t.card) >= 4.5, "{kind:?}: text on card");
+            assert_eq!(kind.chrome_css(), if t.dark() { "#000000" } else { "#FFFFFF" });
+        }
+        // Plain ArkUI aliases must not steal the Pro variants.
+        assert_eq!(ThemeKind::from_name("arkui"), Some(ThemeKind::ArkuiLight));
+        assert_eq!(ThemeKind::from_name("arkui dark"), Some(ThemeKind::ArkuiDark));
     }
 
     #[test]

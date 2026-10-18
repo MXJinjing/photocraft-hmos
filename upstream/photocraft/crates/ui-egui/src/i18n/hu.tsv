@@ -469,6 +469,8 @@
 	Soft Light Theme	Lágy világos téma
 	ArkUI Light Theme	ArkUI világos téma
 	ArkUI Dark Theme	ArkUI sötét téma
+	ArkUI Pro Light Theme	ArkUI Pro világos téma
+	ArkUI Pro Dark Theme	ArkUI Pro sötét téma
 	Brush Preview	Ecset előnézete
 	Brush Settings	Ecsetbeállítások
 	Brushes	Ecsetek
@@ -4083,3 +4085,7 @@ cameraRaw	Yellow	Sárga
 	Current tool and Eraser	Aktuális eszköz és radír
 	Previous tool	Előző eszköz
 	Show or hide context menu	Helyi menü megjelenítése vagy elrejtése
+
+# Window full screen (HarmonyOS host)
+	Enter Full Screen	Váltás teljes képernyőre
+	Exit Full Screen	Kilépés a teljes képernyőből

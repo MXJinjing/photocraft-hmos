@@ -738,6 +738,8 @@
 	Soft Light Theme	Zacht licht thema
 	ArkUI Light Theme	ArkUI-thema licht
 	ArkUI Dark Theme	ArkUI-thema donker
+	ArkUI Pro Light Theme	ArkUI Pro-thema licht
+	ArkUI Pro Dark Theme	ArkUI Pro-thema donker
 	Adwaita Light Theme	Adwaita-thema licht
 	Adwaita Dark Theme	Adwaita-thema donker
 	Adwaita	Adwaita
@@ -3922,3 +3924,7 @@ curves	Smooth	Vloeiend maken
 	Right sidebar	Rechterzijbalk
 	Connected pen	Verbonden pen
 	No pen connected	Geen pen verbonden
+
+# Window full screen (HarmonyOS host)
+	Enter Full Screen	Volledig scherm inschakelen
+	Exit Full Screen	Volledig scherm verlaten
