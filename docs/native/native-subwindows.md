@@ -93,3 +93,9 @@ icon, per-display DPI (uses the main window's scale), window position restore.
   XComponent surface tracks the chrome. System maximize can still be a no-op if the parent is
   not free-floating; Rust may emit `{op:"maximize"}` to call the same `maximize`/`recover` path
   as the main window.
+
+## Minimum size and tablet maximize
+
+- Minimum window size is 320x240 vp: `setWindowLimits` in `SubWindowHost.applyLimits` (px via display density, max kept >= min) plus the same floor in Rust (`viewports::MIN_SIZE`) for Open/Resize commands.
+- The system maximize button is only effective when the main window is a free window (2in1, or a tablet in freeform). Apps cannot intercept the system button, so on a tablet whose main window is full-screen/split-screen the sub-window is created with `maximizeSupported: false` and the button hidden via `setWindowTitleButtonVisible`. Rust-initiated `op:"maximize"` falls back to resizing/moving to the main window rect (and back) if `maximize()` throws.
+- Not verified on a tablet (no device); the main-window-status heuristic is the part to check.

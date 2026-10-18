@@ -192,14 +192,33 @@ fn title_and_size_commands_follow_the_app() {
             title: "renamed".into()
         }]
     );
-    ctx.send_viewport_cmd_to(doc_id(), ViewportCommand::InnerSize(egui::vec2(300., 200.)));
+    ctx.send_viewport_cmd_to(doc_id(), ViewportCommand::InnerSize(egui::vec2(500., 400.)));
     frame(&ctx, &registry, true, "renamed", &mut seen);
     assert_eq!(
         registry.borrow_mut().take_outbox(),
         vec![Command::Resize {
             key: 1,
-            width: 600,
-            height: 400
+            width: 1000,
+            height: 800
+        }]
+    );
+}
+
+#[test]
+fn window_size_requests_are_floored_at_the_minimum() {
+    let ctx = context();
+    let registry = registry(2.);
+    let mut seen = Seen::default();
+    frame(&ctx, &registry, true, "doc", &mut seen);
+    registry.borrow_mut().take_outbox();
+    ctx.send_viewport_cmd_to(doc_id(), ViewportCommand::InnerSize(egui::vec2(1., 0.)));
+    frame(&ctx, &registry, true, "doc", &mut seen);
+    assert_eq!(
+        registry.borrow_mut().take_outbox(),
+        vec![Command::Resize {
+            key: 1,
+            width: (MIN_SIZE.x * 2.) as u32,
+            height: (MIN_SIZE.y * 2.) as u32,
         }]
     );
 }

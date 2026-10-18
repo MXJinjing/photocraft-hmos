@@ -16,6 +16,13 @@ use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 /// Window size (points) used until the sub-window reports its real surface.
 const DEFAULT_SIZE: Vec2 = vec2(800.0, 600.0);
+/// Smallest document window (points). ArkTS enforces the same floor with `setWindowLimits`;
+/// this keeps a request that never went through the system limits from making a 0-size surface.
+pub const MIN_SIZE: Vec2 = vec2(320.0, 240.0);
+
+fn to_px(points: f32, ppp: f32, min_points: f32) -> u32 {
+    (points.max(min_points) * ppp).round().clamp(1.0, 16384.0) as u32
+}
 
 /// Requests for the ArkTS `SubWindowHost` (sent as `window` notifications).
 #[derive(Debug, Clone, PartialEq)]
@@ -158,12 +165,13 @@ impl Registry {
         if !self.children.contains_key(&id) {
             let key = self.next_key;
             self.next_key = self.next_key.wrapping_add(1).max(1);
-            let px = |points: f32| (points * ppp).round().clamp(1.0, 16384.0) as u32;
+            let width = to_px(wanted.x, ppp, MIN_SIZE.x);
+            let height = to_px(wanted.y, ppp, MIN_SIZE.y);
             self.outbox.push(Command::Open {
                 key,
                 title: title.clone(),
-                width: px(wanted.x),
-                height: px(wanted.y),
+                width,
+                height,
                 x: builder.position.map(|p| (p.x * ppp).round() as i32),
                 y: builder.position.map(|p| (p.y * ppp).round() as i32),
             });
@@ -174,7 +182,7 @@ impl Registry {
                     key,
                     title: title.clone(),
                     phase: Phase::Opening,
-                    size_px: (px(wanted.x), px(wanted.y)),
+                    size_px: (width, height),
                     input: {
                         let mut state = input::State::default();
                         state.feed = self.feed.clone();
@@ -267,8 +275,8 @@ impl Registry {
                         });
                     }
                     egui::ViewportCommand::InnerSize(size) => {
-                        let width = (size.x * ppp).round().clamp(1.0, 16384.0) as u32;
-                        let height = (size.y * ppp).round().clamp(1.0, 16384.0) as u32;
+                        let width = to_px(size.x, ppp, MIN_SIZE.x);
+                        let height = to_px(size.y, ppp, MIN_SIZE.y);
                         self.outbox.push(Command::Resize {
                             key: child.key,
                             width,
