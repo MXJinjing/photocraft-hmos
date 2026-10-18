@@ -742,6 +742,10 @@
 	Soft light	Suave claro
 	Soft Dark Theme	Tema suave escuro
 	Soft Light Theme	Tema suave claro
+	ArkUI Light Theme	Tema ArkUI Claro
+	ArkUI Dark Theme	Tema ArkUI Escuro
+	ArkUI Pro Light Theme	Tema ArkUI Pro Claro
+	ArkUI Pro Dark Theme	Tema ArkUI Pro Escuro
 	Next Theme	Próximo tema
 	Actions	Ações
 	Brush Settings	Configurações do pincel
@@ -3951,3 +3955,7 @@ layerLabel	No Color	Sem cor
 	No pen connected	Nenhuma caneta conectada
 	Battery unavailable	Bateria indisponível
 	Battery: {percent}%	Bateria: {percent}%
+
+# Window full screen (HarmonyOS host)
+	Enter Full Screen	Entrar em tela cheia
+	Exit Full Screen	Sair da tela cheia

@@ -768,6 +768,12 @@
 	Soft light	柔和淺色
 	Soft Dark Theme	柔和深色主題
 	Soft Light Theme	柔和淺色主題
+	ArkUI Light Theme	ArkUI 淺色主題
+	ArkUI Dark Theme	ArkUI 深色主題
+	ArkUI Pro Light Theme	ArkUI Pro 淺色主題
+	ArkUI Pro Dark Theme	ArkUI Pro 深色主題
+	ArkUI Pro Light	ArkUI Pro 淺色
+	ArkUI Pro Dark	ArkUI Pro 深色
 	Next Theme	下一個主題
 	Actions	動作
 	Brush Settings	筆刷設定
@@ -2756,3 +2762,7 @@ curves	Smooth	平滑
 	No pen connected	未連接筆
 	Battery unavailable	電量無法取得
 	Battery: {percent}%	電量：{percent}%
+
+# Window full screen (HarmonyOS host)
+	Enter Full Screen	進入全螢幕
+	Exit Full Screen	結束全螢幕

@@ -602,6 +602,46 @@ impl BrushSettings {
         brush
     }
 
+    /// Options-bar "Pressure for Size": on when the shortcut flag is set. Shape Dynamics may also
+    /// name Pen Pressure; painting only uses that when this flag is on (see `dynamics`).
+    pub fn size_uses_pen_pressure(&self) -> bool {
+        self.pressure_size
+    }
+
+    /// Options-bar "Pressure for Opacity".
+    pub fn opacity_uses_pen_pressure(&self) -> bool {
+        self.pressure_opacity
+    }
+
+    /// Turn the options-bar Pressure for Size button on or off. Off also clears Shape Dynamics ›
+    /// Size › Pen Pressure so the Brush Settings panel matches what the stroke does.
+    pub fn set_size_uses_pen_pressure(&mut self, on: bool) {
+        self.pressure_size = on;
+        if !on && self.shape_dynamics.size.control == Control::PenPressure {
+            self.shape_dynamics.size.control = Control::Off;
+        }
+    }
+
+    /// Turn the options-bar Pressure for Opacity button on or off. Off also clears Transfer ›
+    /// Opacity › Pen Pressure.
+    pub fn set_opacity_uses_pen_pressure(&mut self, on: bool) {
+        self.pressure_opacity = on;
+        if !on && self.transfer.opacity.control == Control::PenPressure {
+            self.transfer.opacity.control = Control::Off;
+        }
+    }
+
+    /// Light the options-bar pressure buttons when Shape Dynamics / Transfer already use Pen
+    /// Pressure (built-in Pressure Size / Opacity presets set the dynamics without the shortcut).
+    pub fn sync_pressure_flags_from_dynamics(&mut self) {
+        if self.shape_dynamics.enabled && self.shape_dynamics.size.control == Control::PenPressure {
+            self.pressure_size = true;
+        }
+        if self.transfer.enabled && self.transfer.opacity.control == Control::PenPressure {
+            self.pressure_opacity = true;
+        }
+    }
+
     /// This brush (a preset) picked while `current` is the tool's brush: Smoothing is a tool
     /// option, so it stays the tool's (Photoshop), a protected texture stays too, and so does every
     /// section `current` has locked (the locks themselves are tool state and carry over).

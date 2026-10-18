@@ -2170,6 +2170,10 @@
 	Soft light	Απαλό ανοιχτό
 	Soft Dark Theme	Απαλό σκούρο θέμα
 	Soft Light Theme	Απαλό ανοιχτό θέμα
+	ArkUI Light Theme	Φωτεινό θέμα ArkUI
+	ArkUI Dark Theme	Σκοτεινό θέμα ArkUI
+	ArkUI Pro Light Theme	Φωτεινό θέμα ArkUI Pro
+	ArkUI Pro Dark Theme	Σκοτεινό θέμα ArkUI Pro
 	Clear Canvas Guides	Απαλοιφή οδηγών καμβά
 	Clear Override	Απαλοιφή παράκαμψης
 	Clear Samples	Απαλοιφή δειγμάτων
@@ -3859,3 +3863,7 @@ curves	Smooth	Εξομάλυνση
 	No pen connected	Δεν έχει συνδεθεί γραφίδα
 	Battery unavailable	Η στάθμη μπαταρίας δεν είναι διαθέσιμη
 	Battery: {percent}%	Μπαταρία: {percent}%
+
+# Window full screen (HarmonyOS host)
+	Enter Full Screen	Είσοδος σε πλήρη οθόνη
+	Exit Full Screen	Έξοδος από πλήρη οθόνη

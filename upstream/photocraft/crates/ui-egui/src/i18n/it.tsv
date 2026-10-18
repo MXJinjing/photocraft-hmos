@@ -755,6 +755,10 @@
 	Soft light	Morbido chiaro
 	Soft Dark Theme	Tema morbido scuro
 	Soft Light Theme	Tema morbido chiaro
+	ArkUI Light Theme	Tema ArkUI chiaro
+	ArkUI Dark Theme	Tema ArkUI scuro
+	ArkUI Pro Light Theme	Tema ArkUI Pro chiaro
+	ArkUI Pro Dark Theme	Tema ArkUI Pro scuro
 	Next Theme	Tema successivo
 	Actions	Azioni
 	Brush Settings	Impostazioni pennello
@@ -4124,3 +4128,7 @@ navigator	Zoom	Zoom
 	No pen connected	Nessuna penna connessa
 	Battery unavailable	Batteria non disponibile
 	Battery: {percent}%	Batteria: {percent}%
+
+# Window full screen (HarmonyOS host)
+	Enter Full Screen	Attiva schermo intero
+	Exit Full Screen	Esci da schermo intero

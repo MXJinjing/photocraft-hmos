@@ -443,6 +443,11 @@ pub fn builtin() -> Vec<BrushPreset> {
     v.extend(dry_media(&base));
     v.extend(wet_media(&base));
     v.extend(special_effects(&base));
+    // Pressure Size / Opacity presets drive size/opacity through Shape Dynamics / Transfer. Light
+    // the options-bar buttons so turning them off can gate that path in `dynamics`.
+    for p in &mut v {
+        p.brush.sync_pressure_flags_from_dynamics();
+    }
     v
 }
 
@@ -470,8 +475,12 @@ mod tests {
         // Groups are contiguous, in panel order.
         let order: Vec<usize> = v.iter().filter_map(|p| GROUPS.iter().position(|g| *g == p.group)).collect();
         assert!(order.windows(2).all(|w| w[0] <= w[1]));
-        // Pressure variants respond to pressure.
-        let ps = find(&v, "Hard Round Pressure Size").map(|p| p.brush.shape_dynamics.size.control);
-        assert_eq!(ps, Some(Control::PenPressure));
+        // Pressure variants respond to pressure, and light the options-bar buttons.
+        let ps = find(&v, "Hard Round Pressure Size").map(|p| &p.brush);
+        assert_eq!(ps.map(|b| b.shape_dynamics.size.control), Some(Control::PenPressure));
+        assert_eq!(ps.map(|b| b.pressure_size), Some(true));
+        let po = find(&v, "Hard Round Pressure Opacity").map(|p| &p.brush);
+        assert_eq!(po.map(|b| b.transfer.opacity.control), Some(Control::PenPressure));
+        assert_eq!(po.map(|b| b.pressure_opacity), Some(true));
     }
 }

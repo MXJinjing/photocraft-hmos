@@ -439,12 +439,24 @@ pub fn dynamic_color(b: &BrushSettings, s: &StepInput, seed: u64, index: u64) ->
 }
 
 /// Base (pre-jitter) diameter at a step: size × size control (pressure etc.). Drives spacing.
+///
+/// Shape Dynamics › Size › Pen Pressure only applies when [`BrushSettings::pressure_size`] is on
+/// (the options-bar Pressure for Size button). Off ignores that control so the button truly
+/// disables pressure→size, including for Pressure Size presets and the Eraser's own flags.
 pub fn base_diameter(b: &BrushSettings, s: &StepInput) -> f32 {
     let sd = &b.shape_dynamics;
     let mut f = 1.0;
-    if sd.enabled && sd.size.control != Control::Off {
+    let size_control = if sd.enabled {
+        match sd.size.control {
+            Control::PenPressure if !b.pressure_size => Control::Off,
+            c => c,
+        }
+    } else {
+        Control::Off
+    };
+    if size_control != Control::Off {
         let min = sd.size.minimum.clamp(0.0, 1.0);
-        f = min + (1.0 - min) * control_value(sd.size.control, sd.size.fade_steps, s);
+        f = min + (1.0 - min) * control_value(size_control, sd.size.fade_steps, s);
     } else if b.pressure_size {
         f = s.point.pressure.clamp(0.0, 1.0);
     }
@@ -547,7 +559,13 @@ impl DabBuilder {
             let tr = &b.transfer;
             let (mut opacity, mut flow) = (1.0, b.flow);
             if tr.enabled {
-                opacity = scalar(&tr.opacity, s, r(stream::OPACITY));
+                // Transfer › Opacity › Pen Pressure only when pressure_opacity is on (options bar).
+                let opacity_dyn = if tr.opacity.control == Control::PenPressure && !b.pressure_opacity {
+                    Dynamic { control: Control::Off, ..tr.opacity }
+                } else {
+                    tr.opacity
+                };
+                opacity = scalar(&opacity_dyn, s, r(stream::OPACITY));
                 flow *= scalar(&tr.flow, s, r(stream::FLOW));
             }
             let (wet, mix) = if tr.enabled { (scalar(&tr.wetness, s, r(stream::WET)), scalar(&tr.mix, s, r(stream::MIX))) } else { (1.0, 1.0) };

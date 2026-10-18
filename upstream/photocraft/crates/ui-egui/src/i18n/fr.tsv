@@ -748,6 +748,10 @@
 	Soft light	Doux clair
 	Soft Dark Theme	Thème doux sombre
 	Soft Light Theme	Thème doux clair
+	ArkUI Light Theme	Thème ArkUI clair
+	ArkUI Dark Theme	Thème ArkUI sombre
+	ArkUI Pro Light Theme	Thème ArkUI Pro clair
+	ArkUI Pro Dark Theme	Thème ArkUI Pro sombre
 	Next Theme	Thème suivant
 	Actions	Actions
 	Brush Settings	Paramètres du pinceau
@@ -3163,3 +3167,7 @@ curves	Smooth	Lisser
 	No pen connected	Aucun stylet connecté
 	Battery unavailable	Batterie indisponible
 	Battery: {percent}%	Batterie : {percent}%
+
+# Window full screen (HarmonyOS host)
+	Enter Full Screen	Passer en plein écran
+	Exit Full Screen	Quitter le plein écran

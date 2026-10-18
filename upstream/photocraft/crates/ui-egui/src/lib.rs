@@ -231,6 +231,7 @@ pub mod vp_ui;
 pub mod warp_preview;
 #[cfg(target_arch = "wasm32")]
 pub mod web_host;
+pub mod window_fullscreen;
 pub mod wheel_nav;
 pub mod wide_angle_ui;
 pub mod widgets;
@@ -473,6 +474,8 @@ pub struct Services {
     /// Photoshop's live keyboard shortcut set, imported once at first launch (`kys_import`).
     pub photoshop_shortcuts: Option<PhotoshopShortcutsFn>,
     pub system_theme: Option<SystemThemeFn>,
+    /// Host-window full screen (HarmonyOS): shows the status-bar button and Window menu item.
+    pub window_fullscreen: Option<window_fullscreen::WindowFullscreen>,
     /// The native window is connected directly to a Wayland compositor.
     pub is_wayland: bool,
     /// On Wayland, the shell command that starts this install under XWayland, where native file

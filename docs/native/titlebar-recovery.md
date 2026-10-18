@@ -14,9 +14,13 @@ Decor setup is now best-effort and separate from listening. Status and size chan
 
 2026-10-11 (compile fix): PR #4 briefly typed the shared layout callback as `WindowStatusType` and reused it for `windowSizeChange`. ArkTS overload resolution then rejected `on/off('windowSizeChange', …)` (error mentioning `freeWindowModeChange`). Status and size now use separate callbacks (`Callback<WindowStatusType>` vs `Callback<Size>`) that both re-apply decor and refresh geometry.
 
+2026-10-17: fixed caption-button colours staying black after tablet → freeform.
+
+`setDecorButtonStyle` (via `paintWindow` / `applySystemBars`) is applied at cold start, on theme chrome changes, and on foreground. Outside freeform it often fails or does not stick. Entering freeform later re-applied decor height/visibility and geometry, but did not re-paint the theme chrome, so the three system caption buttons stayed black until the user manually switched theme. `WindowChrome` now re-calls `paintWindow` with the current `photocraftChrome` on start and on every status/size layout signal, matching cold freeform / manual theme behaviour.
+
 Validation:
 
-- `scripts/test_window_chrome.cjs`: passed mocked transition-zero, query-error, delayed-recovery, visible-caption/lagging-status, non-floating empty geometry, lifecycle cleanup, and freeform-entry-after-fullscreen (decor-throw and size-driven) regressions.
+- `scripts/test_window_chrome.cjs`: passed mocked transition-zero, query-error, delayed-recovery, visible-caption/lagging-status, non-floating empty geometry, lifecycle cleanup, freeform-entry-after-fullscreen (decor-throw and size-driven), and theme-chrome re-paint on freeform entry regressions.
 - Dual-target Rust release build and signed HAP build passed; `verify_native.py` passed (2026-10-10 validation).
 - Installed on real device `3GLUN25314G05064` after confirming the app had no open documents (2026-10-10).
 - Floating-window and restored foreground large-window screenshots show workspace/stylus controls clear of the native caption buttons. Device log reports a 139×37 vp caption rectangle and 147 vp reserved width.
