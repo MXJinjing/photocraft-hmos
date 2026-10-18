@@ -8,8 +8,8 @@ import { fileIo, fileUri, picker } from '@kit.CoreFileKit';
 import { photoAccessHelper } from '@kit.MediaLibraryKit';
 import { i18n } from '@kit.LocalizationKit';
 import { BusinessError } from '@kit.BasicServicesKit';
-import { KeyboardAvoidMode } from '@kit.ArkUI';
-import { applySystemBars, LOADING_CHROME, normalizeChrome } from '../SystemBars';
+import { ComponentContent, KeyboardAvoidMode } from '@kit.ArkUI';
+import { applySystemBars, isDarkChrome, LOADING_CHROME, normalizeChrome } from '../SystemBars';
 import { setOpenListener, takeOpens } from '../openInbox';
 import { allowConfirmedClose, setCloseRequest } from '../closeGuard';
 import { HarmonyStylusAdapter } from '../stylus/HarmonyStylusAdapter';
@@ -55,6 +55,39 @@ class NativeInput {
   alt: boolean = false;
   dx: number = 0;
   dy: number = 0;
+}
+
+interface OpenSourceActions {
+  background: string;
+  text: string;
+  card: string;
+  onFiles: () => void;
+  onGallery: () => void;
+  onCancel: () => void;
+}
+
+@Builder
+function openSourceContent(actions: OpenSourceActions) {
+  Column({ space: 6 }) {
+    Button('从文件管理导入', { type: ButtonType.Normal })
+      .width('100%').height(46).borderRadius(12)
+      .fontSize(15).fontWeight(FontWeight.Medium).fontColor(actions.text)
+      .backgroundColor(actions.card)
+      .onClick(actions.onFiles)
+    Button('从图库导入', { type: ButtonType.Normal })
+      .width('100%').height(46).borderRadius(12)
+      .fontSize(15).fontWeight(FontWeight.Medium).fontColor(actions.text)
+      .backgroundColor(actions.card)
+      .onClick(actions.onGallery)
+    Button('取消', { type: ButtonType.Normal })
+      .width('100%').height(46).borderRadius(12)
+      .fontSize(15).fontWeight(FontWeight.Medium).fontColor(actions.text)
+      .backgroundColor(actions.card)
+      .onClick(actions.onCancel)
+  }
+  .width('82%').constraintSize({ maxWidth: 360 })
+  .padding(18)
+  .backgroundColor(actions.background).borderRadius(24)
 }
 
 @Entry
@@ -228,7 +261,7 @@ struct Index {
   }
   private async openFile(id: number): Promise<void> {
     // File › Open / homepage Open / Ctrl+O all arrive here via native pick_open → kind "open".
-    // Show a native ActionSheet before the system Document or Gallery picker.
+    // Choose a source in a centered ArkUI dialog before opening a system picker.
     this.ime.stop(); this.cursor.reset();
     let generation = this.generation;
     try {
@@ -256,31 +289,36 @@ struct Index {
     }
   }
   private chooseOpenSource(): Promise<string> {
-    // Native ArkUI ActionSheet via UIContext — avoids CustomDialogController crashes
-    // when opened from the async native pick_open bridge path.
-    return new Promise<string>((resolve: (value: string) => void) => {
-      let settled: boolean = false;
-      let finish = (value: string): void => {
-        if (settled) { return; }
-        settled = true;
-        resolve(value);
+    return new Promise<string>((resolve: (value: string) => void, reject: (reason: Error) => void) => {
+      const prompt = this.getUIContext().getPromptAction();
+      let source: string = '';
+      let closing: boolean = false;
+      let content: ComponentContent<OpenSourceActions>;
+      const select = (value: string): void => {
+        if (closing) { return; }
+        closing = true;
+        source = value;
+        prompt.closeCustomDialog(content).catch((error: BusinessError) => {
+          reject(error);
+        });
       };
-      this.getUIContext().showActionSheet({
-        title: '打开文件',
-        message: '请选择文件来源',
+      const background: string = normalizeChrome(this.chrome) || LOADING_CHROME;
+      const dark: boolean = isDarkChrome(background);
+      const actions: OpenSourceActions = {
+        background: background,
+        text: dark ? '#FFFFFFFF' : '#FF000000',
+        card: dark ? '#26FFFFFF' : '#14000000',
+        onFiles: (): void => select('files'),
+        onGallery: (): void => select('gallery'),
+        onCancel: (): void => select(''),
+      };
+      content = new ComponentContent(this.getUIContext(), wrapBuilder(openSourceContent), actions);
+      prompt.openCustomDialog(content, {
+        alignment: DialogAlignment.Center,
+        isModal: true,
         autoCancel: true,
-        sheets: [
-          {
-            title: '从文件管理选取',
-            action: (): void => { finish('files'); },
-          },
-          {
-            title: '从图库选取',
-            action: (): void => { finish('gallery'); },
-          },
-        ],
-        cancel: (): void => { finish(''); },
-      });
+        onDidDisappear: (): void => { content.dispose(); resolve(source); },
+      }).catch((error: BusinessError) => { content.dispose(); reject(error); });
     });
   }
   private async selectDocumentUris(): Promise<Array<string>> {
