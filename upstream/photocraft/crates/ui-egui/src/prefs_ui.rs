@@ -2993,14 +2993,13 @@ mod tests {
         h.run_steps(2);
         h.get_by_label("Block finger input").click();
         h.run_steps(2);
-        h.get_by_label("Stylus").click();
-        h.run_steps(2);
         h.get_by_label("Previous tool").click();
-        h.run_steps(2);
-        h.get_by_label("Stylus").click();
         h.run_steps(2);
         h.query_all_by_label("Off").last().unwrap().click();
         h.run_steps(2);
+        h.get_by_label("Stylus").click();
+        h.run_steps(2);
+        assert!(h.query_by_label("Block finger input").is_none(), "the trigger still closes its own menu");
 
         let id = open_preferences(h.state_mut(), "tools");
         h.run_steps(3);

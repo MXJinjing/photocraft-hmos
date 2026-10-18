@@ -226,7 +226,7 @@ pub fn stylus_menu(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     }
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), "Stylus"));
     let resp = resp.on_hover_text(tl!("Stylus"));
-    egui::Popup::menu(&resp).show(|ui| {
+    egui::Popup::menu(&resp).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
         let t = Tokens::get(ui.ctx());
         ui.set_min_width(240.0);
         if device.connected {
@@ -238,14 +238,12 @@ pub fn stylus_menu(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         let on = app.session.prefs().tools.block_finger_input;
         if ui.add(egui::Button::selectable(on, tl!("Block finger input"))).clicked() {
             app.session.edit_prefs(|p| p.tools.block_finger_input = !on);
-            ui.close();
         }
         ui.separator();
         ui.label(RichText::new(tl!("Double-tap pen body")).color(t.text_dim));
         for &(mode, label) in STYLUS_DOUBLE_TAP_OPTIONS {
             if ui.add(egui::Button::selectable(app.session.prefs().tools.stylus_double_tap == mode, tl!(label))).clicked() {
                 app.session.edit_prefs(|p| p.tools.stylus_double_tap = mode);
-                ui.close();
             }
         }
         ui.separator();
@@ -253,7 +251,6 @@ pub fn stylus_menu(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         for &(mode, label) in STYLUS_LONG_PRESS_OPTIONS {
             if ui.add(egui::Button::selectable(app.session.prefs().tools.stylus_long_press == mode, tl!(label))).clicked() {
                 app.session.edit_prefs(|p| p.tools.stylus_long_press = mode);
-                ui.close();
             }
         }
     });
@@ -620,11 +617,11 @@ mod tests {
     }
 
     #[test]
-    fn stylus_menu_sits_left_of_discord_in_the_title_bar_and_toggles_block_finger() {
+    fn stylus_menu_sits_left_of_discord_and_stays_open_until_an_outside_click() {
         use egui_kittest::{Harness, kittest::Queryable};
 
         let app = crate::PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
-        let mut h = Harness::builder().with_size(egui::vec2(1400.0, 80.0)).build_ui_state(
+        let mut h = Harness::builder().with_size(egui::vec2(1400.0, 500.0)).build_ui_state(
             |ui, app| {
                 if !ui.ctx().fonts(|f| f.families().contains(&egui::FontFamily::Name("medium".into()))) {
                     return;
@@ -665,13 +662,20 @@ mod tests {
         h.get_by_label("Stylus").click();
         h.run_steps(2);
         h.get_by_label("Block finger input").click();
-        h.run_steps(2);
+        h.run();
         assert!(h.state().session.prefs().tools.block_finger_input, "the stylus menu toggles block finger input");
-        h.get_by_label("Stylus").click();
-        h.run_steps(2);
+        assert!(h.query_by_label("Previous tool").is_some(), "an internal click keeps the stylus menu open");
+        h.get_by_label("Previous tool").click();
+        h.run();
+        assert_eq!(h.state().session.prefs().tools.stylus_double_tap, StylusDoubleTap::Previous);
+        assert!(h.query_by_label("Show or hide context menu").is_some(), "another option also keeps the menu open");
         h.get_by_label("Block finger input").click();
-        h.run_steps(2);
+        h.run();
         assert!(!h.state().session.prefs().tools.block_finger_input);
+        assert!(h.query_by_label("Block finger input").is_some());
+        h.get_by_label("File").click();
+        h.run();
+        assert!(h.query_by_label("Block finger input").is_none(), "a click outside closes the stylus menu");
         let zh = crate::i18n::Lang::from_code("zh-hans").expect("zh-hans registered");
         assert_eq!(crate::i18n::tr(zh, "Stylus"), "手写笔");
         assert_eq!(crate::i18n::tr(crate::i18n::Lang::EN, "Stylus"), "Stylus");
