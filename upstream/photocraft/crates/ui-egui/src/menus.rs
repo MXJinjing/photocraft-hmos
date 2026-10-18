@@ -321,7 +321,7 @@ pub(crate) fn invoke_unguarded(app: &mut PhotocraftApp, ctx: &egui::Context, id:
                 None if app.services.default_save.is_some() => app.save(None),
                 None => {
                     let own = app.session.active().and_then(|d| d.path.clone().map(|p| (photocraft_engine::file_cmds::holds_at(&d.doc, &p), p, d)));
-                    let own = own.filter(|(_, path, _)| !path.starts_with("save-as/"));
+                    let own = own.filter(|(_, path, _)| !crate::file_open::is_ephemeral_save_token(path));
                     match own {
                         Some((true, path, _)) => app.save_in_place(path),
                         Some((false, path, d)) if photocraft_engine::file_cmds::saves_in_place(&path) => {
@@ -2227,6 +2227,31 @@ mod open_recent_tests {
         invoke(&mut app, &ctx, "file.removeRecent", json!({"path": "/tmp/not-listed.png"})).unwrap();
         assert_eq!(app.ui.recent_files.len(), 2, "a path that isn't listed changes nothing");
         assert!(invoke(&mut app, &ctx, "file.removeRecent", json!({})).is_err(), "needs a path");
+    }
+
+    /// HarmonyOS ordinary Save / Save As use session-scoped `save-default/…` and `save-as/…`
+    /// tokens. Those must never land in Open Recent (Home › Recent would otherwise try to reopen
+    /// a path the host can no longer resolve after restart).
+    #[test]
+    fn ephemeral_save_tokens_are_not_listed_in_recent() {
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        app.push_recent("/docs/real.psd");
+        app.push_recent("save-default/10/untitled.psd");
+        app.push_recent("save-as/15/export.psd");
+        assert_eq!(app.ui.recent_files, vec!["/docs/real.psd".to_string()]);
+        assert_eq!(app.session.prefs().file_handling.recent_files, app.ui.recent_files);
+
+        // Leftovers from older builds are scrubbed on sync.
+        app.session.prefs.edit(|p| {
+            p.file_handling.recent_files = vec![
+                "save-default/1/a.psd".into(),
+                "/docs/keep.psd".into(),
+                "save-as/2/b.psd".into(),
+            ];
+        });
+        app.sync_recent();
+        assert_eq!(app.ui.recent_files, vec!["/docs/keep.psd".to_string()]);
+        assert_eq!(app.session.prefs().file_handling.recent_files, app.ui.recent_files);
     }
 
     #[cfg(not(target_arch = "wasm32"))]

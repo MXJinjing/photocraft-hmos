@@ -64,6 +64,13 @@ pub fn display_name(path: &str) -> String {
     std::path::Path::new(path).file_name().map(|n| n.to_string_lossy().to_string()).filter(|n| !n.is_empty()).unwrap_or_else(|| path.to_string())
 }
 
+/// Host picker tokens (`save-default/…`, `save-as/…`) are session-scoped capability handles, not
+/// durable filesystem paths. They must not be listed in Open Recent / the Home recent strip: after
+/// a restart (or once the host drops the URI map) they cannot be opened again.
+pub fn is_ephemeral_save_token(path: &str) -> bool {
+    path.starts_with("save-default/") || path.starts_with("save-as/")
+}
+
 impl PhotocraftApp {
     /// Open `bytes` read from the file at `path`: the document is named after the file, keeps
     /// `path` for File › Save unless it is a derivative preview, and `path` goes to the top of Open Recent. Returns the import
@@ -105,6 +112,11 @@ impl PhotocraftApp {
     /// Read and open the file at `path` (see [`open_file`](Self::open_file)).
     #[cfg(not(target_arch = "wasm32"))]
     pub fn open_path(&mut self, path: &str) -> Result<Vec<String>, String> {
+        if is_ephemeral_save_token(path) {
+            // Stale Home › Recent / Open Recent entry from a prior save; drop it so it cannot be retried.
+            self.remove_recent(path);
+            return Err("that save target is no longer available; open the file from its folder or File › Open".into());
+        }
         // Documents opening in the background are read on the worker too (a 2 GB PSB read
         // would block the window). Preset files (brushes, gradients) go the usual way.
         let ext = std::path::Path::new(path).extension().map(|e| e.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
