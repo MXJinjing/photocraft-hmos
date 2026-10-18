@@ -93,6 +93,8 @@ pub const UI_COMMANDS: &[(&str, &str, &[&str], Option<&str>)] = &[
     ("window.theme.softDark", "Soft Dark Theme", &["Window", "Theme"], None),
     ("window.theme.arkuiLight", "ArkUI Light Theme", &["Window", "Theme"], None),
     ("window.theme.arkuiDark", "ArkUI Dark Theme", &["Window", "Theme"], None),
+    ("window.theme.arkuiProLight", "ArkUI Pro Light Theme", &["Window", "Theme"], None),
+    ("window.theme.arkuiProDark", "ArkUI Pro Dark Theme", &["Window", "Theme"], None),
     ("window.theme.system", "Sync with system", &["Window", "Theme"], None),
     ("edit.search", "Search…", &["Edit"], Some("Cmd+F")),
     #[cfg(not(feature = "harmonyos-ui"))]
@@ -401,7 +403,9 @@ pub(crate) fn invoke_unguarded(app: &mut PhotocraftApp, ctx: &egui::Context, id:
         | "window.theme.softLight"
         | "window.theme.softDark"
         | "window.theme.arkuiLight"
-        | "window.theme.arkuiDark" => {
+        | "window.theme.arkuiDark"
+        | "window.theme.arkuiProLight"
+        | "window.theme.arkuiProDark" => {
             let k = crate::theme::ThemeKind::from_name(&id["window.theme.".len()..]).unwrap_or_default();
             app.set_theme(ctx, k);
             Ok(Value::Null)
