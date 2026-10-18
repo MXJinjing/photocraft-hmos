@@ -41,7 +41,7 @@ const fixture = JSON.parse(fs.readFileSync(path.join(root,
   'upstream/photocraft/crates/ui-egui/tests/fixtures/stylus-packets.json'), 'utf8'));
 assert.deepEqual(plain(factoryPackets), fixture, 'ArkTS factories must match the Rust protocol fixture');
 
-function setup(failedGesture, granted = false) {
+function setup(failedGesture) {
   const gestures = new Map();
   const devices = new Map();
   const timers = new Map();
@@ -56,38 +56,25 @@ function setup(failedGesture, granted = false) {
     off(name, callback) { assert.equal(gestures.get(name), callback); gestures.delete(name); }
   };
   const info = new Map([[1, { name: 'HUAWEI M-Pencil', uniq: '11:22:33:44:55:66', phys: '' }]]);
-  const bluetooth = { ids: ['11:22:33:44:55:66'], name: 'HUAWEI M-Pencil', battery: 82, queries: 0, pending: null, bleIds: [], hidError: false, nameError: false };
-  let permissionRequests = 0;
   const device = {
     KeyboardType: { HANDWRITING_PEN: 13 },
     getKeyboardTypeSync: id => id === 1 ? 13 : 0,
     getDeviceInfoSync: id => info.get(id) || { name: 'Keyboard' },
-    getDeviceList: () => new Promise(resolve => pending.push(resolve)),
+    getDeviceList: () => new Promise((resolve, reject) => pending.push({ resolve, reject })),
     on: (name, callback) => devices.set(name, callback),
     off(name, callback) { assert.equal(devices.get(name), callback); devices.delete(name); }
   };
   const { HarmonyStylusAdapter } = load('HarmonyStylusAdapter', {
     './StylusProtocol': protocol, '@kit.Penkit': { stylusInteraction: sdk },
-    '@kit.InputKit': { inputDevice: device },
-    '@kit.ConnectivityKit': {
-      hid: { createHidHostProfile: () => ({ getConnectedDevices: () => { if (bluetooth.hidError) throw { code: 801 }; return bluetooth.ids; } }) },
-      ble: { getConnectedBLEDevices: () => bluetooth.bleIds },
-      connection: {
-        getRemoteDeviceName: () => { if (bluetooth.nameError) throw { code: 1 }; return bluetooth.name; },
-        getRemoteDeviceBatteryInfo: () => {
-          bluetooth.queries++;
-          return bluetooth.pending ? new Promise(resolve => bluetooth.pending.push(resolve)) : Promise.resolve({ batteryLevel: bluetooth.battery });
-        }
-      }
-    }
+    '@kit.InputKit': { inputDevice: device }
   }, {
     Date: { now: () => 1234567890000 },
     setInterval: callback => { const id = nextTimer++; timers.set(id, callback); return id; },
     clearInterval: id => timers.delete(id)
   });
   const packets = [];
-  const adapter = new HarmonyStylusAdapter(packet => packets.push(plain(packet)), async () => { permissionRequests++; return granted; });
-  return { adapter, gestures, devices, timers, pending, packets, info, bluetooth, permissionRequests: () => permissionRequests };
+  const adapter = new HarmonyStylusAdapter(packet => packets.push(plain(packet)));
+  return { adapter, gestures, devices, timers, pending, packets, info };
 }
 async function flush() { await new Promise(resolve => setImmediate(resolve)); }
 
@@ -96,19 +83,34 @@ async function main() {
   s.adapter.start(); s.adapter.start();
   assert.equal(s.gestures.size, 2); assert.equal(s.devices.size, 1); assert.equal(s.timers.size, 1);
   assert.equal(s.pending.length, 1, 'start is idempotent');
-  s.pending.shift()([1]); await flush();
-  assert.deepEqual(s.packets.pop(), { version: 1, type: 'connection', connected: true, deviceName: 'HUAWEI M-Pencil' });
+
+  // Poll and device-change notifications while a slow scan is running coalesce instead of
+  // invalidating its result or starting unbounded overlapping queries.
+  s.timers.values().next().value();
+  s.devices.get('change')({});
+  assert.equal(s.pending.length, 1, 'only one device scan runs at a time');
+  s.pending.shift().resolve([1]); await flush();
+  assert.deepEqual(s.packets.pop(), {
+    version: 1, type: 'connection', connected: true, deviceName: 'HUAWEI M-Pencil'
+  }, 'a scan slower than the polling interval is still accepted');
+  assert.equal(s.pending.length, 1, 'notifications during a scan request one immediate follow-up');
+  s.pending.shift().resolve([1]); await flush();
+  assert.equal(s.packets.length, 0, 'unchanged connection does not repeatedly emit');
+
   s.gestures.get('doubleTap')({ timestamp: 7 });
   s.gestures.get('squeeze')({ timestamp: 8 });
   assert.deepEqual(s.packets.splice(0), [
     { version: 1, type: 'gesture', gesture: 'doubleTap', timestampMs: 1234567890000 },
     { version: 1, type: 'gesture', gesture: 'longPress', timestampMs: 1234567890000 }
   ], 'SDK-specific names/timestamp units must be normalised');
-  s.timers.values().next().value(); s.pending.shift()([1]); await flush();
-  assert.equal(s.packets.length, 0, 'unchanged connection does not repeatedly emit');
-  s.adapter.publishState(); s.pending.shift()([1]); await flush();
-  assert.deepEqual(s.packets.pop(), { version: 1, type: 'connection', connected: true, deviceName: 'HUAWEI M-Pencil' }, 'page reload republishes current state');
-  s.devices.get('change')({}); s.pending.shift()([]); await flush();
+
+  s.adapter.publishState();
+  s.pending.shift().resolve([1]); await flush();
+  assert.deepEqual(s.packets.pop(), {
+    version: 1, type: 'connection', connected: true, deviceName: 'HUAWEI M-Pencil'
+  }, 'native consumer restart republishes current state');
+  s.devices.get('change')({});
+  s.pending.shift().resolve([]); await flush();
   assert.deepEqual(s.packets.pop(), { version: 1, type: 'connection', connected: false });
 
   // An asynchronous scan from before stop/restart must not update the new adapter lifetime.
@@ -119,106 +121,27 @@ async function main() {
   assert.equal(s.gestures.size, 0); assert.equal(s.devices.size, 0); assert.equal(s.timers.size, 0);
   oldGesture({ timestamp: 9 }); assert.equal(s.packets.length, 0);
   s.adapter.start();
-  stale([1]); await flush(); assert.equal(s.packets.length, 0, 'ignore old asynchronous result after restart');
-  s.pending.shift()([]); await flush();
+  stale.resolve([1]); await flush(); assert.equal(s.packets.length, 0, 'ignore old asynchronous result after restart');
+  s.pending.shift().resolve([]); await flush();
   assert.deepEqual(s.packets.pop(), { version: 1, type: 'connection', connected: false });
   s.adapter.stop();
 
   const partial = setup('squeeze');
-  partial.adapter.start(); partial.pending.shift()([]); await flush();
+  partial.adapter.start(); partial.pending.shift().resolve([]); await flush();
   assert.equal(partial.gestures.size, 1, 'one unsupported feature must not disable the other');
   partial.gestures.get('doubleTap')({});
   assert.equal(partial.packets.at(-1).gesture, 'doubleTap');
   partial.adapter.stop(); assert.equal(partial.gestures.size, 0); assert.equal(partial.timers.size, 0);
-  const b = setup(undefined, true);
-  b.adapter.start(); b.pending.shift()([1]); await flush();
-  assert.equal(b.permissionRequests(), 1, 'ask only after detecting a pen');
-  b.pending.shift()([1]); await flush();
-  assert.equal(b.packets.at(-1).batteryPercent, 82);
-  assert.equal(b.packets.at(-1).deviceName, 'HUAWEI M-Pencil');
-  b.bluetooth.battery = 0;
-  b.timers.values().next().value(); b.pending.shift()([1]); await flush();
-  assert.equal(b.packets.at(-1).batteryPercent, 0);
-  b.bluetooth.battery = -1;
-  b.timers.values().next().value(); b.pending.shift()([1]); await flush();
-  assert.equal(b.packets.at(-1).batteryPercent, undefined, 'unknown battery is not 0%');
-  b.bluetooth.ids = ['AA:AA:AA:AA:AA:AA']; b.bluetooth.name = 'Headphones';
-  const count = b.bluetooth.queries;
-  b.timers.values().next().value(); b.pending.shift()([1]); await flush();
-  assert.equal(b.bluetooth.queries, count, 'never use an unrelated device battery');
-  b.bluetooth.ids = ['11:22:33:44:55:66']; b.bluetooth.name = 'HUAWEI M-Pencil';
-  b.bluetooth.pending = [];
-  b.timers.values().next().value(); b.pending.shift()([1]); await flush();
-  const lateBattery = b.bluetooth.pending.shift();
-  b.devices.get('change')({}); b.pending.shift()([]); await flush();
-  lateBattery({ batteryLevel: 90 }); await flush();
-  assert.deepEqual(b.packets.at(-1), { version: 1, type: 'connection', connected: false }, 'late battery must not reconnect a pen');
-  b.adapter.stop();
 
-  // BLE-only pens, including generic InputKit driver names, still report battery.
-  const bleOnly = setup(undefined, true);
-  bleOnly.bluetooth.ids = [];
-  bleOnly.bluetooth.bleIds = ['11:22:33:44:55:66'];
-  bleOnly.bluetooth.hidError = true;
-  bleOnly.info.set(1, { name: 'Virtual Stylus', uniq: '', phys: '' });
-  bleOnly.adapter.start(); bleOnly.pending.shift()([1]); await flush();
-  bleOnly.pending.shift()([1]); await flush();
-  assert.equal(bleOnly.packets.at(-1).batteryPercent, 82, 'BLE does not depend on HID availability or identical driver names');
-  assert.equal(bleOnly.packets.at(-1).deviceName, 'HUAWEI M-Pencil');
-  bleOnly.bluetooth.bleIds.push('22:33:44:55:66:77');
-  bleOnly.timers.values().next().value(); bleOnly.pending.shift()([1]); await flush();
-  assert.equal(bleOnly.packets.at(-1).batteryPercent, undefined, 'two remote pens are ambiguous');
-  bleOnly.bluetooth.bleIds = ['11:22:33:44:55:66'];
-  bleOnly.info.set(2, { name: 'Second Stylus', uniq: '', phys: '' });
-  bleOnly.timers.values().next().value(); bleOnly.pending.shift()([1, 2]); await flush();
-  assert.equal(bleOnly.packets.at(-1).batteryPercent, undefined, 'two input pens must not share a guessed battery');
-  bleOnly.adapter.stop();
+  const failed = setup();
+  failed.adapter.start();
+  failed.pending.shift().reject({ code: 1, message: 'temporary failure' }); await flush();
+  failed.timers.values().next().value();
+  assert.equal(failed.pending.length, 1, 'a failed scan releases the serialization guard');
+  failed.pending.shift().resolve([1]); await flush();
+  assert.equal(failed.packets.at(-1).connected, true);
+  failed.adapter.stop();
 
-  const slow = setup(undefined, true);
-  slow.adapter.start(); slow.pending.shift()([1]); await flush();
-  slow.bluetooth.pending = [];
-  slow.pending.shift()([1]); await flush();
-  const slowBattery = slow.bluetooth.pending.shift();
-  slow.timers.values().next().value(); slow.pending.shift()([1]); await flush();
-  slow.timers.values().next().value(); slow.pending.shift()([1]); await flush();
-  assert.equal(slow.bluetooth.queries, 1, 'polls do not overlap battery requests');
-  slowBattery({ batteryLevel: 73 }); await flush();
-  assert.equal(slow.packets.at(-1).batteryPercent, 73, 'reads lasting over one poll are not discarded');
-  slow.adapter.stop();
-
-  // Identity matching takes priority and survives an unavailable remote device name.
-  const identity = setup(undefined, true);
-  identity.bluetooth.bleIds = identity.bluetooth.ids.slice();
-  identity.bluetooth.nameError = true;
-  identity.adapter.start(); identity.pending.shift()([1]); await flush();
-  identity.pending.shift()([1]); await flush();
-  assert.equal(identity.bluetooth.queries, 1, 'deduplicate HID and BLE addresses');
-  assert.equal(identity.packets.at(-1).batteryPercent, 82, 'address match does not require a readable remote name');
-  identity.adapter.stop();
-
-  const reconnect = setup(undefined, true);
-  reconnect.adapter.start(); reconnect.pending.shift()([1]); await flush();
-  reconnect.bluetooth.pending = [];
-  reconnect.pending.shift()([1]); await flush();
-  const previousBattery = reconnect.bluetooth.pending.shift();
-  reconnect.devices.get('change')({}); reconnect.pending.shift()([]); await flush();
-  reconnect.devices.get('change')({}); reconnect.pending.shift()([1]); await flush();
-  previousBattery({ batteryLevel: 99 }); await flush();
-  assert.equal(reconnect.packets.at(-1).batteryPercent, undefined, 'disconnect and reconnect invalidate old reads even when InputKit reuses the ID');
-  reconnect.bluetooth.pending = null;
-  reconnect.timers.values().next().value(); reconnect.pending.shift()([1]); await flush();
-  assert.equal(reconnect.packets.at(-1).batteryPercent, 82, 'new connection can read its own battery');
-  reconnect.adapter.stop();
-
-  const denied = setup();
-  denied.adapter.start(); denied.pending.shift()([]); await flush();
-  assert.equal(denied.permissionRequests(), 0, 'no permission prompt without a pen');
-  denied.devices.get('change')({}); denied.pending.shift()([1]); await flush();
-  denied.timers.values().next().value(); denied.pending.shift()([1]); await flush();
-  assert.equal(denied.permissionRequests(), 1, 'denial is not repeatedly prompted');
-  assert.equal(denied.bluetooth.queries, 0);
-  assert.equal(denied.packets.at(-1).deviceName, 'HUAWEI M-Pencil', 'InputKit name survives denial');
-  denied.adapter.stop();
-  console.log('Passed: packets, lifecycle, connection/name/battery updates, unavailable/zero battery, permission denial, stale queries, BLE-only pens, differing names, ambiguous pens, slow reads and unrelated devices.');
+  console.log('Passed: packets, lifecycle, gestures, connection/name updates, serialized slow scans, stale results and scan failure recovery.');
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });

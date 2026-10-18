@@ -24,8 +24,6 @@
 
 # Guide layout dialog
 # HarmonyOS native controls
-	Battery unavailable	Podaci o bateriji nisu dostupni
-	Battery: {percent}%	Baterija: {percent}%
 	Block finger input	Blokiraj unos prstom
 	Choose printer, copies and duplex in the system print dialog.	Izaberite štampač, broj kopija i dvostranu štampu u sistemskom dijalogu za štampanje.
 	Connected pen	Povezana olovka

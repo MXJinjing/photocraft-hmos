@@ -231,10 +231,6 @@ pub fn stylus_menu(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         ui.set_min_width(240.0);
         if device.connected {
             ui.label(RichText::new(device.name.as_deref().unwrap_or(tl!("Connected pen"))).color(t.text));
-            let battery = device
-                .battery_percent
-                .map_or_else(|| tl!("Battery unavailable").to_owned(), |p| crate::i18n::fmt(tl!("Battery: {percent}%"), &[("percent", &p.to_string())]));
-            ui.label(RichText::new(battery).color(t.text_dim));
         } else {
             ui.label(RichText::new(tl!("No pen connected")).color(t.text_dim));
         }
@@ -680,8 +676,6 @@ mod tests {
         assert_eq!(crate::i18n::tr(zh, "Stylus"), "手写笔");
         assert_eq!(crate::i18n::tr(crate::i18n::Lang::EN, "Stylus"), "Stylus");
         assert_eq!(crate::i18n::tr(zh, "No pen connected"), "未连接笔");
-        assert_eq!(crate::i18n::tr(zh, "Battery unavailable"), "电量不可用");
-        assert_eq!(crate::i18n::tr(zh, "Battery: {percent}%"), "电量：{percent}%");
         assert_eq!(crate::i18n::tr(zh, "Double-tap pen body"), "双击笔身");
         assert_eq!(crate::i18n::tr(zh, "Long-press pen body"), "轻捏笔身");
 
@@ -698,7 +692,7 @@ mod tests {
     }
 
     #[test]
-    fn stylus_menu_reports_current_name_and_battery_and_clears_on_disconnect() {
+    fn stylus_menu_reports_current_name_and_clears_on_disconnect() {
         use egui_kittest::{Harness, kittest::Queryable};
         let app = crate::PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
         let mut h = Harness::builder().with_size(egui::vec2(1400.0, 500.0)).build_ui_state(
@@ -716,27 +710,21 @@ mod tests {
         h.run_steps(2);
         assert!(h.query_by_label("No pen connected").is_some());
         assert!(h.query_by_label("Block finger input").is_some());
-        h.state().stylus.feed.set_device(true, Some("HUAWEI M-Pencil".into()), Some(82));
+        h.state().stylus.feed.set_device(true, Some("HUAWEI M-Pencil".into()));
         h.run_steps(2);
         assert!(h.query_by_label("HUAWEI M-Pencil").is_some());
-        assert!(h.query_by_label("Battery: 82%").is_some());
         assert!(h.query_by_label("No pen connected").is_none());
         if let Some(path) = std::env::var_os("PHOTOCRAFT_STYLUS_POPUP_SCREENSHOT") {
             h.render().expect("render stylus menu").save(path).expect("save stylus menu");
         }
-        h.state().stylus.feed.set_device(true, Some("HUAWEI M-Pencil".into()), Some(0));
-        h.run_steps(2);
-        assert!(h.query_by_label("Battery: 0%").is_some(), "zero is a valid battery level");
-        h.state().stylus.feed.set_device(true, Some("Another pen".into()), None);
+        h.state().stylus.feed.set_device(true, Some("Another pen".into()));
         h.run_steps(2);
         assert!(h.query_by_label("Another pen").is_some());
-        assert!(h.query_by_label("Battery unavailable").is_some());
         assert!(h.query_by_label("HUAWEI M-Pencil").is_none());
         h.state().stylus.feed.set_connected(false);
         h.run_steps(2);
         assert!(h.query_by_label("No pen connected").is_some());
         assert!(h.query_by_label("Another pen").is_none());
-        assert!(h.query_by_label("Battery unavailable").is_none());
         h.get_by_label("Block finger input").click();
         h.run_steps(2);
         assert!(h.state().session.prefs().tools.block_finger_input, "settings work while disconnected");

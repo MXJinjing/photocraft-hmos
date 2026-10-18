@@ -124,8 +124,6 @@ pub enum StylusInput {
         connected: bool,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         device_name: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        battery_percent: Option<u8>,
     },
 }
 
@@ -134,7 +132,6 @@ pub enum StylusInput {
 pub struct StylusDevice {
     pub connected: bool,
     pub name: Option<String>,
-    pub battery_percent: Option<u8>,
 }
 
 /// Barrel-button timing. A short second press within [`DOUBLE_MS`] is a double-tap; holding for
@@ -247,7 +244,7 @@ impl StylusFeed {
                 self.push_gesture(gesture, timestamp_ms);
                 true
             }
-            StylusInput::Connection { connected, device_name, battery_percent } => self.set_device(connected, device_name, battery_percent),
+            StylusInput::Connection { connected, device_name } => self.set_device(connected, device_name),
         }
     }
 
@@ -301,17 +298,9 @@ impl StylusFeed {
         changed
     }
     /// Update connection and metadata together; a disconnect clears the previous pen's details.
-    pub fn set_device(&self, connected: bool, name: Option<String>, battery_percent: Option<u8>) -> bool {
+    pub fn set_device(&self, connected: bool, name: Option<String>) -> bool {
         let name = name.map(|s| s.chars().filter(|c| !c.is_control()).take(128).collect::<String>());
-        let device = if connected {
-            StylusDevice {
-                connected,
-                name: name.map(|s| s.trim().to_owned()).filter(|s| !s.is_empty()),
-                battery_percent: battery_percent.filter(|v| *v <= 100),
-            }
-        } else {
-            StylusDevice::default()
-        };
+        let device = if connected { StylusDevice { connected, name: name.map(|s| s.trim().to_owned()).filter(|s| !s.is_empty()) } } else { StylusDevice::default() };
         let Ok(mut g) = self.0.lock() else { return false };
         let changed = g.device != device;
         g.device = device;
