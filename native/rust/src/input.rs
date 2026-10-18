@@ -74,6 +74,17 @@ struct PreviewResume {
     first_hover: Option<Pos2>,
 }
 
+#[derive(Debug)]
+struct PenHoverPreview(bool);
+
+impl Default for PenHoverPreview {
+    fn default() -> Self {
+        // The host applies the persisted preference before accepting input. Keeping the
+        // adapter's standalone default enabled preserves its platform-neutral test contract.
+        Self(true)
+    }
+}
+
 impl PreviewResume {
     fn stationary(&self, pos: Pos2) -> bool {
         self.cached
@@ -107,6 +118,7 @@ pub struct State {
     last_mouse: Option<Pos2>,
     preview_resume: Option<PreviewResume>,
     preview_hidden: bool,
+    pen_hover_preview: PenHoverPreview,
     ignore_fingers: bool,
     /// Multi-touch / pinch navigation is active; leftover fingers must not Primary.
     touch_nav_active: bool,
@@ -187,6 +199,25 @@ impl State {
         } else {
             icon
         }
+    }
+
+    /// Apply the user preference. Disabling an already visible pen hover clears it on the
+    /// next egui frame; enabling waits for a fresh pen position instead of restoring stale data.
+    pub fn set_pen_hover_preview(&mut self, enabled: bool, events: &mut Vec<Event>) -> bool {
+        if self.pen_hover_preview.0 == enabled {
+            return false;
+        }
+        self.pen_hover_preview.0 = enabled;
+        if enabled {
+            self.preview_resume = None;
+            return false;
+        }
+        if !self.pen_down && !self.preview_hidden && self.hover_origin.is_some() {
+            self.hide_pen_preview();
+            events.push(Event::PointerGone);
+            return true;
+        }
+        false
     }
 
     fn clear_touches(&mut self, events: &mut Vec<Event>) {
@@ -508,6 +539,15 @@ impl State {
                     return;
                 }
                 if input.source == PointerSource::Pen && is_hover_move {
+                    if !self.pen_hover_preview.0 {
+                        self.feed.report(input.source, input.sample);
+                        self.last_pen = Some(pos);
+                        if !self.preview_hidden {
+                            self.hide_pen_preview();
+                            events.push(Event::PointerGone);
+                        }
+                        return;
+                    }
                     if let Some(resume) = self.preview_resume.as_mut() {
                         if resume.blocks_hover(pos) {
                             return;

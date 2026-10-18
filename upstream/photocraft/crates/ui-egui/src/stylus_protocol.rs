@@ -100,23 +100,20 @@ mod tests {
     }
 
     #[test]
-    fn connection_metadata_is_optional_bounded_and_cleared_on_disconnect() {
+    fn connection_name_is_optional_bounded_and_cleared_on_disconnect() {
         let feed = StylusFeed::default();
         let submit = |json: &str| feed.submit(StylusPacket::from_json(json).unwrap().input);
-        assert!(submit(r#"{"version":1,"type":"connection","connected":true,"deviceName":" M-Pencil ","batteryPercent":0}"#));
+        assert!(submit(r#"{"version":1,"type":"connection","connected":true,"deviceName":" M-Pencil "}"#));
         assert_eq!(feed.device().name.as_deref(), Some("M-Pencil"));
-        assert_eq!(feed.device().battery_percent, Some(0));
-        assert!(!submit(r#"{"version":1,"type":"connection","connected":true,"deviceName":"M-Pencil","batteryPercent":0}"#));
-        assert!(submit(r#"{"version":1,"type":"connection","connected":true,"deviceName":"Other pen","batteryPercent":101}"#));
-        assert_eq!(feed.device().battery_percent, None);
-        assert!(submit(r#"{"version":1,"type":"connection","connected":false,"deviceName":"Old pen","batteryPercent":80}"#));
+        assert!(!submit(r#"{"version":1,"type":"connection","connected":true,"deviceName":"M-Pencil"}"#));
+        assert!(submit(r#"{"version":1,"type":"connection","connected":true,"deviceName":"Other pen"}"#));
+        assert!(submit(r#"{"version":1,"type":"connection","connected":false,"deviceName":"Old pen"}"#));
         assert_eq!(feed.device(), Default::default());
         assert!(submit(r#"{"version":1,"type":"connection","connected":true}"#));
         assert_eq!(feed.device().name, None);
-        assert_eq!(feed.device().battery_percent, None);
-        feed.set_device(true, Some("\0\n".into()), Some(100));
+        feed.set_device(true, Some("\0\n".into()));
         assert_eq!(feed.device().name, None);
-        feed.set_device(true, Some("笔".repeat(200)), Some(100));
+        feed.set_device(true, Some("笔".repeat(200)));
         assert_eq!(feed.device().name.unwrap().chars().count(), 128);
     }
 

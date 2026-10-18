@@ -3141,6 +3141,7 @@ curves	Smooth	Haluskan
 # HarmonyOS host additions retained during upstream sync
 	Stylus	Stylus
 	Block finger input	Blokir masukan jari
+	Stylus hover preview	Pratinjau saat stylus melayang
 	Double-tap pen body	Ketuk dua kali badan stylus
 	Current tool and Eraser	Alat saat ini dan penghapus
 	Previous tool	Alat sebelumnya
@@ -3152,8 +3153,6 @@ curves	Smooth	Haluskan
 	Right sidebar	Bilah sisi kanan
 	Connected pen	Pena terhubung
 	No pen connected	Tidak ada pena terhubung
-	Battery unavailable	Baterai tidak tersedia
-	Battery: {percent}%	Baterai: {percent}%
 
 # Window full screen (HarmonyOS host)
 	Enter Full Screen	Masuk layar penuh

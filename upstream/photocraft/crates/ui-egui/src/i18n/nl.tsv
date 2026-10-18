@@ -3919,12 +3919,11 @@ curves	Smooth	Vloeiend maken
 	System print preview opened	Afdrukvoorbeeld van het systeem geopend
 	Stylus	Styluspen
 	Block finger input	Vingerinvoer blokkeren
+	Stylus hover preview	Zweefvoorbeeld van stylus
 	Only show canvas	Alleen canvas tonen
 	Right sidebar	Rechterzijbalk
 	Connected pen	Verbonden pen
 	No pen connected	Geen pen verbonden
-	Battery unavailable	Batterijniveau niet beschikbaar
-	Battery: {percent}%	Batterij: {percent}%
 
 # Window full screen (HarmonyOS host)
 	Enter Full Screen	Volledig scherm inschakelen

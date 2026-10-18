@@ -3154,6 +3154,7 @@ curves	Smooth	Lisser
 # HarmonyOS host additions retained during upstream sync
 	Stylus	Stylet
 	Block finger input	Bloquer la saisie au doigt
+	Stylus hover preview	Aperçu du stylet au survol
 	Double-tap pen body	Double-clic sur le corps du stylet
 	Current tool and Eraser	Outil actuel et gomme
 	Previous tool	Outil précédent
@@ -3165,8 +3166,6 @@ curves	Smooth	Lisser
 	Right sidebar	Barre latérale droite
 	Connected pen	Stylet connecté
 	No pen connected	Aucun stylet connecté
-	Battery unavailable	Batterie indisponible
-	Battery: {percent}%	Batterie : {percent}%
 
 # Window full screen (HarmonyOS host)
 	Enter Full Screen	Passer en plein écran

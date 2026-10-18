@@ -4071,9 +4071,8 @@ cameraRaw	Yellow	Sárga
 	Redrawing	Újrarajzolás
 
 # HarmonyOS native controls
-	Battery unavailable	Az akkumulátor adatai nem érhetők el
-	Battery: {percent}%	Akkumulátor: {percent}%
 	Block finger input	Ujjal történő bevitel tiltása
+	Stylus hover preview	Toll lebegtetési előnézete
 	Choose printer, copies and duplex in the system print dialog.	Válasszon nyomtatót, példányszámot és kétoldalas nyomtatást a rendszer nyomtatási párbeszédablakában.
 	Connected pen	Csatlakoztatott toll
 	Double-tap pen body	Dupla koppintás a toll testén

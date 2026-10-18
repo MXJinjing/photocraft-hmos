@@ -3327,6 +3327,7 @@ curves	Smooth	매끄럽게
 # HarmonyOS host additions retained during upstream sync
 	Stylus	스타일러스
 	Block finger input	손가락 입력 차단
+	Stylus hover preview	스타일러스 호버 미리보기
 	Double-tap pen body	펜 몸통 두 번 탭
 	Current tool and Eraser	현재 도구와 지우개
 	Previous tool	이전 도구
@@ -3338,8 +3339,6 @@ curves	Smooth	매끄럽게
 	Right sidebar	오른쪽 사이드바
 	Connected pen	연결된 펜
 	No pen connected	연결된 펜 없음
-	Battery unavailable	배터리 정보 없음
-	Battery: {percent}%	배터리: {percent}%
 
 # Window full screen (HarmonyOS host)
 	Enter Full Screen	전체 화면 시작

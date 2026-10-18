@@ -3757,12 +3757,11 @@ curves	Smooth	Wygładź
 	System print preview opened	Otwarto systemowy podgląd wydruku
 	Stylus	Rysik
 	Block finger input	Blokuj dotyk palcem
+	Stylus hover preview	Podgląd rysika podczas najechania
 	Only show canvas	Pokaż tylko płótno
 	Right sidebar	Prawy panel boczny
 	Connected pen	Podłączone pióro
 	No pen connected	Brak podłączonego pióra
-	Battery unavailable	Poziom baterii niedostępny
-	Battery: {percent}%	Bateria: {percent}%
 
 # Window full screen (HarmonyOS host)
 	Enter Full Screen	Przejdź do pełnego ekranu

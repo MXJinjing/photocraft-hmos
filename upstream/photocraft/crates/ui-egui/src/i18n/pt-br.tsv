@@ -3942,6 +3942,7 @@ layerLabel	No Color	Sem cor
 # HarmonyOS host additions retained during upstream sync
 	Stylus	Caneta
 	Block finger input	Bloquear entrada por dedo
+	Stylus hover preview	Visualização da caneta ao pairar
 	Double-tap pen body	Toque duplo no corpo da caneta
 	Current tool and Eraser	Ferramenta atual e borracha
 	Previous tool	Ferramenta anterior
@@ -3953,8 +3954,6 @@ layerLabel	No Color	Sem cor
 	Right sidebar	Barra lateral direita
 	Connected pen	Caneta conectada
 	No pen connected	Nenhuma caneta conectada
-	Battery unavailable	Bateria indisponível
-	Battery: {percent}%	Bateria: {percent}%
 
 # Window full screen (HarmonyOS host)
 	Enter Full Screen	Entrar em tela cheia

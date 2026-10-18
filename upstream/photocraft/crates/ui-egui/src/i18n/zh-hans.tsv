@@ -2764,6 +2764,7 @@ curves	Smooth	平滑
 # HarmonyOS host additions retained during upstream sync
 	Stylus	手写笔
 	Block finger input	屏蔽手指输入
+	Stylus hover preview	手写笔悬停预览
 	Double-tap pen body	双击笔身
 	Current tool and Eraser	当前工具与橡皮擦
 	Previous tool	上一个工具
@@ -2775,8 +2776,6 @@ curves	Smooth	平滑
 	Right sidebar	右侧面板
 	Connected pen	已连接的笔
 	No pen connected	未连接笔
-	Battery unavailable	电量不可用
-	Battery: {percent}%	电量：{percent}%
 
 # Window full screen (HarmonyOS host)
 	Enter Full Screen	进入全屏

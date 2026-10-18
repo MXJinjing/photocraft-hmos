@@ -3882,9 +3882,8 @@ cameraData	Lens	Lens
 	Redrawing	Yeniden çiziliyor
 
 # HarmonyOS native controls
-	Battery unavailable	Pil bilgisi kullanılamıyor
-	Battery: {percent}%	Pil: {percent}%
 	Block finger input	Parmak girişini engelle
+	Stylus hover preview	Kalemle üzerine gelme önizlemesi
 	Choose printer, copies and duplex in the system print dialog.	Sistem yazdırma iletişim kutusunda yazıcıyı, kopya sayısını ve çift taraflı yazdırmayı seçin.
 	Connected pen	Bağlı kalem
 	Double-tap pen body	Kalem gövdesine çift dokunma

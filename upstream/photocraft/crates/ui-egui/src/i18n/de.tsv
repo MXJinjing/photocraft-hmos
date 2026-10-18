@@ -3150,6 +3150,7 @@ curves	Smooth	Glätten
 # HarmonyOS host additions retained during upstream sync
 	Stylus	Stift
 	Block finger input	Fingereingabe blockieren
+	Stylus hover preview	Stiftvorschau beim Schweben
 	Double-tap pen body	Stiftgehäuse doppeltippen
 	Current tool and Eraser	Aktuelles Werkzeug und Radierer
 	Previous tool	Vorheriges Werkzeug
@@ -3161,8 +3162,6 @@ curves	Smooth	Glätten
 	Right sidebar	Rechte Seitenleiste
 	Connected pen	Verbundener Stift
 	No pen connected	Kein Stift verbunden
-	Battery unavailable	Akkustand nicht verfügbar
-	Battery: {percent}%	Akku: {percent}%
 
 # Window full screen (HarmonyOS host)
 	Enter Full Screen	Vollbild aktivieren

@@ -3858,12 +3858,11 @@ curves	Smooth	Згладити
 	System print preview opened	Відкрито системний попередній перегляд друку
 	Stylus	Стилус
 	Block finger input	Блокувати введення пальцем
+	Stylus hover preview	Попередній перегляд стилуса при наведенні
 	Only show canvas	Показати лише полотно
 	Right sidebar	Права бічна панель
 	Connected pen	Підключене перо
 	No pen connected	Перо не підключено
-	Battery unavailable	Заряд батареї недоступний
-	Battery: {percent}%	Заряд батареї: {percent}%
 
 # Window full screen (HarmonyOS host)
 	Enter Full Screen	Повноекранний режим

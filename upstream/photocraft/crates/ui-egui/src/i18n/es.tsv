@@ -2837,6 +2837,7 @@ curves	Smooth	Suavizar
 # HarmonyOS host additions retained during upstream sync
 	Stylus	Lápiz
 	Block finger input	Bloquear entrada táctil
+	Stylus hover preview	Vista previa al pasar el lápiz
 	Double-tap pen body	Doble toque en el cuerpo del lápiz
 	Current tool and Eraser	Herramienta actual y borrador
 	Previous tool	Herramienta anterior
@@ -2848,8 +2849,6 @@ curves	Smooth	Suavizar
 	Right sidebar	Barra lateral derecha
 	Connected pen	Lápiz conectado
 	No pen connected	Ningún lápiz conectado
-	Battery unavailable	Batería no disponible
-	Battery: {percent}%	Batería: {percent}%
 
 # Window full screen (HarmonyOS host)
 	Enter Full Screen	Entrar en pantalla completa

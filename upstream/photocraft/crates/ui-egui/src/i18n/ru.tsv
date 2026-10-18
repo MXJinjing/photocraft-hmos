@@ -3118,6 +3118,7 @@ curves	Smooth	Сгладить
 # HarmonyOS host additions retained during upstream sync
 	Stylus	Стилус
 	Block finger input	Блокировать ввод пальцем
+	Stylus hover preview	Предпросмотр пера при наведении
 	Double-tap pen body	Двойное нажатие на корпус пера
 	Current tool and Eraser	Текущий инструмент и ластик
 	Previous tool	Предыдущий инструмент
@@ -3129,8 +3130,6 @@ curves	Smooth	Сгладить
 	Right sidebar	Правая боковая панель
 	Connected pen	Подключённое перо
 	No pen connected	Перо не подключено
-	Battery unavailable	Заряд батареи недоступен
-	Battery: {percent}%	Заряд батареи: {percent}%
 
 # Window full screen (HarmonyOS host)
 	Enter Full Screen	Полноэкранный режим

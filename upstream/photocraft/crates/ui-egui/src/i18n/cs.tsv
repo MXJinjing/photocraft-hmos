@@ -3760,6 +3760,7 @@ navigator	Zoom	Zvětšení
 # HarmonyOS host additions retained during upstream sync
 	Stylus	Stylus
 	Block finger input	Blokovat zadávání prstem
+	Stylus hover preview	Náhled při najetí stylusu
 	Double-tap pen body	Dvojité klepnutí na tělo pera
 	Current tool and Eraser	Aktuální nástroj a guma
 	Previous tool	Předchozí nástroj
@@ -3771,8 +3772,6 @@ navigator	Zoom	Zvětšení
 	Right sidebar	Pravý postranní panel
 	Connected pen	Připojené pero
 	No pen connected	Žádné pero není připojeno
-	Battery unavailable	Stav baterie není dostupný
-	Battery: {percent}%	Baterie: {percent}%
 
 # Window full screen (HarmonyOS host)
 	Enter Full Screen	Přejít na celou obrazovku

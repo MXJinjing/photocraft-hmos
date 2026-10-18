@@ -3857,12 +3857,11 @@ curves	Smooth	Εξομάλυνση
 	System print preview opened	Άνοιξε η προεπισκόπηση εκτύπωσης του συστήματος
 	Stylus	Γραφίδα
 	Block finger input	Αποκλεισμός εισόδου δακτύλου
+	Stylus hover preview	Προεπισκόπηση αιώρησης γραφίδας
 	Only show canvas	Εμφάνιση μόνο του καμβά
 	Right sidebar	Δεξιά πλαϊνή στήλη
 	Connected pen	Συνδεδεμένη γραφίδα
 	No pen connected	Δεν έχει συνδεθεί γραφίδα
-	Battery unavailable	Η στάθμη μπαταρίας δεν είναι διαθέσιμη
-	Battery: {percent}%	Μπαταρία: {percent}%
 
 # Window full screen (HarmonyOS host)
 	Enter Full Screen	Είσοδος σε πλήρη οθόνη
