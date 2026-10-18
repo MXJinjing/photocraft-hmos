@@ -16,6 +16,8 @@ pub static ICONS: &[(&str, &[u8])] = &[
     ("brush", include_bytes!("../../../assets/icons/brush.svg")),
     ("brush-replace", include_bytes!("../../../assets/icons/brush-replace.svg")),
     ("brush-cleaning", include_bytes!("../../../assets/icons/brush-cleaning.svg")),
+    // PhotoCraft original: Only show canvas (Tab) — hollow centre square with four L-corner brackets.
+    ("canvas-only", include_bytes!("../../../assets/icons/canvas-only.svg")),
     ("check", include_bytes!("../../../assets/icons/check.svg")),
     ("chevron-down", include_bytes!("../../../assets/icons/chevron-down.svg")),
     ("chevron-left", include_bytes!("../../../assets/icons/chevron-left.svg")),
@@ -54,6 +56,9 @@ pub static ICONS: &[(&str, &[u8])] = &[
     ("folder-plus", include_bytes!("../../../assets/icons/folder-plus.svg")),
     ("frame-placeholder", include_bytes!("../../../assets/icons/frame-placeholder.svg")),
     ("gauge", include_bytes!("../../../assets/icons/gauge.svg")),
+    // PhotoCraft originals: window full screen enter / exit (four diagonal corner arrows).
+    ("fullscreen-enter", include_bytes!("../../../assets/icons/fullscreen-enter.svg")),
+    ("fullscreen-exit", include_bytes!("../../../assets/icons/fullscreen-exit.svg")),
     // PhotoCraft original: the Gradient tool glyph (a rectangle filled with a linear ramp).
     ("gradient", include_bytes!("../../../assets/icons/gradient.svg")),
     ("grid-2x2", include_bytes!("../../../assets/icons/grid-2x2.svg")),

@@ -3129,3 +3129,7 @@ curves	Smooth	Сгладить
 	No pen connected	Перо не подключено
 	Battery unavailable	Заряд батареи недоступен
 	Battery: {percent}%	Заряд батареи: {percent}%
+
+# Window full screen (HarmonyOS host)
+	Enter Full Screen	Полноэкранный режим
+	Exit Full Screen	Выйти из полноэкранного режима

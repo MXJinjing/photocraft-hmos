@@ -2773,3 +2773,7 @@ curves	Smooth	平滑
 	No pen connected	未连接笔
 	Battery unavailable	电量不可用
 	Battery: {percent}%	电量：{percent}%
+
+# Window full screen (HarmonyOS host)
+	Enter Full Screen	进入全屏
+	Exit Full Screen	退出全屏

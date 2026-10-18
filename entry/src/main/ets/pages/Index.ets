@@ -19,6 +19,7 @@ import { IMAGE_DROP_TYPES, NativeDropAdapter } from '../input/NativeDropAdapter'
 import { DropPreview, DropTargetFeedback, localDropPoint } from '../input/DropPreview';
 import { isFiniteHoverPoint, penHoverLeaveMessage, penHoverMoveMessage } from '../input/PenHoverPreview';
 import { moveWindow, toggleWindowMaximize } from '../WindowChrome';
+import { fullscreenAvailable, fullscreenOn, reportFullscreen, requestFullscreen } from '../Fullscreen';
 import { window } from '@kit.ArkUI';
 import { configureDisplayColor } from '../DisplayColor';
 import { SYSTEM_THEME_DARK, SYSTEM_THEME_LIGHT } from '../SystemTheme';
@@ -30,10 +31,13 @@ class NativeConfig {
   language: string;
   displayP3: boolean;
   systemTheme: string;
-  constructor(files: string, documents: string, scale: number, language: string, displayP3: boolean, systemTheme: string) {
+  // Whether the egui status-bar button / Window menu item for full screen are offered (not on 2in1).
+  fullscreen: boolean;
+  constructor(files: string, documents: string, scale: number, language: string, displayP3: boolean, systemTheme: string, fullscreen: boolean) {
     this.files = files; this.documents = documents; this.scale = scale; this.language = language;
     this.displayP3 = displayP3;
     this.systemTheme = systemTheme;
+    this.fullscreen = fullscreen;
   }
 }
 class NativeMessage { kind: string = ''; text: string = ''; }
@@ -130,8 +134,10 @@ struct Index {
       if (systemTheme !== SYSTEM_THEME_DARK && systemTheme !== SYSTEM_THEME_LIGHT) {
         systemTheme = '';
       }
-      native.init(JSON.stringify(new NativeConfig(this.context.filesDir, documents, scale, i18n.System.getSystemLanguage(), displayP3, systemTheme)),
+      native.init(JSON.stringify(new NativeConfig(this.context.filesDir, documents, scale, i18n.System.getSystemLanguage(), displayP3, systemTheme, fullscreenAvailable())),
         (id: number, message: string, data: ArrayBuffer) => { this.receive(id, message, data); });
+      // A recreated page can start while the window is still full screen: bring Rust in line.
+      if (fullscreenOn()) { reportFullscreen(true); }
       this.initialized = true;
       this.onTitlebarChanged();
       this.failure = '';
@@ -197,6 +203,13 @@ struct Index {
       if (color.length > 0 && color !== this.chrome) {
         AppStorage.setOrCreate('photocraftChrome', color);
       }
+    }
+    else if (request.kind === 'fullscreen') {
+      // egui asked to enter ('enter') or leave ('exit') full screen; the result is reported back.
+      let wantOn: boolean = request.text === 'enter';
+      window.getLastWindow(this.context).then((win: window.Window) => {
+        return requestFullscreen(win, wantOn, (): void => { applySystemBars(this.context, this.chrome); });
+      }).catch((error: BusinessError) => { console.info(`Fullscreen request: ${error.code} ${error.message}`); });
     }
     else if (request.kind === 'open') { this.openFile(id); }
     else if (request.kind === 'save_default') { this.selectSave(id, request.text, true); }

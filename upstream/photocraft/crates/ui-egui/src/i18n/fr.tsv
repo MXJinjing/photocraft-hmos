@@ -3165,3 +3165,7 @@ curves	Smooth	Lisser
 	No pen connected	Aucun stylet connecté
 	Battery unavailable	Batterie indisponible
 	Battery: {percent}%	Batterie : {percent}%
+
+# Window full screen (HarmonyOS host)
+	Enter Full Screen	Passer en plein écran
+	Exit Full Screen	Quitter le plein écran

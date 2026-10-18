@@ -3761,3 +3761,7 @@ curves	Smooth	Wygładź
 	No pen connected	Brak podłączonego pióra
 	Battery unavailable	Poziom baterii niedostępny
 	Battery: {percent}%	Bateria: {percent}%
+
+# Window full screen (HarmonyOS host)
+	Enter Full Screen	Przejdź do pełnego ekranu
+	Exit Full Screen	Wyjdź z pełnego ekranu
