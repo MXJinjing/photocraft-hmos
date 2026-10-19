@@ -579,12 +579,10 @@ pub(crate) fn paste(shape: &mut [f32], region: Rect, r: Rect, v: &[f32]) {
 // ---------------------------------------------------------------------------------------------
 // Shape identity and damage
 
-/// A shape source's tiles by address: a [`std::sync::Weak`] reserves the address (so a new tile
-/// can't reuse it and pass for unchanged) without keeping the pixels alive (#4530).
-pub(crate) type Tiles = HashMap<TileCoord, std::sync::Weak<Tile>>;
+pub(crate) type Tiles = HashMap<TileCoord, Arc<Tile>>;
 
 pub(crate) fn snapshot(s: &Surface) -> Tiles {
-    s.tiles().map(|(c, t)| (*c, Arc::downgrade(t))).collect()
+    s.tiles().map(|(c, t)| (*c, t.clone())).collect()
 }
 
 /// Union of the tiles that differ between `old` and `s`.
@@ -592,7 +590,7 @@ pub(crate) fn damage(old: &Tiles, s: &Surface) -> Rect {
     let mut d = Rect::EMPTY;
     let mut add = |r: Rect| d = if d.is_empty() { r } else { d.union(&r) };
     for (c, t) in s.tiles() {
-        if old.get(c).is_none_or(|o| !std::ptr::eq(o.as_ptr(), Arc::as_ptr(t))) {
+        if old.get(c).is_none_or(|o| !Arc::ptr_eq(o, t)) {
             add(c.rect());
         }
     }
@@ -644,42 +642,39 @@ pub(crate) fn shape_key(layer: &Layer, canvas: Rect) -> u64 {
     h.finish()
 }
 
-/// Deep identity of a group (children, their pixels by tile pointer, settings). `pin` sees every
-/// tile hashed, so a cache entry can reserve their addresses (see [`Tiles`]).
-pub(crate) fn group_key(layer: &Layer, light: &GlobalLight, pin: &mut dyn FnMut(&Arc<Tile>)) -> u64 {
-    type Pin<'a> = &'a mut dyn FnMut(&Arc<Tile>);
-    fn surface_fp(s: &Surface, h: &mut std::collections::hash_map::DefaultHasher, pin: Pin) {
+/// Deep identity of a group (children, their pixels by tile pointer, settings).
+pub(crate) fn group_key(layer: &Layer, light: &GlobalLight) -> u64 {
+    fn surface_fp(s: &Surface, h: &mut std::collections::hash_map::DefaultHasher) {
         format!("{:?}{:?}", s.format(), s.default_pixel()).hash(h);
         for (c, t) in s.tiles() {
-            pin(t);
             (c.tx, c.ty, Arc::as_ptr(t) as usize).hash(h);
         }
     }
-    fn walk(l: &Layer, h: &mut std::collections::hash_map::DefaultHasher, pin: Pin) {
+    fn walk(l: &Layer, h: &mut std::collections::hash_map::DefaultHasher) {
         l.id.0.hash(h);
         (l.visible, l.clipped, l.opacity.to_bits(), l.fill_opacity.to_bits(), format!("{:?}", l.blend)).hash(h);
         match &l.content {
             LayerContent::Group(g) => {
                 for c in &g.children {
-                    walk(c, h, pin);
+                    walk(c, h);
                 }
             }
             LayerContent::Fill(f) => {
                 format!("{f:?}").hash(h);
                 if let Some(c) = &l.fill_cache {
-                    surface_fp(&c.surface, h, pin);
+                    surface_fp(&c.surface, h);
                 }
             }
             LayerContent::Adjustment(a) => format!("{a:?}").hash(h),
             _ => {
                 if let Some(s) = l.surface() {
-                    surface_fp(s, h, pin);
+                    surface_fp(s, h);
                 }
             }
         }
         if let Some(m) = &l.mask {
             (m.enabled, m.density.to_bits(), m.feather.to_bits()).hash(h);
-            surface_fp(&m.surface, h, pin);
+            surface_fp(&m.surface, h);
         }
         format!("{:?}{:?}", l.vector_mask, l.effects).hash(h);
         h.write_u8(0xfe);
@@ -689,14 +684,14 @@ pub(crate) fn group_key(layer: &Layer, light: &GlobalLight, pin: &mut dyn FnMut(
     match &layer.content {
         LayerContent::Group(g) => {
             for c in &g.children {
-                walk(c, &mut h, pin);
+                walk(c, &mut h);
             }
             if let Some(m) = &layer.mask {
                 (m.enabled, m.density.to_bits(), m.feather.to_bits()).hash(&mut h);
-                surface_fp(&m.surface, &mut h, pin);
+                surface_fp(&m.surface, &mut h);
             }
         }
-        _ => walk(layer, &mut h, pin),
+        _ => walk(layer, &mut h),
     }
     h.finish()
 }
@@ -878,40 +873,5 @@ mod tests {
         s.spread = 0.5;
         let shadow = program(&Effect::DropShadow(s), &light, false);
         assert!(shadow.fields.iter().any(|(k, _)| *k == FieldKind::StrokeOutside), "the shadow spread keeps the chamfer: {:?}", shadow.fields);
-    }
-
-    /// Cached shapes and group keys reserve tile addresses without keeping pixels (#4530):
-    /// damage still tells a replaced tile from an unchanged one, and a dropped tile's pixels
-    /// are freed although the entry remembers it.
-    #[test]
-    fn shape_tiles_and_group_pins_hold_addresses_not_pixels() {
-        use photocraft_color::{ColorMode, PixelFormat, SampleType};
-        let fmt = PixelFormat::new(ColorMode::Rgb, SampleType::U8, true);
-        let mut s = Surface::new(fmt);
-        // A ramp, so no two tiles share their pixels.
-        for x in 0..600 {
-            let v = x as f32 / 600.0;
-            s.fill_rect(Rect::new(x, 0, x + 1, 300), &[v, 0.2, 0.9, 1.0]);
-        }
-        let first = s.tiles().find(|(c, _)| c.tx == 0 && c.ty == 0).map(|(_, t)| t.clone()).unwrap();
-        assert_eq!(Arc::strong_count(&first), 2);
-        let old = snapshot(&s);
-        assert_eq!(Arc::strong_count(&first), 2, "the snapshot adds no strong reference");
-        assert!(damage(&old, &s).is_empty());
-        s.fill_rect(Rect::new(0, 0, 4, 4), &[0.0, 0.0, 0.0, 1.0]);
-        let origin = s.tiles().map(|(c, _)| *c).find(|c| c.tx == 0 && c.ty == 0).unwrap();
-        assert_eq!(damage(&old, &s), origin.rect(), "only the edited tile");
-        drop(first);
-        assert!(old.values().any(|w| w.strong_count() == 0), "the replaced tile's pixels are freed");
-
-        let child = Layer::new("c", LayerContent::Raster(s));
-        let n = child.surface().map_or(0, |s| s.tile_count());
-        let group = Layer::group("g", vec![child]);
-        let mut pins = Vec::new();
-        let key = group_key(&group, &GlobalLight::default(), &mut |t| pins.push(Arc::downgrade(t)));
-        assert_eq!(key, group_key(&group, &GlobalLight::default(), &mut |_| {}), "pinning doesn't change the key");
-        assert_eq!(pins.len(), n);
-        drop(group);
-        assert!(pins.iter().all(|w| w.strong_count() == 0), "a group's pins keep none of its pixels");
     }
 }

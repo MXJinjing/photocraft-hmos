@@ -26,16 +26,11 @@ pub struct Limits {
     pub max_entry: usize,
     /// Total bytes extracted over the whole import.
     pub max_total: usize,
-    /// Bytes of decoded pixels one import may hold: every layer's RGBA together, plus the
-    /// temporary planes the layer being read decodes through. The entry limits bound what is
-    /// extracted, not what the layers materialized out of it cost (#4960).
-    pub max_pixel_bytes: usize,
 }
 
 impl Default for Limits {
     fn default() -> Self {
-        // The gigabyte the other importers allow decoded pixels (`io`'s `MAX_PIXEL_BYTES`).
-        Self { max_entry: 256 << 20, max_total: 1 << 30, max_pixel_bytes: 1 << 30 }
+        Self { max_entry: 256 << 20, max_total: 1 << 30 }
     }
 }
 

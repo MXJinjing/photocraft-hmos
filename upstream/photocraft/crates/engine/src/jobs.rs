@@ -29,43 +29,6 @@ use serde_json::{Value, json};
 
 use crate::{EngineError, Result, Session};
 
-type Authorization = fn(&str, &Value) -> Result<()>;
-
-thread_local! {
-    // Smart-filter rendering has no Session argument. Carry the requesting session's gate
-    // through synchronous rendering and explicitly reinstall it on background workers.
-    static RENDER_AUTHORIZATION: std::cell::Cell<Option<Authorization>> = const { std::cell::Cell::new(None) };
-}
-
-pub(crate) struct AuthorizationScope(Option<Authorization>);
-
-impl AuthorizationScope {
-    fn enter(gate: Option<Authorization>) -> Self {
-        Self(RENDER_AUTHORIZATION.with(|current| current.replace(gate.or(current.get()))))
-    }
-}
-
-impl Drop for AuthorizationScope {
-    fn drop(&mut self) {
-        RENDER_AUTHORIZATION.with(|current| current.set(self.0));
-    }
-}
-
-/// [`AuthorizationScope`] entered with `gate` (or the one already installed, so trusted work on
-/// this thread keeps ambient paths usable). [`Session::edit`] and the job paths use this to carry
-/// the requesting session's authority into every smart-object re-render.
-pub(crate) fn render_authorization_scope(gate: Option<Authorization>) -> AuthorizationScope {
-    AuthorizationScope::enter(gate)
-}
-
-/// Recheck a stored filter's command and parameters before evaluating it or using its cache.
-pub(crate) fn authorize_render_command(id: &str, params: &Value) -> Result<()> {
-    match RENDER_AUTHORIZATION.with(std::cell::Cell::get) {
-        Some(gate) => gate(id, params),
-        None => Ok(()),
-    }
-}
-
 /// Identifies one background job for the session's lifetime.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, serde::Deserialize)]
 pub struct JobId(pub u64);
@@ -321,11 +284,6 @@ pub fn run<T: Send + 'static>(
     work: impl FnOnce(&JobCtx) -> Result<T> + Send + 'static,
     apply: impl FnOnce(&mut Session, T) -> Result<Value> + Send + 'static,
 ) -> Result<Value> {
-    let authorization = s.authorize.or_else(|| RENDER_AUTHORIZATION.with(std::cell::Cell::get));
-    let _authorization = AuthorizationScope::enter(authorization);
-    // The job's document: stored paths it follows are resolved against it on any thread.
-    let document = s.active().and_then(|d| d.path.as_deref()).map(std::path::PathBuf::from);
-    let _document = crate::doc_path::scope(document.as_deref());
     if !s.jobs.spawn || cfg!(target_arch = "wasm32") {
         let t = work(&s.jobs.inline.clone().unwrap_or_default())?;
         return apply(s, t);
@@ -340,10 +298,7 @@ pub fn run<T: Send + 'static>(
     };
     let ctx = JobCtx::new();
     let (tx, rx) = std::sync::mpsc::channel::<Result<Payload>>();
-    let apply_document = document.clone();
     let erased: Apply = Box::new(move |s, any| {
-        let _authorization = AuthorizationScope::enter(authorization);
-        let _document = crate::doc_path::scope(apply_document.as_deref());
         let t = any.downcast::<T>().map_err(|_| EngineError::Other("internal error: job result type mismatch".into()))?;
         apply(s, *t)
     });
@@ -356,8 +311,6 @@ pub fn run<T: Send + 'static>(
         // The work closure is moved into the thread. If spawning fails (thread limits), there is
         // no way to get it back, so the error is reported instead.
         let spawned = std::thread::Builder::new().name(format!("photocraft-job-{}", id.0)).spawn(move || {
-            let _authorization = AuthorizationScope::enter(authorization);
-            let _document = crate::doc_path::scope(document.as_deref());
             let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| work(&wctx).map(|t| Box::new(t) as Payload)))
                 .unwrap_or_else(|_| Err(EngineError::Other(format!("`{label_w}` failed with an internal error (logged); the document is unchanged"))));
             // The receiver is gone when the job was cancelled: nothing to report.
@@ -429,24 +382,6 @@ pub fn edit_job<R: Send + 'static>(
     )
 }
 
-/// Scan every layer surface's content bounds into the shared tile bounds cache, so the first
-/// draw of a document opened in the background doesn't do it on the UI thread: GPU planning
-/// asks each layer for its bounds, a multi-second scan on a multi-gigabyte PSB (#4024).
-/// `check` runs between layers (cancellation).
-pub fn warm_layer_bounds(doc: &Document, mut check: impl FnMut() -> Result<()>) -> Result<()> {
-    let mut pending: Vec<&photocraft_doc::Layer> = doc.layers.iter().collect();
-    while let Some(layer) = pending.pop() {
-        check()?;
-        if let Some(children) = layer.children() {
-            pending.extend(children);
-        }
-        if let Some(surface) = layer.surface() {
-            photocraft_compose::bounds::content_bounds(surface);
-        }
-    }
-    Ok(())
-}
-
 /// Where a background open reads its file from.
 #[derive(Clone, Debug)]
 pub enum OpenSource {
@@ -499,15 +434,11 @@ impl Session {
                 };
                 ctx.check()?;
                 ctx.progress(0.02, "Decoding");
-                let imported = ctx
-                    .stage(0.02, 0.95, "Decoding", |ctl| photocraft_io::import_with_svg_group_depth_and_interrupt(&name_w, &bytes, max_svg_group_depth, ctl))
+                ctx.stage(0.02, 1.0, "Decoding", |ctl| photocraft_io::import_with_svg_group_depth_and_interrupt(&name_w, &bytes, max_svg_group_depth, ctl))
                     .map_err(|e| match e {
                         photocraft_io::IoError::Cancelled => EngineError::Cancelled,
                         e => EngineError::Other(e.to_string()),
-                    })?;
-                ctx.progress(0.95, "Preparing layers");
-                warm_layer_bounds(&imported.document, || ctx.check())?;
-                Ok(imported)
+                    })
             },
             move |s, r: photocraft_io::ImportResult| {
                 // Ask When Opening: held back until the prompt is answered (`take_held_open`). A
@@ -549,7 +480,7 @@ impl Session {
                 job.ctx.cancel();
                 Err(e)
             }
-            (Err(e), None) => Err(self.explain_missing_layer(e)),
+            (Err(e), None) => Err(e),
             (Ok(_), Some(mut job)) => {
                 job.command = command.to_string();
                 job.params = params;
@@ -699,8 +630,6 @@ impl Session {
         if let Some(gate) = self.authorize {
             gate(id, &params)?;
         }
-        let _authorization = AuthorizationScope::enter(self.authorize);
-        let _document = crate::doc_path::scope(self.active().and_then(|d| d.path.as_deref()).map(std::path::Path::new));
         // Last Filter runs as the filter it repeats: journaled, recorded in an action, faded and
         // run as a job like that filter, so a recorded step replays the same filter anywhere
         // (#3089), as Transform Again records its transform (#1440). With no filter yet it falls
@@ -720,7 +649,17 @@ impl Session {
             return Ok(Started::Done(v));
         }
         // Pixel commands follow the Channels panel target unless the caller names one.
-        let run_params = self.admit(id, spec, &params)?;
+        let run_params = crate::channel_cmds::inject_target(self, id, crate::commands::inject_kind(id, params.clone()));
+        if let Err(why) = self.explicit_layer_enabled(spec, &params).unwrap_or_else(|| self.precondition(spec, &run_params)) {
+            return Err(EngineError::Disabled(id.to_string(), why));
+        }
+        if let Some(why) = self.job_conflict(id, spec.journal) {
+            return Err(EngineError::Disabled(id.to_string(), why));
+        }
+        // Painting on or moving a hidden layer is refused, as in Photoshop (#571).
+        if let Some(why) = crate::hidden_target::refusal(self, id, &params) {
+            return Err(EngineError::Other(why.into()));
+        }
         self.coalesce_request = params.get("coalesce").and_then(Value::as_str).map(str::to_string);
         self.color_restrict = crate::channel_cmds::color_restriction(self, id, &run_params);
         self.jobs.spawn = background;
@@ -747,7 +686,7 @@ impl Session {
                 job.ctx.cancel();
                 Err(e)
             }
-            (Err(e), None) => Err(self.explain_missing_layer(e)),
+            (Err(e), None) => Err(e),
             (Ok(_), Some(mut job)) => {
                 job.command = id.to_string();
                 job.params = params;
@@ -760,18 +699,6 @@ impl Session {
                 self.after_command(id, params, spec.journal, Some(nested_from));
                 Ok(Started::Done(v))
             }
-        }
-    }
-
-    /// A command that failed on a layer id the document doesn't have says which ids it does have
-    /// (#5058): ids are not positions (an opened PNG's Background is not layer 1), and an agent
-    /// should not need `document.inspect` to recover.
-    fn explain_missing_layer(&self, e: EngineError) -> EngineError {
-        match (e, self.active()) {
-            (EngineError::NoLayer(id), Some(st)) if st.doc.layer(id).is_none() => {
-                EngineError::UnknownLayer { id, known: crate::commands::layer_listing(&st.doc) }
-            }
-            (e, _) => e,
         }
     }
 
@@ -797,8 +724,6 @@ impl Session {
             self.journal.truncate(from);
         }
         if !crate::brush_cmds::coalesce_journal(self, id, &params) {
-            let params =
-                if id == "layer.select" && self.actions.recording.is_some() { crate::layer_multi_cmds::recorded_selection(self, params) } else { params };
             self.journal.push((id.to_string(), params));
         }
     }

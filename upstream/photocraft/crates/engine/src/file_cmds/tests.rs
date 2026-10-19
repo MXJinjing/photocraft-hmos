@@ -1033,7 +1033,7 @@ fn reveal_in_finder_reveals_the_documents_saved_path() {
     let path = "/tmp/pics/a.psd";
     s.active_mut().unwrap().path = Some(path.into());
     let r = s.execute("file.revealInFinder", json!({"dryRun": true})).unwrap();
-    let (program, args) = crate::layer_menu_cmds::reveal_command(path).unwrap();
+    let (program, args) = crate::layer_menu_cmds::reveal_command(path);
     assert_eq!(r["program"], json!(program));
     assert_eq!(r["args"], json!(args));
     // The tab menu names a background tab: the active document is not the one revealed.
@@ -1044,110 +1044,6 @@ fn reveal_in_finder_reveals_the_documents_saved_path() {
     assert_eq!(r["program"], json!(program));
     assert_eq!(r["args"], json!(args));
 }
-
-/// "Include All Subfolders" (AUTO-219-5, #3753): Batch and Image Processor take the images in
-/// subfolders too, each result keeping its subfolder under the output folder (so same-named files
-/// don't collide), and skip the output folder when it sits inside the input folder.
-#[test]
-fn batch_include_all_subfolders() {
-    let dir = tmp("batch-subfolders");
-    let input = join(&dir, "in");
-    for sub in ["sub/deeper", "z"] {
-        std::fs::create_dir_all(join(&input, sub)).unwrap();
-    }
-    png(&input, "a.png", 8, 8, "#ff0000");
-    png(&join(&input, "sub"), "b.png", 8, 8, "#00ff00");
-    png(&join(&input, "sub/deeper"), "a.png", 8, 8, "#0000ff");
-    png(&join(&input, "z"), "a.png", 8, 8, "#ffffff");
-    let mut s = Session::new();
-    // Default: the top level only, as before.
-    let out = join(&input, "batch");
-    let r = s.execute("file.automate.batch", json!({"steps": [], "input": input, "output": out, "format": "png"})).unwrap();
-    assert_eq!((r["files"].as_array().unwrap().len(), r["errors"].as_array().unwrap().len()), (1, 0), "{r}");
-    // With subfolders: every image, in folder order, results kept apart by subfolder; the output
-    // folder (inside the input folder, holding last run's a.png) is not an input.
-    let r = s
-        .execute(
-            "file.automate.batch",
-            json!({"steps": [["image.adjustments.invert", {}]], "input": input, "includeSubfolders": true, "output": out, "format": "png"}),
-        )
-        .unwrap();
-    assert!(r["errors"].as_array().unwrap().is_empty(), "{r}");
-    let files: Vec<String> = r["files"].as_array().unwrap().iter().map(|f| f.as_str().unwrap().replace('\\', "/")).collect();
-    let o = out.replace('\\', "/");
-    assert_eq!(files, vec![format!("{o}/a.png"), format!("{o}/sub/b.png"), format!("{o}/sub/deeper/a.png"), format!("{o}/z/a.png")]);
-    let deep = photocraft_io::import("a.png", &std::fs::read(join(&out, "sub/deeper/a.png")).unwrap()).unwrap().document;
-    let px = photocraft_compose::render(&deep, Rect::new(1, 1, 2, 2)).px[0];
-    assert!(px[0] > 0.99 && px[1] > 0.99 && px[2] < 0.01, "blue inverted to yellow: {px:?}");
-    std::fs::remove_dir_all(&out).unwrap();
-    // A naming template applies within each kept subfolder (output outside the input folder).
-    let named = join(&dir, "named");
-    let r = s
-        .execute("file.automate.batch", json!({"steps": [], "input": input, "includeSubfolders": true, "output": named, "format": "png", "naming": "{serial}"}))
-        .unwrap();
-    assert!(r["errors"].as_array().unwrap().is_empty(), "{r}");
-    let files: Vec<String> = r["files"].as_array().unwrap().iter().map(|f| f.as_str().unwrap().replace('\\', "/")).collect();
-    let n = named.replace('\\', "/");
-    assert_eq!(files, vec![format!("{n}/001.png"), format!("{n}/sub/002.png"), format!("{n}/sub/deeper/003.png"), format!("{n}/z/004.png")]);
-    // Image Processor shares the option (with its results out of the input folder).
-    let out = join(&dir, "jpg");
-    let r = s.execute("file.scripts.imageProcessor", json!({"input": input, "includeSubfolders": true, "output": out})).unwrap();
-    assert_eq!((r["files"].as_array().unwrap().len(), r["errors"].as_array().unwrap().len()), (4, 0), "{r}");
-    assert!(std::path::Path::new(&join(&out, "sub/deeper/a.jpg")).is_file());
-    // A wrong type is a parameter error, for both.
-    for bad in [json!("yes"), json!(1), json!([true])] {
-        for cmd in ["file.automate.batch", "file.scripts.imageProcessor"] {
-            let e = s.execute(cmd, json!({"steps": [], "input": input, "includeSubfolders": bad, "output": out})).unwrap_err();
-            assert!(matches!(e, EngineError::BadParams { .. }), "{cmd} {bad}: {e}");
-        }
-    }
-    // A missing input folder is an error, not a panic.
-    assert!(s.execute("file.automate.batch", json!({"steps": [], "input": join(&dir, "nope"), "includeSubfolders": true, "output": out})).is_err());
-}
-
-/// The subfolder walk stops at `MAX_SUBFOLDER_DEPTH` levels.
-#[test]
-fn batch_subfolder_walk_is_depth_limited() {
-    let dir = tmp("batch-subfolder-depth");
-    let mut deep = dir.clone();
-    for level in 1..=MAX_SUBFOLDER_DEPTH + 1 {
-        deep = join(&deep, "d");
-        std::fs::create_dir_all(&deep).unwrap();
-        if level >= MAX_SUBFOLDER_DEPTH {
-            std::fs::write(join(&deep, &format!("l{level}.png")), b"x").unwrap();
-        }
-    }
-    let found = list_images_tree(&dir, "", "test").unwrap();
-    let names: Vec<_> = found.iter().map(|i| file_name(&i.path)).collect();
-    assert_eq!(names, vec![format!("l{MAX_SUBFOLDER_DEPTH}.png")], "{found:?}");
-    assert_eq!(found[0].rel_dir.split('/').count(), MAX_SUBFOLDER_DEPTH);
-}
-
-/// A symlink back up the tree is walked once, not forever. Skipped where the platform doesn't
-/// let the test create directory symlinks (Windows without developer mode).
-#[test]
-fn batch_subfolder_walk_survives_symlink_loops() {
-    let dir = tmp("batch-subfolder-loop");
-    let sub = join(&dir, "sub");
-    std::fs::create_dir_all(&sub).unwrap();
-    std::fs::write(join(&dir, "a.png"), b"x").unwrap();
-    std::fs::write(join(&sub, "b.png"), b"x").unwrap();
-    let link = std::path::Path::new(&sub).join("loop");
-    #[cfg(unix)]
-    let made = std::os::unix::fs::symlink(&dir, &link);
-    #[cfg(windows)]
-    let made = std::os::windows::fs::symlink_dir(&dir, &link);
-    #[cfg(not(any(unix, windows)))]
-    let made: std::io::Result<()> = Err(std::io::Error::other("no symlinks"));
-    if made.is_err() {
-        eprintln!("skipped: cannot create a directory symlink here");
-        return;
-    }
-    let found = list_images_tree(&dir, "", "test").unwrap();
-    let names: Vec<_> = found.iter().map(|i| (i.rel_dir.as_str(), file_name(&i.path))).collect();
-    assert_eq!(names, vec![("", "a.png".to_string()), ("sub", "b.png".to_string())]);
-}
-
 #[test]
 fn batch_naming_validates_the_whole_plan_before_writing() {
     let dir = tmp("naming-invalid");

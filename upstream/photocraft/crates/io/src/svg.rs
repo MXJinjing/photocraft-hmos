@@ -337,11 +337,6 @@ impl Conv {
     /// `nodes` in paint order (first = bottom), as layers in the same order. `parent` is the
     /// absolute transform of the group holding them (what resvg needs to render one of them
     /// alone, since a node's own data is in its parent's space).
-    ///
-    /// Transforms are composed from `parent` down rather than read from `abs_transform()`: the
-    /// glyph outlines usvg builds for a text element (`Text::flattened`) keep identity absolute
-    /// transforms, so text placed by its own or an ancestor's `transform` (Illustrator writes
-    /// `matrix(1 0 0 1 x y)` on every text element) would lose it (#4806). Elsewhere the two agree.
     fn convert_children(&mut self, nodes: &[usvg::Node], depth: usize, rec: usize, parent: tiny_skia::Transform) -> Vec<Layer> {
         let mut out = Vec::new();
         for node in nodes {
@@ -355,7 +350,7 @@ impl Conv {
             usvg::Node::Group(g) => {
                 // A clip-path of one plain path becomes the group's vector mask (#4266); others
                 // are rasterised with the group.
-                let clip = g.clip_path().and_then(|cp| self.clip_mask(parent.pre_concat(g.transform()), cp));
+                let clip = g.clip_path().and_then(|cp| self.clip_mask(g, cp));
                 let dropped: [(bool, &'static str); 3] =
                     [(!g.filters().is_empty(), "filter"), (g.clip_path().is_some() && clip.is_none(), "clip-path"), (g.mask().is_some(), "mask")];
                 let too_deep = self.max_group_depth.is_some_and(|limit| depth >= limit) || depth >= MAX_GROUP_DEPTH || rec >= MAX_RECURSION;
@@ -375,8 +370,7 @@ impl Conv {
                 // A group that only carries a transform (baked into its paths by usvg) or that
                 // usvg inserted for its own bookkeeping adds nothing to the layer tree.
                 let plain = clip.is_none() && g.id().is_empty() && g.opacity().get() >= 1.0 && g.blend_mode() == usvg::BlendMode::Normal;
-                let abs = parent.pre_concat(g.transform());
-                let children = self.convert_children(g.children(), if plain { depth } else { depth + 1 }, rec + 1, abs);
+                let children = self.convert_children(g.children(), if plain { depth } else { depth + 1 }, rec + 1, g.abs_transform());
                 if children.is_empty() {
                     return;
                 }
@@ -410,9 +404,7 @@ impl Conv {
                 out.extend(self.raster_layer(node, name, parent));
             }
             usvg::Node::Text(t) => {
-                // The outlines are in the text element's own space.
-                let abs = t.abs_transform().pre_concat(t.flattened().transform());
-                let children = self.convert_children(t.flattened().children(), depth + 1, rec + 1, abs);
+                let children = self.convert_children(t.flattened().children(), depth + 1, rec + 1, t.flattened().abs_transform());
                 if children.is_empty() {
                     self.note("text", "SVG: text needs a font the drawing can use; none matched, so it was dropped".to_string());
                     return;
@@ -429,10 +421,10 @@ impl Conv {
         }
     }
 
-    /// The vector mask for a group clipped by `cp`, when the clip is one visible path with no
-    /// clip of its own: what resvg draws for the clip (the group's absolute transform `abs`, then
-    /// the clip's, then the path), in canvas pixels, with the clip rule as its fill rule.
-    fn clip_mask(&self, abs: tiny_skia::Transform, cp: &usvg::ClipPath) -> Option<VectorMask> {
+    /// The vector mask for group `g` clipped by `cp`, when the clip is one visible path with no
+    /// clip of its own: what resvg draws for the clip (the group's transform, then the clip's,
+    /// then the path), in canvas pixels, with the clip rule as its fill rule.
+    fn clip_mask(&self, g: &usvg::Group, cp: &usvg::ClipPath) -> Option<VectorMask> {
         if cp.clip_path().is_some() {
             return None;
         }
@@ -440,7 +432,7 @@ impl Conv {
         if !p.is_visible() {
             return None;
         }
-        let ts = abs.pre_concat(cp.transform()).post_concat(self.global);
+        let ts = g.abs_transform().pre_concat(cp.transform()).post_concat(self.global);
         let subpaths = knots(&(*p.data()).clone().transform(ts)?);
         if subpaths.is_empty() {
             return None;
@@ -463,8 +455,7 @@ impl Conv {
             let name = self.name(p.id(), 0);
             return self.raster_layer(node, name, parent);
         }
-        // A path has no transform of its own: its data is in its parent's space.
-        let ts = parent.post_concat(self.global);
+        let ts = p.abs_transform().post_concat(self.global);
         let data = (*p.data()).clone().transform(ts)?;
         let subpaths = knots(&data);
         if subpaths.is_empty() {
@@ -551,14 +542,7 @@ impl Conv {
     /// The node rendered by resvg into a pixel layer over its bounding box, clipped to the canvas.
     /// `parent` is the absolute transform of the node's parent group.
     fn raster_layer(&mut self, node: &usvg::Node, name: String, parent: tiny_skia::Transform) -> Option<Layer> {
-        // Where the node lands, from its box in its parent's space (as usvg computes its absolute
-        // box, but through `parent`, which is right inside text too).
-        let bb = match node {
-            usvg::Node::Group(g) => g.layer_bounding_box().transform(parent.pre_concat(g.transform()))?,
-            _ => node.bounding_box().to_non_zero_rect()?.transform(parent)?,
-        };
-        // What resvg shifts the node by before drawing it.
-        let shift = node.abs_layer_bounding_box()?;
+        let bb = node.abs_layer_bounding_box()?;
         let k = self.global.sx;
         let x0 = ((bb.x() * k).floor() as i32).max(self.canvas.x0);
         let y0 = ((bb.y() * k).floor() as i32).max(self.canvas.y0);
@@ -575,7 +559,7 @@ impl Conv {
         // to the origin: undo that shift, apply the parent's transform, then scale to the canvas
         // and shift so the pixmap starts at (x0, y0).
         let canvas = tiny_skia::Transform::from_row(k, 0.0, 0.0, k, -(x0 as f32), -(y0 as f32));
-        let ts = canvas.pre_concat(parent).pre_translate(shift.x(), shift.y());
+        let ts = canvas.pre_concat(parent).pre_translate(bb.x(), bb.y());
         resvg::render_node(node, ts, &mut pixmap.as_mut())?;
         Some(Layer::new(name, LayerContent::Raster(surface(&pixmap, Rect::new(x0, y0, x1, y1), self.fmt))))
     }

@@ -474,10 +474,8 @@ pub fn auto_sampling_with(w: usize, h: usize, ch: usize, img: &[f32], hole: &[bo
     let mut cost_fg = vec![0.0f32; sw * sh];
     let mut cost_bg = vec![0.0f32; sw * sh];
     let mut fixed = vec![FREE; sw * sh];
-    // Always the hole's own edge, and around a thin selection each part's surroundings.
-    let keep = thin_band(sw, sh, &shole);
     for i in 0..sw * sh {
-        if shole[i] || dist[i] <= keep {
+        if shole[i] || dist[i] <= 1.5 {
             fixed[i] = HARD_FG;
             continue;
         }
@@ -508,22 +506,6 @@ pub fn auto_sampling_with(w: usize, h: usize, ch: usize, img: &[f32], hole: &[bo
         return Ok(everything());
     }
     Ok(out)
-}
-
-/// How far around a thin selection (strings, wires, and any small parts selected with them, all
-/// at most a quarter as thick as the selection is long) the Auto area always reaches, in cells of
-/// a `w × h` grid: as far as the selection is thick, so that each part, however far from the
-/// rest, keeps its own surroundings to copy from. 1.5 cells for any other selection.
-fn thin_band(w: usize, h: usize, hole: &[bool]) -> f32 {
-    let inside = crate::selection::edt(&hole.iter().map(|h| !h).collect::<Vec<_>>(), w, h);
-    let thickness = 2.0 * inside.iter().zip(hole).filter(|(_, h)| **h).map(|(d, _)| *d).fold(0.0f32, f32::max);
-    let (mut x0, mut y0, mut x1, mut y1) = (w, h, 0, 0);
-    for (i, _) in hole.iter().enumerate().filter(|(_, h)| **h) {
-        let (x, y) = (i % w, i / w);
-        (x0, y0, x1, y1) = (x0.min(x), y0.min(y), x1.max(x + 1), y1.max(y + 1));
-    }
-    let extent = x1.saturating_sub(x0).max(y1.saturating_sub(y0)) as f32;
-    if 4.0 * thickness <= extent { thickness.max(1.5) } else { 1.5 }
 }
 
 /// The Patch Tool's and the Content-Aware Move Tool's Color option (0–10) as the colour adaptation
@@ -770,31 +752,6 @@ mod tests {
     }
 
     #[test]
-    fn auto_sampling_keeps_the_surroundings_of_every_part_of_a_thin_selection() {
-        // A long thin selection across a grey ramp, and a small knob selected with it in a red
-        // corner. Each part keeps its own surroundings; a compact selection is unchanged.
-        let (w, h) = (900, 600);
-        let tex = noise(w, h, 4);
-        let img: Vec<f32> = (0..w * h * 3)
-            .map(|i| {
-                let (x, y, c) = ((i / 3) % w, (i / 3) / w, i % 3);
-                let base = if x > 690 && y > 420 { [0.7, 0.25, 0.2][c] } else { 0.2 + 0.5 * x as f32 / w as f32 };
-                base + (tex[i] - 0.5) * 0.04
-            })
-            .collect();
-        let line = |i: usize| (30..870).contains(&(i % w)) && (180..192).contains(&(i / w));
-        let knob = |i: usize| ((i % w) as f32 - 795.0).hypot((i / w) as f32 - 510.0) < 10.0;
-        let hole: Vec<bool> = (0..w * h).map(|i| line(i) || knob(i)).collect();
-        let area = auto_sampling(w, h, 3, &img, &hole);
-        let around_knob = (0..w * h).filter(|&i| !hole[i] && ((i % w) as f32 - 795.0).hypot((i / w) as f32 - 510.0) < 24.0);
-        let (n, kept) = around_knob.fold((0, 0), |(n, k), i| (n + 1, k + usize::from(area[i])));
-        assert!(kept as f32 > 0.9 * n as f32, "{kept} of {n} pixels around the knob");
-        assert!(thin_band(w, h, &hole) >= 20.0, "{}", thin_band(w, h, &hole));
-        let disc: Vec<bool> = (0..w * h).map(|i| ((i % w) as f32 - 450.0).hypot((i / w) as f32 - 300.0) < 90.0).collect();
-        assert_eq!(thin_band(w, h, &disc), 1.5);
-    }
-
-    #[test]
     fn without_colour_adaptation_the_fill_copies_pixels_exactly() {
         // A smooth texture with fine noise, so that every value is unique: a filled pixel equal to
         // an image pixel was copied from it. Photoshop's fill (colour adaptation None) is such
@@ -839,116 +796,6 @@ mod tests {
         assert_eq!(shift(0), 0.0);
         assert!((shift(3) - 0.12).abs() < 0.01, "{}", shift(3));
         assert!((shift(10) - 0.4).abs() < 0.01, "{}", shift(10));
-    }
-
-    /// A soft background (gradients, broad out-of-focus blobs of colour, fine noise) with thin, long bright
-    /// objects over it: three coiled strings 3 to 7 px wide and two straighter ones, each with an
-    /// anti-aliased edge and a faint halo. Returns the image; what removing the coils should give
-    /// (the background and the straighter strings, which stay); and the selection a user would draw
-    /// around the coils, `margin` px wide.
-    fn strings_scene(w: usize, h: usize, margin: f32) -> (Vec<f32>, Vec<f32>, Vec<bool>) {
-        let fine = noise(w, h, 11);
-        // Out-of-focus colour: broad blobs over two gradients.
-        let blob = noise(3, 3, 5);
-        let bg: Vec<f32> = (0..w * h * 3)
-            .map(|i| {
-                let (x, y, c) = (((i / 3) % w) as f32 / w as f32, ((i / 3) / w) as f32 / h as f32, i % 3);
-                let mut v = [0.18 + 0.25 * x, 0.22 + 0.1 * y, 0.3 - 0.1 * x][c];
-                for b in blob.as_chunks::<3>().0 {
-                    let (bx, by, s) = (b[0] * 1.6 - 0.3, b[1] * 1.6 - 0.3, 0.1 + 0.25 * b[2]);
-                    v += (b[(c + 1) % 3] - 0.2) * 0.5 * (-((x - bx).powi(2) + (y - by).powi(2) * 0.56) / (2.0 * s * s)).exp();
-                }
-                v + (fine[i] - 0.5) * 0.03
-            })
-            .collect();
-        // Signed distance to each object's surface, stamped from points along it.
-        let stamp = |sd: &mut [f32], pts: &mut dyn Iterator<Item = (f32, f32)>, half: f32| {
-            for (px, py) in pts {
-                let reach = (half + 4.0) as i32 + 1;
-                for dy in -reach..=reach {
-                    for dx in -reach..=reach {
-                        let (x, y) = (px as i32 + dx, py as i32 + dy);
-                        if x >= 0 && y >= 0 && (x as usize) < w && (y as usize) < h {
-                            let i = y as usize * w + x as usize;
-                            sd[i] = sd[i].min((x as f32 - px).hypot(y as f32 - py) - half);
-                        }
-                    }
-                }
-            }
-        };
-        let mut coils = vec![f32::INFINITY; w * h];
-        for (k, half) in [1.5f32, 2.5, 3.5].into_iter().enumerate() {
-            let (y0, r) = ((0.22 + 0.28 * k as f32) * h as f32, 10.0 + 2.0 * k as f32);
-            let mut pts = (0..4000).map(|j| {
-                let t = j as f32 / 4000.0;
-                let a = 8.0 * std::f32::consts::TAU * t;
-                (18.0 + t * (w as f32 - 60.0) + r * a.cos(), y0 + 6.0 * (6.0 * t).sin() + 0.7 * r * a.sin())
-            });
-            stamp(&mut coils, &mut pts, half);
-        }
-        let mut straight = vec![f32::INFINITY; w * h];
-        for y in [0.07, 0.93] {
-            stamp(&mut straight, &mut (0..2000).map(|j| (j as f32 / 2000.0 * w as f32, y * h as f32 + 3.0 * (j as f32 / 300.0).sin())), 2.0);
-        }
-        let draw = |base: &[f32], sd: &[f32]| -> Vec<f32> {
-            let mut img = base.to_vec();
-            for i in 0..w * h {
-                let cover = (0.5 - sd[i]).clamp(0.0, 1.0);
-                let halo = if sd[i] > 0.0 { 0.08 * (-sd[i] * sd[i] / 2.9).exp() } else { 0.0 };
-                for (c, metal) in [0.9f32, 0.85, 0.7].into_iter().enumerate() {
-                    let v = &mut img[i * 3 + c];
-                    *v = *v * (1.0 - cover) + metal * cover + halo * (1.0 - cover);
-                }
-            }
-            img
-        };
-        let clean = draw(&bg, &straight);
-        let both: Vec<f32> = coils.iter().zip(&straight).map(|(a, b)| a.min(*b)).collect();
-        let img = draw(&bg, &both);
-        let hole = coils.iter().map(|d| *d <= margin).collect();
-        (img, clean, hole)
-    }
-
-    /// RMS over the hole of the error averaged over 7 × 7 pixels (in levels of 255): the noise
-    /// cancels out, a ghost of the removed outline or a blotch of another shade does not.
-    fn blotch_error(w: usize, h: usize, out: &[f32], clean: &[f32], hole: &[bool]) -> f32 {
-        let (mut sum, mut n) = (0.0f64, 0usize);
-        for y in 3..h - 3 {
-            for x in 3..w - 3 {
-                if !hole[y * w + x] {
-                    continue;
-                }
-                let mut e = [0.0f32; 3];
-                for j in (y - 3..=y + 3).flat_map(|yy| (x - 3..=x + 3).map(move |xx| yy * w + xx)) {
-                    for (c, ec) in e.iter_mut().enumerate() {
-                        *ec += out[j * 3 + c] - clean[j * 3 + c];
-                    }
-                }
-                sum += f64::from(e.iter().map(|v| (v / 49.0).powi(2)).sum::<f32>() / 3.0);
-                n += 1;
-            }
-        }
-        ((sum / n.max(1) as f64).sqrt() * 255.0) as f32
-    }
-
-    /// Removing thin, long objects (guitar strings, wires) from a soft background (#1366): the
-    /// fill is the background, with no ghost of their outline and nothing of their colour copied
-    /// back in. Their selection is long but only a few pixels thick, so the fill is worked out at
-    /// a scale where it is still a few pixels thick rather than one where the strings' surroundings
-    /// have merged into a blur.
-    #[test]
-    fn thin_objects_leave_no_ghost_and_none_of_their_colour() {
-        let (w, h) = (360, 270);
-        let (img, clean, hole) = strings_scene(w, h, 2.0);
-        let source = auto_sampling(w, h, 3, &img, &hole);
-        let out = fill(w, h, 3, &img, &hole, &source, &FillOptions::default());
-        let blotch = blotch_error(w, h, &out, &clean, &hole);
-        let luma = |v: &[f32], i: usize| (v[i * 3] + v[i * 3 + 1] + v[i * 3 + 2]) / 3.0;
-        let bright = (0..w * h).filter(|&i| hole[i] && luma(&out, i) > luma(&clean, i) + 0.06).count();
-        // Before #1366 the outlines stayed as darker and lighter blotches (13 levels of 255) and
-        // 1121 pixels took the strings' colour.
-        assert!(blotch < 2.5, "ghosts and blotches: {blotch:.2} levels of 255");
-        assert_eq!(bright, 0, "filled pixels with the strings' colour");
     }
 
     #[test]

@@ -45,17 +45,11 @@ pub struct Action {
     /// filled by Load Actions (`actions.load`) and written by Save Actions (`actions.save`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub set: Option<String>,
-    /// Button Mode colour. Empty is none; otherwise one of [`BUTTON_COLORS`].
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub color: String,
 }
-
-/// Button Mode colours, in Photoshop's order. Empty is no colour.
-pub const BUTTON_COLORS: [&str; 8] = ["", "red", "orange", "yellow", "green", "blue", "violet", "gray"];
 
 impl Action {
     pub fn new(name: impl Into<String>, steps: Vec<(String, Value)>) -> Self {
-        Self { name: name.into(), steps, disabled: BTreeSet::new(), dialogs: BTreeSet::new(), set: None, color: String::new() }
+        Self { name: name.into(), steps, disabled: BTreeSet::new(), dialogs: BTreeSet::new(), set: None }
     }
 
     /// Apply `f` to every per-step index set (`disabled`, `dialogs`) after steps moved.
@@ -241,7 +235,7 @@ fn get(s: &mut Session, p: &Value) -> Result<Value> {
     let idx = resolve(&s.actions.list, p, "actions.get")?;
     let action = &s.actions.list[idx];
     let steps: Vec<Value> = action.steps.iter().map(|(id, params)| json!([id, params])).collect();
-    Ok(json!({"name": action.name, "steps": steps, "disabled": action.disabled, "dialogs": action.dialogs, "set": action.set, "color": action.color}))
+    Ok(json!({"name": action.name, "steps": steps, "disabled": action.disabled, "dialogs": action.dialogs, "set": action.set}))
 }
 
 fn record(s: &mut Session, p: &Value) -> Result<Value> {
@@ -559,25 +553,6 @@ fn rename(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({"action": name, "index": idx}))
 }
 
-fn set_color(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "actions.setColor";
-    not_playing(s, cmd)?;
-    let idx = resolve(&s.actions.list, p, cmd)?;
-    let Some(color) = p.get("color").and_then(Value::as_str) else {
-        return Err(bad(cmd, "needs \"color\""));
-    };
-    if !BUTTON_COLORS.contains(&color) {
-        return Err(bad(cmd, "color must be empty, red, orange, yellow, green, blue, violet, or gray"));
-    }
-    let Some(action) = s.actions.list.get_mut(idx) else {
-        return Err(bad(cmd, "no such action"));
-    };
-    action.color = color.to_string();
-    let name = action.name.clone();
-    s.actions.touch();
-    Ok(json!({"action": name, "color": color}))
-}
-
 pub fn specs() -> Vec<CommandSpec> {
     vec![
         CommandSpec {
@@ -605,7 +580,7 @@ pub fn specs() -> Vec<CommandSpec> {
             label: "Get Action",
             menu: &[],
             shortcut: None,
-            params: r##"{"action":name|index} → {name, steps:[[id, params]…], disabled:[step…], dialogs:[step…], set:name|null, color:str} (steps is the shape file.automate.batch and droplets take; disabled lists the 0-based steps playback skips; dialogs the steps whose dialog Photoshop would show; set the action set from Load Actions; color is the Button Mode swatch, or empty)"##,
+            params: r##"{"action":name|index} → {name, steps:[[id, params]…], disabled:[step…], dialogs:[step…], set:name|null} (steps is the shape file.automate.batch and droplets take; disabled lists the 0-based steps playback skips; dialogs the steps whose dialog Photoshop would show; set the action set from Load Actions)"##,
             enabled: always,
             run: get,
             journal: false,
@@ -668,16 +643,6 @@ pub fn specs() -> Vec<CommandSpec> {
             params: r##"{"action":name|index, "name":str} → {action, index}. The name must not be empty or whitespace-only and must be unique. Nested Play Action steps and the action's function key follow the rename."##,
             enabled: always,
             run: rename,
-            journal: false,
-        },
-        CommandSpec {
-            id: "actions.setColor",
-            label: "Set Action Color",
-            menu: &[],
-            shortcut: None,
-            params: r##"{"action":name|index, "color":""|"red"|"orange"|"yellow"|"green"|"blue"|"violet"|"gray"} → {action, color}. The Button Mode colour. Empty clears it."##,
-            enabled: always,
-            run: set_color,
             journal: false,
         },
     ]
@@ -990,109 +955,6 @@ mod tests {
             assert!(px.iter().zip([1.0, 0.0, 0.0, 1.0]).all(|(a, b)| (a - b).abs() < 1.0e-5), "depth {depth}: {px:?}");
             assert_eq!(s.actions.playing, 0);
         }
-    }
-
-    #[test]
-    fn recorded_layer_selection_replays_by_name_on_another_document() {
-        for depth in [8, 16, 32] {
-            let mut s = Session::new();
-            s.execute("file.new", json!({"width": 8, "height": 8, "depth": depth})).unwrap();
-            let original = s.active().unwrap().active_layer.unwrap();
-            s.execute("layer.setProps", json!({"name": "Photo"})).unwrap();
-            s.execute("layer.new.layer", json!({"name": "LogoBase"})).unwrap();
-            s.execute("actions.record", json!({"name": "Duplicate photo"})).unwrap();
-            s.execute("layer.select", json!({"layer": original.0, "mode": "replace"})).unwrap();
-            // The target name must be captured now, not when recording stops.
-            s.execute("layer.setProps", json!({"name": "Retouched"})).unwrap();
-            s.execute("layer.duplicate", json!({})).unwrap();
-            s.execute("actions.stop", json!({})).unwrap();
-            assert_eq!(s.actions.list[0].steps[0].1, json!({"name":"Photo", "mode":"replace"}));
-            // Persisted actions must work in an entirely different session too.
-            let saved = serde_json::to_string(&s.actions.list).unwrap();
-            let mut replay = Session::new();
-            replay.actions.list = serde_json::from_str(&saved).unwrap();
-            replay.execute("file.new", json!({"width": 8, "height": 8, "depth": depth})).unwrap();
-            replay.execute("layer.setProps", json!({"name": "Photo"})).unwrap();
-            let target = replay.active().unwrap().active_layer.unwrap();
-            assert_ne!(original, target);
-            replay.execute("layer.new.layer", json!({"name": "LogoBase"})).unwrap();
-            let result = replay.execute("actions.play", json!({"action": 0})).unwrap();
-            assert!(result.get("failed").is_none(), "{result}");
-            assert_eq!(result["ran"], 3);
-            assert_eq!(replay.active().unwrap().doc.layer(target).unwrap().name, "Retouched");
-            let active = replay.active().unwrap().active_layer.unwrap();
-            assert_eq!(replay.active().unwrap().doc.layer(active).unwrap().name, "Retouched copy");
-        }
-    }
-
-    #[test]
-    fn named_selection_preserves_modes_and_duplicate_occurrences() {
-        let mut s = Session::new();
-        s.execute("file.new", json!({"width":4,"height":4})).unwrap();
-        s.execute("layer.setProps", json!({"name":"Photo"})).unwrap();
-        let first = s.active().unwrap().active_layer.unwrap();
-        s.execute("layer.new.group", json!({"name":"Group"})).unwrap();
-        // A duplicate nested in a group must be found even when that group is collapsed.
-        let second = s
-            .edit("child", |doc, active| {
-                let child = photocraft_doc::Layer::raster("Photo", doc.pixel_format());
-                let id = child.id;
-                if let photocraft_doc::LayerContent::Group(group) = &mut doc.layer_mut(active.unwrap()).unwrap().content {
-                    group.children.push(child);
-                    group.expanded = false;
-                }
-                Ok(id)
-            })
-            .unwrap();
-        s.execute("actions.record", json!({"name":"Select duplicates"})).unwrap();
-        s.execute("layer.select", json!({"layer":first.0})).unwrap();
-        s.execute("layer.select", json!({"layer":second.0,"mode":"add"})).unwrap();
-        s.execute("actions.stop", json!({})).unwrap();
-        assert_eq!(s.actions.list[0].steps[0].1, json!({"name":"Photo","occurrence":0}));
-        assert_eq!(s.actions.list[0].steps[1].1, json!({"name":"Photo","occurrence":1,"mode":"add"}));
-        s.execute("layer.select", json!({"layer":first.0})).unwrap();
-        let r = s.execute("actions.play", json!({"action":0})).unwrap();
-        assert!(r.get("failed").is_none(), "{r}");
-        assert_eq!(s.active().unwrap().selected_layers(), vec![first, second]);
-        s.execute("layer.select", json!({"name":"Photo","occurrence":1,"mode":"toggle"})).unwrap();
-        assert_eq!(s.active().unwrap().selected_layers(), vec![first]);
-        s.execute("layer.select", json!({"name":"Photo","occurrence":1,"mode":"range"})).unwrap();
-        assert!(s.active().unwrap().selected_layers().contains(&second));
-        // Main's imported .atn steps use a string-valued `layer` and choose the topmost match.
-        s.execute("layer.select", json!({"layer":"Photo"})).unwrap();
-        assert_eq!(s.active().unwrap().selected_layers(), vec![second]);
-        s.execute("layer.select", json!({"name":"Photo","occurrence":0,"mode":"add"})).unwrap();
-        s.execute("layer.select", json!({"name":"Photo","occurrence":1,"mode":"remove"})).unwrap();
-        assert_eq!(s.active().unwrap().selected_layers(), vec![first]);
-        // Removing an unselected layer does not add it; removing the last target keeps it.
-        s.execute("layer.select", json!({"layer":"Photo","mode":"remove"})).unwrap();
-        s.execute("layer.select", json!({"name":"Photo","occurrence":0,"mode":"remove"})).unwrap();
-        assert_eq!(s.active().unwrap().selected_layers(), vec![first]);
-        for p in [
-            json!({"name":"absent"}),
-            json!({"name":"Photo"}),
-            json!({"name":1}),
-            json!({"name":"Photo","occurrence":-1}),
-            json!({"name":"Photo","occurrence":1.5}),
-            json!({"name":"Photo","occurrence":99}),
-            json!({"name":"Photo","layer":first.0}),
-            json!({"layer":first.0,"occurrence":0}),
-        ] {
-            let before = s.active().unwrap().selected_layers();
-            assert!(s.execute("layer.select", p.clone()).is_err(), "{p}");
-            assert_eq!(s.active().unwrap().selected_layers(), before);
-        }
-        s.actions.list.push(Action {
-            name: "Missing".into(),
-            steps: vec![("layer.select".into(), json!({"name":"absent"})), ("layer.duplicate".into(), json!({}))],
-            disabled: Default::default(),
-            ..Default::default()
-        });
-        let before = s.active().unwrap().doc.walk().len();
-        let result = s.execute("actions.play", json!({"action":"Missing"})).unwrap();
-        assert_eq!(result["ran"], 0);
-        assert!(result["failed"]["error"].as_str().unwrap().contains("absent"));
-        assert_eq!(s.active().unwrap().doc.walk().len(), before);
     }
 
     #[test]
@@ -1445,25 +1307,5 @@ mod tests {
         // The first document is untouched.
         let first = &s.documents()[0].doc;
         assert_eq!((first.size.width, first.size.height), (48, 48), "the recording document keeps its own crop");
-    }
-
-    #[test]
-    fn button_color_is_one_of_the_photoshop_swatches() {
-        let mut s = Session::new();
-        s.execute("actions.record", json!({"name": "Print"})).unwrap();
-        s.execute("actions.stop", json!({})).unwrap();
-        let set = s.execute("actions.setColor", json!({"action": "Print", "color": "blue"})).unwrap();
-        assert_eq!(set["color"], "blue");
-        assert_eq!(s.actions.list[0].color, "blue");
-        assert_eq!(s.execute("actions.get", json!({"action": 0})).unwrap()["color"], "blue");
-        let saved = serde_json::to_string(&s.actions.list).unwrap();
-        assert!(saved.contains("blue"));
-        s.execute("actions.setColor", json!({"action": 0, "color": ""})).unwrap();
-        assert!(s.actions.list[0].color.is_empty());
-        assert!(!serde_json::to_string(&s.actions.list).unwrap().contains("color"), "an empty colour is omitted");
-        for bad in [json!({"action": 0, "color": "pink"}), json!({"action": 0}), json!({"action": 4, "color": "red"}), json!({"color": "red"})] {
-            assert!(s.execute("actions.setColor", bad).is_err());
-        }
-        assert!(s.actions.list[0].color.is_empty(), "rejected colours change nothing");
     }
 }

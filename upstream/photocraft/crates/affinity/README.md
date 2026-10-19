@@ -132,10 +132,8 @@ test fixtures, not an exporter.
 
 ## Safety limits
 
-Every size is checked before it is allocated: 256 MiB per archive entry, 1 GiB extracted per import
-and 1 GiB of decoded pixels per import by default (`Limits`: extracted bytes and materialized pixels
-are separate budgets, since a bitmap's declared size costs memory whatever its tiles hold), a 64 MiB
-zstd window, 4096 saved revisions, array lengths no longer than the
+Every size is checked before it is allocated: 256 MiB per archive entry and 1 GiB per import by
+default (`Limits`), a 64 MiB zstd window, 4096 saved revisions, array lengths no longer than the
 bytes left, 16 777 216 decoded values per document stream (fields and array elements together, counted before
 anything is allocated: a value takes about 40 bytes in memory however few it took in the file; the largest of
 those 189 public documents uses 3.3 million), 384 levels of object nesting, 128 levels of layers, 500 000 layers, four million curve

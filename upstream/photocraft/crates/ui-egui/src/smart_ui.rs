@@ -287,37 +287,15 @@ pub fn open_editor(app: &mut PhotocraftApp, ctx: &egui::Context, layer: u64, sm:
         }
         return;
     }
-    // So has the Filter Gallery.
-    if f.command == "filter.filterGallery" {
-        if let Err(e) = crate::gallery_ui::open_smart_filter(app, photocraft_doc::LayerId(layer), index) {
-            app.ui.status = e;
-            app.ui.status_error = true;
-        }
-        return;
-    }
-    // An adjustment recorded on the smart object (Brightness/Contrast, Levels…) re-opens its own
-    // Image › Adjustments editor, like the filters above.
-    if crate::adjust_dialog::has_dialog(&f.command) {
-        if let Some(id) = crate::adjust_dialog::open(app, &f.command) {
-            edit_filter(app, id, layer, index, &f.params);
-        }
-        return;
-    }
     if !crate::filter_dialog::has_dialog(&f.command) {
         return;
     }
     let Some(id) = crate::filter_dialog::open(app, &f.command) else { return };
-    edit_filter(app, id, layer, index, &f.params);
-}
-
-/// Hands the open dialog `id` the smart filter's recorded `params` and makes OK update that
-/// filter (`layer.smartFilter.setParams`, see [`confirm_command`]) instead of adding another.
-fn edit_filter(app: &mut PhotocraftApp, id: u64, layer: u64, index: usize, params: &Value) {
     if let Some(d) = app.ui.dialog_mut(id) {
         // The live preview would stack a second copy of the filter on the smart object.
         d.fields.remove("__preview");
         d.fields.insert("__smartFilter".into(), json!({"layer": layer, "index": index}));
-        if let Value::Object(p) = params {
+        if let Value::Object(p) = &f.params {
             for (k, v) in p {
                 if d.fields.contains_key(k) {
                     d.fields.insert(k.clone(), v.clone());
@@ -418,38 +396,5 @@ mod tests {
         let drawn = filled(&smart, thumb);
         assert!(drawn.contains(&(frame, t.field)));
         assert!(drawn.iter().all(|(_, c)| *c != t.icon));
-    }
-
-    /// #5689: an Image › Adjustments recorded on a smart object (Brightness/Contrast…) opens its
-    /// own editor from the Smart Filters row, with the recorded settings, and OK updates that
-    /// filter instead of stacking another.
-    #[test]
-    fn an_adjustment_smart_filter_opens_its_editor_and_updates_it() {
-        let mut s = photocraft_engine::Session::new();
-        s.execute("file.new", json!({"width": 64, "height": 48})).unwrap();
-        s.execute("layer.new.layer", json!({})).unwrap();
-        s.execute("edit.fill", json!({"contents": "black"})).unwrap();
-        let id = s.execute("layer.smartObjects.convertToSmartObject", json!({})).unwrap()["layer"].as_u64().unwrap();
-        s.execute("image.adjustments.brightnessContrast", json!({"brightness": 40, "contrast": -10})).unwrap();
-        let mut app = PhotocraftApp::new(s, crate::Services::default());
-        let sm = match &app.session.active().unwrap().doc.layer(photocraft_doc::LayerId(id)).unwrap().content {
-            LayerContent::Smart(sm) => sm.clone(),
-            other => panic!("expected a smart object, got {other:?}"),
-        };
-        assert_eq!(sm.smart_filters.len(), 1);
-        open_editor(&mut app, &egui::Context::default(), id, &sm, 0);
-        let d = app.ui.dialogs.last().expect("the adjustment editor opened");
-        assert_eq!(d.fields.get("__adjust").and_then(Value::as_str), Some("brightnessContrast"));
-        assert_eq!(d.fields.get("brightness").and_then(Value::as_f64), Some(40.0), "the recorded settings");
-        assert_eq!(d.fields.get("contrast").and_then(Value::as_f64), Some(-10.0));
-        let dialog = d.id;
-        // OK updates the recorded filter (one history step), it does not add a second filter.
-        crate::dialogs::confirm(&mut app, dialog).unwrap();
-        let LayerContent::Smart(sm) = &app.session.active().unwrap().doc.layer(photocraft_doc::LayerId(id)).unwrap().content else {
-            panic!("the layer stays a smart object");
-        };
-        assert_eq!(sm.smart_filters.len(), 1, "no filter was stacked");
-        assert_eq!(sm.smart_filters[0].params.get("brightness").and_then(Value::as_f64), Some(40.0));
-        assert_eq!(sm.smart_filters[0].params.get("contrast").and_then(Value::as_f64), Some(-10.0));
     }
 }

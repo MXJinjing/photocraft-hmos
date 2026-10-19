@@ -12,69 +12,6 @@ fn d(s: &Session) -> Arc<Document> {
 }
 
 #[test]
-fn failed_compound_restores_layer_target_history_and_journal() {
-    let mut s = session(80, 60, 8);
-    let background = s.active().unwrap().active_layer.unwrap();
-    s.execute("layer.new.layer", json!({"name": "Selected"})).unwrap();
-    let selected = s.active().unwrap().active_layer.unwrap();
-    {
-        let st = s.active_mut().unwrap();
-        st.selected_layers = vec![background, selected];
-        st.layer_anchor = Some(background);
-        st.coalesce = Some("previous-gesture".into());
-    }
-
-    let st = s.active().unwrap();
-    let prior_doc = st.doc.clone();
-    let prior_history = st.history.past_len();
-    let prior_channel_view = st.channel_view.clone();
-    let prior_mask_targeted = s.tools.mask_targeted;
-    let prior_journal = s.journal.len();
-    let error = compound(&mut s, "Place Scale Marker", |s| -> Result<()> {
-        // Mirrors a scale-bar creation followed by a failed type.create: the
-        // inner command selects a new layer, which rollback must remove.
-        s.execute("layer.new.layer", json!({"name": "Temporary Scale Bar"}))?;
-        s.active_mut().unwrap().channel_view.target = crate::channel_cmds::ChannelTarget::LayerMask;
-        s.sync_tools_mask_target();
-        Err(bad("test", "synthetic second step failed"))
-    })
-    .unwrap_err();
-
-    assert!(error.to_string().contains("synthetic second step failed"));
-    let st = s.active().unwrap();
-    assert!(Arc::ptr_eq(&prior_doc, &st.doc), "the original document is restored");
-    assert_eq!(st.history.past_len(), prior_history, "no undo step remains");
-    assert_eq!(s.journal.len(), prior_journal, "no rolled-back command is journaled");
-    assert_eq!(st.active_layer, Some(selected));
-    assert_eq!(st.selected_layers, vec![background, selected]);
-    assert_eq!(st.layer_anchor, Some(background));
-    assert_eq!(st.channel_view, prior_channel_view);
-    assert_eq!(s.tools.mask_targeted, prior_mask_targeted, "tool mask target follows the restored channel");
-    assert_eq!(st.coalesce.as_deref(), Some("previous-gesture"));
-    assert!(st.doc.layer(selected).is_some());
-
-    // Subsequent ordinary commands target the original layer, not the
-    // nonexistent scale bar.
-    s.execute("layer.setProps", json!({"layer": selected.0, "visible": false})).unwrap();
-    assert!(!s.active().unwrap().doc.layer(selected).unwrap().visible);
-}
-
-#[test]
-fn failed_compound_preserves_a_clean_document() {
-    let mut s = session(80, 60, 8);
-    assert!(!s.active().unwrap().is_dirty());
-    let prior_doc = d(&s);
-    let error = compound(&mut s, "Place Scale Marker", |s| -> Result<()> {
-        s.execute("layer.new.layer", json!({"name": "Temporary Scale Bar"}))?;
-        Err(bad("test", "synthetic second step failed"))
-    })
-    .unwrap_err();
-    assert!(error.to_string().contains("synthetic second step failed"));
-    assert!(Arc::ptr_eq(&prior_doc, &d(&s)));
-    assert!(!s.active().unwrap().is_dirty(), "a rolled-back edit does not need saving");
-}
-
-#[test]
 fn record_measurements_refuses_an_area_too_large_to_measure() {
     // #933: with no selection the whole document is measured, and `width * height` overflowed
     // u32 on a legal 65536×65536 document, panicking inside `run`.

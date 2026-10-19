@@ -52,7 +52,6 @@ pub struct Runtime {
     show_rulers: Option<bool>,
     /// Tool options as last remembered in the preferences (see `tool_memory`).
     pub(crate) tool_options: Option<crate::state::ToolOptions>,
-    pub(crate) selected_tool: Option<crate::state::Tool>,
 }
 
 /// The GPU canvas colours from Preferences › Transparency & Gamut.
@@ -131,26 +130,6 @@ pub(crate) fn cycle_appearance(app: &mut PhotocraftApp, ctx: &egui::Context) {
     if app.ui.theme != selected {
         app.apply_theme(ctx, selected);
     }
-}
-
-/// Photoshop's four interface brightnesses, darkest first.
-const BRIGHTNESSES: [ThemeKind; 4] = [ThemeKind::Pro, ThemeKind::ProMedium, ThemeKind::ProLightGray, ThemeKind::ProLight];
-
-/// Darken Interface (⇧⌘F1, `lighter` false) and Lighten Interface (⇧⌘F2): the next of
-/// Photoshop's four brightnesses from the theme on screen, stopping at either end, as in
-/// Photoshop. Another theme steps from the nearest brightness: Medium Gray for a dark one, Light
-/// Gray for a light one. The choice is saved like picking it in Preferences › Interface.
-pub(crate) fn step_brightness(app: &mut PhotocraftApp, ctx: &egui::Context, lighter: bool) -> Result<(), String> {
-    let current = app.ui.theme;
-    let at = BRIGHTNESSES.iter().position(|k| *k == current).unwrap_or(if crate::theme::Tokens::for_kind(current).dark() { 1 } else { 2 });
-    let next = if lighter { (at + 1).min(BRIGHTNESSES.len() - 1) } else { at.saturating_sub(1) };
-    let Some(&kind) = BRIGHTNESSES.get(next) else { return Ok(()) };
-    if kind == current {
-        return Ok(());
-    }
-    app.run("prefs.set", json!({"path": "interface.theme", "value": kind.id()}))?;
-    sync_appearance(app, ctx);
-    Ok(())
 }
 
 const LIGHT_THEME_OPTIONS: &[(&str, ThemeKind)] = &[
@@ -812,21 +791,6 @@ pub fn shortcut_items(app: &PhotocraftApp) -> Vec<(String, String, Vec<String>, 
     out
 }
 
-/// A fingerprint of the bindings a shortcut conflict describes.
-fn conflict_state(overrides: &BTreeMap<String, String>, alternates: &BTreeMap<String, Vec<String>>, selected: &str, set: Option<&Value>) -> u64 {
-    use std::hash::{Hash, Hasher};
-    let mut h = std::collections::hash_map::DefaultHasher::new();
-    (overrides, alternates, selected, set.map(Value::to_string)).hash(&mut h);
-    h.finish()
-}
-
-/// Keys the system takes before the app sees them (switching apps, closing the window, force
-/// quit): Edit › Keyboard Shortcuts won't assign them, as Photoshop won't. `sc` is in our
-/// notation, where `Cmd` is Ctrl off the Mac.
-pub fn reserved_shortcut(sc: &str) -> bool {
-    prefs::reserved_shortcut(sc)
-}
-
 /// Text of a key press for the shortcut editor (`Cmd+Shift+K`), `None` for bare modifiers.
 pub fn shortcut_text(key: egui::Key, m: egui::Modifiers) -> Option<String> {
     if is_modifier_key(key) {
@@ -1028,9 +992,6 @@ pub fn open_shortcuts(app: &mut PhotocraftApp, tab: u64) -> u64 {
         "tab": tab,
         "filter": "",
         "overrides": p.shortcuts,
-        "alternates": p.alternate_shortcuts,
-        "sets": p.shortcut_sets,
-        "activeSet": p.shortcut_set,
         "hidden": p.menus.hidden,
         "colors": p.menus.colors,
         "toolbarHidden": p.toolbar.hidden,
@@ -1044,13 +1005,8 @@ pub fn open_shortcuts(app: &mut PhotocraftApp, tab: u64) -> u64 {
 /// Open the Embedded Profile Mismatch prompt for a file waiting to open (`open_prompt`): its
 /// `message`, the answer selected first (`action`), and `marker`, the field that routes OK and
 /// Cancel back to `open_prompt`.
-/// `names` carries the embedded and working profile names and the Color Settings policy a
-/// remembered choice is saved to (`policyKey`, null for a mode without one).
-pub fn open_mismatch(app: &mut PhotocraftApp, message: &str, action: &str, missing: bool, marker: &str, names: Value) -> u64 {
-    let mut fields = json!({"message": message, "action": action, "missing": missing, "remember": false});
-    if let (Some(f), Value::Object(n)) = (fields.as_object_mut(), names) {
-        f.extend(n);
-    }
+pub fn open_mismatch(app: &mut PhotocraftApp, message: &str, action: &str, missing: bool, marker: &str) -> u64 {
+    let mut fields = json!({"message": message, "action": action, "missing": missing});
     fields[marker] = json!(true);
     open_kind(app, "mismatch", tl!("Embedded Profile Mismatch"), fields)
 }
@@ -1061,9 +1017,7 @@ pub fn open_mismatch(app: &mut PhotocraftApp, message: &str, action: &str, missi
 pub fn body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Value>) {
     match f.get("__prefsui").and_then(Value::as_str).unwrap_or("") {
         "prefs" => {
-            let mut info = app.perf.gpu_info_lines();
-            info.extend(gpu_memory_lines(app));
-            f.insert("__gpuInfo".into(), json!(info));
+            f.insert("__gpuInfo".into(), json!(app.perf.gpu_info_lines()));
             let system = system_theme(app, ui.ctx());
             prefs_body(ui, f, system);
         }
@@ -1075,34 +1029,12 @@ pub fn body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Valu
     }
 }
 
-/// Performance › Graphics: the compositor's GPU memory budget and whether the active document's
-/// layers fit it (the GPU Memory preference sets it).
-fn gpu_memory_lines(app: &PhotocraftApp) -> Vec<String> {
-    let mut v = Vec::new();
-    if app.perf.gpu_budget_mb > 0 {
-        let budget = crate::chrome_ui::fmt_bytes(app.perf.gpu_budget_mb.saturating_mul(1 << 20));
-        v.push(crate::i18n::fmt(tl!("GPU memory budget: {budget}"), &[("budget", &budget)]));
-    }
-    let doc = app.session.active().map(|st| st.doc.id.0);
-    if let Some(fit) = app.perf.gpu_layer_fit.filter(|f| Some(f.doc) == doc) {
-        let args = [("needed", crate::chrome_ui::fmt_bytes(fit.needed)), ("budget", crate::chrome_ui::fmt_bytes(fit.budget))];
-        let args: Vec<(&str, &str)> = args.iter().map(|(k, v)| (*k, v.as_str())).collect();
-        v.push(if fit.fits() {
-            crate::i18n::fmt(tl!("This document's layers: {needed} of {budget} for layers"), &args)
-        } else {
-            crate::i18n::fmt(tl!("This document's layers need {needed} but may hold {budget}: whole-document redraws use the CPU"), &args)
-        });
-    }
-    v
-}
-
 fn humanize(key: &str) -> String {
     match key {
         "blockFingerInputConfigured" => return "Block finger input".into(),
         "stylusDoubleTap" => return "Double-tap pen body".into(),
         "stylusLongPress" => return "Long-press pen body".into(),
         "appearanceMode" => return "Appearance Mode".into(),
-        "exrAcesCg" => return "Open color-less EXR as ACEScg".into(),
         "darkTheme" => return "Dark Theme".into(),
         "lightTheme" => return "Light Theme".into(),
         _ => {}
@@ -1120,22 +1052,6 @@ fn humanize(key: &str) -> String {
     }
     if key == "notificationDurationSeconds" {
         return "Notification Duration (seconds)".into();
-    }
-    // Tools: arrow-key nudges bundle into one History state (#2259).
-    if key == "bundleNudges" {
-        return "Bundle Arrow-Key Nudges".into();
-    }
-    if key == "nudgeBundlePauseMs" {
-        return "Nudge Bundle Pause (ms)".into();
-    }
-    // Performance: presentation without vsync (#1343); like the other graphics settings, it
-    // takes effect when the window next opens.
-    if key == "lowLatencyDrawing" {
-        return "Low-Latency Drawing (vsync off, applies at next launch)".into();
-    }
-    // Performance: the canvas compositor's GPU memory, 0 for the automatic budget (L3).
-    if key == "gpuMemoryMb" {
-        return "GPU Memory (MB, 0 = Automatic)".into();
     }
     let mut s = String::new();
     for (i, ch) in key.chars().enumerate() {
@@ -1395,11 +1311,6 @@ fn export_field_visible(obj: &Map<String, Value>, key: &str) -> bool {
     }
 }
 
-/// The pause that bundles arrow-key nudges means nothing with Bundle Arrow-Key Nudges off (#2259).
-fn tools_field_visible(obj: &Map<String, Value>, key: &str) -> bool {
-    key != "nudgeBundlePauseMs" || obj.get("bundleNudges").and_then(Value::as_bool) != Some(false)
-}
-
 /// One theme as a Color Theme swatch: its panel colour under a chrome strip with an accent dot,
 /// outlined when chosen. The name is the tooltip and the accessible label. A star badge on its
 /// corner adds the theme to (or removes it from) the favourites listed by the appearance
@@ -1584,10 +1495,7 @@ fn field_visible(section: &str, obj: &Map<String, Value>, k: &str, query: &str) 
         // View › Rulers (⌘R) sets it, as in Photoshop.
         || path == "unitsAndRulers.showRulers"
         || (section == "performance" && matches!(k, "useGpu" | "gpuBackend" | "renderingMode"))
-        // The browser presents frames itself: Low-Latency Drawing does nothing there.
-        || (cfg!(target_arch = "wasm32") && path == "performance.lowLatencyDrawing")
-        || (section == "export" && !export_field_visible(obj, k))
-        || (section == "tools" && !tools_field_visible(obj, k));
+        || (section == "export" && !export_field_visible(obj, k));
     (query.is_empty() || preference_matches(section, k, query))
         && !drawn_elsewhere
         && !prefs::is_hidden(&path)
@@ -1798,19 +1706,17 @@ fn shortcuts_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String
         toolbar_tab(ui, f);
         return;
     }
+    let mut filter = f.get("filter").and_then(Value::as_str).unwrap_or("").to_string();
+    ui.horizontal(|ui| {
+        ui.label(RichText::new(tl!("Search")).color(t.text_dim));
+        ui.add(egui::TextEdit::singleline(&mut filter).desired_width(260.0).hint_text(tl!("command or shortcut")));
+    });
+    f.insert("filter".into(), json!(filter));
     // A malformed map (set over automation) is left as it is, so OK rejects it instead of
     // saving the empty map drawn in its place.
     let parsed = f.get("overrides").map(|v| serde_json::from_value::<BTreeMap<String, String>>(v.clone()));
     let overrides_ok = parsed.as_ref().is_none_or(Result::is_ok);
     let mut overrides = parsed.and_then(Result::ok).unwrap_or_default();
-    // A command's further keys (#3665): id → keys, replacing its default alternates.
-    let parsed_alts = f.get("alternates").map(|v| serde_json::from_value::<BTreeMap<String, Vec<String>>>(v.clone()));
-    let alternates_ok = parsed_alts.as_ref().is_none_or(Result::is_ok);
-    let mut alt_overrides = parsed_alts.and_then(Result::ok).unwrap_or_default();
-    let mut capture_alt = f.get("captureAlt").and_then(Value::as_bool).unwrap_or(false);
-    // A key just assigned that another command holds: Photoshop's Accept and Go to Conflict /
-    // Undo Changes (an object: the key, the other command, and this one's keys before).
-    let mut conflict: Option<Value> = f.get("conflict").filter(|c| c.is_object()).cloned();
     let mut hidden: Vec<String> = f.get("hidden").and_then(|v| serde_json::from_value(v.clone()).ok()).unwrap_or_default();
     let mut colors: BTreeMap<String, String> = f.get("colors").and_then(|v| serde_json::from_value(v.clone()).ok()).unwrap_or_default();
     let mut selected = f.get("selected").and_then(Value::as_str).unwrap_or("").to_string();
@@ -1818,17 +1724,6 @@ fn shortcuts_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String
     let mut message = f.get("message").and_then(Value::as_str).unwrap_or("").to_string();
     let mut message_warning = f.get("messageWarning").and_then(Value::as_bool).unwrap_or(false);
     let items = shortcut_items(app);
-    // The Set row, then the search (the Menus tab searches too).
-    if tab == 0 {
-        set_row(app, ui, f, &mut overrides, &mut alt_overrides, &items, &mut message, &mut message_warning);
-        ui.add_space(4.0);
-    }
-    let mut filter = f.get("filter").and_then(Value::as_str).unwrap_or("").to_string();
-    ui.horizontal(|ui| {
-        ui.label(RichText::new(tl!("Search")).color(t.text_dim));
-        ui.add(egui::TextEdit::singleline(&mut filter).desired_width(260.0).hint_text(tl!("command or shortcut")));
-    });
-    f.insert("filter".into(), json!(filter));
     // Menu path and command label as shown in the menus, in the UI language.
     let shown = |id: &str, label: &str, path: &[String]| -> (Vec<String>, String) {
         let lang = crate::i18n::current();
@@ -1841,15 +1736,7 @@ fn shortcuts_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String
             None => def.clone(),
         }
     };
-    // A command's further keys as the dialog stands: its edited list, else its defaults.
-    let eff_alts = |alts: &BTreeMap<String, Vec<String>>, id: &str, main: Option<&str>| -> Vec<String> {
-        let mut p = prefs::Preferences::default();
-        if let Some(list) = alts.get(id) {
-            p.alternate_shortcuts.insert(id.to_string(), list.clone());
-        }
-        p.alternates(id, main)
-    };
-    // Key capture for the selected command: its main key, or (Add Shortcut) one more key.
+    // Key capture for the selected command.
     if capture && tab == 0 && !selected.is_empty() {
         let pressed = ui.input(|i| {
             i.events.iter().find_map(|e| match e {
@@ -1863,64 +1750,21 @@ fn shortcuts_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String
             });
             if key == egui::Key::Escape {
                 capture = false;
-                conflict = None;
             } else if matches!(key, egui::Key::Backspace | egui::Key::Delete) && m.is_none() {
-                if capture_alt {
-                    alt_overrides.insert(selected.clone(), Vec::new());
-                } else {
-                    overrides.insert(selected.clone(), String::new());
-                }
+                overrides.insert(selected.clone(), String::new());
                 capture = false;
                 message = tl!("Shortcut removed.").into();
                 message_warning = false;
-            } else if let Some(sc) = shortcut_text(key, m).filter(|sc| reserved_shortcut(sc)) {
-                message = crate::i18n::fmt(tl!("{shortcut} is reserved by the system and can't be assigned."), &[("shortcut", &crate::shortcuts::pretty(&sc))]);
-                message_warning = true;
-                capture = false;
             } else if let Some(sc) = shortcut_text(key, m) {
-                let clash_ids: Vec<&str> = items
-                    .iter()
-                    .filter(|(id, _, _, def)| {
-                        let cur = eff(&overrides, id, def);
-                        *id != selected
-                            && (cur.as_deref().and_then(prefs::normalize_shortcut) == Some(sc.clone())
-                                || eff_alts(&alt_overrides, id, cur.as_deref()).contains(&sc))
-                    })
-                    .map(|(id, ..)| id.as_str())
-                    .collect();
                 let clash: Vec<String> = items
                     .iter()
-                    .filter(|(id, ..)| clash_ids.contains(&id.as_str()))
+                    .filter(|(id, _, _, def)| *id != selected && eff(&overrides, id, def).as_deref().and_then(prefs::normalize_shortcut) == Some(sc.clone()))
                     .map(|(id, label, path, _)| {
                         let (path, label) = shown(id, label, path);
                         format!("{} › {}", path.join(" › "), label.trim_end_matches('…'))
                     })
                     .collect();
-                // What Undo Changes puts back: the command's main key and further keys as they were.
-                if let Some(first) = clash_ids.first() {
-                    conflict = Some(json!({
-                        "shortcut": sc,
-                        "with": first,
-                        // Every command holding the key: Accept takes it from all of them.
-                        "holders": clash_ids,
-                        "command": selected,
-                        "main": overrides.get(&selected),
-                        "alternates": alt_overrides.get(&selected),
-                    }));
-                } else {
-                    conflict = None;
-                }
-                if capture_alt {
-                    let def = items.iter().find(|i| i.0 == selected).and_then(|i| i.3.clone());
-                    let cur = eff(&overrides, &selected, &def);
-                    let mut keys = eff_alts(&alt_overrides, &selected, cur.as_deref());
-                    if cur.as_deref().and_then(prefs::normalize_shortcut) != Some(sc.clone()) && !keys.contains(&sc) && keys.len() < prefs::MAX_ALTERNATES {
-                        keys.push(sc.clone());
-                    }
-                    alt_overrides.insert(selected.clone(), keys);
-                } else {
-                    overrides.insert(selected.clone(), sc.clone());
-                }
+                overrides.insert(selected.clone(), sc.clone());
                 message_warning = !clash.is_empty();
                 message = if clash.is_empty() {
                     let template = "{shortcut} assigned.";
@@ -1942,16 +1786,13 @@ fn shortcuts_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String
                     continue;
                 }
                 let cur = eff(&overrides, id, def);
-                let alts = eff_alts(&alt_overrides, id, cur.as_deref());
                 let (shown_path, shown_label) = shown(id, label, path);
                 // Match what is shown and the English name (commands are documented in English).
-                let hay =
-                    format!("{} {} {} {} {} {}", shown_path.join(" "), shown_label, path.join(" "), label, cur.clone().unwrap_or_default(), alts.join(" "))
-                        .to_lowercase();
+                let hay = format!("{} {} {} {} {}", shown_path.join(" "), shown_label, path.join(" "), label, cur.clone().unwrap_or_default()).to_lowercase();
                 if !needle.is_empty() && !hay.contains(&needle) && !id.to_ascii_lowercase().contains(&needle) {
                     continue;
                 }
-                if tab == 0 && path.is_empty() && def.is_none() && cur.is_none() && alts.is_empty() {
+                if tab == 0 && path.is_empty() && def.is_none() && cur.is_none() {
                     continue;
                 }
                 let top = shown_path.first().cloned().unwrap_or_else(|| tl!("Other").into());
@@ -1971,46 +1812,21 @@ fn shortcuts_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String
                     selected = id.clone();
                 }
                 if tab == 0 {
-                    let text = if sel && capture && !capture_alt {
-                        tl!("Press keys…").to_string()
-                    } else {
-                        cur.as_deref().map(crate::shortcuts::pretty).unwrap_or_default()
-                    };
-                    let changed = overrides.contains_key(id) || alt_overrides.contains_key(id);
+                    let text = if sel && capture { tl!("Press keys…").to_string() } else { cur.as_deref().map(crate::shortcuts::pretty).unwrap_or_default() };
+                    let changed = overrides.contains_key(id);
                     let r = ui.add(
                         egui::Button::new(RichText::new(tl!(&text)).size(12.0).color(if changed { t.accent_text } else { t.text })).min_size(vec2(120.0, 18.0)),
                     );
                     if r.clicked() {
                         selected = id.clone();
                         capture = true;
-                        capture_alt = false;
                         message.clear();
                         message_warning = false;
                     }
-                    // The further keys (F3 beside ⌘C), each removable on its own, as Photoshop
-                    // lists them as rows of their own (#3665).
-                    ui.horizontal(|ui| {
-                        for k in &alts {
-                            let b = egui::Button::new(RichText::new(format!("{}  ×", crate::shortcuts::pretty(k))).size(11.0).color(t.text)).small();
-                            if ui.add(b).on_hover_text(tl!("Delete Shortcut")).clicked() {
-                                alt_overrides.insert(id.clone(), alts.iter().filter(|x| *x != k).cloned().collect());
-                                selected = id.clone();
-                                message = tl!("Shortcut removed.").into();
-                                message_warning = false;
-                            }
-                        }
-                        if sel && capture && capture_alt {
-                            ui.label(RichText::new(tl!("Press keys…")).size(11.0).color(t.accent_text));
-                        }
-                        if changed {
-                            ui.label(RichText::new(tl!("modified")).color(t.text_faint).size(10.5));
-                        }
-                    });
+                    ui.label(if changed { RichText::new(tl!("modified")).color(t.text_faint).size(10.5) } else { RichText::new("") });
                 } else {
-                    // Edit › Menus, Keyboard Shortcuts, Preferences, Save and Exit always stay (#5096).
-                    let hideable = photocraft_engine::prefs::MenuCustomization::hideable(id);
-                    let mut visible = !hideable || !hidden.contains(id);
-                    ui.add_enabled_ui(hideable, |ui| crate::widgets::checkbox(ui, &mut visible, tl!("Visible")));
+                    let mut visible = !hidden.contains(id);
+                    crate::widgets::checkbox(ui, &mut visible, tl!("Visible"));
                     if visible {
                         hidden.retain(|h| h != id);
                     } else if !hidden.contains(id) {
@@ -2034,15 +1850,8 @@ fn shortcuts_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String
     if tab == 0 {
         ui.horizontal(|ui| {
             let has_sel = !selected.is_empty();
-            if ui.add_enabled(has_sel, egui::Button::new(tl!("Add Shortcut"))).clicked() {
-                capture = true;
-                capture_alt = true;
-                message.clear();
-                message_warning = false;
-            }
             if ui.add_enabled(has_sel, egui::Button::new(tl!("Use Default"))).clicked() {
                 overrides.remove(&selected);
-                alt_overrides.remove(&selected);
                 message = tl!("Default restored.").into();
                 message_warning = false;
             }
@@ -2053,7 +1862,6 @@ fn shortcuts_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String
             }
             if ui.button(tl!("Reset All to Defaults")).clicked() {
                 overrides.clear();
-                alt_overrides.clear();
                 message = tl!("All shortcuts reset to PhotoCraft defaults.").into();
                 message_warning = false;
             }
@@ -2073,232 +1881,15 @@ fn shortcuts_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String
     if !message.is_empty() {
         ui.label(RichText::new(&message).color(if message_warning { t.warning } else { t.text_dim }));
     }
-    // The conflict describes the bindings as the capture left them: any later change (Use
-    // Default, Delete, ×, Reset All, another command or set) makes it stale, and it goes.
-    let state = conflict_state(&overrides, &alt_overrides, &selected, f.get("activeSet"));
-    if conflict.as_ref().and_then(|c| c.get("state")).is_some_and(|s| s.as_u64() != Some(state)) {
-        conflict = None;
-    }
-    if tab == 0
-        && let Some(c) = conflict.clone()
-    {
-        let (key, with, command) =
-            (c["shortcut"].as_str().unwrap_or_default(), c["with"].as_str().unwrap_or_default(), c["command"].as_str().unwrap_or_default());
-        ui.horizontal(|ui| {
-            if ui.button(tl!("Accept and Go to Conflict")).on_hover_text(tl!("Take the shortcut from the other command and select it")).clicked() {
-                let holders: Vec<String> = serde_json::from_value(c["holders"].clone()).unwrap_or_else(|_| vec![with.to_string()]);
-                for holder in &holders {
-                    let def = items.iter().find(|i| i.0 == *holder).and_then(|i| i.3.clone());
-                    let cur = eff(&overrides, holder, &def);
-                    if cur.as_deref().and_then(prefs::normalize_shortcut).as_deref() == Some(key) {
-                        overrides.insert(holder.clone(), String::new());
-                    }
-                    let keys = eff_alts(&alt_overrides, holder, eff(&overrides, holder, &def).as_deref());
-                    if keys.iter().any(|k| k == key) {
-                        alt_overrides.insert(holder.clone(), keys.into_iter().filter(|k| k != key).collect());
-                    }
-                }
-                selected = with.to_string();
-                filter.clear();
-                message = tl!("Choose a new shortcut for this command, or leave it without one.").into();
-                message_warning = false;
-                conflict = None;
-            }
-            if ui.button(tl!("Undo Changes")).on_hover_text(tl!("Put this command's shortcuts back as they were")).clicked() {
-                match c["main"].as_str() {
-                    Some(m) => overrides.insert(command.to_string(), m.to_string()),
-                    None => overrides.remove(command),
-                };
-                match serde_json::from_value::<Vec<String>>(c["alternates"].clone()) {
-                    Ok(list) => alt_overrides.insert(command.to_string(), list),
-                    Err(_) => alt_overrides.remove(command),
-                };
-                selected = command.to_string();
-                message = tl!("Changes undone.").into();
-                message_warning = false;
-                conflict = None;
-            }
-        });
-    }
     if overrides_ok {
         f.insert("overrides".into(), json!(overrides));
     }
-    if alternates_ok {
-        f.insert("alternates".into(), json!(alt_overrides));
-    }
-    f.insert("captureAlt".into(), json!(capture && capture_alt));
-    // A conflict just found is stamped with the bindings it describes.
-    if let Some(c) = conflict.as_mut().filter(|c| c.get("state").is_none()) {
-        c["state"] = json!(conflict_state(&overrides, &alt_overrides, &selected, f.get("activeSet")));
-    }
-    f.insert("conflict".into(), conflict.unwrap_or(Value::Null));
     f.insert("hidden".into(), json!(hidden));
     f.insert("colors".into(), json!(colors));
     f.insert("selected".into(), json!(selected));
     f.insert("capture".into(), json!(capture));
     f.insert("message".into(), json!(message));
     f.insert("messageWarning".into(), json!(message_warning));
-}
-
-/// A command's keys as the dialog stands, main key first: the edited main key (or its default)
-/// and its further keys.
-fn dialog_keys(overrides: &BTreeMap<String, String>, alternates: &BTreeMap<String, Vec<String>>, id: &str, default: Option<&str>) -> Vec<String> {
-    let main = match overrides.get(id) {
-        Some(s) if s.is_empty() => None,
-        Some(s) => Some(s.as_str()),
-        None => default,
-    };
-    let mut p = prefs::Preferences::default();
-    if let Some(list) = alternates.get(id) {
-        p.alternate_shortcuts.insert(id.to_string(), list.clone());
-    }
-    let mut keys: Vec<String> = main.and_then(prefs::normalize_shortcut).into_iter().collect();
-    keys.extend(p.alternates(id, main));
-    keys
-}
-
-/// Edit › Keyboard Shortcuts › Set, as in Photoshop: choose a saved set (its bindings replace
-/// the dialog's), save the bindings as a new set or over the one in use, delete it, export it as
-/// a `.kys` file or summarize it as an HTML page. Everything but Export and Summarize waits for
-/// OK, like the rest of the dialog.
-#[allow(clippy::too_many_arguments)]
-fn set_row(
-    app: &mut PhotocraftApp,
-    ui: &mut egui::Ui,
-    f: &mut Map<String, Value>,
-    overrides: &mut BTreeMap<String, String>,
-    alternates: &mut BTreeMap<String, Vec<String>>,
-    items: &[(String, String, Vec<String>, Option<String>)],
-    message: &mut String,
-    warning: &mut bool,
-) {
-    use photocraft_engine::shortcut_sets::{self, ShortcutSet};
-    let mut sets: BTreeMap<String, ShortcutSet> = f.get("sets").and_then(|v| serde_json::from_value(v.clone()).ok()).unwrap_or_default();
-    let mut active = f.get("activeSet").and_then(Value::as_str).unwrap_or("").to_string();
-    if !active.is_empty() && !sets.contains_key(&active) {
-        active.clear();
-    }
-    let now = ShortcutSet { shortcuts: overrides.clone(), alternate_shortcuts: alternates.clone() };
-    let modified = match sets.get(&active) {
-        Some(s) => *s != now,
-        None => now != ShortcutSet::default(),
-    };
-    let defaults = tl!("PhotoCraft Defaults").to_string();
-    let shown = |name: &str| -> String {
-        let base = if name.is_empty() { defaults.clone() } else { name.to_string() };
-        if name == active && modified { crate::i18n::fmt(tl!("{set} (modified)"), &[("set", &base)]) } else { base }
-    };
-    let names: Vec<(String, String)> = std::iter::once(String::new()).chain(sets.keys().cloned()).map(|n| (n.clone(), shown(&n))).collect();
-    let mut new_name: Option<String> = f.get("newSetName").and_then(Value::as_str).map(str::to_string);
-    let set_label = if active.is_empty() { defaults.clone() } else { active.clone() };
-    let mut export = false;
-    let mut summarize = false;
-    ui.horizontal(|ui| {
-        ui.label(tl!("Set:"));
-        let mut chosen = active.clone();
-        let pairs: Vec<(String, &str)> = names.iter().map(|(n, l)| (n.clone(), l.as_str())).collect();
-        if crate::widgets::dropdown(ui, "shortcut-set", &mut chosen, &pairs, 220.0) && chosen != active {
-            let set = sets.get(&chosen).cloned().unwrap_or_default();
-            *overrides = set.shortcuts;
-            *alternates = set.alternate_shortcuts;
-            active = chosen;
-            message.clear();
-        }
-        if ui.button(tl!("New Set…")).on_hover_text(tl!("Save these shortcuts as a new set")).clicked() {
-            new_name = Some(String::new());
-        }
-        if ui.add_enabled(!active.is_empty() && modified, egui::Button::new(tl!("Save"))).on_hover_text(tl!("Save the changes to this set")).clicked() {
-            sets.insert(active.clone(), now.clone());
-            *message = tl!("Set saved.").into();
-            *warning = false;
-        }
-        if ui.add_enabled(!active.is_empty(), egui::Button::new(tl!("Delete"))).on_hover_text(tl!("Delete this set")).clicked() {
-            sets.remove(&active);
-            active.clear();
-            *message = tl!("Set deleted.").into();
-            *warning = false;
-        }
-        export = ui.button(tl!("Export…")).on_hover_text(tl!("Save these shortcuts as a .kys file")).clicked();
-        summarize = ui.button(tl!("Summarize…")).on_hover_text(tl!("Save a list of these shortcuts as a web page")).clicked();
-    });
-    if let Some(name) = new_name.as_mut() {
-        let mut create = false;
-        let mut cancel = false;
-        ui.horizontal(|ui| {
-            ui.label(tl!("Name:"));
-            let r = ui.add(egui::TextEdit::singleline(name).desired_width(220.0).hint_text(tl!("set name")));
-            create = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-            create |= ui.button(tl!("Create")).clicked();
-            cancel = ui.button(tl!("Cancel")).clicked();
-        });
-        if create {
-            match shortcut_sets::set_name(name) {
-                Ok(n) if !sets.contains_key(&n) && sets.len() >= shortcut_sets::MAX_SETS => {
-                    *message = tl!("There are too many sets: delete one first.").into();
-                    *warning = true;
-                }
-                Ok(n) => {
-                    sets.insert(n.clone(), now.clone());
-                    active = n;
-                    new_name = None;
-                    *message = tl!("Set saved.").into();
-                    *warning = false;
-                }
-                Err(e) => {
-                    *message = e;
-                    *warning = true;
-                }
-            }
-        } else if cancel {
-            new_name = None;
-        }
-    }
-    if export || summarize {
-        let result = if export {
-            let entries: Vec<photocraft_engine::kys::Entry> = items
-                .iter()
-                .map(|(id, label, _, def)| photocraft_engine::kys::Entry {
-                    id: id.clone(),
-                    label: label.clone(),
-                    tool: id.starts_with("tools.select."),
-                    keys: dialog_keys(overrides, alternates, id, def.as_deref()),
-                })
-                .collect();
-            let text = photocraft_engine::kys::write(&set_label, &entries);
-            save_text(app, &format!("{set_label}.kys"), text)
-        } else {
-            let mut sections: Vec<shortcut_sets::Section> = Vec::new();
-            for (id, label, path, def) in items {
-                let section = path.first().cloned().unwrap_or_else(|| tl!("Other").to_string());
-                let name = path.iter().skip(1).chain(std::iter::once(label)).cloned().collect::<Vec<_>>().join(" › ");
-                let row = (name, dialog_keys(overrides, alternates, id, def.as_deref()));
-                match sections.iter_mut().find(|(s, _)| *s == section) {
-                    Some((_, rows)) => rows.push(row),
-                    None => sections.push((section, vec![row])),
-                }
-            }
-            let html = shortcut_sets::summarize(&set_label, &sections, cfg!(target_os = "macos"));
-            save_text(app, &format!("{set_label}.html"), html)
-        };
-        if let Err(e) = result {
-            *message = e;
-            *warning = true;
-        }
-    }
-    f.insert("sets".into(), json!(sets));
-    f.insert("activeSet".into(), json!(active));
-    f.insert("newSetName".into(), new_name.map_or(Value::Null, Value::String));
-}
-
-/// Save `text` through the save dialog under the suggested file name.
-fn save_text(app: &mut PhotocraftApp, suggested: &str, text: String) -> Result<Value, String> {
-    // A set name can hold characters a file name can't.
-    let name: String = suggested.chars().map(|c| if matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') { '_' } else { c }).collect();
-    app.pick_save(&name, move |app, path| {
-        let write = app.services.write.as_mut().ok_or("no writer configured")?;
-        write(&path, text.as_bytes())?;
-        Ok(json!({"path": path}))
-    })
 }
 
 fn toolbar_tab(ui: &mut egui::Ui, f: &mut Map<String, Value>) {
@@ -2399,28 +1990,19 @@ fn mismatch_body(ui: &mut egui::Ui, f: &mut Map<String, Value>) {
     ui.add_space(6.0);
     let mut action = f.get("action").and_then(Value::as_str).unwrap_or("preserve").to_string();
     let missing = f.get("missing").and_then(Value::as_bool).unwrap_or(false);
-    let name = |k: &str| f.get(k).and_then(Value::as_str).unwrap_or("?").to_string();
-    let opts: Vec<(&str, String)> = if missing {
-        vec![("preserve", tl!("Leave as is (don't color manage)").into()), ("assignWorking", tl!("Assign working space").into())]
+    let opts: &[(&str, &str)] = if missing {
+        &[("preserve", tl!("Leave as is (don't color manage)")), ("assignWorking", tl!("Assign working space"))]
     } else {
-        vec![
-            ("preserve", crate::i18n::fmt(tl!("Use the embedded profile ({profile})"), &[("profile", &name("embedded"))])),
-            ("convert", crate::i18n::fmt(tl!("Convert to the working space ({profile})"), &[("profile", &name("working"))])),
-            ("discard", tl!("Discard the embedded profile (don't color manage)").into()),
+        &[
+            ("preserve", tl!("Use the embedded profile (instead of the working space)")),
+            ("convert", tl!("Convert document's colors to the working space")),
+            ("discard", tl!("Discard the embedded profile (don't color manage)")),
         ]
     };
     for (v, label) in opts {
-        ui.radio_value(&mut action, v.to_string(), label);
+        ui.radio_value(&mut action, v.to_string(), *label);
     }
     f.insert("action".into(), json!(action));
-    // Remembering sets the Color Settings policy and stops asking, so it needs a mode with a policy.
-    if !missing && f.get("policyKey").is_some_and(Value::is_string) {
-        ui.add_space(8.0);
-        let mut remember = f.get("remember").and_then(Value::as_bool).unwrap_or(false);
-        crate::widgets::checkbox(ui, &mut remember, tl!("Remember this choice for future images"))
-            .on_hover_text(tl!("Turn the prompt back on with Ask On Mismatch in Edit › Color Settings."));
-        f.insert("remember".into(), json!(remember));
-    }
 }
 
 // ------------------------------------------------------------------ confirm
@@ -2439,72 +2021,33 @@ pub fn confirm(app: &mut PhotocraftApp, f: &Map<String, Value>) -> Result<Value,
             // The map replaces every stored override, so a malformed one is an error, not "none".
             let mut ov: BTreeMap<String, String> =
                 serde_json::from_value(overrides).map_err(|e| format!("overrides must map command IDs to shortcut strings: {e}"))?;
-            let alternates = f.get("alternates").cloned().unwrap_or(json!({}));
-            let mut alt: BTreeMap<String, Vec<String>> =
-                serde_json::from_value(alternates).map_err(|e| format!("alternates must map command IDs to lists of shortcuts: {e}"))?;
             let items = shortcut_items(app);
             // Newly assigned shortcuts are checked first and take theirs from any holder, custom
-            // overrides included; unchanged overrides only take theirs from defaults. A
-            // command's further keys (#3665) take and lose keys the same way.
+            // overrides included; unchanged overrides only take theirs from defaults.
             let before = &app.session.prefs().shortcuts;
-            let before_alt = &app.session.prefs().alternate_shortcuts;
-            let mut todo: Vec<(String, String, bool, bool)> =
-                ov.iter().filter(|(_, s)| !s.is_empty()).map(|(k, s)| (k.clone(), s.clone(), before.get(k) != Some(s), false)).collect();
-            for (k, keys) in &alt {
-                let new = before_alt.get(k) != Some(keys);
-                todo.extend(keys.iter().map(|s| (k.clone(), s.clone(), new, true)));
-            }
-            todo.sort_by_key(|(_, _, new, _)| !new);
-            let main_of = |ov: &BTreeMap<String, String>, id: &str, def: Option<&str>| -> Option<String> {
-                match ov.get(id) {
-                    Some(s) if s.is_empty() => None,
-                    Some(s) => Some(s.clone()),
-                    None => def.map(str::to_string),
+            let mut todo: Vec<(String, String, bool)> =
+                ov.iter().filter(|(_, s)| !s.is_empty()).map(|(k, s)| (k.clone(), s.clone(), before.get(k) != Some(s))).collect();
+            todo.sort_by_key(|(_, _, new)| !new);
+            for (id, sc, new) in todo {
+                if ov.get(&id).is_some_and(String::is_empty) {
+                    continue; // taken by a newer assignment
                 }
-            };
-            for (id, sc, new, is_alt) in todo {
                 let norm = prefs::normalize_shortcut(&sc);
-                let Some(norm) = norm else { continue };
-                // Taken by a newer assignment?
-                if (!is_alt && ov.get(&id).is_some_and(String::is_empty)) || (is_alt && alt.get(&id).is_some_and(|k| !k.contains(&norm))) {
-                    continue;
-                }
                 for (other, _, _, def) in &items {
-                    if *other == id {
-                        continue;
-                    }
                     let held = match ov.get(other) {
                         Some(s) if new => Some(s.as_str()),
                         Some(_) => None,
                         None => def.as_deref(),
                     };
-                    if held.and_then(prefs::normalize_shortcut).as_deref() == Some(norm.as_str()) {
+                    if *other != id && held.and_then(prefs::normalize_shortcut) == norm {
                         ov.insert(other.clone(), String::new());
-                    }
-                    // Its further keys: the edited list when this assignment is new, else only
-                    // the defaults.
-                    if alt.contains_key(other) && !new {
-                        continue;
-                    }
-                    let mut p = prefs::Preferences::default();
-                    if let Some(list) = alt.get(other) {
-                        p.alternate_shortcuts.insert(other.clone(), list.clone());
-                    }
-                    let keys = p.alternates(other, main_of(&ov, other, def.as_deref()).as_deref());
-                    if keys.contains(&norm) {
-                        alt.insert(other.clone(), keys.into_iter().filter(|k| *k != norm).collect());
                     }
                 }
             }
             let hidden = f.get("hidden").cloned().unwrap_or(json!([]));
             let colors = f.get("colors").cloned().unwrap_or(json!({}));
             let toolbar = f.get("toolbarHidden").cloned().unwrap_or(json!([]));
-            let sets = f.get("sets").cloned().unwrap_or(json!({}));
-            let active = f.get("activeSet").cloned().unwrap_or(json!(""));
-            app.run(
-                "edit.keyboardShortcuts",
-                json!({"reset": true, "set": ov, "alternates": alt, "allowUnknown": true, "removeConflicts": false, "sets": sets, "activeSet": active}),
-            )?;
+            app.run("edit.keyboardShortcuts", json!({"reset": true, "set": ov, "allowUnknown": true, "removeConflicts": false}))?;
             app.run("prefs.set", json!({"values": {"menus": {"hidden": hidden, "colors": colors}, "toolbar": {"hidden": toolbar}}}))
         }
         "presets" => Ok(Value::Null),
@@ -2530,9 +2073,6 @@ pub fn confirm(app: &mut PhotocraftApp, f: &Map<String, Value>) -> Result<Value,
         // The file it asks about opens with this answer (`open_prompt`).
         "mismatch" => {
             let action = f.get("action").and_then(Value::as_str).unwrap_or("preserve");
-            if f.get("remember").and_then(Value::as_bool) == Some(true) {
-                return crate::open_prompt::answer_remembering(app, action);
-            }
             crate::open_prompt::answer(app, Some(action))
         }
         _ => Err("unknown dialog".into()),
@@ -2547,9 +2087,6 @@ mod recovery_tests;
 #[cfg(test)]
 #[path = "shortcut_capture_tests.rs"]
 mod shortcut_capture_tests;
-#[cfg(test)]
-#[path = "shortcut_set_tests.rs"]
-mod shortcut_set_tests;
 
 #[cfg(test)]
 mod tests {
@@ -2600,21 +2137,6 @@ mod tests {
         assert!(export_field_visible(&obj, "webpQuality"));
         assert_eq!(humanize("webpLossless"), "Lossless");
         assert_eq!(humanize("webpQuality"), "Quality");
-    }
-
-    #[test]
-    fn the_nudge_pause_is_hidden_while_nudges_are_not_bundled() {
-        let mut tools = Map::new();
-        tools.insert("bundleNudges".into(), json!(true));
-        assert!(tools_field_visible(&tools, "nudgeBundlePauseMs"));
-        assert!(tools_field_visible(&tools, "bundleNudges"));
-        tools.insert("bundleNudges".into(), json!(false));
-        assert!(!tools_field_visible(&tools, "nudgeBundlePauseMs"));
-        assert!(tools_field_visible(&tools, "bundleNudges") && tools_field_visible(&tools, "showTooltips"));
-        // A section without the flag (an older preferences object) shows the field.
-        assert!(tools_field_visible(&Map::new(), "nudgeBundlePauseMs"));
-        assert_eq!(humanize("bundleNudges"), "Bundle Arrow-Key Nudges");
-        assert_eq!(humanize("nudgeBundlePauseMs"), "Nudge Bundle Pause (ms)");
     }
 
     #[test]
@@ -2718,65 +2240,6 @@ mod tests {
             assert_eq!(app.session.prefs().interface.dark_theme, DarkTheme::Studio);
             assert_eq!(app.session.prefs().interface.light_theme, LightTheme::Classic);
         }
-    }
-
-    #[test]
-    fn darken_and_lighten_interface_step_through_photoshops_brightnesses_and_stop_at_the_ends() {
-        let ctx = egui::Context::default();
-        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
-        sync_appearance(&mut app, &ctx);
-        assert_eq!(app.ui.theme, ThemeKind::ProMedium, "Photoshop's default brightness");
-        let press = |app: &mut PhotocraftApp, id: &str| crate::menus::invoke(app, &ctx, id, json!({})).unwrap();
-        for expected in [ThemeKind::ProLightGray, ThemeKind::ProLight, ThemeKind::ProLight] {
-            press(&mut app, "view.lightenInterface");
-            assert_eq!(app.ui.theme, expected);
-        }
-        // Saved like a choice in Preferences › Interface: the light slot and the Light appearance.
-        let i = &app.session.prefs().interface;
-        assert_eq!((i.appearance_mode, i.light_theme), (AppearanceMode::Light, LightTheme::ProLight));
-        for expected in [ThemeKind::ProLightGray, ThemeKind::ProMedium, ThemeKind::Pro, ThemeKind::Pro] {
-            press(&mut app, "view.darkenInterface");
-            assert_eq!(app.ui.theme, expected);
-        }
-        let i = &app.session.prefs().interface;
-        assert_eq!((i.appearance_mode, i.dark_theme), (AppearanceMode::Dark, DarkTheme::Pro));
-        // Another theme steps from the nearest brightness.
-        for (theme, id, expected) in [
-            ("studio", "view.darkenInterface", ThemeKind::Pro),
-            ("studio", "view.lightenInterface", ThemeKind::ProLightGray),
-            ("classic", "view.darkenInterface", ThemeKind::ProMedium),
-            ("classic", "view.lightenInterface", ThemeKind::ProLight),
-        ] {
-            app.run("prefs.set", json!({"path": "interface.theme", "value": theme})).unwrap();
-            sync_appearance(&mut app, &ctx);
-            press(&mut app, id);
-            assert_eq!(app.ui.theme, expected, "{theme} {id}");
-        }
-    }
-
-    #[test]
-    fn ctrl_shift_f1_and_f2_darken_and_lighten_the_interface() {
-        for (id, shortcut) in [("view.darkenInterface", "Cmd+Shift+F1"), ("view.lightenInterface", "Cmd+Shift+F2")] {
-            assert_eq!(crate::shortcuts::default_shortcut(id).as_deref(), Some(shortcut), "{id}");
-        }
-        let ctx = egui::Context::default();
-        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
-        sync_appearance(&mut app, &ctx);
-        let press = |app: &mut PhotocraftApp, key| {
-            let modifiers = egui::Modifiers::COMMAND | egui::Modifiers::SHIFT;
-            let raw = egui::RawInput {
-                events: vec![egui::Event::ModifiersChanged(modifiers), egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers }],
-                ..Default::default()
-            };
-            ctx.begin_pass(raw);
-            crate::shortcuts::handle(app, &ctx);
-            ctx.end_pass().textures_delta.clear();
-        };
-        press(&mut app, egui::Key::F1);
-        assert_eq!(app.ui.theme, ThemeKind::Pro);
-        press(&mut app, egui::Key::F2);
-        press(&mut app, egui::Key::F2);
-        assert_eq!(app.ui.theme, ThemeKind::ProLightGray);
     }
 
     fn appearance_frame(app: &mut PhotocraftApp, ctx: &egui::Context, appearance: Option<egui::Theme>) {
@@ -3343,110 +2806,6 @@ mod tests {
     }
 
     #[test]
-    fn selected_tool_survives_a_restart_without_option_changes() {
-        use crate::state::Tool;
-        let (mut app, store) = app_with_store();
-        let ctx = egui::Context::default();
-        tick(&mut app, &ctx);
-        assert_eq!(app.ui.tool, Tool::Brush);
-        // Every tool, including flyout-only tools, can be restored. Return to Brush last to
-        // prove selecting the default overwrites a previously remembered nondefault tool.
-        for tool in Tool::ALL.into_iter().chain([Tool::Brush]) {
-            app.ui.tool = tool;
-            crate::tool_memory::persist(&mut app, &ctx);
-            tick(&mut app, &ctx);
-            assert_eq!(stored(&store)["selectedTool"], serde_json::to_value(tool).unwrap());
-            let (app2, _) = app_with_saved(store.lock().unwrap().clone());
-            assert_eq!(app2.ui.tool, tool, "restored before the first frame");
-            assert_eq!(app2.ui.group_tool(tool.key()), Some(tool));
-            assert_eq!(app2.ui.tool_options, crate::state::ToolOptions::default());
-        }
-    }
-
-    #[test]
-    fn selected_tool_is_flushed_on_exit_without_another_frame() {
-        let (mut app, store) = app_with_store();
-        app.ui.tool = crate::state::Tool::Move;
-        crate::tool_memory::save_on_exit(&mut app).unwrap();
-        let (app2, _) = app_with_saved(store.lock().unwrap().clone());
-        assert_eq!(app2.ui.tool, crate::state::Tool::Move);
-    }
-
-    #[test]
-    fn selected_tool_explicit_eraser_survives_exit_during_temporary_switches() {
-        use crate::state::Tool;
-        for spring in [false, true] {
-            for menu in [false, true] {
-                let (mut app, store) = app_with_store();
-                app.stylus.tool_before_eraser = Some(Tool::Zoom);
-                app.ui.tool = Tool::Eraser;
-                if spring {
-                    crate::spring_tools::pressed(&mut app, 'E', Tool::Zoom, true, 0.0);
-                }
-                if menu {
-                    crate::menus::invoke(&mut app, &egui::Context::default(), "tools.select.eraser", json!({})).unwrap();
-                } else {
-                    crate::tool_memory::select(&mut app, Tool::Eraser);
-                }
-                assert_eq!(app.stylus.tool_before_eraser, None);
-                assert!(app.ui.spring.is_none());
-                crate::tool_memory::save_on_exit(&mut app).unwrap();
-                let (restored, _) = app_with_saved(store.lock().unwrap().clone());
-                assert_eq!(restored.ui.tool, Tool::Eraser);
-            }
-        }
-    }
-
-    #[test]
-    fn invalid_selected_tool_preserves_other_preferences() {
-        for bad in [json!(null), json!("FutureTool"), json!(42), json!({}), json!([])] {
-            let (app, _) = app_with_saved(Some(
-                json!({
-                    "selectedTool": bad, "toolOptions": {"feather": 12.0}
-                })
-                .to_string(),
-            ));
-            assert_eq!(app.ui.tool, crate::state::Tool::Brush, "{bad}");
-            assert_eq!(app.ui.tool_options.feather, 12.0);
-        }
-    }
-
-    #[test]
-    fn selected_tool_excludes_temporary_switches() {
-        use crate::state::Tool;
-        let (mut app, store) = app_with_store();
-        let ctx = egui::Context::default();
-        app.ui.tool = Tool::Move;
-        crate::tool_memory::persist(&mut app, &ctx);
-        tick(&mut app, &ctx);
-        app.tool_override = Some(Tool::Hand);
-        crate::tool_memory::persist(&mut app, &ctx);
-        tick(&mut app, &ctx);
-        assert_eq!(stored(&store)["selectedTool"], json!("Move"));
-        app.tool_override = None;
-        app.ui.tool = Tool::Zoom;
-        crate::spring_tools::pressed(&mut app, 'Z', Tool::Move, true, 0.0);
-        crate::tool_memory::persist(&mut app, &ctx);
-        tick(&mut app, &ctx);
-        assert_eq!(stored(&store)["selectedTool"], json!("Move"));
-        // A quick tap commits the choice after spring_tools clears the pending switch.
-        crate::spring_tools::tick(&mut app, &ctx);
-        crate::tool_memory::persist(&mut app, &ctx);
-        tick(&mut app, &ctx);
-        assert_eq!(stored(&store)["selectedTool"], json!("Zoom"));
-        app.stylus.tool_before_eraser = Some(Tool::Zoom);
-        app.ui.tool = Tool::Eraser;
-        crate::tool_memory::persist(&mut app, &ctx);
-        tick(&mut app, &ctx);
-        assert_eq!(stored(&store)["selectedTool"], json!("Zoom"));
-        // An explicit selection during a temporary switch takes precedence.
-        app.ui.tool = Tool::PolygonLasso;
-        crate::tool_memory::persist(&mut app, &ctx);
-        tick(&mut app, &ctx);
-        assert_eq!(stored(&store)["selectedTool"], json!("PolygonLasso"));
-    }
-
-    #[test]
     fn tool_options_survive_a_restart() {
         let (mut app, store) = app_with_store();
         let ctx = egui::Context::default();
@@ -3974,52 +3333,6 @@ mod tests {
         assert_eq!(effective_shortcut(&app, "file.open", Some("Cmd+O")), None, "File › Open stays cleared");
     }
 
-    /// #3665: the dialog keeps a command's further keys: they move like main keys, an override
-    /// of the main key leaves them, and menus show only the main key.
-    #[test]
-    fn shortcut_dialog_moves_and_keeps_alternate_keys() {
-        let (mut app, _) = app_with_store();
-        let ctx = egui::Context::default();
-        let open = |app: &mut PhotocraftApp| crate::menus::invoke(app, &ctx, "edit.keyboardShortcuts", json!({})).unwrap()["dialog"].as_u64().unwrap();
-        assert_eq!(crate::shortcuts::effective_alternates(&app, "edit.copy"), ["F3"]);
-        assert_eq!(crate::shortcuts::effective_alternates(&app, "view.zoomIn"), ["Cmd++"]);
-        // F2 (Cut's alternate) given to Rename Layer is taken from Cut, which keeps ⌘X.
-        let id = open(&mut app);
-        app.ui.dialog_mut(id).unwrap().fields.insert("overrides".into(), json!({"layer.renameLayer": "F2"}));
-        crate::dialogs::confirm(&mut app, id).unwrap();
-        assert_eq!(effective_shortcut(&app, "layer.renameLayer", None).as_deref(), Some("F2"));
-        assert!(crate::shortcuts::effective_alternates(&app, "edit.cut").is_empty());
-        assert_eq!(effective_shortcut(&app, "edit.cut", Some("Cmd+X")).as_deref(), Some("Cmd+X"));
-        // Copy's main key moved to ⌘K keeps F3; the menu shows ⌘K.
-        let id = open(&mut app);
-        let mut ov = app.session.prefs().shortcuts.clone();
-        ov.insert("edit.copy".into(), "Cmd+K".into());
-        app.ui.dialog_mut(id).unwrap().fields.insert("overrides".into(), json!(ov));
-        crate::dialogs::confirm(&mut app, id).unwrap();
-        assert_eq!(crate::shortcuts::effective_alternates(&app, "edit.copy"), ["F3"]);
-        assert!(crate::menus::menu_items(&app).iter().any(|i| i.id == "edit.copy" && i.shortcut.as_deref() == Some("Cmd+K")));
-        // An added alternate takes its key from the main key that held it.
-        let id = open(&mut app);
-        app.ui.dialog_mut(id).unwrap().fields.insert("alternates".into(), json!({"edit.paste": ["F4", "Cmd+K"]}));
-        crate::dialogs::confirm(&mut app, id).unwrap();
-        assert_eq!(crate::shortcuts::effective_alternates(&app, "edit.paste"), ["F4", "Cmd+K"]);
-        assert_eq!(effective_shortcut(&app, "edit.copy", Some("Cmd+C")), None, "taken from Copy");
-        // Use Default for everything restores the defaults; a malformed list is an error.
-        let id = open(&mut app);
-        app.ui.dialog_mut(id).unwrap().fields.insert("alternates".into(), json!({"edit.paste": "F4"}));
-        assert!(crate::dialogs::confirm(&mut app, id).is_err());
-        let id = open(&mut app);
-        app.ui.dialog_mut(id).unwrap().fields.insert("alternates".into(), json!({"edit.paste": ["Cmd+Shift"]}));
-        assert!(crate::dialogs::confirm(&mut app, id).is_err());
-        assert_eq!(crate::shortcuts::effective_alternates(&app, "edit.paste"), ["F4", "Cmd+K"], "nothing changed");
-        let id = open(&mut app);
-        app.ui.dialog_mut(id).unwrap().fields.insert("alternates".into(), json!({}));
-        app.ui.dialog_mut(id).unwrap().fields.insert("overrides".into(), json!({}));
-        crate::dialogs::confirm(&mut app, id).unwrap();
-        assert!(app.session.prefs().alternate_shortcuts.is_empty() && app.session.prefs().shortcuts.is_empty());
-        assert_eq!(crate::shortcuts::effective_alternates(&app, "edit.cut"), ["F2"]);
-    }
-
     #[test]
     fn shortcut_dialog_rejects_malformed_overrides() {
         // #956: a non-map `overrides` was read as "no overrides" and wiped every custom shortcut.
@@ -4054,16 +3367,6 @@ mod tests {
         let (mut app, _) = app_with_store();
         app.run("edit.menus", json!({"hide": ["edit.fade"]})).unwrap();
         assert!(!crate::menus::menu_items(&app).iter().any(|i| i.id == "edit.fade"));
-    }
-
-    /// #5096: preferences that list Edit › Menus or File › Exit as hidden still show them.
-    #[test]
-    fn essential_menu_items_stay_visible() {
-        let (mut app, _) = app_with_store();
-        app.run("prefs.set", json!({"values": {"menus": {"hidden": ["edit.menus", "file.exit", "edit.fade"], "colors": {}}}})).unwrap();
-        let items = crate::menus::menu_items(&app);
-        assert!(items.iter().any(|i| i.id == "edit.menus") && items.iter().any(|i| i.id == "file.exit"));
-        assert!(!items.iter().any(|i| i.id == "edit.fade"));
     }
 
     #[test]

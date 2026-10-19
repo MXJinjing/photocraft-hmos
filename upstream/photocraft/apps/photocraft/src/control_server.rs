@@ -5,12 +5,11 @@ use std::io::{BufReader, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender, channel};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use photocraft_automation::budgets::write_reply;
 use photocraft_automation::security::{
-    AUTH_DEADLINE, AuthDeadlineStream, ConnectionLimiter, LineRead, MAX_CONNECTIONS, MAX_REQUEST_BYTES, authentication_reply, configure_stream,
-    read_bounded_line, repeat_auth_reply,
+    ConnectionLimiter, LineRead, MAX_CONNECTIONS, MAX_REQUEST_BYTES, authentication_reply, configure_stream, read_bounded_line, repeat_auth_reply,
 };
 use photocraft_ui_egui::ControlRequest;
 use photocraft_ui_egui::control::REPLY_DEADLINE;
@@ -48,17 +47,11 @@ pub fn start(port: u16, token: String, ctx: egui::Context) -> Receiver<ControlRe
 }
 
 fn serve(stream: TcpStream, token: &str, tx: Sender<ControlRequest>, ctx: egui::Context) {
-    serve_with_auth_deadline(stream, token, tx, ctx, AUTH_DEADLINE);
-}
-
-/// [`serve`] for a connection that must complete `auth` within `auth_deadline` of connecting,
-/// however much it sends meanwhile (#4965); after that only the idle timeout applies.
-fn serve_with_auth_deadline(stream: TcpStream, token: &str, tx: Sender<ControlRequest>, ctx: egui::Context, auth_deadline: Duration) {
     if configure_stream(&stream).is_err() {
         return;
     }
     let Ok(read) = stream.try_clone() else { return };
-    let mut reader = BufReader::new(AuthDeadlineStream::new(read, auth_deadline));
+    let mut reader = BufReader::new(read);
     let mut out = stream;
     let mut line = String::new();
     let mut authenticated = false;
@@ -81,9 +74,6 @@ fn serve_with_auth_deadline(stream: TcpStream, token: &str, tx: Sender<ControlRe
         if !authenticated {
             let (reply, ok) = authentication_reply(&line, token);
             authenticated = ok;
-            if ok && reader.get_mut().authenticated().is_err() {
-                break;
-            }
             if write_reply(&mut out, &reply).is_err() || out.flush().is_err() || !authenticated {
                 break;
             }
@@ -130,34 +120,7 @@ fn serve_with_auth_deadline(stream: TcpStream, token: &str, tx: Sender<ControlRe
 mod tests {
     use super::*;
     use std::io::BufRead;
-
-    /// #4965: a connection that keeps sending without authenticating is closed at the deadline
-    /// (releasing its connection permit), and nothing it sent is dispatched.
-    #[test]
-    fn an_unauthenticated_connection_is_closed_at_the_deadline_whatever_it_sends() {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let addr = listener.local_addr().unwrap();
-        let (tx, rx) = channel::<ControlRequest>();
-        let server = std::thread::spawn(move || {
-            let (stream, _) = listener.accept().unwrap();
-            let started = Instant::now();
-            serve_with_auth_deadline(stream, "unused", tx, egui::Context::default(), Duration::from_millis(300));
-            started.elapsed()
-        });
-        // Blank lines and partial frames, one byte every 20 ms: each read succeeds long before
-        // the idle timeout.
-        let mut stream = TcpStream::connect(addr).unwrap();
-        for i in 0..150 {
-            let byte: &[u8] = if i % 5 == 0 { b"\n" } else { b" " };
-            if stream.write_all(byte).is_err() {
-                break;
-            }
-            std::thread::sleep(Duration::from_millis(20));
-        }
-        let served = server.join().unwrap();
-        assert!(served < Duration::from_secs(3), "the trickle did not extend the deadline: {served:?}");
-        assert!(rx.try_recv().is_err(), "nothing was dispatched");
-    }
+    use std::time::Duration;
 
     #[test]
     fn oversized_reply_preserves_framing_id_and_the_next_control_request() {

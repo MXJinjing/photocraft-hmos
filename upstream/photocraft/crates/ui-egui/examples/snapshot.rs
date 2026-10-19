@@ -1,4 +1,4 @@
-//! Render the full PhotoCraft UI offscreen (no window, no focus stealing) and save a PNG.
+//! Render the full Photocraft UI offscreen (no window, no focus stealing) and save a PNG.
 //!
 //! ```sh
 //! cargo run --release -p photocraft-ui-egui --example snapshot -- \

@@ -105,10 +105,6 @@ fn older_dialog_above(ctx: &egui::Context, live: egui::LayerId, dialogs: &[Dialo
     ctx.memory(|m| m.layer_ids().skip_while(|l| *l != live).skip(1).any(|l| others.contains(&l)))
 }
 
-fn resizable_dialog(fields: &serde_json::Map<String, Value>) -> bool {
-    fields.contains_key("__web") || crate::prefs_ui::is_preferences(fields)
-}
-
 fn show_modal<T>(
     modal: egui::Modal,
     ctx: &egui::Context,
@@ -134,26 +130,6 @@ fn show_modal<T>(
             contents(ui)
         }
     })
-}
-
-/// Whether dialogs have a close box (×) in their title bar (#5496). Photoshop's modal dialogs have
-/// one on Windows, where clicking it is Cancel, and none on macOS; Linux and the web follow Windows.
-pub(crate) const CLOSE_BOX: bool = !cfg!(target_os = "macos");
-
-/// The side of the close box's square, in points.
-const CLOSE_BOX_SIZE: f32 = 20.0;
-
-/// The close box's square: flush with the title band's right end `right`, centred on the title
-/// row at height `centre_y`.
-fn close_box_rect(right: f32, centre_y: f32) -> egui::Rect {
-    egui::Rect::from_min_size(egui::pos2(right - CLOSE_BOX_SIZE, centre_y - CLOSE_BOX_SIZE / 2.0), egui::vec2(CLOSE_BOX_SIZE, CLOSE_BOX_SIZE))
-}
-
-/// Draws a title bar's close box in `rect`, the same × icon button the floating panels close with,
-/// and says whether it was clicked. Its own child `Ui`, so the title row's layout is unchanged.
-pub(crate) fn close_box(ui: &mut egui::Ui, rect: egui::Rect) -> bool {
-    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(egui::Layout::right_to_left(egui::Align::Center)));
-    crate::icons::button(&mut child, "x", CLOSE_BOX_SIZE, false, tl!("Close")).clicked()
 }
 
 pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
@@ -184,7 +160,6 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
         let place = place_id(&d);
         let start = pinned.or_else(|| ctx.data_mut(|m| m.get_persisted::<egui::Vec2>(place))).or_else(|| crate::blur_pins::first_place(&d.fields, ctx));
         let mut drag = egui::Vec2::ZERO;
-        let mut close_clicked = false;
         let mut sizing = false;
         let area = match start {
             Some(offset) => egui::Modal::default_area(id).anchor(egui::Align2::LEFT_TOP, offset),
@@ -208,16 +183,14 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
         // Photoshop doesn't dim the window behind dialogs: previews must be judged at true contrast.
         let web = fields.contains_key("__web");
         let web_popup_open = web && egui::Popup::is_any_open(ctx);
-        let modal = show_modal(modal, ctx, id, resizable_dialog(&fields), interactive, |ui| {
+        let modal = show_modal(modal, ctx, id, web, interactive, |ui| {
             sizing = ui.is_sizing_pass();
             let available = ui.available_size();
             // A dialog of a few short fields (`__compact`, Fit Image) is narrower (#4673): the title
             // rule and the button row fill the width they are given, so it needs its own maximum too.
             let compact = d.fields.contains_key("__compact");
-            // The curve editor caps its graph allocation at 300 points (#5113).
-            let curves = fields.get("__adjust").and_then(Value::as_str) == Some("curves");
             if !compact {
-                ui.set_min_width(if curves { 300.0 } else { 380.0 });
+                ui.set_min_width(380.0);
             }
             let wide = crate::prefs_ui::width(&d.fields, (ctx.content_rect().width() - 48.0).max(380.0));
             if let Some(w) = wide {
@@ -240,8 +213,6 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
                 600.0
             } else if compact {
                 260.0
-            } else if curves {
-                300.0
             } else {
                 440.0
             }));
@@ -265,15 +236,8 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
             let t = if crate::color_picker_ui::owns(&fields) { ui.add_sized(egui::vec2(ui.available_width(), 22.0), label).rect } else { ui.add(label).rect };
             // The whole title band drags (#1921): the full width plus a little of the popup's
             // padding around it and the gap above the hairline, but none of the controls below.
-            // The close box (#5496) sits at the band's right end and is left out of the drag area:
-            // egui would let a drag that starts on a button move the dialog.
-            let close_rect = CLOSE_BOX.then(|| close_box_rect(ui.max_rect().right(), t.center().y));
-            let bar_right = close_rect.map_or(ui.max_rect().right() + 7.0, |r| r.left());
-            let bar = egui::Rect::from_min_max(t.min - egui::vec2(7.0, 7.0), egui::pos2(bar_right, t.bottom() + 4.0));
+            let bar = egui::Rect::from_min_max(t.min - egui::vec2(7.0, 7.0), egui::pos2(ui.max_rect().right() + 7.0, t.bottom() + 4.0));
             drag = ui.interact(bar, id.with("title"), egui::Sense::drag()).drag_delta();
-            if let Some(r) = close_rect {
-                close_clicked = close_box(ui, r);
-            }
             ui.add_space(4.0);
             crate::widgets::hairline(ui);
             ui.add_space(8.0);
@@ -326,7 +290,6 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
                 DialogKind::Command if crate::channel_options_ui::owns_new_spot(&fields) => crate::channel_options_ui::new_spot_body(ui, &mut fields),
                 DialogKind::Command if crate::shape_dialog::owns(&fields) => crate::shape_dialog::body(app, ui, &mut fields),
                 DialogKind::Command if crate::delete_layer_prompt::owns(&fields) => crate::delete_layer_prompt::body(ui, &mut fields),
-                DialogKind::Command if crate::disk_change_prompt::owns(&fields) => crate::disk_change_prompt::body(ui, &fields),
                 DialogKind::Command if crate::actions::owns_insert_stop(&fields) => crate::actions::insert_stop_body(ui, &mut fields),
                 DialogKind::Command if crate::new_layer_ui::owns(&fields) => crate::new_layer_ui::body(ui, &mut fields),
                 DialogKind::Command if crate::mask_trash_prompt::owns(&fields) => crate::mask_trash_prompt::body(ui, &fields),
@@ -340,9 +303,6 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
                 DialogKind::Command if crate::color_picker_ui::owns(&fields) => {
                     outcome = crate::color_picker_ui::body(ui, &mut fields);
                     crate::color_picker_ui::take_add_swatch(app, &mut fields);
-                    if let Some(web) = fields.get("__webOnly").and_then(Value::as_bool) {
-                        app.ui.color_panel.web_only = web;
-                    }
                 }
                 DialogKind::Command if crate::color_range_ui::owns(&fields) => crate::color_range_ui::body(app, ui, &mut fields),
                 DialogKind::Command if crate::prefs_ui::owns(&fields) => crate::prefs_ui::body(app, ui, &mut fields),
@@ -410,8 +370,6 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
                             tl!("Create")
                         } else if crate::delete_layer_prompt::owns(&d.fields) {
                             tl!("Delete")
-                        } else if crate::disk_change_prompt::owns(&d.fields) {
-                            tl!("Replace")
                         } else if d.fields.contains_key("__export") {
                             tl!("Export")
                         } else {
@@ -497,13 +455,11 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
                 ctx.data_mut(|m| m.insert_persisted(place, offset));
             }
         }
-        // Esc and the title bar's close box cancel (topmost dialog, no popup open for Esc). A click
-        // outside does nothing: Photoshop keeps the dialog, and the pointer may be panning or
-        // zooming the canvas under it.
+        // Esc cancels (topmost dialog, no popup open). A click outside does nothing: Photoshop keeps
+        // the dialog, and the pointer may be panning or zooming the canvas under it.
         if interactive
             && outcome.is_none()
-            && (close_clicked
-                || modal.response.should_close()
+            && (modal.response.should_close()
                 || (modal.is_top_modal && !modal.any_popup_open && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))))
         {
             outcome = Some(false);
@@ -646,7 +602,6 @@ pub fn confirm(app: &mut PhotocraftApp, id: u64) -> Result<Value, String> {
         DialogKind::Command if crate::channel_options_ui::owns_new_spot(&d.fields) => crate::channel_options_ui::confirm_new_spot(app, &d.fields),
         DialogKind::Command if crate::shape_dialog::owns(&d.fields) => crate::shape_dialog::confirm(app, &d.fields),
         DialogKind::Command if crate::delete_layer_prompt::owns(&d.fields) => crate::delete_layer_prompt::confirm(app, &d.fields),
-        DialogKind::Command if crate::disk_change_prompt::owns(&d.fields) => crate::disk_change_prompt::confirm(app, &d.fields),
         DialogKind::Command if crate::actions::owns_insert_stop(&d.fields) => crate::actions::insert_stop_confirm(app, &d.fields),
         DialogKind::Command if crate::new_layer_ui::owns(&d.fields) => crate::new_layer_ui::confirm(app, &d.fields),
         DialogKind::Command if crate::mask_trash_prompt::owns(&d.fields) => crate::mask_trash_prompt::confirm(app, &d.fields),
@@ -796,83 +751,6 @@ mod tests {
         confirm(&mut app, id).unwrap();
         assert!(app.filter_preview.is_none());
         assert_eq!(crate::canvas::committed_filter_preview(&mut app, 0), None);
-    }
-
-    /// #5496: a pointer click on the title bar's close box does what Cancel does: the dialog
-    /// closes, the live preview goes and nothing reaches the document or the journal. On macOS
-    /// dialogs have no close box.
-    #[test]
-    fn the_title_bar_close_box_cancels_like_cancel() {
-        use egui_kittest::kittest::Queryable;
-        let close = |button: &str| {
-            let (mut app, _) = filter_dialog_with_preview(false);
-            let revision = app.session.active().unwrap().revision;
-            let journal = app.session.journal.len();
-            // The fonts are set up after the harness's first frame: the dialog appears after it.
-            let dialogs = std::mem::take(&mut app.ui.dialogs);
-            let mut h = egui_kittest::Harness::builder().with_size(egui::vec2(1280.0, 800.0)).build_ui_state(|ui, app| show(app, ui.ctx()), app);
-            PhotocraftApp::setup_context(&h.ctx, crate::theme::ThemeKind::ALL[0]);
-            h.state_mut().ui.dialogs = dialogs;
-            h.run_steps(4);
-            assert!(h.state().filter_preview.is_some(), "the preview is on screen");
-            if !CLOSE_BOX {
-                assert_eq!(h.query_all_by_label("Close").count(), 0, "no close box on macOS");
-            }
-            let target = h.query_by_label(button).map(|n| n.rect().center())?;
-            h.hover_at(target);
-            h.drag_at(target);
-            h.drop_at(target);
-            h.run_steps(3);
-            let app = h.state();
-            Some((
-                app.ui.dialogs.is_empty(),
-                app.filter_preview.is_none(),
-                app.session.active().unwrap().revision == revision,
-                app.session.journal.len() == journal,
-            ))
-        };
-        let cancel = close("Cancel");
-        assert_eq!(cancel, Some((true, true, true, true)), "Cancel closes, drops the preview and changes nothing");
-        if CLOSE_BOX {
-            assert_eq!(close("Close"), cancel, "the × is Cancel");
-        }
-    }
-
-    /// #5496: the close box sits at the title band's right end, and the band stays a drag handle
-    /// around it: a drag that starts on the × neither moves nor closes the dialog, and the band
-    /// just left of the × still moves it.
-    #[test]
-    fn the_close_box_and_the_title_drag_keep_apart() {
-        use egui_kittest::kittest::Queryable;
-        if !CLOSE_BOX {
-            return;
-        }
-        let mut h = dialog_harness(egui::vec2(1280.0, 800.0), "filter.blur.gaussianBlur");
-        let title = h.get_by_label("Gaussian Blur").rect();
-        let x = h.get_by_label("Close").rect();
-        let frame = rects(&h.ctx)[0];
-        assert!((x.center().y - title.center().y).abs() < 2.0 && x.left() > title.right(), "the × is on the title row: {x:?}, {title:?}");
-        assert!(frame.right() - x.right() < 16.0, "at its right end: {x:?} in {frame:?}");
-        let drag = |h: &mut egui_kittest::Harness<'static, PhotocraftApp>, from: egui::Pos2, to: egui::Pos2| {
-            h.hover_at(from);
-            h.drag_at(from);
-            h.run_steps(2);
-            for i in 1..=8 {
-                h.hover_at(from + (to - from) * (i as f32 / 8.0));
-                h.run_steps(1);
-            }
-            h.drop_at(to);
-            h.run_steps(3);
-        };
-        drag(&mut h, x.center(), x.center() + egui::vec2(-80.0, 60.0));
-        assert_eq!(h.state().ui.dialogs.len(), 1, "a drag from the × doesn't close the dialog");
-        assert!((h.get_by_label("Gaussian Blur").rect().min - title.min).length() < 1.0, "nor move it");
-        let x = h.get_by_label("Close").rect();
-        let beside = x.left_center() - egui::vec2(4.0, 0.0);
-        drag(&mut h, beside, beside + egui::vec2(-120.0, 40.0));
-        assert_eq!(h.state().ui.dialogs.len(), 1, "a title drag doesn't close the dialog");
-        let moved = h.get_by_label("Gaussian Blur").rect().min - title.min;
-        assert!((moved - egui::vec2(-120.0, 40.0)).length() < 2.0, "the band beside the × moved the dialog: {moved:?}");
     }
 
     #[test]
@@ -1144,23 +1022,5 @@ mod tests {
         for label in ["Fit Image", "Width", "Height", "OK", "Cancel"] {
             assert!(window.contains_rect(h.get_by_label(label).rect()), "{label} inside the window");
         }
-    }
-}
-
-#[cfg(test)]
-mod preference_resize_tests {
-    use super::*;
-
-    #[test]
-    fn preferences_can_resize_while_standard_native_dialogs_keep_their_layout() {
-        let prefs = json!({"__prefsui": "prefs"});
-        let shortcuts = json!({"__prefsui": "shortcuts"});
-        let ordinary = json!({});
-        let web = json!({"__web": true});
-
-        assert!(resizable_dialog(prefs.as_object().unwrap()));
-        assert!(!resizable_dialog(shortcuts.as_object().unwrap()));
-        assert!(!resizable_dialog(ordinary.as_object().unwrap()));
-        assert!(resizable_dialog(web.as_object().unwrap()));
     }
 }

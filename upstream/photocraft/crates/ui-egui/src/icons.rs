@@ -133,7 +133,7 @@ pub fn tool_icon(t: Tool) -> &'static str {
         Tool::Dodge => "lollipop",
         Tool::Burn => "flame",
         Tool::Sponge => "cloud",
-        Tool::QuickSelection => "quick-selection",
+        Tool::QuickSelection => "circle-dashed",
         Tool::ObjectSelection => "square-dashed-mouse-pointer",
         Tool::Pen => "pen-tool",
         Tool::FreeformPen => "pen-freeform",
@@ -246,36 +246,6 @@ mod tests {
             left_alpha > mid_alpha && mid_alpha > right_alpha,
             "interior ramp should fade from left ({left_alpha}) through middle ({mid_alpha}) to right ({right_alpha})"
         );
-    }
-
-    /// Rasterize an icon to its ink mask at `size` px.
-    fn ink(name: &str, size: u32) -> Vec<bool> {
-        let egui::ImageSource::Bytes { bytes, .. } = white_icons().source(name) else { panic!("icon must be embedded bytes") };
-        let image = egui_extras::image::load_svg_bytes_with_size(
-            bytes.as_ref(),
-            egui::load::SizeHint::Size { width: size, height: size, maintain_aspect_ratio: true },
-            &Default::default(),
-        )
-        .unwrap();
-        assert_eq!(image.size, [size as usize; 2]);
-        image.pixels.iter().map(|p| p.a() > 16).collect()
-    }
-
-    #[test]
-    fn quick_selection_icon_differs_from_ellipse_marquee() {
-        // #5116: Quick Selection used to reuse the Ellipse Marquee's dashed circle.
-        assert_ne!(tool_icon(Tool::QuickSelection), tool_icon(Tool::EllipseMarquee));
-        for size in [14_u32, 28] {
-            let (quick, ellipse) = (ink(tool_icon(Tool::QuickSelection), size), ink(tool_icon(Tool::EllipseMarquee), size));
-            let shared = quick.iter().zip(&ellipse).filter(|(a, b)| **a && **b).count();
-            let union = quick.iter().zip(&ellipse).filter(|(a, b)| **a || **b).count();
-            assert!(union > 0, "icons must have ink at {size}px");
-            let overlap = shared as f32 / union as f32;
-            assert!(overlap < 0.5, "the two glyphs must read as distinct: {overlap:.2} of their ink overlaps at {size}px");
-            // The dashed selection arc must actually rasterize: more ink than the bare brush.
-            let brush = ink(tool_icon(Tool::Brush), size);
-            assert!(quick.iter().filter(|a| **a).count() > brush.iter().filter(|a| **a).count(), "the dashed arc is missing at {size}px");
-        }
     }
 
     #[test]

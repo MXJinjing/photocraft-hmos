@@ -67,23 +67,9 @@ fn dim(ui: &mut egui::Ui, s: &str) {
     ui.label(RichText::new(s).color(t.text_dim));
 }
 
-/// Whether a dynamic's control has a 0..1 input its own response curve shapes (not Off, not the
-/// direction controls, not Angle Jitter, whose controls set an angle).
-pub(crate) fn takes_curve(control: Control, angle: bool) -> bool {
-    !angle && matches!(control, Control::Fade | Control::PenPressure | Control::PenTilt | Control::StylusWheel | Control::Rotation)
-}
-
-/// egui memory key of the open/closed state of a dynamic's curve editor.
-pub(crate) fn curve_open_id(id: &str) -> egui::Id {
-    egui::Id::new(("brush-curve-open", id))
-}
-
-/// `Control: [Off ▾] [25] [~]`: the controller pop-up, Fade's step count and the button that
-/// shows this dynamic's own response curve (lit while the curve isn't linear). `angle` offers the
+/// `Control: [Off ▾] [25]`: the controller pop-up plus Fade's step count. `angle` offers the
 /// direction controls (Photoshop only has them for Angle Jitter).
 fn control_row(ui: &mut egui::Ui, id: &str, d: &mut Dynamic, angle: bool) {
-    let open_id = curve_open_id(id);
-    let mut open: bool = ui.data(|m| m.get_temp(open_id)).unwrap_or(false);
     ui.horizontal(|ui| {
         dim(ui, tl!("Control:"));
         let n = if angle || matches!(d.control, Control::InitialDirection | Control::Direction) { 8 } else { 6 };
@@ -94,17 +80,7 @@ fn control_row(ui: &mut egui::Ui, id: &str, d: &mut Dynamic, angle: bool) {
                 d.fade_steps = steps.round().clamp(1.0, 9999.0) as u32;
             }
         }
-        if takes_curve(d.control, angle) && crate::icons::button(ui, "spline", 22.0, open || !d.curve.is_linear(), tl!("Response curve")).clicked() {
-            open = !open;
-        }
     });
-    if open && takes_curve(d.control, angle) {
-        let mut points = d.curve.points();
-        if crate::pressure_curve_ui::edit_points(ui, egui::Id::new(("brush-curve-rect", id)), &mut points) {
-            d.curve = paint::ResponseCurve::new(&points);
-        }
-    }
-    ui.data_mut(|m| m.insert_temp(open_id, open));
     ui.add_space(2.0);
 }
 

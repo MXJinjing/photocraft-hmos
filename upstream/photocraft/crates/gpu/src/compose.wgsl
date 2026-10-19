@@ -1,4 +1,4 @@
-// PhotoCraft GPU compositor kernels.
+// Photocraft GPU compositor kernels.
 //
 // Every pass renders one chunk of the canvas into a straight-alpha RGBA32F accumulator, reading
 // its inputs with `textureLoad` at the same pixel. Effect-map kernels (`fs_m*`) render
@@ -473,17 +473,6 @@ fn posterize(v: f32, n: f32) -> f32 {
     return floor(bin * 255.0 / (n - 1.0)) / 255.0;
 }
 
-// compose::adjust::posterize_in at 16 bits: bins of the 16-bit sample, landing on 8-bit levels
-// through a 16-bit step. Every product and sum here is a whole number below 2^24, exact in f32;
-// 16-bit layers reach the GPU as half floats, though, so a sample within their precision of a
-// bin's edge can land in the neighbouring bin (the CPU, which exports, is exact).
-fn posterize16(v: f32, n: f32) -> f32 {
-    let x = floor(clamp(v, 0.0, 1.0) * 32768.0 + 0.5);
-    let bin = min(floor(x * n / 32768.0), n - 1.0);
-    let step = floor(bin * 32768.0 / (n - 1.0));
-    return floor((step * 255.0 + 16384.0) / 32768.0) / 255.0;
-}
-
 // Document pixel being adjusted (for ordered dither).
 var<private> adj_px: vec2<i32>;
 
@@ -591,37 +580,49 @@ fn tone_channel(row: i32, v: f32, identity: f32) -> f32 {
     return lut(row, v);
 }
 
+// Modern Brightness curve: line of slope 1.375^(b/50) rolled off to (1,1) by a v^P white anchor.
+// Mirrors compose::adjust::modern_brightness.
+fn mbright(v: f32, b: f32) -> f32 {
+    if (b == 0.0) { return v; }
+    let s = pow(1.375, b / 50.0);
+    var p: f32;
+    if (b >= 0.0) { p = max(4.5 - 0.013 * b, 2.0); } else { p = 5.0 - 0.072 * b; }
+    let vv = clamp(v, 0.0, 1.0);
+    return clamp(s * vv + (1.0 - s) * pow(vv, p), 0.0, 1.0);
+}
+
+// Modern Contrast curve: symmetric cubic-Hermite S pivoting at 0.5.
+// Mirrors compose::adjust::modern_contrast.
+fn mcontrast(v: f32, ct: f32) -> f32 {
+    if (ct == 0.0) { return v; }
+    let k = ct / 128.0;
+    let e = 1.0 - k; let m = 1.0 + k;
+    let vv = clamp(v, 0.0, 1.0);
+    var t: f32;
+    if (vv <= 0.5) { t = vv / 0.5; } else { t = (1.0 - vv) / 0.5; }
+    let h = e * 0.5 * (t * t * t - 2.0 * t * t + t) + (-2.0 * t * t * t + 3.0 * t * t) * 0.5 + m * 0.5 * (t * t * t - t * t);
+    if (vv <= 0.5) { return h; }
+    return 1.0 - h;
+}
+
 fn adjust(c: vec3<f32>) -> vec3<f32> {
-    let hdr = (op.flags & F_HDR) != 0u;
     let p0 = op.p0;
     let p1 = op.p1;
     let p2 = op.p2;
     let p3 = op.p3;
     switch op.kind {
         case 1: { return 1.0 - c; }                                            // Invert
-        case 2: {                                                              // Threshold (compose::adjust::threshold_white)
-            // p0.x = 8-bit level; p0.y = 1: 8-bit levels, 2: 16-bit samples against p0.z, 0: float.
-            // Sums of 30 R + 59 G + 11 B over whole samples are exact in f32.
-            var white = lum(c) * 255.0 >= p0.x;
-            if p0.y > 0.5 {
-                let q = select(32768.0, 255.0, p0.y < 1.5);
-                let v = floor(clamp(c, vec3(0.0), vec3(1.0)) * q + 0.5);
-                let s = 30.0 * v.r + 59.0 * v.g + 11.0 * v.b;
-                white = select(s >= 100.0 * p0.z, s > 100.0 * p0.x - 50.0, p0.y < 1.5);
-            }
-            return vec3(select(0.0, 1.0, white));
+        case 2: {                                                              // Threshold (p0.x = 8-bit level)
+            return vec3(select(0.0, 1.0, round_half_up(gray(c) * 255.0) >= p0.x));
         }
-        case 3: {                                                              // Posterize (p0.x levels; p0.y = 1: 16-bit)
-            if p0.y > 0.5 { return vec3(posterize16(c.r, p0.x), posterize16(c.g, p0.x), posterize16(c.b, p0.x)); }
-            return vec3(posterize(c.r, p0.x), posterize(c.g, p0.x), posterize(c.b, p0.x));
-        }
-        case 4: {                                                              // B/C legacy: brightness before (p0.x) or after (p0.w) contrast around the pivot (p0.z); 32-bit unclipped
-            let v = (c + p0.x - p0.z) * p0.y + p0.z + p0.w;
-            if (hdr) { return v; }
-            return clamp(v, vec3(0.0), vec3(1.0));
+        case 3: { return vec3(posterize(c.r, p0.x), posterize(c.g, p0.x), posterize(c.b, p0.x)); }
+        case 4: { return clamp((c + p0.x - p0.z) * p0.y + p0.z + p0.w, vec3(0.0), vec3(1.0)); }   // B/C legacy: brightness before (p0.x) or after (p0.w) contrast around compose::adjust::LEGACY_PIVOT (p0.z)
+        case 5: {                                                              // B/C modern
+            let b = p0.x; let ct = p0.y;
+            return vec3(mcontrast(mbright(c.r, b), ct), mcontrast(mbright(c.g, b), ct), mcontrast(mbright(c.b, b), ct));
         }
         case 6: { return vec3(exposure(c.r, p0), exposure(c.g, p0), exposure(c.b, p0)); }  // Exposure
-        case 7: { return vec3(tone_channel(0, c.r, p0.x), tone_channel(1, c.g, p0.y), tone_channel(2, c.b, p0.z)); } // Levels / Curves / modern Brightness/Contrast (compose::adjust::modern_lut)
+        case 7: { return vec3(tone_channel(0, c.r, p0.x), tone_channel(1, c.g, p0.y), tone_channel(2, c.b, p0.z)); } // Levels / Curves
         case 17: { return vec3(levels_float(0, levels_float(1, c.r)), levels_float(0, levels_float(2, c.g)), levels_float(0, levels_float(3, c.b))); }
         case 8: {                                                              // Hue/Saturation
             let hsl = rgb_to_hsl(c);
@@ -677,17 +678,13 @@ fn adjust(c: vec3<f32>) -> vec3<f32> {
             l = clamp(l, vec3(0.0), vec3(p0.w));
             return vec3(t_encode(l.r, p0.z), t_encode(l.g, p0.z), t_encode(l.b, p0.z));
         }
-        case 10: {                                                             // Channel mixer (32-bit unclipped)
-            let lo = select(0.0, -F32_MAX, hdr);
-            let hi = select(1.0, F32_MAX, hdr);
-            let r = clamp(dot(p0.xyz, c) + p0.w, lo, hi);
+        case 10: {                                                             // Channel mixer
+            let r = clamp(dot(p0.xyz, c) + p0.w, 0.0, 1.0);
             if (p3.x > 0.5) { return vec3(r); }
-            return vec3(r, clamp(dot(p1.xyz, c) + p1.w, lo, hi), clamp(dot(p2.xyz, c) + p2.w, lo, hi));
+            return vec3(r, clamp(dot(p1.xyz, c) + p1.w, 0.0, 1.0), clamp(dot(p2.xyz, c) + p2.w, 0.0, 1.0));
         }
         case 11: {                                                             // Photo filter
             // compose::adjust::photo_filter_matrix (rows p0..p2) in linear light, then SetLum.
-            // 32-bit samples are linear already and stay unclipped.
-            if (hdr) { return vec3(dot(p0.xyz, c), dot(p1.xyz, c), dot(p2.xyz, c)); }
             let g = p3.y;
             let lin = vec3(t_decode(c.r, g), t_decode(c.g, g), t_decode(c.b, g));
             var f = vec3(t_encode(dot(p0.xyz, lin), g), t_encode(dot(p1.xyz, lin), g), t_encode(dot(p2.xyz, lin), g));
@@ -706,13 +703,12 @@ fn adjust(c: vec3<f32>) -> vec3<f32> {
             if (c.b <= c.r && c.b <= c.g) { secondary = 1; } else if (c.r <= c.g) { secondary = 3; }
             let g = clamp(mn + (mid - mn) * w[secondary] / 100.0 + (mx - mid) * w[primary] / 100.0, 0.0, 1.0);
             if (p1.z > 0.5) {
-                if (hdr) { return set_lum(p2.rgb, g, F32_MAX); }                // 32-bit: nothing clips at 1
                 return clamp(set_lum(p2.rgb, g, 1.0), vec3(0.0), vec3(1.0));   // Color blend of the tint
             }
             return vec3(g);
         }
-        case 13: {                                                             // Gradient map (driven by the W3C luminosity)
-            var t = lum(c);
+        case 13: {                                                             // Gradient map
+            var t = gray(c);
             if (p0.x > 0.5) { t = 1.0 - t; }
             var o = vec3(lut(0, t), lut(1, t), lut(2, t));
             if (p0.y > 0.5) { o = clamp(o + bayer4(adj_px) / 255.0, vec3(0.0), vec3(1.0)); }

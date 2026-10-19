@@ -1,23 +1,8 @@
-//! PhotoCraft desktop app.
+//! Photocraft desktop app.
 //!
 //! Usage: `photocraft [--control <port>] [--control-token <64-hex> |
 //! --control-token-file <path>] [--automation-read-root <dir>]
-//! [--automation-write-root <dir>] [--safe-gpu] [--in-window-menus] [--present-mode <mode>]
-//! [--frame-latency <n>] [--stroke-trace <stderr|file.csv>] [--new-instance] [--] [files…]`
-//! (`photocraft --help` prints [`USAGE`]; `--version` prints the version).
-//!
-//! Any other argument starting with `-` is a usage error (exit status 2, issue #6431), so a typo
-//! such as `--safegpu` doesn't open the window and then fail to open the flag as a file. A file
-//! whose name starts with `-` goes after `--`.
-//!
-//! On Windows and Linux a launch hands its files to the PhotoCraft that is already running (new
-//! tabs in its window) and exits; `--new-instance` starts a separate copy instead, as does any
-//! `--control` launch (see `single_instance`).
-//!
-//! `--present-mode` (`fifo`, `autovsync`, `novsync`) and `--frame-latency` (1–3) override how
-//! frames reach the display for this launch (`PHOTOCRAFT_PRESENT_MODE` / `…_FRAME_LATENCY`;
-//! `presentation`); `--stroke-trace` times each brush stroke's frames (`PHOTOCRAFT_STROKE_TRACE`;
-//! `photocraft_ui_egui::stroke_trace`).
+//! [--automation-write-root <dir>] [--safe-gpu] [--in-window-menus] [files…]`
 //!
 //! `--safe-gpu` starts with the CPU renderer (no GPU canvas; a software adapter for the window
 //! where the platform has one) for this launch, e.g. after a graphics driver crash. A start that
@@ -59,18 +44,8 @@ mod linux_libs;
 mod logging;
 mod monitor_profile;
 mod photoshop_settings;
-// Save As through the desktop portal, which reports the file type picked (#6121).
-#[cfg(target_os = "linux")]
-mod portal_save;
-mod presentation;
-// The print portal needs the session bus (zbus, Linux only); its pure helpers are tested everywhere.
-#[cfg(any(target_os = "linux", test))]
-mod print_portal;
 mod screen_color;
 mod services;
-// macOS gets one instance from LaunchServices (open-documents Apple events).
-#[cfg(any(not(target_os = "macos"), test))]
-mod single_instance;
 // Windows gets pen pressure from winit (WM_POINTER); the web runner has its own listener.
 #[cfg(any(target_os = "macos", target_os = "linux", test))]
 mod tablet;
@@ -103,11 +78,9 @@ fn custom_titlebar(prefs_file: Option<&std::path::Path>) -> bool {
 /// different offset every launch (#419). A later launch restores the saved position instead
 /// (`main` turns `centered` off, #4826). Wayland compositors place windows themselves.
 fn native_options(custom_titlebar: bool) -> eframe::NativeOptions {
-    let viewport = egui::ViewportBuilder::default();
-    // Not inside a macOS app bundle: its Dock icon is the bundle's .icns (`app_icon`, #5849).
-    let viewport = if app_icon::sets_runtime_icon(std::env::current_exe().ok().as_deref()) { viewport.with_icon(app_icon::window_icon()) } else { viewport };
     eframe::NativeOptions {
-        viewport: viewport
+        viewport: egui::ViewportBuilder::default()
+            .with_icon(app_icon::window_icon())
             .with_app_id(APP_ID)
             .with_title("PhotoCraft")
             .with_inner_size([1440.0, 900.0])
@@ -157,63 +130,21 @@ fn parse_control_port(value: &str, source: &str) -> Result<u16, String> {
     value.trim().parse().map_err(|_| format!("{source}: `{value}` is not a valid port (expected a number from 0 to 65535)"))
 }
 
-/// Process exit status for the collected usage errors (a bad `--control` /
-/// `PHOTOCRAFT_CONTROL_PORT`, an unknown option): `None` when there are none, else 2 (a
-/// command-line usage error), never 0.
-fn usage_exit_code(errors: &[String]) -> Option<i32> {
+/// Process exit status for the collected `--control` / `PHOTOCRAFT_CONTROL_PORT` errors: `None`
+/// when there are none, else 2 (a command-line usage error), never 0.
+fn control_args_exit_code(errors: &[String]) -> Option<i32> {
     if errors.is_empty() { None } else { Some(2) }
-}
-
-/// `photocraft --help`. Keep in step with the options `main` accepts and the module docs.
-const USAGE: &str = "\
-Usage: photocraft [options] [--] [files…]
-
-Opens PhotoCraft with the given files.
-
-Options:
-  -h, --help                       Print this help and exit
-      --version                    Print the version, commit and build date and exit
-      --safe-gpu                   Start with the CPU renderer for this launch (after a graphics driver crash)
-      --in-window-menus            macOS: keep the menus inside the window instead of the menu bar
-      --new-instance               Windows and Linux: start a separate PhotoCraft instead of opening
-                                   the files in the one already running
-      --present-mode <mode>        How frames reach the display: fifo, autovsync or novsync
-      --frame-latency <n>          Frames queued for the display: 1 to 3
-      --stroke-trace <stderr|file.csv>
-                                   Time each brush stroke's frames
-      --control <port>             Start the localhost JSON-lines control server on this port
-      --control-token <64-hex>     Control server token (default: a new random one, printed)
-      --control-token-file <path>  Read the control server token from this file, or create it
-                                   with a new one
-      --automation-read-root <dir> Directory the control server may read files from
-      --automation-write-root <dir>
-                                   Directory the control server may write files to
-  --                               Treat every later argument as a file, even one starting with `-`
-
-A bad --present-mode, --frame-latency or --stroke-trace value is reported and ignored.
-Environment: PHOTOCRAFT_CONTROL_PORT, PHOTOCRAFT_CONTROL_TOKEN, PHOTOCRAFT_CONTROL_TOKEN_FILE,
-PHOTOCRAFT_AUTOMATION_READ_ROOT, PHOTOCRAFT_AUTOMATION_WRITE_ROOT, PHOTOCRAFT_PRESENT_MODE,
-PHOTOCRAFT_FRAME_LATENCY, PHOTOCRAFT_STROKE_TRACE, PHOTOCRAFT_IN_WINDOW_MENUS, PHOTOCRAFT_NEW_INSTANCE,
-PHOTOCRAFT_CONFIG_DIR.
-";
-
-/// Print to standard output for `--help` / `--version`. Unlike `println!`, never panics when
-/// stdout is closed or a pipe (`photocraft --help | head -1`).
-fn print_stdout(text: &str) {
-    use std::io::Write as _;
-    let mut out = std::io::stdout().lock();
-    let _ = out.write_all(text.as_bytes()).and_then(|()| out.flush());
 }
 
 #[cfg(test)]
 mod control_port_tests {
-    use super::{parse_control_port, usage_exit_code};
+    use super::{control_args_exit_code, parse_control_port};
 
     #[test]
     fn control_port_errors_exit_non_zero() {
-        assert_eq!(usage_exit_code(&[]), None);
+        assert_eq!(control_args_exit_code(&[]), None);
         let errors = vec![parse_control_port("nope", "--control").unwrap_err()];
-        assert_eq!(usage_exit_code(&errors), Some(2));
+        assert_eq!(control_args_exit_code(&errors), Some(2));
     }
 
     #[test]
@@ -241,11 +172,11 @@ fn main() -> eframe::Result {
     // The system font scan can take seconds (minutes on some Macs): run it off the UI thread.
     photocraft_ui_egui::type_tool::warm_fonts();
     let mut control_port: Option<u16> = None;
-    let mut usage_errors: Vec<String> = Vec::new();
+    let mut control_arg_errors: Vec<String> = Vec::new();
     if let Some(value) = std::env::var("PHOTOCRAFT_CONTROL_PORT").ok().filter(|v| !v.trim().is_empty()) {
         match parse_control_port(&value, "PHOTOCRAFT_CONTROL_PORT") {
             Ok(port) => control_port = Some(port),
-            Err(error) => usage_errors.push(error),
+            Err(error) => control_arg_errors.push(error),
         }
     }
     let mut control_token = None;
@@ -258,98 +189,45 @@ fn main() -> eframe::Result {
     // reported in a notice once the app is up; a control token is a usage error like a bad port.
     let mut unreadable_paths: Vec<String> = Vec::new();
     let mut safe_gpu = false;
-    let mut new_instance = false;
-    // Options that apply only to the process they're given to; a launch with any keeps its own.
-    let mut launch_options: Vec<&'static str> = Vec::new();
-    let (mut present_mode_arg, mut frame_latency_arg, mut stroke_trace_arg): (Option<String>, Option<String>, Option<String>) = (None, None, None);
     let mut in_window_menus = std::env::var_os("PHOTOCRAFT_IN_WINDOW_MENUS").is_some_and(|v| !v.is_empty() && v != "0");
     let mut args = std::env::args_os().skip(1);
-    // After `--`, every argument is a file, even one that starts with `-`.
-    let mut only_files = false;
     while let Some(a) = args.next() {
-        if only_files {
-            match a.into_string() {
-                Ok(s) => files.push(s),
-                Err(raw) => unreadable_paths.push(raw.to_string_lossy().into_owned()),
-            }
-            continue;
-        }
         match a.to_str() {
-            Some("--") => only_files = true,
-            Some("--help" | "-h") => {
-                print_stdout(USAGE);
-                return Ok(());
-            }
             Some("--control") => match args.next() {
                 Some(value) => match parse_control_port(&value.to_string_lossy(), "--control") {
                     Ok(port) => control_port = Some(port),
-                    Err(error) => usage_errors.push(error),
+                    Err(error) => control_arg_errors.push(error),
                 },
-                None => usage_errors.push("--control: missing port value (expected `--control <port>`)".to_string()),
+                None => control_arg_errors.push("--control: missing port value (expected `--control <port>`)".to_string()),
             },
             Some("--control-token") => match args.next().map(std::ffi::OsString::into_string) {
                 Some(Ok(token)) => control_token = Some(token),
-                Some(Err(raw)) => usage_errors.push(format!("--control-token: value is not valid Unicode (`{}`)", raw.to_string_lossy())),
+                Some(Err(raw)) => control_arg_errors.push(format!("--control-token: value is not valid Unicode (`{}`)", raw.to_string_lossy())),
                 None => control_token = None,
             },
             Some("--control-token-file") => control_token_file = args.next().map(std::path::PathBuf::from),
-            Some("--automation-read-root") => {
-                launch_options.push("--automation-read-root");
-                automation_read_root = args.next().map(std::path::PathBuf::from);
-            }
-            Some("--automation-write-root") => {
-                launch_options.push("--automation-write-root");
-                automation_write_root = args.next().map(std::path::PathBuf::from);
-            }
-            Some("--safe-gpu") => {
-                launch_options.push("--safe-gpu");
-                safe_gpu = true;
-            }
-            Some(flag @ ("--present-mode" | "--frame-latency" | "--stroke-trace")) => {
-                launch_options.push(match flag {
-                    "--present-mode" => "--present-mode",
-                    "--frame-latency" => "--frame-latency",
-                    _ => "--stroke-trace",
-                });
-                let flag = flag.to_string();
-                match args.next().map(std::ffi::OsString::into_string) {
-                    Some(Ok(v)) => match flag.as_str() {
-                        "--present-mode" => present_mode_arg = Some(v),
-                        "--frame-latency" => frame_latency_arg = Some(v),
-                        _ => stroke_trace_arg = Some(v),
-                    },
-                    // A bad value is reported and ignored; it never fails the launch.
-                    _ => eprintln!("photocraft: {flag}: missing or unreadable value; ignored"),
-                }
-            }
-            Some("--in-window-menus") => {
-                launch_options.push("--in-window-menus");
-                in_window_menus = true;
-            }
-            Some("--new-instance") => new_instance = true,
+            Some("--automation-read-root") => automation_read_root = args.next().map(std::path::PathBuf::from),
+            Some("--automation-write-root") => automation_write_root = args.next().map(std::path::PathBuf::from),
+            Some("--safe-gpu") => safe_gpu = true,
+            Some("--in-window-menus") => in_window_menus = true,
             Some("--version") => {
-                print_stdout(&format!("photocraft {}\n", photocraft_engine::build_info::long_version()));
+                println!("photocraft {}", photocraft_engine::build_info::long_version());
                 return Ok(());
             }
             // Old macOS passes a process serial number when launched from Finder.
             Some(s) if s.starts_with("-psn_") => {}
-            // A typo such as `--safegpu`, or `--help` spelt another way, must not open the window
-            // and then fail to open the flag as a file (#6431).
-            Some(s) if s.starts_with('-') => usage_errors.push(format!("unknown option `{s}` (put `--` before a file name that starts with `-`)")),
             Some(s) => files.push(s.to_owned()),
             None => unreadable_paths.push(a.to_string_lossy().into_owned()),
         }
     }
 
-    // A malformed control port must not silently drop the control server (issue #701), and an
-    // unknown option must not open the window (#6431): name the bad argument and fail the launch,
-    // like `photocraft-cli` does for the same typos. Exit status 2 is the usual command-line usage
-    // error, so a launcher sees the failure.
-    if let Some(code) = usage_exit_code(&usage_errors) {
-        for error in &usage_errors {
+    // A malformed control port must not silently drop the control server (issue #701): name the
+    // bad value and fail the launch, like `photocraft-cli serve --port` does for the same typo.
+    // Exit status 2 is the usual command-line usage error, so a launcher sees the failure.
+    if let Some(code) = control_args_exit_code(&control_arg_errors) {
+        for error in &control_arg_errors {
             eprintln!("photocraft: {error}");
         }
-        eprintln!("Run `photocraft --help` for usage.");
         std::process::exit(code);
     }
 
@@ -362,48 +240,6 @@ fn main() -> eframe::Result {
             Err(e) => log::warn!("no log file: {e}"),
         }
     }
-
-    // One PhotoCraft per user (#3708): files opened from Explorer or a file manager while it runs
-    // become tabs in its window. Only with the per-user settings folder (a portable copy's may be
-    // shared between users), and not for automation, `--new-instance` or per-process options.
-    #[cfg(not(target_os = "macos"))]
-    let single_instance = {
-        let new_instance_env = std::env::var("PHOTOCRAFT_NEW_INSTANCE").ok();
-        let context = single_instance::LaunchContext {
-            per_user_settings: app_dirs::current().mode == app_dirs::Mode::Platform,
-            new_instance_flag: new_instance,
-            new_instance_env: new_instance_env.as_deref(),
-            control: control_port.is_some(),
-            unreadable_paths: !unreadable_paths.is_empty(),
-            launch_options: &launch_options,
-        };
-        match (single_instance::skip_reason(&context), services::config_dir()) {
-            (Some(reason), _) => {
-                log::info!("running as a separate PhotoCraft: {reason}");
-                None
-            }
-            (None, None) => None,
-            (None, Some(dir)) => {
-                let paths: Vec<String> = files.iter().map(|f| single_instance::absolute(f)).collect();
-                match single_instance::claim(&dir, &paths) {
-                    single_instance::Launch::Forwarded => {
-                        log::info!("handed {} file(s) to the running PhotoCraft", paths.len());
-                        return Ok(());
-                    }
-                    single_instance::Launch::Primary(primary) => Some(primary),
-                    single_instance::Launch::Standalone(reason) => {
-                        log::warn!("starting a separate PhotoCraft: {reason}");
-                        None
-                    }
-                }
-            }
-        }
-    };
-    // Lives until the event loop returns, then `shutdown` lets the next launch become the primary.
-    #[cfg(not(target_os = "macos"))]
-    let single_instance = &single_instance;
-    #[cfg(target_os = "macos")]
-    let _ = (new_instance, &launch_options);
 
     // The display server to open the window on: Xwayland for a pen on Wayland, which gives this
     // app no pen input (#639).
@@ -526,21 +362,6 @@ fn main() -> eframe::Result {
     let gpu_note: std::sync::Arc<std::sync::Mutex<Option<String>>> = Default::default();
     // The adapter's real texture limits (egui asks for 8192 px), so big documents stay on the GPU.
     gpu_startup::configure(&mut options.wgpu_options.wgpu_setup, &plan, os, sentinel.clone(), gpu_note.clone());
-    // Preferences › Performance › Low-Latency Drawing (#1343): without vsync a stroke shows about
-    // 50 ms sooner; wgpu picks Immediate, else Mailbox, else Fifo by what the driver offers.
-    if gpu_startup::read_low_latency(services::prefs_file().as_deref()) {
-        options.wgpu_options.surface.present_mode = eframe::wgpu::PresentMode::AutoNoVsync;
-    }
-    // Testers' present mode and frame latency overrides (#1343), after the preference.
-    let present = presentation::Overrides::from_args_or_env(present_mode_arg.as_deref(), frame_latency_arg.as_deref());
-    options.wgpu_options.surface = present.apply(options.wgpu_options.surface);
-    let present_desc = presentation::describe(&options.wgpu_options.surface, &present);
-    // Without vsync, frames are capped at 240 fps (#4472) so repaint loops don't spin flat out.
-    let uncapped = !matches!(
-        options.wgpu_options.surface.present_mode,
-        eframe::wgpu::PresentMode::Fifo | eframe::wgpu::PresentMode::FifoRelaxed | eframe::wgpu::PresentMode::AutoVsync
-    );
-    log::info!("presentation: {present_desc}");
     let sentinel_ms = t_sentinel.elapsed().as_secs_f64() * 1000.0;
     log::info!("GPU startup: {:?} ({sentinel_ms:.2} ms)", plan);
     let retry_cpu = !safe_gpu && plan.backend != photocraft_engine::prefs::GpuBackend::Cpu;
@@ -568,16 +389,7 @@ fn main() -> eframe::Result {
                         services::xwayland_command(var("FLATPAK_ID").as_deref(), var("APPIMAGE").as_deref(), std::env::var_os("DISPLAY").is_some());
                 }
             }
-            #[cfg(target_os = "linux")]
-            let session = {
-                let mut session = Session::new();
-                session.print_spooler = print_portal::spooler();
-                session
-            };
-            #[cfg(not(target_os = "linux"))]
-            let session = Session::new();
-            let mut app = PhotocraftApp::new(session, services);
-            app.min_frame_ms = uncapped.then_some(1000.0 / 240.0);
+            let mut app = PhotocraftApp::new(Session::new(), services);
             app.integrated_titlebar = cfg!(target_os = "macos");
             app.custom_titlebar = custom_titlebar;
             // Only the title bar's free gap drags the window, never the menus (mac_window.rs).
@@ -609,10 +421,6 @@ fn main() -> eframe::Result {
             // composites on the CPU).
             let info = &mut app.perf.gpu_info;
             info.preference = pref.name().to_string();
-            info.present = present_desc.clone();
-            if let Some(v) = &stroke_trace_arg {
-                app.stroke_trace.set(v);
-            }
             info.selected = if plan.env.is_some() { "env".into() } else { plan.backend.name().to_string() };
             info.fallback = match (plan.reason.clone(), gpu_note.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone()) {
                 (Some(reason), Some(note)) => Some(format!("{reason}. {note}")),
@@ -675,11 +483,6 @@ fn main() -> eframe::Result {
             }
             #[cfg(not(target_os = "macos"))]
             let _ = in_window_menus;
-            // Files from later launches (Explorer, file managers) open here as new tabs.
-            #[cfg(not(target_os = "macos"))]
-            if let Some(primary) = single_instance {
-                app.services.os_events = Some(primary.connect(&cc.egui_ctx));
-            }
             // Where file drags and drops are (winit 0.30 doesn't say).
             app.services.cursor_pos = cursor::service(cc);
             // The custom title bar's undecorated window must stay borderless, or its caption and
@@ -717,13 +520,6 @@ fn main() -> eframe::Result {
             Ok(Box::new(app))
         }),
     );
-    // The window is gone: refuse further files and free the lock, so a launch that is waiting (or
-    // the CPU-compatibility relaunch below) becomes the primary instead of handing its files to a
-    // process that is exiting.
-    #[cfg(not(target_os = "macos"))]
-    if let Some(primary) = single_instance {
-        primary.shutdown();
-    }
     // Closed or failed outside graphics initialization: not a driver crash. A renderer error
     // keeps the marker, so the next start tries a safer backend, unless there is no safer one:
     // a failed CPU start would otherwise pin every later start to CPU.

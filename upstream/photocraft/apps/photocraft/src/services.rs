@@ -21,8 +21,8 @@ mod recovery_tests;
 /// (.kys), which go to the preset libraries and Edit › Keyboard Shortcuts.
 const OPEN_EXTS: &[&str] = &[
     "pcraft", "pdn", "ora", "kra", "krz", "psd", "psb", "psdt", "png", "jpg", "jpeg", "tif", "tiff", "webp", "gif", "bmp", "tga", "ico", "qoi", "exr", "hdr",
-    "pbm", "pgm", "ppm", "pam", "pfm", "pcx", "dds", "xpm", "fits", "fit", "fts", "dpx", "cin", "heic", "heif", "hif", "dng", "cr2", "cr3", "nef", "nrw",
-    "arw", "pef", "orf", "rw2", "raf", "abr", "grd", "svg", "svgz", "aco", "ase", "kys", "af", "afdesign", "afphoto", "afpub",
+    "pbm", "pgm", "ppm", "pam", "pfm", "pcx", "dds", "xpm", "fits", "fit", "fts", "dpx", "heic", "heif", "hif", "dng", "cr2", "cr3", "nef", "nrw", "arw",
+    "pef", "orf", "rw2", "raf", "abr", "grd", "svg", "svgz", "aco", "ase", "kys", "af", "afdesign", "afphoto", "afpub",
 ];
 const SVG_EXTS: &[&str] = &["svg", "svgz"];
 
@@ -53,7 +53,6 @@ fn open_filters() -> Vec<(&'static str, Vec<String>)> {
 /// keeps defaulting to PSD.
 const SAVE_FILTERS: &[(&str, &[&str])] = &[
     ("PSD Document", &["psd", "psb"]),
-    ("PDF", &["pdf"]),
     ("PhotoCraft", &["pcraft"]),
     ("OpenRaster", &["ora"]),
     ("PNG", &["png"]),
@@ -95,51 +94,18 @@ fn save_filters(suggested: &str) -> Vec<(String, Vec<String>)> {
     v
 }
 
-/// `path` with the extension of the file type picked in the save dialog (`chosen`), where the
-/// dialog left the name alone (#6121): the format follows the extension, and the GTK file chooser
-/// keeps the typed name when another type is picked. Only a name that still has the extension the
-/// dialog opened with (`opened_with`, `Untitled-1.psd` with PNG picked) or none gets the type's
-/// extension, as PolyMeilex/rfd#341 does. An extension the user typed that PhotoCraft saves
-/// (`art.png` with the PSD type untouched, the way to save a PNG before this) is theirs and stays,
-/// and so does one of the type's own (`.psb` for PSD). One PhotoCraft doesn't save (`scan.2024`)
-/// is part of the name, and the type's extension is added after it.
-#[cfg(any(target_os = "linux", test))]
-pub(crate) fn with_chosen_type(path: &Path, opened_with: Option<&str>, chosen: &[String]) -> PathBuf {
-    let Some(first) = chosen.first() else { return path.to_path_buf() };
-    let ext = path.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase);
-    let opened_ext = opened_with.and_then(|n| Path::new(n).extension()).and_then(|e| e.to_str()).map(str::to_ascii_lowercase);
-    match ext {
-        Some(ext) if chosen.contains(&ext) => path.to_path_buf(),
-        Some(ext) if opened_ext.as_ref() == Some(&ext) => path.with_extension(first),
-        Some(ext) if SAVE_FILTERS.iter().chain(OTHER_SAVE_FILTERS).any(|(_, exts)| exts.contains(&ext.as_str())) => path.to_path_buf(),
-        _ => {
-            let mut name = path.as_os_str().to_owned();
-            name.push(".");
-            name.push(first);
-            PathBuf::from(name)
-        }
-    }
-}
-
-/// The name the save dialog starts with. Where the type picked gives a bare name its extension
-/// (`adds_extension`), the dialog gets the stem and the suggested type (listed first by
-/// [`save_filters`]) supplies `.psd`:
-/// - On Windows a visible extension stays put when the user picks another type (with File name
-///   extensions shown, `image.psd` saved as PhotoCraft stayed `image.psd`, #4394).
-/// - On Linux the portal's dialog keeps the name as typed, and before returning asks whether to
-///   replace a file of that name, so `test.psd` with PNG picked asked to replace test.psd, which
-///   the save leaves alone (#6121). From the stem [`with_chosen_type`] gives the picked type's
-///   extension, and a name that then exists is asked about under that name
-///   (`portal_save::save_as`).
-///
-/// A stem that still has a dot (`scan.jpg.psd`: Windows could keep `scan.jpg`) or an upper-case
+/// The name the save dialog starts with. On Windows a visible extension stays put when the user
+/// picks another type (with File name extensions shown, `image.psd` saved as PhotoCraft stayed
+/// `image.psd`, #4394), while a bare name gets the chosen type's extension, so there the dialog
+/// gets the stem and the suggested type (listed first by [`save_filters`]) supplies `.psd`. A
+/// stem that still has a dot (`scan.jpg.psd`: Windows could keep `scan.jpg`) or an upper-case
 /// extension (the user's spelling) keeps the whole name. Elsewhere the whole name is kept: the
-/// macOS panel has no type list, and rfd's Linux dialogs don't say which type was picked.
-fn dialog_file_name(suggested: &str, adds_extension: bool) -> Option<String> {
+/// macOS panel has no type list, and on Linux rfd doesn't report which type was picked.
+fn dialog_file_name(suggested: &str, windows: bool) -> Option<String> {
     let path = Path::new(suggested);
     let name = path.file_name()?.to_string_lossy().into_owned();
     let (Some(stem), Some(ext)) = (path.file_stem(), path.extension().and_then(|e| e.to_str())) else { return Some(name) };
-    let bare = adds_extension && Path::new(stem).extension().is_none() && !ext.is_empty() && ext == ext.to_ascii_lowercase();
+    let bare = windows && Path::new(stem).extension().is_none() && !ext.is_empty() && ext == ext.to_ascii_lowercase();
     Some(if bare { stem.to_string_lossy().into_owned() } else { name })
 }
 
@@ -181,52 +147,17 @@ fn show_file_dialog(request: FileDialogRequest, parent: Option<&eframe::Frame>, 
             Box::pin(async move { picked.await.map(|folder| FileDialogAnswer::FolderTo(path_of(&folder))) })
         }
         FileDialogRequest::Save { suggested } => {
-            let filters = save_filters(&suggested);
-            let name = dialog_file_name(&suggested, cfg!(windows));
-            let dir = Path::new(&suggested).parent().filter(|p| !p.as_os_str().is_empty()).map(Path::to_path_buf);
-            for (name, exts) in &filters {
-                dialog = dialog.add_filter(name, exts);
+            for (name, exts) in save_filters(&suggested) {
+                dialog = dialog.add_filter(name, &exts);
             }
-            if let Some(name) = &name {
+            if let Some(name) = dialog_file_name(&suggested, cfg!(windows)) {
                 dialog = dialog.set_file_name(name);
             }
-            if let Some(dir) = &dir {
+            if let Some(dir) = Path::new(&suggested).parent().filter(|p| !p.as_os_str().is_empty()) {
                 dialog = dialog.set_directory(dir);
             }
-            // On Linux the portal's own dialog, which reports the file type picked (#6121); rfd if
-            // the portal can't show it.
-            #[cfg(target_os = "linux")]
-            {
-                use eframe::wgpu::rwh::HasWindowHandle;
-                let parent = crate::portal_save::parent_id(parent.and_then(|p| p.window_handle().ok()).map(|h| h.as_raw()));
-                let req = crate::portal_save::SaveRequest {
-                    parent,
-                    name: dialog_file_name(&suggested, true),
-                    suggested: Path::new(&suggested).file_name().map(|n| n.to_string_lossy().into_owned()),
-                    folder: dir,
-                    filters,
-                    current: Some(0),
-                };
-                Box::pin(async move {
-                    let portal = zbus::blocking::connection::Builder::session()
-                        .and_then(|b| b.build())
-                        .map_err(|e| e.to_string())
-                        .and_then(|conn| crate::portal_save::save_as(&conn, req));
-                    match portal {
-                        Ok(path) => path.map(|p| FileDialogAnswer::SaveTo(p.to_string_lossy().into_owned())),
-                        Err(e) => {
-                            log::info!("portal save dialog unavailable ({e}), using rfd");
-                            dialog.save_file().await.map(|file| FileDialogAnswer::SaveTo(path_of(&file)))
-                        }
-                    }
-                })
-            }
-            #[cfg(not(target_os = "linux"))]
-            {
-                let _ = filters;
-                let picked = dialog.save_file();
-                Box::pin(async move { picked.await.map(|file| FileDialogAnswer::SaveTo(path_of(&file))) })
-            }
+            let picked = dialog.save_file();
+            Box::pin(async move { picked.await.map(|file| FileDialogAnswer::SaveTo(path_of(&file))) })
         }
     };
     // Without the thread the reply is dropped unanswered, which the app takes as Cancel.
@@ -264,8 +195,8 @@ fn block_on<T>(future: impl Future<Output = T>) -> T {
 }
 
 /// Per-user settings directory: `PHOTOCRAFT_CONFIG_DIR`, else `<exe dir>/PhotoCraftData` in
-/// portable mode, else the platform convention. Everything the app persists lives under it
-/// except, on Windows, crash-recovery autosaves; see [`crate::app_dirs`].
+/// portable mode, else the platform convention. Everything the app persists lives under it; see
+/// [`crate::app_dirs`].
 pub fn config_dir() -> Option<PathBuf> {
     crate::app_dirs::config_dir()
 }
@@ -280,10 +211,8 @@ pub fn presets_dir() -> Option<PathBuf> {
     config_dir().map(|d| d.join("Presets"))
 }
 
-/// Crash-recovery autosaves: under the settings directory, except on Windows, where they stay
-/// out of the roaming profile (see [`crate::app_dirs::recovery_dir`]).
 fn recovery_dir() -> Option<PathBuf> {
-    crate::app_dirs::recovery_dir()
+    config_dir().map(|d| d.join("Recovery"))
 }
 
 /// Write `bytes` crash-safely (temp file beside the target, fsync, rename, directory fsync; see
@@ -299,7 +228,20 @@ fn write_atomic_progress(path: &Path, bytes: &[u8], progress: &dyn Fn(f32)) -> R
 }
 
 fn export_options(settings: &photocraft_ui_egui::ExportSettings) -> photocraft_io::ExportOptions {
-    settings.io_options()
+    let mut opts = photocraft_io::ExportOptions::default();
+    if let Some(q) = settings.jpeg_quality {
+        opts.encode.jpeg_quality = q;
+    }
+    opts.encode.webp_lossless = settings.webp_lossless;
+    if let Some(q) = settings.webp_quality {
+        opts.encode.webp_quality = q;
+    }
+    opts.tiff_layers = settings.tiff_layers;
+    opts.xmp = if settings.xmp_all { photocraft_io::XmpEmbed::All } else { photocraft_io::XmpEmbed::None };
+    opts.tga_bits = settings.tga_bits;
+    opts.image_previews = settings.image_previews;
+    opts.psd_maximize_compatibility = settings.psd_maximize_compatibility;
+    opts
 }
 
 /// The share of a save's progress bar that encoding fills; writing the file fills the rest. A
@@ -506,11 +448,6 @@ pub fn native(automation: Option<photocraft_automation::AuthorizedWorkspace>) ->
         save_file: Some(Arc::new(save_file)),
         file_dialog: Some(Box::new(show_file_dialog)),
         write: Some(Box::new(|path: &str, bytes: &[u8]| write_atomic(Path::new(path), bytes))),
-        file_stamp: Some(Box::new(|path: &str| {
-            // Follows a symlink, as Save writes through it to the file it points at.
-            let meta = std::fs::metadata(path).ok()?;
-            Some(photocraft_ui_egui::FileStamp { len: meta.len(), modified: meta.modified().ok() })
-        })),
         automation_read,
         automation_write,
         automation_open_pcraft,
@@ -660,41 +597,6 @@ mod tests {
     use photocraft_ui_egui::{PhotocraftApp, prefs_ui};
     use serde_json::{Value, json};
 
-    /// #6121: the file type picked in the save dialog gives the name its extension where the
-    /// dialog left the one it opened with, and only there.
-    #[test]
-    fn the_picked_file_type_gives_the_name_its_extension() {
-        let exts = |e: &[&str]| e.iter().map(|s| s.to_string()).collect::<Vec<_>>();
-        let (png, psd) = (exts(&["png"]), exts(&["psd", "psb"]));
-        let opened = Some("Untitled-1.psd");
-        let cases = [
-            // PNG picked, the name as the dialog opened (or renamed, its extension kept).
-            ("/pics/Untitled-1.psd", opened, &png, "/pics/Untitled-1.png"),
-            ("/pics/art.psd", opened, &png, "/pics/art.png"),
-            ("/pics/ART.PSD", opened, &png, "/pics/ART.png"),
-            // No extension: the type's. One PhotoCraft doesn't save is part of the name.
-            ("/pics/art", opened, &png, "/pics/art.png"),
-            ("/pics/scan.2024", opened, &png, "/pics/scan.2024.png"),
-            // Typed, an extension PhotoCraft saves is the user's: kept, whatever the type says
-            // (the PSD type untouched, or PNG picked and .jpg typed).
-            ("/pics/art.png", opened, &psd, "/pics/art.png"),
-            ("/pics/art.jpg", opened, &png, "/pics/art.jpg"),
-            ("/pics/art.pcraft", opened, &png, "/pics/art.pcraft"),
-            // Already the type's: kept, including its other extensions.
-            ("/pics/art.png", opened, &png, "/pics/art.png"),
-            ("/pics/art.PNG", opened, &png, "/pics/art.PNG"),
-            ("/pics/big.psb", opened, &psd, "/pics/big.psb"),
-            // The dialog opened on a .pcraft: that is the extension the type replaces.
-            ("/pics/art.pcraft", Some("art.pcraft"), &png, "/pics/art.png"),
-            ("/pics/art.psd", Some("art.pcraft"), &png, "/pics/art.psd"),
-        ];
-        for (typed, opened, chosen, want) in cases {
-            assert_eq!(with_chosen_type(Path::new(typed), opened, chosen), PathBuf::from(want), "{typed} (opened {opened:?})");
-        }
-        // No type picked: the name as typed.
-        assert_eq!(with_chosen_type(Path::new("/pics/art.psd"), opened, &[]), PathBuf::from("/pics/art.psd"));
-    }
-
     #[cfg(all(unix, not(target_os = "macos")))]
     #[test]
     fn open_filters_cover_uppercase_and_mixed_case_extensions() {
@@ -836,8 +738,7 @@ mod tests {
     /// Every flat format Save As offers is one PhotoCraft writes, and ICO is among them (#4357).
     #[test]
     fn save_as_offers_only_writable_formats_including_ico() {
-        // Layered formats, and PDF, are written by `photocraft-io`, not a codec.
-        let layered = ["psd", "psb", "pcraft", "ora", "pdf"];
+        let layered = ["psd", "psb", "pcraft", "ora"];
         for (name, exts) in SAVE_FILTERS {
             for ext in exts.iter().filter(|e| !layered.contains(e)) {
                 let format = photocraft_codecs::from_extension(ext).unwrap_or_else(|| panic!("{name}: .{ext} is no known format"));

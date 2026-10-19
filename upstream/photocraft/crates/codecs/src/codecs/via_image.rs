@@ -1,6 +1,5 @@
 //! Formats delegated to the `image` crate (pure-Rust features only):
-//! GIF, BMP, TGA, ICO, QOI, Radiance HDR, and AVIF encode (feature `avif`). Targa is written by
-//! [`super::tga`] and only read here.
+//! GIF, BMP, TGA, ICO, QOI, Radiance HDR, and AVIF encode (feature `avif`).
 
 use std::io::Cursor;
 
@@ -38,8 +37,7 @@ pub(crate) fn bmp_palette(bytes: &[u8]) -> Result<Option<Vec<[u8; 3]>>, CodecErr
     Ok(decoder.get_palette().map(|palette| palette.to_vec()))
 }
 
-/// The `image` decoder for `f` with our limits, its header read and its size checked.
-fn open<'a>(f: Format, bytes: &'a [u8], limits: &Limits) -> Result<impl ImageDecoder + 'a, CodecError> {
+pub(crate) fn decode(f: Format, bytes: &[u8], limits: &Limits) -> Result<Image, CodecError> {
     let fmt = image_format(f).ok_or_else(|| CodecError::unsupported(f, "not handled by image backend"))?;
     let mut reader = image::ImageReader::with_format(Cursor::new(bytes), fmt);
     let mut il = image::Limits::default();
@@ -47,14 +45,9 @@ fn open<'a>(f: Format, bytes: &'a [u8], limits: &Limits) -> Result<impl ImageDec
     il.max_image_height = Some(limits.max_height);
     il.max_alloc = Some(limits.max_alloc);
     reader.limits(il);
-    let dec = reader.into_decoder().map_err(|e| map_err(f, e))?;
+    let mut dec = reader.into_decoder().map_err(|e| map_err(f, e))?;
     let (w, h) = dec.dimensions();
     limits.check_bytes(w, h, dec.color_type().bytes_per_pixel() as u64)?;
-    Ok(dec)
-}
-
-pub(crate) fn decode(f: Format, bytes: &[u8], limits: &Limits) -> Result<Image, CodecError> {
-    let mut dec = open(f, bytes, limits)?;
     let icc = dec.icc_profile().ok().flatten();
     let exif = dec.exif_metadata().ok().flatten();
     let dynimg = DynamicImage::from_decoder(dec).map_err(|e| map_err(f, e))?;
@@ -65,18 +58,6 @@ pub(crate) fn decode(f: Format, bytes: &[u8], limits: &Limits) -> Result<Image, 
         img.warnings.extend(gif_more_frames(bytes));
     }
     Ok(img)
-}
-
-/// The stored size and EXIF block [`decode`] would find, from the decoder's header alone: the
-/// same reader, limits and size check, without decoding pixels. AVIF is refused: its decoder
-/// decodes the image as it opens.
-pub(crate) fn probe(f: Format, bytes: &[u8], limits: &Limits) -> Result<(u32, u32, Option<Vec<u8>>), CodecError> {
-    if f == Format::Avif {
-        return Err(CodecError::unsupported(f, "no header-only size probe"));
-    }
-    let mut dec = open(f, bytes, limits)?;
-    let (w, h) = dec.dimensions();
-    Ok((w, h, dec.exif_metadata().ok().flatten()))
 }
 
 /// Counts a GIF's frames (image descriptors) by walking its blocks, without decompressing any.
@@ -164,10 +145,6 @@ pub(crate) fn encode(f: Format, src: &Image, plan: Plan, opts: &EncodeOptions) -
         return Err(CodecError::encode(f, format!("dimensions exceed {mw}x{mh}")));
     }
     let img = src.converted(plan.layout, plan.sample);
-    // Targa is written by our encoder: the image crate's RLE packets cross scanlines (#6382).
-    if f == Format::Tga {
-        return super::tga::encode(&img);
-    }
     let dynimg = to_dynamic(&img)?;
     let mut cursor = Cursor::new(Vec::new());
     match f {

@@ -566,7 +566,6 @@ fn gradient_map_stop_controls_fit_a_narrow_properties_panel_in_every_theme() {
                         gradients: Vec::new(),
                         dialog: false,
                         dynamic_color_sliders: true,
-                        isolated_curve: None,
                     };
                     editor(ui, "gradientMap", values, &cx);
                 },
@@ -775,7 +774,6 @@ fn editor_harness(kind: &'static str, params: serde_json::Value) -> Harness<'sta
                 gradients: Vec::new(),
                 dialog: true,
                 dynamic_color_sliders: true,
-                isolated_curve: None,
             };
             editor(ui, kind, values, &cx);
         },

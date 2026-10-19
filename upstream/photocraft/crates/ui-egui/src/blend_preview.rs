@@ -1,5 +1,5 @@
-//! Layers panel: hovering a mode in the open blend-mode list previews it on the layers it would
-//! change, the active one or every selected one (Photoshop's live blend-mode preview, #970). Hovering records nothing: leaving the list, or
+//! Layers panel: hovering a mode in the open blend-mode list previews it on the active layer
+//! (Photoshop's live blend-mode preview, #970). Hovering records nothing: leaving the list, or
 //! closing it without a choice, shows the document again, and choosing a mode commits it through
 //! `layer.setProps` (one history step). The canvas re-renders once per hovered mode, and only
 //! where the layer's blending can change pixels.
@@ -15,17 +15,17 @@ use crate::PhotocraftApp;
 /// Preview keys (`canvas::display_doc`) are `BASE` plus a hash of the revision and the mode.
 const BASE: u64 = 1 << 37;
 
-/// A blend mode hovered for layers of a document at a revision.
+/// A blend mode hovered for a layer of a document at a revision.
 pub(crate) struct BlendPreview {
     doc: DocId,
     revision: u64,
-    layers: Vec<LayerId>,
+    layer: LayerId,
     /// The mode under the pointer; `None` once it left the list (the rest stays for the
     /// canvas's damage on its way back to the document).
     mode: Option<BlendMode>,
     /// The frame the list was last drawn in: a list no longer drawn previews nothing.
     frame: u64,
-    /// Where the layers' blending can change pixels; `None` for anywhere.
+    /// Where the layer's blending can change pixels; `None` for anywhere.
     area: Option<Rect>,
     /// The document shown for `mode`, with its key.
     shown: Option<(u64, Arc<Document>)>,
@@ -33,11 +33,11 @@ pub(crate) struct BlendPreview {
 
 /// The Layers panel, each frame it draws `layer`'s blend-mode dropdown: the mode under the
 /// pointer in its open list, if any.
-pub(crate) fn hover(app: &mut PhotocraftApp, layers: &[LayerId], mode: Option<BlendMode>) {
+pub(crate) fn hover(app: &mut PhotocraftApp, layer: LayerId, mode: Option<BlendMode>) {
     let frame = app.frame;
     let Some(st) = app.session.active() else { return };
     let (doc, revision) = (st.doc.id, st.revision);
-    if let Some(p) = app.blend_preview.as_mut().filter(|p| p.doc == doc && p.revision == revision && p.layers == layers) {
+    if let Some(p) = app.blend_preview.as_mut().filter(|p| p.doc == doc && p.revision == revision && p.layer == layer) {
         p.frame = frame;
         if mode.is_none() {
             p.shown = None;
@@ -46,15 +46,8 @@ pub(crate) fn hover(app: &mut PhotocraftApp, layers: &[LayerId], mode: Option<Bl
         return;
     }
     app.blend_preview = mode.and_then(|mode| {
-        // Anywhere when any layer can change anything; else the union of their areas.
-        let mut area: Option<Rect> = Some(Rect::EMPTY);
-        for &id in layers {
-            area = match (area, photocraft_compose::change_bounds(st.doc.layer(id)?, st.doc.bounds())) {
-                (Some(a), Some(b)) => Some(if a.is_empty() { b } else { a.union(&b) }),
-                _ => None,
-            };
-        }
-        Some(BlendPreview { doc, revision, layers: layers.to_vec(), mode: Some(mode), frame, area, shown: None })
+        let area = photocraft_compose::change_bounds(st.doc.layer(layer)?, st.doc.bounds());
+        Some(BlendPreview { doc, revision, layer, mode: Some(mode), frame, area, shown: None })
     });
 }
 
@@ -64,23 +57,15 @@ pub(crate) fn display_doc(app: &mut PhotocraftApp, idx: usize) -> Option<(Arc<Do
     let st = app.session.documents().get(idx)?;
     let p = app.blend_preview.as_mut().filter(|p| p.doc == st.doc.id && p.revision == st.revision && p.frame + 1 >= frame)?;
     let mode = p.mode?;
-    let key = preview_key(p.revision, &p.layers, mode);
+    let key = preview_key(p.revision, p.layer, mode);
     if let Some((k, shown)) = &p.shown
         && *k == key
     {
         return Some((shown.clone(), key));
     }
     let mut doc = (*st.doc).clone();
-    let mut changed = false;
-    for &id in &p.layers {
-        if let Some(l) = doc.layer_mut(id).filter(|l| l.blend != mode) {
-            l.blend = mode;
-            changed = true;
-        }
-    }
-    if !changed {
-        return None;
-    }
+    let l = doc.layer_mut(p.layer).filter(|l| l.blend != mode)?;
+    l.blend = mode;
     // Duotone documents display through their inks.
     let doc = Arc::new(photocraft_engine::mode_cmds::display_document(&doc).unwrap_or(doc));
     p.shown = Some((key, doc.clone()));
@@ -88,7 +73,7 @@ pub(crate) fn display_doc(app: &mut PhotocraftApp, idx: usize) -> Option<(Arc<Do
 }
 
 /// What changed between preview (or document) key `seen` and `now` of document `doc` at
-/// `revision`: the hovered layers' area. `None` when either key is another kind of preview, or
+/// `revision`: the hovered layer's area. `None` when either key is another kind of preview, or
 /// the layer can change anything (the canvas then recomposites everything).
 pub(crate) fn damage(app: &PhotocraftApp, doc: DocId, revision: u64, seen: u64, now: u64) -> Option<Rect> {
     let p = app.blend_preview.as_ref().filter(|p| p.doc == doc && p.revision == revision)?;
@@ -100,9 +85,8 @@ fn is_preview_key(key: u64) -> bool {
     (BASE..BASE << 1).contains(&key)
 }
 
-fn preview_key(revision: u64, layers: &[LayerId], mode: BlendMode) -> u64 {
-    let seed = layers.iter().fold(revision.wrapping_mul(0x9e37_79b9_7f4a_7c15), |h, id| h.wrapping_mul(0x100_0000_01b3) ^ id.0);
-    let h = mode.label().bytes().fold(seed, |h, b| h.wrapping_mul(31).wrapping_add(u64::from(b)));
+fn preview_key(revision: u64, layer: LayerId, mode: BlendMode) -> u64 {
+    let h = mode.label().bytes().fold(revision.wrapping_mul(0x9e37_79b9_7f4a_7c15) ^ layer.0, |h, b| h.wrapping_mul(31).wrapping_add(u64::from(b)));
     (h & (BASE - 1)) | BASE
 }
 

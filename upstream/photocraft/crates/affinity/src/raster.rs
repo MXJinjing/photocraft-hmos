@@ -117,11 +117,6 @@ fn decode(r: &mut Reader, bitmap: ObjId, crop: (u32, u32, u32, u32), world: Affi
             return Ok(None);
         }
     };
-    // A layer is materialized from its declared size, whatever the tiles hold: admit the output
-    // and the planes it decodes through before either is allocated (#4960).
-    let pixels = (w as usize).checked_mul(h as usize).ok_or(Error::Limit("pixel layer size"))?;
-    let scratch = pixels.checked_mul(channels * bps).ok_or(Error::Limit("pixel layer size"))?;
-    r.admit_pixels(pixels.checked_mul(4).ok_or(Error::Limit("pixel layer size"))?, scratch)?;
     let mut planes = Vec::with_capacity(channels);
     let mut cache = HashMap::new();
     for c in 1..=channels {

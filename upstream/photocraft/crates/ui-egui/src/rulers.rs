@@ -93,17 +93,6 @@ pub struct GuideDrag {
     pub vertical: bool,
     pub index: Option<usize>,
     pub pos: f64,
-    /// Where the pointer went down, on the guide's axis: released there, an existing guide is
-    /// clicked (selected), not moved.
-    pub press: f64,
-}
-
-impl GuideDrag {
-    /// An existing guide taken at document point `p`.
-    pub fn existing(vertical: bool, index: usize, p: [f64; 2]) -> Self {
-        let at = if vertical { p[0] } else { p[1] };
-        Self { vertical, index: Some(index), pos: at, press: at }
-    }
 }
 
 /// Canvas area left after the rulers.
@@ -170,12 +159,6 @@ fn guide_segment(xf: &ViewXform, clip: Rect, vertical: bool, pos: f64) -> [Pos2;
     if vertical { [xf.to_screen(pos, lo), xf.to_screen(pos, hi)] } else { [xf.to_screen(lo, pos), xf.to_screen(hi, pos)] }
 }
 
-/// The cursor over a guide: the arrow across it as the view shows it. A vertical guide moves left
-/// and right in the document; a rotated view turns that, as it turns the guide (#3277).
-pub fn guide_cursor(xf: &ViewXform, vertical: bool) -> egui::CursorIcon {
-    crate::tool_cursor::resize(if vertical { [1.0, 0.0] } else { [0.0, 1.0] }, xf)
-}
-
 pub fn draw_guides(app: &PhotocraftApp, painter: &egui::Painter, xf: &ViewXform, doc: &Document) {
     let clip = painter.clip_rect();
     let drag = app.guide_drag;
@@ -189,13 +172,8 @@ pub fn draw_guides(app: &PhotocraftApp, painter: &egui::Painter, xf: &ViewXform,
         styled_line(painter, a, b, Stroke::new(1.0, color), style);
     };
     // A guide given a colour in New Guide keeps it; the rest use the preference colour (or, while
-    // New Guide Layout previews, the colour it will set). The selected guide is Photoshop's blue.
-    let own = |vertical: bool, p: f64| {
-        if crate::guide_select::is_selected(app, vertical, p) {
-            return crate::guide_select::SELECTED_COLOR;
-        }
-        guides.color(vertical, p).map_or(guide, |[r, g, b]| Color32::from_rgb(r, g, b))
-    };
+    // New Guide Layout previews, the colour it will set).
+    let own = |vertical: bool, p: f64| guides.color(vertical, p).map_or(guide, |[r, g, b]| Color32::from_rgb(r, g, b));
     if app.ui.extras.guides || preview.is_some() {
         for (vertical, list) in [(true, &guides.vertical), (false, &guides.horizontal)] {
             for (i, p) in list.iter().enumerate() {
@@ -235,26 +213,16 @@ pub fn guide_at(app: &PhotocraftApp, x: f64, y: f64) -> Option<(bool, usize)> {
     None
 }
 
-/// Finish a guide drag: create, move, or delete (dropped outside the canvas). An existing guide
-/// released where it was pressed is a click: it's selected and stays put, as in Photoshop; a
-/// moved one stays selected.
+/// Finish a guide drag: create, move, or delete (dropped outside the canvas).
 pub fn finish_drag(app: &mut PhotocraftApp, d: GuideDrag) {
     let Some(size) = app.session.active().map(|s| s.doc.size) else { return };
-    if let Some(i) = d.index
-        && (d.pos - d.press).abs() * f64::from(app.point_zoom().max(0.01)) < 0.5
-    {
-        crate::guide_select::select(app, d.vertical, i);
-        return;
-    }
     let extent = if d.vertical { size.width } else { size.height } as f64;
     let orientation = if d.vertical { "vertical" } else { "horizontal" };
     let inside = d.pos >= 0.0 && d.pos <= extent;
     let pos = (d.pos * 1000.0).round() / 1000.0;
     let _ = match (d.index, inside) {
         (None, true) => app.run("view.newGuide", json!({"orientation": orientation, "position": pos})),
-        (Some(i), true) => app
-            .run("view.moveGuide", json!({"orientation": orientation, "index": i, "position": pos}))
-            .inspect(|_| crate::guide_select::select(app, d.vertical, i)),
+        (Some(i), true) => app.run("view.moveGuide", json!({"orientation": orientation, "index": i, "position": pos})),
         (Some(i), false) => app.run("view.deleteGuide", json!({"orientation": orientation, "index": i})),
         (None, false) => Ok(serde_json::Value::Null),
     };
@@ -431,13 +399,10 @@ pub fn draw_rulers(app: &mut PhotocraftApp, ui: &mut egui::Ui, full: Rect, xf: &
             ui.ctx().set_cursor_icon(if vertical { egui::CursorIcon::ResizeHorizontal } else { egui::CursorIcon::ResizeVertical });
         }
         if let Some(pos) = resp.interact_pointer_pos().filter(|_| salt != "ruler-corner" && (resp.dragged() || resp.drag_started())) {
-            // ⌥/Alt turns the guide the other way, as in Photoshop: a vertical guide out of the top
-            // ruler, a horizontal one out of the left (#5698), switching as Alt goes up and down.
-            let vertical = vertical != ui.input(|i| i.modifiers.alt);
             let d = xf.to_doc(pos);
             let along = if vertical { d[0] } else { d[1] };
             let pos = if ui.input(|i| i.modifiers.shift) { snap_to_tick(app, xf, vertical, along) } else { crate::snap_ui::snap_guide(app, vertical, along) };
-            app.guide_drag = Some(GuideDrag { vertical, index: None, pos, press: pos });
+            app.guide_drag = Some(GuideDrag { vertical, index: None, pos });
         }
         if resp.drag_stopped()
             && let Some(d) = app.guide_drag.take()
@@ -668,24 +633,6 @@ mod tests {
         assert!(h.query_by_label("50").is_none(), "not the raw image x");
     }
 
-    /// #5728: dragging a guide shows its coordinate in the Info panel on one axis only.
-    #[test]
-    fn info_panel_shows_guide_drag_position_outside_canvas() {
-        use egui_kittest::kittest::Queryable;
-        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
-        app.run("file.new", json!({"width": 200, "height": 100})).unwrap();
-        app.hover_doc = None;
-        app.guide_drag = Some(GuideDrag { vertical: true, index: None, pos: 42.0, press: 42.0 });
-        let mut h = egui_kittest::Harness::builder()
-            .with_size(vec2(260.0, 240.0))
-            .build_ui_state(|ui, app| crate::panels::dock_body(app, ui, crate::dock::Group::Navigator, 2), app);
-        h.run_steps(2);
-        assert!(h.query_by_label("42").is_some(), "vertical guide: X readout");
-        h.state_mut().guide_drag = Some(GuideDrag { vertical: false, index: None, pos: 17.0, press: 17.0 });
-        h.run_steps(2);
-        assert!(h.query_by_label("17").is_some(), "horizontal guide: Y readout");
-    }
-
     #[test]
     fn percentage_grid_spacing_uses_both_canvas_dimensions() {
         let mut g = GuidesGridAndSlices { grid_unit: Unit::Percent, gridline_every: 20.0, subdivisions: 2, ..Default::default() };
@@ -810,14 +757,14 @@ mod tests {
         let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
         app.session.execute("file.new", json!({"width": 200, "height": 100})).unwrap();
         app.sync_views();
-        finish_drag(&mut app, GuideDrag { vertical: true, index: None, pos: 50.0, press: 50.0 });
-        finish_drag(&mut app, GuideDrag { vertical: false, index: None, pos: 500.0, press: 500.0 }); // off canvas: ignored
+        finish_drag(&mut app, GuideDrag { vertical: true, index: None, pos: 50.0 });
+        finish_drag(&mut app, GuideDrag { vertical: false, index: None, pos: 500.0 }); // off canvas: ignored
         assert_eq!(app.session.active().unwrap().doc.guides.vertical, vec![50.0]);
         assert!(app.session.active().unwrap().doc.guides.horizontal.is_empty());
         assert_eq!(guide_at(&app, 51.0, 10.0), Some((true, 0)));
-        finish_drag(&mut app, GuideDrag { vertical: true, index: Some(0), pos: 120.0, press: 50.0 });
+        finish_drag(&mut app, GuideDrag { vertical: true, index: Some(0), pos: 120.0 });
         assert_eq!(app.session.active().unwrap().doc.guides.vertical, vec![120.0]);
-        finish_drag(&mut app, GuideDrag { vertical: true, index: Some(0), pos: -30.0, press: 120.0 });
+        finish_drag(&mut app, GuideDrag { vertical: true, index: Some(0), pos: -30.0 });
         assert!(app.session.active().unwrap().doc.guides.vertical.is_empty());
         app.ui.extras.lock_guides = true;
         assert_eq!(guide_at(&app, 0.0, 0.0), None);
@@ -943,20 +890,6 @@ mod tests {
         }
     }
 
-    /// The cursor over a guide turns with the view as the guide does: on a view turned 90°, a
-    /// vertical guide shows as a horizontal line and moves up and down.
-    #[test]
-    fn guide_cursors_turn_with_a_rotated_view() {
-        use egui::CursorIcon::{ResizeHorizontal as H, ResizeNeSw as NeSw, ResizeNwSe as NwSe, ResizeVertical as V};
-        let rect = Rect::from_min_size(pos2(0.0, 0.0), vec2(800.0, 600.0));
-        let level = ViewXform { rect, zoom: 1.0, center: [400.0, 300.0], flip: false, rotation: 0.0, aspect: 1.0 };
-        // View rotation, flip → the cursor over a vertical guide, over a horizontal guide.
-        for (rotation, flip, want) in [(0.0, false, [H, V]), (90.0, false, [V, H]), (45.0, false, [NwSe, NeSw]), (0.0, true, [H, V])] {
-            let xf = ViewXform { rotation, flip, ..level };
-            assert_eq!([guide_cursor(&xf, true), guide_cursor(&xf, false)], want, "view turned {rotation}°, flip {flip}");
-        }
-    }
-
     #[test]
     fn ruler_range_is_normalised_when_flipped() {
         // #1814: with View > Flip Horizontal, `to_doc` negates x, so the raw
@@ -970,35 +903,6 @@ mod tests {
             assert!(u0 <= u1, "flip={flip}: u0 ({u0}) must be <= u1 ({u1})");
             assert!(u1 - u0 > 0.0, "flip={flip}: range is empty");
         }
-    }
-
-    /// #5698: as in Photoshop, an Alt-drag out of the top ruler makes a vertical guide and one out
-    /// of the left ruler a horizontal guide; without Alt each ruler makes its own kind.
-    #[test]
-    fn alt_drags_a_guide_of_the_other_orientation_out_of_a_ruler() {
-        let full = Rect::from_min_size(Pos2::ZERO, vec2(400.0, 300.0));
-        let rect = Rect::from_min_max(full.min + vec2(RULER, RULER), full.max);
-        let xf = ViewXform { rect, zoom: 1.0, center: [128.0, 64.0], flip: false, rotation: 0.0, aspect: 1.0 };
-        let drag = |from: Pos2, modifiers: egui::Modifiers| {
-            let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
-            app.run("file.new", json!({"width": 256, "height": 128})).unwrap();
-            let mut h = egui_kittest::Harness::builder().with_size(vec2(400.0, 300.0)).build_ui_state(move |ui, app| draw_rulers(app, ui, full, &xf), app);
-            let to = xf.to_screen(37.0, 90.0);
-            h.event_modifiers(egui::Event::PointerMoved(from), modifiers);
-            h.event_modifiers(egui::Event::PointerButton { pos: from, button: egui::PointerButton::Primary, pressed: true, modifiers }, modifiers);
-            h.run_steps(1);
-            h.event_modifiers(egui::Event::PointerMoved(to), modifiers);
-            h.run_steps(1);
-            h.event_modifiers(egui::Event::PointerButton { pos: to, button: egui::PointerButton::Primary, pressed: false, modifiers }, modifiers);
-            h.run_steps(2);
-            let g = &h.state().session.active().unwrap().doc.guides;
-            (g.vertical.clone(), g.horizontal.clone())
-        };
-        let (top, left) = (pos2(200.0, RULER / 2.0), pos2(RULER / 2.0, 150.0));
-        assert_eq!(drag(top, egui::Modifiers::NONE), (vec![], vec![90.0]), "top ruler: horizontal");
-        assert_eq!(drag(left, egui::Modifiers::NONE), (vec![37.0], vec![]), "left ruler: vertical");
-        assert_eq!(drag(top, egui::Modifiers::ALT), (vec![37.0], vec![]), "Alt from the top ruler: vertical");
-        assert_eq!(drag(left, egui::Modifiers::ALT), (vec![], vec![90.0]), "Alt from the left ruler: horizontal");
     }
 
     /// #3770: a guide Shift-dragged out of a ruler lands on the nearest tick the ruler draws
@@ -1028,8 +932,6 @@ mod tests {
             h.state().session.active().unwrap().doc.guides.vertical.clone()
         };
         assert_eq!(drag_guide(egui::Modifiers::NONE), vec![37.0]);
-        // #5698: Alt turns it into a horizontal guide (at the drop's y, the document's centre).
-        assert_eq!(drag_guide(egui::Modifiers::ALT), Vec::<f64>::new(), "no vertical guide with Alt");
         // Pixels at 100%: labels every 100 px, ticks every 10 px.
         assert_eq!(drag_guide(egui::Modifiers::SHIFT), vec![40.0]);
 

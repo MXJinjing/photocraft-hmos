@@ -4,9 +4,6 @@
 //!   library as one group named after the file, with the file's own folders nested inside it
 //!   as Photoshop does (Brushes panel › Import Brushes…, Preset Manager). Parsing lives in
 //!   `photocraft-psd` (`abr`), the mapping onto [`BrushSettings`] in `photocraft-io` (`abr_map`).
-//! - `brush.presets.importImage` turns an image file (anything File › Open reads: PNG, JPEG,
-//!   TIFF, PSD…) into a sampled-tip brush preset, as Edit › Define Brush Preset does with a
-//!   selection: dark pixels paint, white and transparent ones don't (TOOL-213-12).
 //! - `gradient.presets.importGrd` adds the gradients of a `.grd` file (version 5) to the
 //!   Gradients panel as one group.
 //!
@@ -118,87 +115,6 @@ fn add_abr_presets(s: &mut Session, p: &Value, group: String, imp: photocraft_io
     Ok(json!({ "group": group, "imported": names, "count": names.len(), "folders": folders, "version": imp.version, "warnings": imp.warnings }))
 }
 
-/// The image's paint amount (darkness × alpha of its composite, as Define Brush Preset reads a
-/// selection), cropped to the painted extent. The composite is rendered in bands twice: once to
-/// find the painted bounds, then only those, so a large mostly-white image never needs a
-/// full-size buffer.
-fn image_paint(doc: &photocraft_doc::Document, cmd: &str) -> Result<(Vec<f32>, usize, usize)> {
-    let paint = |c: [f32; 4]| ((1.0 - photocraft_color::blend::lum([c[0], c[1], c[2]])) * c[3]).clamp(0.0, 1.0);
-    let mut bounds: Option<photocraft_geom::Rect> = None;
-    let _ = photocraft_compose::render_bands(doc, doc.bounds(), 0, |band| -> std::result::Result<(), ()> {
-        let w = band.rect.width() as usize;
-        for (i, c) in band.px.iter().enumerate() {
-            if paint(*c) > 1e-4 {
-                let (x, y) = (band.rect.x0 + (i % w.max(1)) as i32, band.rect.y0 + (i / w.max(1)) as i32);
-                let px = photocraft_geom::Rect::new(x, y, x.saturating_add(1), y.saturating_add(1));
-                bounds = Some(bounds.map_or(px, |b| b.union(&px)));
-            }
-        }
-        Ok(())
-    });
-    let area = bounds.ok_or_else(|| bad(cmd, "the image contains no paint (all white or transparent)"))?;
-    let max = crate::brush_cmds::MAX_TIP;
-    if area.width().max(area.height()) > max {
-        return Err(bad(cmd, format!("the painted part of the image is too large for a brush tip ({}×{}; max {max} px)", area.width(), area.height())));
-    }
-    let (w, h) = (area.width() as usize, area.height() as usize);
-    let mut v = vec![0.0f32; w * h];
-    let _ = photocraft_compose::render_bands(doc, area, 0, |band| -> std::result::Result<(), ()> {
-        let bw = band.rect.width() as usize;
-        for (i, c) in band.px.iter().enumerate() {
-            let (x, y) = ((band.rect.x0 - area.x0) as usize + i % bw.max(1), (band.rect.y0 - area.y0) as usize + i / bw.max(1));
-            if let Some(out) = v.get_mut(y * w + x) {
-                *out = paint(*c);
-            }
-        }
-        Ok(())
-    });
-    Ok((v, w, h))
-}
-
-/// Brushes panel › Import Brushes… with an image file: a new sampled-tip preset named after the
-/// file (never overwriting one), made the current brush unless `select` is false.
-fn import_image(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "brush.presets.importImage";
-    let (bytes, stem) = file_bytes(p, cmd, "image file")?;
-    let file_name = match p.get("fileName") {
-        None => None,
-        Some(v) => Some(v.as_str().map(str::trim).filter(|n| !n.is_empty()).ok_or_else(|| bad(cmd, "`fileName` must be a non-empty string"))?),
-    };
-    // The decoder picks the format by content, falling back to the name's extension.
-    let decode_name = p.get("path").and_then(Value::as_str).or(file_name).unwrap_or("image");
-    let stem = if stem.is_empty() {
-        file_name.and_then(|n| std::path::Path::new(n).file_stem()).map(|s| s.to_string_lossy().trim().to_string()).unwrap_or_default()
-    } else {
-        stem
-    };
-    let name = match p.get("name") {
-        None if stem.is_empty() => "Imported Brush".to_string(),
-        None => stem,
-        Some(v) => v.as_str().map(str::trim).filter(|n| !n.is_empty()).ok_or_else(|| bad(cmd, "`name` must be a non-empty string"))?.to_string(),
-    };
-    let doc = crate::file_cmds::import(decode_name, &bytes)?;
-    let (v, w, h) = image_paint(&doc, cmd)?;
-    let (brush, tw, th) = crate::brush_cmds::sampled_brush(cmd, &v, w, h)?;
-    let taken: Vec<String> = s.tools.presets.iter().map(|x| x.name.clone()).collect();
-    let name = unique(&name, &taken);
-    s.tools.presets.push(photocraft_paint::BrushPreset {
-        name: name.clone(),
-        brush: brush.clone(),
-        builtin: false,
-        group: String::new(),
-        folder: Vec::new(),
-        captures: Default::default(),
-    });
-    s.brush_presets_changed();
-    if p.get("select").and_then(Value::as_bool).unwrap_or(true) {
-        s.tools.brush = brush;
-        s.tools.current_preset = Some(name.clone());
-        s.tools.brush_changed();
-    }
-    Ok(json!({ "name": name, "width": tw, "height": th }))
-}
-
 /// Brush-file import command specs.
 pub fn specs() -> Vec<CommandSpec> {
     vec![
@@ -210,16 +126,6 @@ pub fn specs() -> Vec<CommandSpec> {
             params: r##"{"path":".abr file"?,"data":base64 bytes?,"group":string?=file name,"replace":bool=true (replace a group of the same name),"select":bool=false (make the first imported preset current)} → {group, imported, count, folders (nested folders kept from the file), version, warnings}"##,
             enabled: always,
             run: import_abr,
-            journal: true,
-        },
-        CommandSpec {
-            id: "brush.presets.importImage",
-            label: "Import Brush from Image…",
-            menu: &[],
-            shortcut: None,
-            params: r##"{"path":"image file (PNG, JPEG, TIFF, PSD…)"?,"data":base64 bytes?,"fileName":string? (with data: the file's name, for its format and the default preset name),"name":string?=file name,"select":bool=true (make it the current brush)} → {name, width, height}"##,
-            enabled: always,
-            run: import_image,
             journal: true,
         },
         CommandSpec {
@@ -454,76 +360,6 @@ mod tests {
         assert!(w.iter().all(|v| (v - 1.0).abs() < 0.01), "{w:?}");
         let k = lab_to_rgb([0.0, 0.0, 0.0]);
         assert!(k.iter().all(|v| *v < 0.01), "{k:?}");
-    }
-
-    /// A 40×30 16-bit RGBA PNG: transparent, a white opaque band (no paint) and a black 10×6 block
-    /// at (5, 8) (full paint).
-    fn stamp_png16() -> Vec<u8> {
-        let mut px = vec![0u16; 40 * 30 * 4];
-        for y in 0..30 {
-            for x in 0..40 {
-                let i = (y * 40 + x) * 4;
-                if (5..15).contains(&x) && (8..14).contains(&y) {
-                    px[i + 3] = u16::MAX;
-                } else if y >= 20 {
-                    px[i..i + 4].copy_from_slice(&[u16::MAX; 4]);
-                }
-            }
-        }
-        let img = photocraft_codecs::Image::from_u16(40, 30, photocraft_codecs::ChannelLayout::Rgba, &px).unwrap();
-        photocraft_codecs::encode(&img, photocraft_codecs::Format::Png, &Default::default()).unwrap()
-    }
-
-    #[test]
-    fn imports_an_image_as_a_brush_tip() {
-        use photocraft_paint::TipShape;
-        let mut s = Session::new();
-        let data = photocraft_paint::tile::b64_encode(&stamp_png16());
-        let r = s.execute("brush.presets.importImage", json!({"data": data, "fileName": "Stamp.png"})).unwrap();
-        assert_eq!(r, json!({"name": "Stamp", "width": 10, "height": 6}), "cropped to the dark block");
-        let pr = s.tools.presets.iter().find(|p| p.name == "Stamp").unwrap();
-        let TipShape::Sampled(tip) = &pr.brush.tip else { panic!("sampled tip expected") };
-        assert_eq!((tip.width, tip.height), (10, 6));
-        assert!((pr.brush.size - 10.0).abs() < 1e-6);
-        assert_eq!(s.tools.current_preset.as_deref(), Some("Stamp"), "the imported brush is current");
-        assert!(matches!(s.tools.brush.tip, TipShape::Sampled(_)));
-        // A second import keeps the first: a new name, and `select: false` leaves the brush alone.
-        let r = s.execute("brush.presets.importImage", json!({"data": data, "fileName": "Stamp.png", "select": false})).unwrap();
-        assert_eq!(r["name"], "Stamp 2");
-        assert_eq!(s.tools.current_preset.as_deref(), Some("Stamp"));
-
-        // An 8-bit grayscale JPEG from disk: named after the file.
-        let px: Vec<u8> = (0..24 * 24).map(|i| if (8..16).contains(&(i % 24)) && (4..20).contains(&(i / 24)) { 0 } else { 255 }).collect();
-        let img = photocraft_codecs::Image::from_u8(24, 24, photocraft_codecs::ChannelLayout::Gray, px).unwrap();
-        let jpeg = photocraft_codecs::encode(&img, photocraft_codecs::Format::Jpeg, &Default::default()).unwrap();
-        let path = std::env::temp_dir().join(format!("pc-brush-tip-{}.jpg", std::process::id()));
-        std::fs::write(&path, jpeg).unwrap();
-        let r = s.execute("brush.presets.importImage", json!({"path": path.to_string_lossy()}));
-        let _ = std::fs::remove_file(&path);
-        let r = r.unwrap();
-        assert!(r["name"].as_str().unwrap().starts_with("pc-brush-tip-"), "{r}");
-        let (w, h) = (r["width"].as_u64().unwrap(), r["height"].as_u64().unwrap());
-        assert!((8..=10).contains(&w) && (16..=18).contains(&h), "JPEG ringing aside, the bar: {r}");
-    }
-
-    #[test]
-    fn image_brush_import_fails_cleanly() {
-        let mut s = Session::new();
-        let white = photocraft_codecs::Image::from_u8(4, 4, photocraft_codecs::ChannelLayout::Gray, vec![255; 16]).unwrap();
-        let white = photocraft_paint::tile::b64_encode(&photocraft_codecs::encode(&white, photocraft_codecs::Format::Png, &Default::default()).unwrap());
-        let n = s.tools.presets.len();
-        for p in [
-            json!({}),
-            json!({"data": white}),
-            json!({"data": "@@"}),
-            json!({"data": photocraft_paint::tile::b64_encode(b"not an image")}),
-            json!({"data": white, "name": 3}),
-            json!({"data": white, "fileName": ""}),
-            json!({"path": "/nope/brush.png"}),
-        ] {
-            assert!(s.execute("brush.presets.importImage", p.clone()).is_err(), "{p}");
-        }
-        assert_eq!(s.tools.presets.len(), n, "a failed import adds nothing");
     }
 
     #[test]

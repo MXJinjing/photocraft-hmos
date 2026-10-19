@@ -19,10 +19,95 @@ pub(crate) fn modal_allows(app: &PhotocraftApp, id: &str) -> bool {
 /// Top-level menus in Photoshop order.
 pub const TOP_MENUS: [&str; 10] = ["File", "Edit", "Image", "Layer", "Type", "Select", "Filter", "View", "Window", "Help"];
 
-/// The table is the engine's ([`photocraft_engine::shell_commands::SHELL_COMMANDS`]), so the
-/// commands and their keys exist without this UI (headless shortcut sets, lists, conflicts).
-pub const UI_COMMANDS: &[(&str, &str, &[&str], Option<&str>)] = photocraft_engine::shell_commands::SHELL_COMMANDS;
-
+/// UI-level commands (handled by the shell rather than the engine): id, label, menu, shortcut.
+pub const UI_COMMANDS: &[(&str, &str, &[&str], Option<&str>)] = &[
+    ("ui.symmetryTransform", "Transform Symmetry", &[], None),
+    // Right-click the options bar's tool icon (#2825); `tool.resetAll` asks first.
+    ("tool.reset", "Reset Tool", &[], None),
+    ("tool.resetAll", "Reset All Tools", &[], None),
+    ("window.panel.group", "Change Panel Group", &[], None),
+    ("window.panel.layout", "Change Panel Layout", &[], None),
+    ("window.panel.move", "Move Panel", &[], None),
+    ("window.panel.float", "Float Panel", &[], None),
+    ("window.panel.dock", "Dock Panel", &[], None),
+    ("window.panel.activate", "Activate Panel", &[], None),
+    ("window.panel.close", "Close Panel", &[], None),
+    ("file.open", "Open…", &["File"], Some("Cmd+O")),
+    ("file.save", "Save", &["File"], Some("Cmd+S")),
+    ("file.saveAs", "Save As…", &["File"], Some("Cmd+Shift+S")),
+    ("file.exit", "Exit", &["File"], Some("Cmd+Q")),
+    ("edit.freeTransform", "Free Transform", &["Edit"], Some("Cmd+T")),
+    ("file.export.exportAs", "Export As…", &["File", "Export"], Some("Cmd+Alt+Shift+W")),
+    ("file.export.quickExportAsPng", "Quick Export as PNG", &["File", "Export"], None),
+    ("edit.transform.scale", "Scale", &["Edit", "Transform"], None),
+    ("edit.transform.rotate", "Rotate", &["Edit", "Transform"], None),
+    ("edit.transform.skew", "Skew", &["Edit", "Transform"], None),
+    ("edit.transform.distort", "Distort", &["Edit", "Transform"], None),
+    ("edit.transform.perspective", "Perspective", &["Edit", "Transform"], None),
+    ("select.selectAndMask", "Select and Mask…", &["Select"], Some("Cmd+Alt+R")),
+    ("view.rulers", "Rulers", &["View"], Some("Cmd+R")),
+    ("view.show.grid", "Grid", &["View", "Show"], Some("Cmd+'")),
+    ("view.show.guides", "Guides", &["View", "Show"], Some("Cmd+;")),
+    ("view.snap", "Snap", &["View"], Some("Cmd+Shift+;")),
+    ("view.lockGuides", "Lock Guides", &["View"], Some("Cmd+Alt+;")),
+    ("view.extras", "Extras", &["View"], Some("Cmd+H")),
+    ("view.show.targetPath", "Target Path", &["View", "Show"], Some("Cmd+Shift+H")),
+    ("view.screenMode.cycle", "Cycle Screen Mode", &[], Some("F")),
+    ("edit.freeTransformCopy", "Free Transform a Copy", &[], Some("Cmd+Alt+T")),
+    ("type.editText", "Edit Type", &[], None),
+    ("view.zoomIn", "Zoom In", &["View"], Some("Cmd+=")),
+    ("view.zoomOut", "Zoom Out", &["View"], Some("Cmd+-")),
+    ("view.fitOnScreen", "Fit on Screen", &["View"], Some("Cmd+0")),
+    ("view.actualPixels", "100%", &["View"], Some("Cmd+1")),
+    ("view.rotateView", "Rotate View", &[], None),
+    ("view.resetView", "Reset View", &["View"], None),
+    ("window.newWindowForDocument", "New Window for Document", &["Window", "Arrange"], None),
+    ("window.toggle.layers", "Layers", &["Window"], Some("F7")),
+    ("window.toggle.history", "History", &["Window"], None),
+    ("window.toggle.properties", "Properties", &["Window"], None),
+    ("window.toggle.color", "Color", &["Window"], Some("F6")),
+    ("window.toggle.brushSettings", "Brush Settings", &["Window"], Some("F5")),
+    ("window.toggle.navigator", "Navigator", &["Window"], None),
+    ("window.toggle.toolbar", "Tools", &["Window"], None),
+    // Photoshop's Tab and ⇧Tab: all panels (Tools, options bar and the dock), or only the dock.
+    ("window.togglePanels", "Show/Hide All Panels", &[], Some("Tab")),
+    ("window.toggle.dock", "Show/Hide Panels", &[], Some("Shift+Tab")),
+    ("window.toggle.options", "Options", &["Window"], None),
+    // Photoshop's Ctrl+Tab and Ctrl+Shift+Tab, on macOS too (⌘Tab belongs to the system, #2340).
+    ("window.nextDocument", "Next Document", &[], Some("Ctrl+Tab")),
+    ("window.previousDocument", "Previous Document", &[], Some("Ctrl+Shift+Tab")),
+    ("window.theme.toggle", "Next Appearance Mode", &["Window"], None),
+    ("window.theme.pro", "Pro Theme", &["Window", "Theme"], None),
+    ("window.theme.proMedium", "Pro Medium Gray Theme", &["Window", "Theme"], None),
+    ("window.theme.proLightGray", "Pro Light Gray Theme", &["Window", "Theme"], None),
+    ("window.theme.proLight", "Pro Light Theme", &["Window", "Theme"], None),
+    ("window.theme.studio", "Studio Theme", &["Window", "Theme"], None),
+    ("window.theme.studioLight", "Studio Light Theme", &["Window", "Theme"], None),
+    ("window.theme.classic", "Classic Theme", &["Window", "Theme"], None),
+    ("window.theme.solarizedDark", "Solarized Dark Theme", &["Window", "Theme"], None),
+    ("window.theme.adwaita", "Adwaita Light Theme", &["Window", "Theme"], None),
+    ("window.theme.adwaitaDark", "Adwaita Dark Theme", &["Window", "Theme"], None),
+    ("window.theme.breezeLight", "Breeze Light Theme", &["Window", "Theme"], None),
+    ("window.theme.breezeDark", "Breeze Dark Theme", &["Window", "Theme"], None),
+    ("window.theme.softLight", "Soft Light Theme", &["Window", "Theme"], None),
+    ("window.theme.softDark", "Soft Dark Theme", &["Window", "Theme"], None),
+    ("window.theme.arkuiLight", "ArkUI Light Theme", &["Window", "Theme"], None),
+    ("window.theme.arkuiDark", "ArkUI Dark Theme", &["Window", "Theme"], None),
+    ("window.theme.arkuiProLight", "ArkUI Pro Light Theme", &["Window", "Theme"], None),
+    ("window.theme.arkuiProDark", "ArkUI Pro Dark Theme", &["Window", "Theme"], None),
+    ("window.theme.system", "Sync with system", &["Window", "Theme"], None),
+    ("edit.search", "Search…", &["Edit"], Some("Cmd+F")),
+    #[cfg(not(feature = "harmonyos-ui"))]
+    ("help.discord", "Join the ArtCraft Discord…", &["Help"], None),
+    #[cfg(not(feature = "harmonyos-ui"))]
+    ("help.website", "PhotoCraft Website", &["Help"], None),
+    #[cfg(not(feature = "harmonyos-ui"))]
+    ("help.artcraftWebsite", "ArtCraft Website", &["Help"], None),
+    ("help.github", "PhotoCraft on GitHub", &["Help"], None),
+    ("help.reportIssue", "Report an Issue…", &["Help"], None),
+    ("help.systemInfo", "System Info…", &["Help"], None),
+    ("help.about", "About PhotoCraft", &["Help"], None),
+];
 
 /// Window › <document>: the open documents, listed at the end of the Window menu as in Photoshop.
 /// The id ends in the document's index, which is its tab's position.
@@ -1216,7 +1301,7 @@ pub fn menu_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui, budget: f32) -> f32 
                                 let mine: Vec<&MenuItem> = items.iter().filter(|i| i.path.first().map(String::as_str) == Some(top)).collect();
                                 let enabled = !mine.is_empty();
                                 ui.add_enabled_ui(enabled, |ui| {
-                                    nav.row(ui, 0, enabled, None, None, |ui, nav| {
+                                    nav.row(ui, 0, enabled, None, |ui, nav| {
                                         let label = crate::i18n::tr(lang, top);
                                         let r = ui.menu_button(label, |ui| {
                                             ui.set_min_width(220.0);
@@ -1467,7 +1552,7 @@ fn help_search(ui: &mut egui::Ui, items: &[MenuItem], opening: bool, clicked: &m
             if let Some(sc) = &it.shortcut {
                 b = b.shortcut_text(crate::shortcuts::pretty(sc));
             }
-            let hit = nav.row(ui, 0, it.enabled, Some(&it.id), None, |ui, _| {
+            let hit = nav.row(ui, 0, it.enabled, Some(&it.id), |ui, _| {
                 let r = ui.add_enabled(it.enabled, b);
                 let hit = r.clicked() || released_on(ui, &r);
                 (r, hit)
@@ -1524,7 +1609,7 @@ fn render_level_rows(ui: &mut egui::Ui, items: &[&MenuItem], depth: usize, click
             if let Some(sc) = &it.shortcut {
                 b = b.shortcut_text(crate::shortcuts::pretty(sc));
             }
-            let hit = nav.row(ui, depth - 1, it.enabled, Some(&it.id), None, |ui, _| {
+            let hit = nav.row(ui, depth - 1, it.enabled, Some(&it.id), |ui, _| {
                 let r = ui.add_enabled(it.enabled, b);
                 let r = match it.id.as_str() {
                     "image.mode.bits8" | "image.mode.bits16" => r.on_hover_text(crate::i18n::tr(lang, "Integer")),
@@ -1548,7 +1633,7 @@ fn render_level_rows(ui: &mut egui::Ui, items: &[&MenuItem], depth: usize, click
             let child: Vec<&MenuItem> = items.iter().copied().filter(|c| c.path.len() > depth && c.path[depth] == name).collect();
             let enabled = submenu_enabled(&child);
             ui.add_enabled_ui(enabled, |ui| {
-                nav.row(ui, depth - 1, enabled, None, None, |ui, nav| {
+                nav.row(ui, depth - 1, enabled, None, |ui, nav| {
                     let r = ui.menu_button(crate::i18n::tr(lang, name), |ui| render_level(ui, &child, depth + 1, clicked, nav));
                     if r.inner.is_some() {
                         // Where the submenu hangs from, to keep it below the menu bar (#319).

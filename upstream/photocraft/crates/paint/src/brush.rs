@@ -10,7 +10,6 @@
 use photocraft_color::BlendMode;
 use serde::{Deserialize, Serialize};
 
-use crate::curve::ResponseCurve;
 use crate::mixer::MixerSettings;
 use crate::tile::{GrayTile, StoredTile};
 
@@ -52,24 +51,20 @@ pub struct Dynamic {
     pub fade_steps: u32,
     /// 0..1 floor the control/jitter may reduce the value to (minimum diameter, roundness, depth…).
     pub minimum: f32,
-    /// This dynamic's own response to its control (Fade, Pen Pressure, Pen Tilt, Stylus Wheel,
-    /// Rotation), applied after the global pen curve. Linear by default. Always written to JSON, so
-    /// a `tools.setBrush` patch can set it back to linear. Angle Jitter's controls ignore it.
-    pub curve: ResponseCurve,
 }
 
 impl Default for Dynamic {
     fn default() -> Self {
-        Self { jitter: 0.0, control: Control::Off, fade_steps: 25, minimum: 0.0, curve: ResponseCurve::LINEAR }
+        Self { jitter: 0.0, control: Control::Off, fade_steps: 25, minimum: 0.0 }
     }
 }
 
 impl Dynamic {
     pub const fn controlled(control: Control) -> Self {
-        Self { jitter: 0.0, control, fade_steps: 25, minimum: 0.0, curve: ResponseCurve::LINEAR }
+        Self { jitter: 0.0, control, fade_steps: 25, minimum: 0.0 }
     }
     pub const fn jitter(jitter: f32) -> Self {
-        Self { jitter, control: Control::Off, fade_steps: 25, minimum: 0.0, curve: ResponseCurve::LINEAR }
+        Self { jitter, control: Control::Off, fade_steps: 25, minimum: 0.0 }
     }
     pub fn is_active(&self) -> bool {
         self.jitter > 0.0 || self.control != Control::Off
@@ -587,15 +582,6 @@ impl Default for BrushSettings {
 }
 
 impl BrushSettings {
-    /// Resize the primary tip and keep an enabled Dual Brush tip at the same relative size.
-    /// An explicit Dual Brush size edit should bypass this and retain the requested diameter.
-    pub fn resize_with_dual_brush(&mut self, new_size: f32) {
-        if self.dual_brush.enabled && self.size.is_finite() && self.size > 0.0 && new_size.is_finite() && new_size > 0.0 {
-            self.dual_brush.size = (self.dual_brush.size * (new_size / self.size)).clamp(0.5, MAX_BRUSH_SIZE);
-        }
-        self.size = new_size;
-    }
-
     /// Copy the settings with the primary and dual diameters and Scatter amounts constrained for
     /// rasterization.
     ///
@@ -718,7 +704,7 @@ impl BrushSettings {
 pub struct BrushPreset {
     pub name: String,
     pub brush: BrushSettings,
-    /// Shipped with PhotoCraft (built-ins can be deleted from a session but are regenerated on reset).
+    /// Shipped with Photocraft (built-ins can be deleted from a session but are regenerated on reset).
     #[serde(default)]
     pub builtin: bool,
     /// Preset group (folder) in the Brushes panel, e.g. "General" or an imported file's name.
@@ -768,7 +754,7 @@ impl BrushPreset {
     pub fn picked_over(&self, current: &BrushSettings) -> BrushSettings {
         let mut b = self.brush.clone().picked_over(current);
         if !self.captures.size {
-            b.resize_with_dual_brush(current.size);
+            b.size = current.size;
         }
         if !self.captures.tool_settings {
             b.mode = current.mode;

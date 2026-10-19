@@ -90,11 +90,6 @@ fn unknown_flags_are_usage_errors() {
     // Every flag still works in both forms.
     let (out, _) = ok(bin().args(["commands", "--json", "--filter=gaussian"]));
     assert!(out.contains("filter.blur.gaussianBlur"), "{out}");
-    // The Elliptical Marquee is a `select.rect` option, found by its keywords (#5060).
-    for needle in ["ellipse", "marquee"] {
-        let (out, _) = ok(bin().args(["commands", "--filter", needle]));
-        assert!(out.contains("select.rect"), "{needle}: {out}");
-    }
     ok(bin().args(["batch", "--actions"]).arg(&actions).arg(format!("--in={}", input.display())).arg("--out").arg(&out_dir).args([
         "--format=jpg",
         "--quality",

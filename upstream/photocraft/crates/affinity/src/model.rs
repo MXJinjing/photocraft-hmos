@@ -288,7 +288,7 @@ pub fn read(bytes: &[u8], limits: Limits) -> Result<Document, Error> {
     let mut archive = Archive::open(bytes, limits)?;
     let doc = archive.read("doc.dat")?;
     let s = stream::parse(&doc)?;
-    Reader::new(&s, &mut archive, limits).document()
+    Reader::new(&s, &mut archive).document()
 }
 
 pub(crate) struct Reader<'s, 'a, 'b> {
@@ -298,27 +298,11 @@ pub(crate) struct Reader<'s, 'a, 'b> {
     warnings: BTreeMap<String, usize>,
     nodes: usize,
     active: HashSet<ObjId>,
-    /// Decoded pixels still available ([`Limits::max_pixel_bytes`] less what the layers read so
-    /// far hold).
-    pixels_left: usize,
 }
 
 impl<'s, 'a, 'b> Reader<'s, 'a, 'b> {
-    fn new(s: &'s Stream, archive: &'b mut Archive<'a>, limits: Limits) -> Self {
-        Self { s, archive, dpi: 72.0, warnings: BTreeMap::new(), nodes: 0, active: HashSet::new(), pixels_left: limits.max_pixel_bytes }
-    }
-
-    /// Admit a layer's decoded pixels before they are allocated (#4960). `rgba` is the layer's
-    /// output, which stays with the document; `planes` is the working set it decodes through and
-    /// releases. Every layer read so far is still live while this one decodes, so the peak is all
-    /// three together.
-    pub(crate) fn admit_pixels(&mut self, rgba: usize, planes: usize) -> Result<(), Error> {
-        let peak = rgba.saturating_add(planes);
-        if peak > self.pixels_left {
-            return Err(Error::Limit("decoded pixel layers exceed the pixel budget"));
-        }
-        self.pixels_left -= rgba;
-        Ok(())
+    fn new(s: &'s Stream, archive: &'b mut Archive<'a>) -> Self {
+        Self { s, archive, dpi: 72.0, warnings: BTreeMap::new(), nodes: 0, active: HashSet::new() }
     }
 
     pub(crate) fn warn(&mut self, what: impl Into<String>) {

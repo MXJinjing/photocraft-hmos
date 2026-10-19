@@ -46,8 +46,7 @@ impl Value {
     pub fn as_f64(&self) -> Option<f64> {
         match self {
             Value::Int(i) => Some(*i as f64),
-            // `inf`, `nan` and `1e999` parse as reals but are never a valid style number.
-            Value::Real(r) if r.is_finite() => Some(*r),
+            Value::Real(r) => Some(*r),
             _ => None,
         }
     }

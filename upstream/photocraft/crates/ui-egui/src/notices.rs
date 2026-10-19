@@ -105,14 +105,8 @@ pub fn slow_cpu_refresh(app: &mut PhotocraftApp, doc: u64, ms: f64, reason: Opti
         tl!("Edits that change the whole document, such as a layer's blend mode, opacity or visibility, redraw all of it.").into(),
     ];
     if reason == Some(crate::gpu_canvas::OVER_BUDGET) {
-        if let Some(fit) = app.perf.gpu_layer_fit.filter(|f| f.doc == doc && !f.fits()) {
-            lines.push(crate::i18n::fmt(
-                tl!("Its layers need {needed} of GPU memory; the budget leaves them {budget}."),
-                &[("needed", &crate::chrome_ui::fmt_bytes(fit.needed)), ("budget", &crate::chrome_ui::fmt_bytes(fit.budget))],
-            ));
-        }
         lines.push(
-            tl!("Set GPU Memory in Preferences › Performance to what your graphics card can hold, at most 3/8 of its memory. Automatic follows Memory Usage, within a quarter of this computer's memory and 3/8 of the card's, and doesn't count the document against a card whose memory is known. The status bar shows GPU Memory Full while they don't fit.")
+            tl!("Its layers don't fit the GPU memory budget. Raising Memory usage in Preferences › Performance raises the budget, up to a quarter of this computer's memory.")
                 .into(),
         );
     } else if let Some(r) = reason {
@@ -360,15 +354,12 @@ mod tests {
         slow_cpu_refresh(&mut app, 1, f64::NAN, Some(crate::gpu_canvas::OVER_BUDGET));
         assert!(app.ui.notices.is_empty(), "a quick refresh needs no explanation");
 
-        // The layers of document 1 need 3.6 GB and may hold 3.4 GB: the notice says so.
-        app.perf.gpu_layer_fit = Some(crate::gpu_canvas::LayerFit { doc: 1, needed: 3600 << 20, budget: 3400 << 20 });
         slow_cpu_refresh(&mut app, 1, 55_000.0, Some(crate::gpu_canvas::OVER_BUDGET));
         assert_eq!(app.ui.notices.len(), 1);
         let text = app.ui.notices[0].lines.join(" ");
         assert!(text.contains("55.0 s"), "{text}");
         assert!(text.contains("blend mode, opacity or visibility"), "{text}");
-        assert!(text.contains("need 3.5G of GPU memory; the budget leaves them 3.3G"), "{text}");
-        assert!(text.contains("GPU Memory in Preferences › Performance"), "{text}");
+        assert!(text.contains("Memory usage in Preferences › Performance"), "{text}");
         assert!(!app.ui.notices[0].error);
 
         slow_cpu_refresh(&mut app, 1, 55_000.0, Some(crate::gpu_canvas::OVER_BUDGET));

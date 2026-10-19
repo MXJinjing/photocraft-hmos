@@ -130,7 +130,6 @@ pub fn reset_options(o: &mut ToolOptions, tool: Tool) {
         Tool::Crop => reset!(
             crop_ratio,
             crop_delete,
-            crop_content_aware,
             crop_width,
             crop_height,
             crop_resolution,

@@ -38,13 +38,11 @@ pub enum Group {
     History,
     /// Layers | Channels | Paths.
     Layers,
-    /// Brushes presets.
-    Brushes,
 }
 
 impl Group {
     /// Photoshop Essentials order, top to bottom.
-    pub const ALL: [Group; 7] = [Group::Color, Group::Properties, Group::Character, Group::Navigator, Group::History, Group::Layers, Group::Brushes];
+    pub const ALL: [Group; 6] = [Group::Color, Group::Properties, Group::Character, Group::Navigator, Group::History, Group::Layers];
 
     pub fn key(self) -> &'static str {
         match self {
@@ -54,7 +52,6 @@ impl Group {
             Group::Navigator => "navigator",
             Group::History => "history",
             Group::Layers => "layers",
-            Group::Brushes => "brushes",
         }
     }
 
@@ -68,7 +65,6 @@ impl Group {
             Group::Navigator => 210.0,
             Group::History => 200.0,
             Group::Layers => 320.0,
-            Group::Brushes => 200.0,
         }
     }
 
@@ -82,7 +78,6 @@ impl Group {
             Group::Navigator => 140.0,
             Group::History => 130.0,
             Group::Layers => 200.0,
-            Group::Brushes => 150.0,
         }
     }
 
@@ -91,7 +86,6 @@ impl Group {
     pub fn preferred_fill(self) -> f32 {
         match self {
             Group::Layers => 500.0,
-            Group::Brushes => 100.0,
             g => g.min_height(),
         }
     }
@@ -100,7 +94,6 @@ impl Group {
     pub fn min_height(self) -> f32 {
         match self {
             Group::Layers => 140.0,
-            Group::Brushes => 100.0,
             _ => 80.0,
         }
     }
@@ -115,7 +108,6 @@ impl Group {
             Group::Navigator => &["Navigator", "Histogram", "Info"],
             Group::History => &["History", "Actions", "Layer Comps"],
             Group::Layers => &["Layers", "Channels", "Paths"],
-            Group::Brushes => &["Brushes"],
         }
     }
 
@@ -133,7 +125,6 @@ impl Group {
             Group::Navigator => &mut tabs.navigator,
             Group::History => &mut tabs.history,
             Group::Layers => &mut tabs.layers,
-            Group::Brushes => &mut tabs.brushes,
         }
     }
 
@@ -150,7 +141,6 @@ impl Group {
             Group::Navigator => panels.navigator,
             Group::History => panels.history,
             Group::Layers => panels.layers,
-            Group::Brushes => panels.brushes,
         }
     }
 
@@ -162,7 +152,6 @@ impl Group {
             Group::Navigator => &mut panels.navigator,
             Group::History => &mut panels.history,
             Group::Layers => &mut panels.layers,
-            Group::Brushes => &mut panels.brushes,
         }
     }
 }

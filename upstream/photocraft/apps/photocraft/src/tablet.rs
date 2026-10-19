@@ -64,33 +64,15 @@ pub fn pen_needs_xwayland(session: DisplaySession, var: impl Fn(&str) -> Option<
 #[cfg(any(target_os = "linux", test))]
 const BTN_TOOL_PEN: u32 = 0x140;
 
-/// `ABS_X` and `ABS_Y` (linux/input-event-codes.h): the absolute axes every pen reports.
-#[cfg(any(target_os = "linux", test))]
-const ABS_X: u32 = 0x00;
-#[cfg(any(target_os = "linux", test))]
-const ABS_Y: u32 = 0x01;
-
-/// Is a pen among the input devices `/proc/bus/input/devices` lists? A pen is a device whose
-/// `B: KEY=` bitmap has `BTN_TOOL_PEN` *and* whose `B: ABS=` bitmap has `ABS_X` and `ABS_Y`
-/// (libinput asks the same of a tablet tool). The key alone is not enough: a virtual keyboard
-/// made with uinput (RustDesk's, for one) claims every key code, `BTN_TOOL_PEN` included, but
-/// has no absolute axes. Taking it for a pen sent the window through Xwayland, where a
-/// fractionally scaled Wayland desktop shows it upscaled and blurred (#1072, #639).
+/// Is a pen among the input devices `/proc/bus/input/devices` lists? Each device's `B: KEY=` line
+/// is its key bitmap as hex words of the kernel's `long`, most significant first.
 #[cfg(any(target_os = "linux", test))]
 pub fn has_pen(devices: &str) -> bool {
-    devices.split("\n\n").any(|device| {
-        let bitmap = |name: &str| device.lines().find_map(|l| l.strip_prefix(name));
-        bitmap("B: KEY=").is_some_and(|keys| bit_set(keys, BTN_TOOL_PEN)) && bitmap("B: ABS=").is_some_and(|axes| bit_set(axes, ABS_X) && bit_set(axes, ABS_Y))
-    })
-}
-
-/// Bit `bit` of a `/proc/bus/input/devices` bitmap: hex words of the kernel's `long`, most
-/// significant first. Short or malformed bitmaps have no bits set.
-#[cfg(any(target_os = "linux", test))]
-fn bit_set(bitmap: &str, bit: u32) -> bool {
     let bits = usize::BITS;
-    let word = usize::try_from(bit / bits).unwrap_or(usize::MAX);
-    bitmap.split_whitespace().rev().nth(word).and_then(|w| u64::from_str_radix(w, 16).ok()).is_some_and(|w| (w >> (bit % bits)) & 1 == 1)
+    let word = usize::try_from(BTN_TOOL_PEN / bits).unwrap_or(usize::MAX);
+    devices.lines().filter_map(|l| l.strip_prefix("B: KEY=")).any(|keys| {
+        keys.split_whitespace().rev().nth(word).and_then(|w| u64::from_str_radix(w, 16).ok()).is_some_and(|w| (w >> (BTN_TOOL_PEN % bits)) & 1 == 1)
+    })
 }
 
 /// Start the XInput2 reader when eframe runs on X11 (Xwayland included). On native Wayland,
@@ -256,49 +238,6 @@ mod tests {
         for keys in ["", "B: KEY=", "B: KEY=1", "B: KEY=zz 0 0 0 0 0", "B: KEY=ffffffffffffffffff 0 0 0 0 0", "B: KEY=0 0 0 0 0 0 0 0"] {
             assert!(!has_pen(keys), "{keys:?}");
         }
-        for abs in ["B: ABS=", "B: ABS=zz", "B: ABS=ffffffffffffffffff", "B: ABS=0 0"] {
-            assert!(!has_pen(&format!("B: KEY=1c03 0 0 0 0 0\n{abs}")), "{abs:?}");
-        }
-    }
-
-    /// #1072: RustDesk's uinput keyboard claims every key code, `BTN_TOOL_PEN` included, and has
-    /// no absolute axes (`EV=20013`: no `EV_ABS`, no `B: ABS=` line). It is no pen, so the window
-    /// stays on native Wayland, where the fractional display scale renders sharp. The bitmaps are
-    /// the device's own, from `/proc/bus/input/devices`.
-    const VIRTUAL_KEYBOARD: &str = "I: Bus=0003 Vendor=1234 Product=5678 Version=0111\n\
-        N: Name=\"RustDesk UInput Keyboard\"\n\
-        P: Phys=\n\
-        S: Sysfs=/devices/virtual/input/input54\n\
-        U: Uniq=\n\
-        H: Handlers=sysrq rfkill kbd event256 leds \n\
-        B: PROP=0\n\
-        B: EV=20013\n\
-        B: KEY=ffffffffff 0 7ffffff000301ff 1000f7fffffff 7fe001fffff000f 7ffffffffffffff ffffffff0003fdff 7fff8fff00ff03ff 1ffffffffffff07 ffffffffffffffff ffffffffffefffff fffffffffffffffe\n\
-        B: MSC=10\n\
-        B: LED=7\n";
-
-    #[test]
-    fn a_virtual_keyboard_claiming_btn_tool_pen_is_no_pen() {
-        assert!(
-            bit_set(
-                "ffffffffff 0 7ffffff000301ff 1000f7fffffff 7fe001fffff000f 7ffffffffffffff ffffffff0003fdff 7fff8fff00ff03ff 1ffffffffffff07 ffffffffffffffff ffffffffffefffff fffffffffffffffe",
-                BTN_TOOL_PEN
-            ),
-            "the fixture claims the key"
-        );
-        assert!(!has_pen(VIRTUAL_KEYBOARD));
-        // Beside a real pen, the pen is still found; the keyboard's key bits never leak into the
-        // pen's device and the pen's axes never into the keyboard's.
-        let both = format!("{VIRTUAL_KEYBOARD}\n{WITH_PEN}");
-        assert!(has_pen(&both));
-        let pen_without_axes = WITH_PEN.lines().filter(|l| !l.starts_with("B: ABS=1000f")).collect::<Vec<_>>().join("\n");
-        assert!(!has_pen(&pen_without_axes), "a pen reports absolute positions");
-        // A pen display or pen-enabled touchscreen reports the pen with its own axes.
-        let pen_display = "N: Name=\"Wacom One Pen\"\nB: KEY=1c03 0 0 0 0 0\nB: ABS=3\n";
-        assert!(has_pen(pen_display));
-        // Axes without `ABS_X` or `ABS_Y` don't count.
-        assert!(!has_pen("B: KEY=1c03 0 0 0 0 0\nB: ABS=1000f000002\n"));
-        assert!(!has_pen("B: KEY=1c03 0 0 0 0 0\nB: ABS=1000f000001\n"));
     }
 
     #[test]

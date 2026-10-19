@@ -538,23 +538,6 @@ mod tests {
     use egui::{Event, Pos2, RawInput, ViewportId};
     use photocraft_engine::Session;
 
-    /// #5826: the drag overlay under a dialog doesn't depend on the custom title bar. On macOS
-    /// (OS traffic lights over the app's own title strip) a dialog left the window undraggable.
-    #[test]
-    fn a_dialog_keeps_the_title_strip_draggable_with_either_title_bar() {
-        for custom in [false, true] {
-            let mut app = PhotocraftApp::new(Session::new(), crate::Services::default());
-            app.custom_titlebar = custom;
-            app.run("file.new", serde_json::json!({"width": 8, "height": 8})).unwrap();
-            assert!(!app.titlebar_modal_drag(true), "no dialog, no overlay");
-            crate::filter_dialog::open(&mut app, "filter.blur.gaussianBlur").unwrap();
-            assert!(app.titlebar_modal_drag(true), "custom title bar: {custom}");
-            assert!(!app.titlebar_modal_drag(false), "chrome hidden (full screen): no title strip");
-            app.ui.panels.menu_bar = false;
-            assert!(!app.titlebar_modal_drag(true), "no menu bar, no title strip");
-        }
-    }
-
     /// A headless window `width` pt wide showing the title bar and the resize zones.
     struct Win {
         ctx: egui::Context,
@@ -663,7 +646,7 @@ mod tests {
         for width in [760.0, 1100.0, 1440.0] {
             let mut w = Win::new(width);
             w.frame(vec![]);
-            w.frame(vec![]);
+            let out = w.frame(vec![]);
             let [min, max, close] = CAPTIONS.map(|c| w.caption(c));
             assert_eq!((close.right(), close.top()), (width, 0.0), "Close sits in the window's corner at {width}");
             // The bar's bottom point is the panel's separator line, which the buttons leave visible.
@@ -674,18 +657,9 @@ mod tests {
             for a in &widgets {
                 assert!(a.right() <= min.left(), "{a:?} runs into the caption buttons at {width}");
             }
-        }
-    }
-
-    #[test]
-    fn the_title_bar_promotes_no_community_chat() {
-        // Issue #1726: only the always-visible title-bar button is removed. The start-screen
-        // and About buttons and Help › Discord remain available.
-        for width in [760.0, 1100.0, 1440.0] {
-            let mut w = Win::new(width);
-            w.frame(vec![]);
-            let out = w.frame(vec![]);
-            assert!(!texts(&out).iter().any(|(t, _)| t.contains("Discord")), "no Discord in the bar at {width}");
+            // Wide windows show the whole group; the narrowest drops Discord (also Help › Discord).
+            let has_discord = texts(&out).iter().any(|(t, _)| t == "Discord");
+            assert_eq!(has_discord, crate::links::SHOW_PROJECT_LINKS && width > 1000.0, "Discord at {width}");
         }
     }
 

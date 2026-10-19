@@ -281,7 +281,7 @@ fn warp(
     // that matters is the one at the source point landing in the clip's centre.
     let (cx, cy) = match clip.and_then(|c| Some((c, h.inverse()?))) {
         Some((c, inv)) => inv.apply((c.x0 as f64 + c.x1 as f64) / 2.0, (c.y0 as f64 + c.y1 as f64) / 2.0),
-        None => ((f64::from(src_rect.x0) + f64::from(src_rect.x1)) / 2.0, (f64::from(src_rect.y0) + f64::from(src_rect.y1)) / 2.0),
+        None => ((src_rect.x0 + src_rect.x1) as f64 / 2.0, (src_rect.y0 + src_rect.y1) as f64 / 2.0),
     };
     let scale = h.local_scale(cx, cy);
     let reduced;
@@ -366,10 +366,10 @@ fn warp(
             return Ok(None);
         }
         let fp: Vec<(f64, f64)> = poly.iter().map(|&(x, y)| inv.apply(x, y)).collect();
-        let fx0 = (fp.iter().map(|c| c.0).fold(f64::MAX, f64::min).floor() as i32).saturating_sub(3);
-        let fy0 = (fp.iter().map(|c| c.1).fold(f64::MAX, f64::min).floor() as i32).saturating_sub(3);
-        let fx1 = (fp.iter().map(|c| c.0).fold(f64::MIN, f64::max).ceil() as i32).saturating_add(3);
-        let fy1 = (fp.iter().map(|c| c.1).fold(f64::MIN, f64::max).ceil() as i32).saturating_add(3);
+        let fx0 = fp.iter().map(|c| c.0).fold(f64::MAX, f64::min).floor() as i32 - 3;
+        let fy0 = fp.iter().map(|c| c.1).fold(f64::MAX, f64::min).floor() as i32 - 3;
+        let fx1 = fp.iter().map(|c| c.0).fold(f64::MIN, f64::max).ceil() as i32 + 3;
+        let fy1 = fp.iter().map(|c| c.1).fold(f64::MIN, f64::max).ceil() as i32 + 3;
         // Without a one-signed forward w, a tile straddling the inverse horizon has no bounded footprint.
         let straddles = side.is_none() && wc.iter().any(|w| *w <= 0.0) && wc.iter().any(|w| *w >= 0.0);
         let foot = if straddles { src_rect } else { Rect::new(fx0, fy0, fx1, fy1).intersect(&src_rect) };
@@ -392,15 +392,6 @@ fn warp(
                 px[((y - foot.y0) as usize * fw + (x - foot.x0) as usize) * n + c] as f64
             }
         };
-        // Samples past the source rect repeat its edge, so a stretched edge row or column keeps its
-        // colour and opacity (the "pixel stretch", #3773); the outline is antialiased by coverage
-        // instead. `foot_u`/`foot_v` are a destination pixel's extent in source pixels.
-        let clamped = |x: i32, y: i32, c: usize| at(x.clamp(src_rect.x0, src_rect.x1 - 1), y.clamp(src_rect.y0, src_rect.y1 - 1), c);
-        let (mx, my) = ((t.x0 + t.x1) as f64 / 2.0, (t.y0 + t.y1) as f64 / 2.0);
-        let (o, dx, dy) = (inv.apply(mx, my), inv.apply(mx + 1.0, my), inv.apply(mx, my + 1.0));
-        let extent = |e: f64| if e.is_finite() && e > 1e-12 { e } else { 1.0 };
-        let foot_u = extent((dx.0 - o.0).abs() + (dy.0 - o.0).abs());
-        let foot_v = extent((dx.1 - o.1).abs() + (dy.1 - o.1).abs());
         let w = t.width() as usize;
         let len = w.checked_mul(t.height() as usize).and_then(|v| v.checked_mul(n)).ok_or(photocraft_raster::AllocationError::SizeOverflow)?;
         let bytes = len.checked_mul(std::mem::size_of::<f32>()).ok_or(photocraft_raster::AllocationError::SizeOverflow)?;
@@ -433,7 +424,7 @@ fn warp(
                         for (dy, wy) in [(0, 1.0 - fy), (1, fy)] {
                             for (dx, wx) in [(0, 1.0 - fx), (1, fx)] {
                                 for (c, s) in acc.iter_mut().enumerate().take(n) {
-                                    *s += clamped(ix + dx, iy + dy, c) * wx * wy;
+                                    *s += at(ix + dx, iy + dy, c) * wx * wy;
                                 }
                             }
                         }
@@ -445,19 +436,10 @@ fn warp(
                             for (i, wxi) in wx.iter().enumerate() {
                                 let k = wxi * wyj;
                                 for (c, s) in acc.iter_mut().enumerate().take(n) {
-                                    *s += clamped(ix - 1 + i as i32, iy - 1 + j as i32, c) * k;
+                                    *s += at(ix - 1 + i as i32, iy - 1 + j as i32, c) * k;
                                 }
                             }
                         }
-                    }
-                }
-                if interp != Interp::Nearest {
-                    // How much of this pixel the warped source rect covers, per axis.
-                    let (uc, vc) = (u + 0.5, v + 0.5);
-                    let cu = ((uc - src_rect.x0 as f64).min(src_rect.x1 as f64 - uc) / foot_u + 0.5).clamp(0.0, 1.0);
-                    let cv = ((vc - src_rect.y0 as f64).min(src_rect.y1 as f64 - vc) / foot_v + 0.5).clamp(0.0, 1.0);
-                    for s in acc.iter_mut().take(n) {
-                        *s *= cu * cv;
                     }
                 }
                 let al = acc[a].clamp(0.0, 1.0);
@@ -555,24 +537,6 @@ mod tests {
 
     fn rgba() -> Surface {
         Surface::new(PixelFormat::RGBA8)
-    }
-
-    /// The "pixel stretch" (#3773): a 1 px column scaled 100x stays solid across the stretch, as in
-    /// Photoshop. Samples past the source edge repeat the edge, and only the outline is antialiased.
-    #[test]
-    fn stretched_single_column_stays_opaque() {
-        let mut s = rgba();
-        s.fill_rect(Rect::new(0, 0, 1, 4), &[0.0, 1.0, 0.0, 1.0]);
-        for interp in [Interp::Bicubic, Interp::Bilinear] {
-            let h = Homography::rect_to_quad([0.0, 0.0, 1.0, 4.0], [[0.0, 0.0], [100.0, 0.0], [100.0, 4.0], [0.0, 4.0]]).unwrap();
-            let w = warp_surface(&s, Rect::new(0, 0, 1, 4), &h, interp).unwrap();
-            assert_eq!(w.content_bounds(), Rect::new(0, 0, 100, 4), "{interp:?}");
-            for x in [0, 1, 25, 50, 75, 99] {
-                for y in 0..4 {
-                    assert!((w.sample_channel(x, y, 3) - 1.0).abs() < 1e-6, "{interp:?} alpha at ({x}, {y}) = {}", w.sample_channel(x, y, 3));
-                }
-            }
-        }
     }
 
     /// Photoshop 27.11's Free Transform, Bicubic, 200 % about the centre of a 64 px image whose left

@@ -23,9 +23,6 @@ pub struct ActionsUi {
     pub expanded: Vec<bool>,
     /// Set folders shown collapsed (Photoshop's set disclosure triangles).
     pub collapsed_sets: Vec<String>,
-    /// Photoshop's Button Mode: each action is a coloured button, and a click plays it.
-    #[serde(default)]
-    pub button_mode: bool,
     #[serde(skip)]
     reveal_recording: Option<(usize, usize)>,
     /// The action whose name is being edited in place (double-click on its name).
@@ -240,24 +237,6 @@ fn step_count(steps: usize, disabled: usize) -> String {
     }
 }
 
-fn button_fill(color: &str, t: &Tokens) -> Color32 {
-    // Photoshop's Actions button colours. Empty uses the panel card so an uncoloured action stays readable.
-    match color {
-        "red" => Color32::from_rgb(196, 64, 64),
-        "orange" => Color32::from_rgb(204, 120, 40),
-        "yellow" => Color32::from_rgb(196, 176, 48),
-        "green" => Color32::from_rgb(56, 140, 72),
-        "blue" => Color32::from_rgb(48, 104, 176),
-        "violet" => Color32::from_rgb(120, 72, 168),
-        "gray" => t.text_dim,
-        _ => t.card,
-    }
-}
-
-fn button_label_color(color: &str, t: &Tokens) -> Color32 {
-    if color.is_empty() { t.text } else { Color32::from_rgb(20, 20, 20) }
-}
-
 fn paint_check(ui: &egui::Ui, rect: Rect, on: bool, t: &Tokens) {
     let b = Rect::from_center_size(rect.center(), vec2(11.0, 11.0));
     ui.painter().rect_stroke(b, 2.0, Stroke::new(1.0, t.text_faint), egui::StrokeKind::Inside);
@@ -271,14 +250,6 @@ fn step_label(id: &str, params: &Value) -> String {
     if id == "actions.play" {
         let target = params.get("action").map(|v| v.as_str().map(str::to_owned).unwrap_or_else(|| v.to_string())).unwrap_or_default();
         format!("{}: {target}", label_of(id))
-    } else if id == "layer.select" {
-        let target = params
-            .get("name")
-            .and_then(Value::as_str)
-            .or_else(|| params.get("layer").and_then(Value::as_str))
-            .map(str::to_owned)
-            .or_else(|| params.get("layer").and_then(Value::as_u64).map(|id| format!("ID {id}")));
-        target.map_or_else(|| label_of(id), |target| format!("{} ({target})", label_of(id)))
     } else if id == "actions.conditional" {
         // "If hasLayers: FS8-Layers / FS8-No-Layers"
         let cond = params.get("if").and_then(Value::as_str).unwrap_or("?");
@@ -606,7 +577,6 @@ struct Row {
     disabled: std::collections::BTreeSet<usize>,
     dialogs: std::collections::BTreeSet<usize>,
     set: Option<String>,
-    color: String,
 }
 
 /// The panel's order: actions outside any set first, then each set folder (in order of first
@@ -636,14 +606,7 @@ pub fn panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         .list
         .iter()
         .enumerate()
-        .map(|(i, a)| Row {
-            name: a.name.clone(),
-            steps: visible_steps(app, i),
-            disabled: a.disabled.clone(),
-            dialogs: a.dialogs.clone(),
-            set: a.set.clone(),
-            color: a.color.clone(),
-        })
+        .map(|(i, a)| Row { name: a.name.clone(), steps: visible_steps(app, i), disabled: a.disabled.clone(), dialogs: a.dialogs.clone(), set: a.set.clone() })
         .collect();
     if app
         .ui
@@ -699,7 +662,7 @@ pub fn panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         }
         let mut shown_set: Option<&str> = None;
         for i in display_order(&rows) {
-            let Row { name, steps, disabled, dialogs, set, color: swatch } = &rows[i];
+            let Row { name, steps, disabled, dialogs, set } = &rows[i];
             // A set folder row before the first of its actions; collapsed folders hide them.
             if let Some(set) = set.as_deref()
                 && shown_set != Some(set)
@@ -752,12 +715,9 @@ pub fn panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
             if reveal == Some((i, 0)) {
                 ui.scroll_to_rect(rect, Some(egui::Align::BOTTOM));
             }
-            let button_mode = app.ui.actions.button_mode;
             let sel = app.ui.actions.selected == Some(i) && app.ui.actions.selected_step.is_none();
             resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, sel, name));
-            if button_mode {
-                ui.painter().rect_filled(rect, 3.0, button_fill(swatch, &t));
-            } else if sel {
+            if sel {
                 ui.painter().rect_filled(rect, 0.0, t.row_selected);
             } else if resp.hovered() {
                 ui.painter().rect_filled(rect, 0.0, t.hover.gamma_multiply(0.5));
@@ -767,21 +727,14 @@ pub fn panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
             {
                 moved = Some(change);
             }
-            let expanded = app.ui.actions.expanded.get(i).copied().unwrap_or(false) && !button_mode;
-            if !button_mode {
-                let tri = Rect::from_center_size(pos2(x0 + 12.0, rect.center().y), vec2(8.0, 8.0));
-                let pts = if expanded {
-                    vec![tri.left_top(), tri.right_top(), tri.center_bottom()]
-                } else {
-                    vec![tri.left_top(), tri.right_center(), tri.left_bottom()]
-                };
-                ui.painter().add(egui::Shape::convex_polygon(pts, t.text_dim, Stroke::NONE));
-                crate::icons::paint(ui, Rect::from_center_size(pos2(x0 + 30.0, rect.center().y), vec2(16.0, 16.0)), "play", 11.0, t.icon);
-            }
+            let expanded = app.ui.actions.expanded.get(i).copied().unwrap_or(false);
+            let tri = Rect::from_center_size(pos2(x0 + 12.0, rect.center().y), vec2(8.0, 8.0));
+            let pts =
+                if expanded { vec![tri.left_top(), tri.right_top(), tri.center_bottom()] } else { vec![tri.left_top(), tri.right_center(), tri.left_bottom()] };
+            ui.painter().add(egui::Shape::convex_polygon(pts, t.text_dim, Stroke::NONE));
+            crate::icons::paint(ui, Rect::from_center_size(pos2(x0 + 30.0, rect.center().y), vec2(16.0, 16.0)), "play", 11.0, t.icon);
             let recording_this = recording.is_some_and(|(_, r)| r == i);
             let nsteps = steps.len();
-            let name_x = if button_mode { x0 + 8.0 } else { x0 + 44.0 };
-            let name_color = if button_mode { button_label_color(swatch, &t) } else { t.text };
             let name_rect = if app.ui.actions.renaming.as_ref().is_some_and(|r| r.index == i) {
                 let field = Rect::from_min_max(pos2(x0 + 40.0, rect.top() + 3.0), pos2((rect.right() - 80.0).max(x0 + 120.0), rect.bottom() - 3.0));
                 if let Some(text) = rename_field(app, ui, i, field) {
@@ -789,33 +742,27 @@ pub fn panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                 }
                 field
             } else {
-                ui.painter().text(pos2(name_x, rect.center().y), Align2::LEFT_CENTER, name, egui::FontId::proportional(12.0), name_color)
+                ui.painter().text(pos2(x0 + 44.0, rect.center().y), Align2::LEFT_CENTER, name, egui::FontId::proportional(12.0), t.text)
             };
-            if !button_mode {
-                ui.painter().text(
-                    pos2(rect.right() - 8.0, rect.center().y),
-                    Align2::RIGHT_CENTER,
-                    app.session
-                        .prefs()
-                        .shortcuts
-                        .get(&shortcut_id(name))
-                        .filter(|s| !s.is_empty())
-                        .map_or_else(|| step_count(nsteps, disabled.len()), |key| format!("{key} · {}", step_count(nsteps, disabled.len()))),
-                    egui::FontId::proportional(11.0),
-                    t.text_faint,
-                );
-            }
+            ui.painter().text(
+                pos2(rect.right() - 8.0, rect.center().y),
+                Align2::RIGHT_CENTER,
+                app.session
+                    .prefs()
+                    .shortcuts
+                    .get(&shortcut_id(name))
+                    .filter(|s| !s.is_empty())
+                    .map_or_else(|| step_count(nsteps, disabled.len()), |key| format!("{key} · {}", step_count(nsteps, disabled.len()))),
+                egui::FontId::proportional(11.0),
+                t.text_faint,
+            );
             if recording_this {
                 ui.painter().circle_filled(pos2(rect.right() - 64.0, rect.center().y), 4.0, Color32::from_rgb(230, 60, 60));
             }
             if resp.clicked() {
                 app.ui.actions.selected = Some(i);
                 app.ui.actions.selected_step = None;
-                if button_mode {
-                    if !resp.double_clicked() {
-                        play_idx = Some(i);
-                    }
-                } else if resp.interact_pointer_pos().is_some_and(|p| p.x < x0 + 20.0) {
+                if resp.interact_pointer_pos().is_some_and(|p| p.x < x0 + 20.0) {
                     if app.ui.actions.expanded.len() <= i {
                         app.ui.actions.expanded.resize(i + 1, false);
                     }
@@ -832,26 +779,8 @@ pub fn panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                         ui.close();
                     }
                 }
-                ui.separator();
-                ui.menu_button(tl!("Color"), |ui| {
-                    for (id, label) in [
-                        ("", tl!("None")),
-                        ("red", tl!("Red")),
-                        ("orange", tl!("Orange")),
-                        ("yellow", tl!("Yellow")),
-                        ("green", tl!("Green")),
-                        ("blue", tl!("Blue")),
-                        ("violet", tl!("Violet")),
-                        ("gray", tl!("Gray")),
-                    ] {
-                        if ui.selectable_label(swatch == id, label).clicked() {
-                            let _ = app.run("actions.setColor", json!({"action": i, "color": id}));
-                            ui.close();
-                        }
-                    }
-                });
             });
-            if resp.double_clicked() && !button_mode {
+            if resp.double_clicked() {
                 // Photoshop renames in place when the name itself is double-clicked.
                 if resp.interact_pointer_pos().is_some_and(|p| name_rect.expand2(vec2(4.0, 13.0)).contains(p)) {
                     app.ui.actions.renaming = Some(RenameAction { index: i, text: name.clone(), focused: false });
@@ -977,12 +906,6 @@ pub fn panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                 delete_selection(app);
             }
         });
-        let mode_label = if app.ui.actions.button_mode { tl!("Button Mode On") } else { tl!("Button Mode") };
-        let mode_button = ui.add_enabled(!recording_now, egui::Button::new(mode_label).small()).on_hover_text(tl!("Button Mode"));
-        mode_button.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, !recording_now, mode_label));
-        if mode_button.clicked() {
-            app.ui.actions.button_mode = !app.ui.actions.button_mode;
-        }
     });
     if let Some(i) = play_idx {
         match app.run("actions.play", json!({"action": i})) {
@@ -999,26 +922,6 @@ pub fn panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn selected_layer_name_is_visible_during_recording_and_after_stop() {
-        use egui_kittest::{Harness, kittest::Queryable};
-        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
-        app.run("file.new", json!({"width":4,"height":4})).unwrap();
-        app.run("layer.setProps", json!({"name":"Background"})).unwrap();
-        let layer = app.session.active().unwrap().active_layer.unwrap();
-        app.run("actions.record", json!({"name":"Select photo"})).unwrap();
-        app.ui.actions.expanded = vec![true];
-        app.run("layer.select", json!({"layer":layer.0})).unwrap();
-        let mut h = Harness::builder().with_size(vec2(400.0, 260.0)).build_ui_state(|ui, app| panel(app, ui), app);
-        h.run_steps(4);
-        h.get_by_label("Select Layer (Background)");
-        h.state_mut().run("actions.stop", json!({})).unwrap();
-        h.run_steps(4);
-        h.get_by_label("Select Layer (Background)");
-        assert_eq!(step_label("layer.select", &json!({"layer":26})), "Select Layer (ID 26)");
-        assert_eq!(step_label("layer.select", &json!({"layer":"Background"})), "Select Layer (Background)");
-    }
 
     #[test]
     fn actions_list_grows_with_panel_and_keeps_footer_visible() {
@@ -1399,81 +1302,6 @@ mod tests {
         assert_eq!(app.session.active().unwrap().path.as_deref(), Some("out/result.psd"));
     }
 
-    /// An app with the real importer/exporter and writer whose Save dialogs answer `answers`.
-    fn disk_app(answers: Vec<Option<crate::file_dialog::FileDialogAnswer>>) -> PhotocraftApp {
-        let services = crate::Services {
-            import: Some(Box::new(|name, bytes, depth| {
-                photocraft_io::import_with_svg_group_depth(name, bytes, depth).map(|r| (r.document, r.warnings)).map_err(|e| e.to_string())
-            })),
-            export: Some(Box::new(|doc, path, _| {
-                photocraft_io::export(doc, path, &Default::default()).map(|r| (r.bytes, r.warnings)).map_err(|e| e.to_string())
-            })),
-            write: Some(Box::new(|path, bytes| std::fs::write(path, bytes).map_err(|e| e.to_string()))),
-            file_dialog: Some(crate::file_dialog::fake(answers).0),
-            ..Default::default()
-        };
-        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), services);
-        app.background_jobs = false;
-        app
-    }
-
-    /// Records Invert + File › Save on the file `a`, then plays it on the file `b` (given a
-    /// new layer first when `layered`). Returns the played result and whether `b` / `a`
-    /// changed on disk.
-    fn record_save_on_a_play_on_b(ext: &str, layered: bool) -> (Value, bool, bool) {
-        use crate::file_dialog::FileDialogAnswer::SaveTo;
-        let dir = std::env::temp_dir().join(format!("photocraft-rec-save-{ext}-{layered}-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = |n: &str| dir.join(format!("{n}.{ext}")).to_string_lossy().into_owned();
-        let (a, b) = (path("a"), path("b"));
-        // The dialog confirms the suggested name, which is the document's own file.
-        let mut app = disk_app(vec![Some(SaveTo(a.clone())), Some(SaveTo(a.clone()))]);
-        let ctx = egui::Context::default();
-        for p in [&a, &b] {
-            app.run("file.new", json!({"width": 16, "height": 16})).unwrap();
-            app.save_as(Some(p.clone())).unwrap();
-        }
-        let (before_a, before_b) = (std::fs::read(&a).unwrap(), std::fs::read(&b).unwrap());
-        app.open_path(&a).unwrap();
-        app.run("actions.record", json!({})).unwrap();
-        app.run("image.adjustments.invert", json!({})).unwrap();
-        crate::menus::invoke(&mut app, &ctx, "file.save", json!({})).unwrap();
-        app.poll_file_dialog(&ctx, None);
-        app.run("actions.stop", json!({})).unwrap();
-        std::fs::write(&a, &before_a).unwrap();
-        app.open_path(&b).unwrap();
-        if layered {
-            app.run("layer.new.layer", json!({})).unwrap();
-        }
-        let played = app.run("actions.play", json!({"action": 0})).unwrap();
-        let r = (played, std::fs::read(&b).unwrap() != before_b, std::fs::read(&a).unwrap() != before_a);
-        let _ = std::fs::remove_dir_all(&dir);
-        r
-    }
-
-    #[test]
-    fn recorded_save_overwrites_the_layered_file_the_action_is_played_on() {
-        let (played, b_changed, a_changed) = record_save_on_a_play_on_b("psd", false);
-        assert!(played.get("failed").is_none(), "{played}");
-        assert!(b_changed && !a_changed);
-    }
-
-    #[test]
-    fn recorded_save_overwrites_the_flat_file_the_action_is_played_on() {
-        let (played, b_changed, a_changed) = record_save_on_a_play_on_b("png", false);
-        assert!(played.get("failed").is_none(), "{played}");
-        assert!(b_changed, "Save did not overwrite the file the action was played on");
-        assert!(!a_changed, "Save wrote the file the action was recorded on");
-    }
-
-    #[test]
-    fn recorded_save_never_flattens_layers_over_a_flat_file() {
-        // The played-on document has layers its PNG can't keep: the step fails, nothing is written (#3806).
-        let (played, b_changed, a_changed) = record_save_on_a_play_on_b("png", true);
-        assert!(played.get("failed").is_some(), "{played}");
-        assert!(!b_changed && !a_changed);
-    }
-
     #[test]
     fn set_folders_group_actions_and_collapse() {
         use egui_kittest::{Harness, kittest::Queryable};
@@ -1602,28 +1430,5 @@ mod tests {
         let v = play(&mut app, &json!({"action": "Blur"})).unwrap();
         assert_eq!(v["ran"], 3, "{v}");
         assert!(v.get("paused").is_none());
-    }
-
-    #[test]
-    fn button_mode_plays_the_clicked_action_and_hides_its_steps() {
-        use egui_kittest::{Harness, kittest::Queryable};
-        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
-        app.run("file.new", json!({"width": 16, "height": 16})).unwrap();
-        app.session.actions.list.push(Action::new("Print", vec![("layer.new.layer".into(), json!({}))]));
-        app.session.actions.list[0].color = "blue".into();
-        app.ui.actions.expanded = vec![true];
-        app.ui.actions.button_mode = true;
-        let mut h = Harness::builder().with_size(vec2(420.0, 280.0)).build_ui_state(|ui, app| panel(app, ui), app);
-        h.run_steps(3);
-        assert_eq!(h.query_all_by_role(egui::accesskit::Role::CheckBox).count(), 0, "button mode hides the step list");
-        let before = h.state().session.active().unwrap().doc.layers.len();
-        h.get_by_label("Print").click();
-        h.run_steps(3);
-        assert_eq!(h.state().session.active().unwrap().doc.layers.len(), before + 1, "a click plays the action");
-        h.get_by_label("Button Mode On").click();
-        h.run_steps(2);
-        assert!(!h.state().ui.actions.button_mode);
-        assert!(h.query_by_label("Button Mode").is_some());
-        assert_eq!(h.query_all_by_role(egui::accesskit::Role::CheckBox).count(), 1, "the step list returns when Button Mode is turned off");
     }
 }

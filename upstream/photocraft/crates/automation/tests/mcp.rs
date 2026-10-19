@@ -167,9 +167,6 @@ async fn command_list_filters() {
     let blur = json_of(&call(&client, "command_list", json!({"filter": "blur"})).await);
     assert!(!blur.as_array().unwrap().is_empty() && blur.as_array().unwrap().len() < n_all);
     assert!(blur.as_array().unwrap().iter().all(|c| c["params"].is_string()));
-    // The Elliptical Marquee is a `select.rect` option, found by its keywords (#5060).
-    let marquee = json_of(&call(&client, "command_list", json!({"filter": "ellipse"})).await);
-    assert!(marquee.as_array().unwrap().iter().any(|c| c["id"] == "select.rect"), "{marquee}");
     let enabled = json_of(&call(&client, "command_list", json!({"enabled_only": true})).await);
     assert!(enabled.as_array().unwrap().iter().any(|c| c["id"] == "file.new"));
     assert!(!enabled.as_array().unwrap().iter().any(|c| c["id"] == "layer.new.layer"), "needs a document");

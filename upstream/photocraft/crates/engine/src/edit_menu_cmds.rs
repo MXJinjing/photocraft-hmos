@@ -224,13 +224,7 @@ fn fade(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn history_bytes(s: &Session, all: bool) -> usize {
     let docs: Vec<&crate::DocState> = if all { s.documents().iter().collect() } else { s.active().into_iter().collect() };
-    // Purge keeps the snapshots, so the tiles they share with the states aren't freed.
-    docs.iter()
-        .map(|d| {
-            let snaps: Vec<&photocraft_doc::Document> = d.snapshots.iter().map(|s| &*s.doc).collect();
-            d.history.unique_bytes_besides(&d.doc, &snaps)
-        })
-        .sum()
+    docs.iter().map(|d| d.history.unique_bytes(&d.doc)).sum()
 }
 
 fn clip_bytes(s: &Session) -> usize {

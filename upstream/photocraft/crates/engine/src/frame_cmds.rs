@@ -3,7 +3,7 @@
 //! primitives: group the selected layers, then clip the group with a rectangular layer mask the
 //! size of their bounds — the same visual result Photoshop's Frame tool produces for this command.
 //! `layer.new.frame` is the Frame tool's (K) command: a rectangular or elliptical frame drawn on
-//! the canvas, empty or holding the layer it was drawn over. Headless and scriptable like
+//! the canvas, empty or holding the pixel layer it was drawn over. Headless and scriptable like
 //! every other command.
 
 use photocraft_doc::{Layer, LayerContent, LayerId, LayerMask, PixelFormat};
@@ -107,9 +107,8 @@ fn ellipse_mask(rect: Rect, area: Rect) -> LayerMask {
 }
 
 /// Frame tool (K): a new frame — a group clipped to the drawn rectangle or ellipse — as one
-/// history step. With `layer` (a pixel, type, shape or smart object layer, not the Background),
-/// that layer becomes the frame's content, as when a frame is drawn over a selected layer in
-/// Photoshop; else it is empty.
+/// history step. With `layer` (a pixel layer, not the Background), that layer becomes the frame's
+/// content, as when a frame is drawn over a selected pixel layer in Photoshop; else it is empty.
 fn new_frame(s: &mut Session, p: &Value) -> Result<Value> {
     const CMD: &str = "layer.new.frame";
     let bad = |msg: String| EngineError::BadParams { cmd: CMD.into(), msg };
@@ -138,9 +137,8 @@ fn new_frame(s: &mut Session, p: &Value) -> Result<Value> {
         let gid = match content {
             Some(id) => {
                 let l = doc.layer(id).ok_or(EngineError::NoLayer(id))?;
-                let framable = matches!(l.content, LayerContent::Raster(_) | LayerContent::Text(_) | LayerContent::Shape(_) | LayerContent::Smart(_));
-                if !framable || doc.is_background(id) {
-                    return Err(bad("only a pixel, type, shape or smart object layer (not the Background) can go in a frame".into()));
+                if !matches!(l.content, LayerContent::Raster(_)) || doc.is_background(id) {
+                    return Err(bad("only a pixel layer (not the Background) can go in a frame".into()));
                 }
                 let gid = doc.insert_above(Some(id), Layer::group(name, vec![]));
                 let child = doc.remove(id).ok_or(EngineError::NoLayer(id))?;
@@ -165,7 +163,7 @@ pub fn specs() -> Vec<CommandSpec> {
             label: "New Frame",
             menu: &[],
             shortcut: None,
-            params: r#"{"x":i32,"y":i32,"width":u32,"height":u32,"shape":"rectangle|ellipse"="rectangle","layer":id?,"name":str?} → {layer, frame:[x,y,w,h], shape}: Frame tool; a group clipped to the shape, holding pixel, type, shape or smart object layer `layer` if given"#,
+            params: r#"{"x":i32,"y":i32,"width":u32,"height":u32,"shape":"rectangle|ellipse"="rectangle","layer":id?,"name":str?} → {layer, frame:[x,y,w,h], shape}: Frame tool; a group clipped to the shape, holding pixel layer `layer` if given"#,
             enabled: |s| s.active().map(|_| ()).ok_or_else(|| "no document open".into()),
             journal: true,
             run: new_frame,
@@ -274,27 +272,6 @@ mod tests {
         for bad in [json!({"x": 0, "y": 0, "width": 0, "height": 5}), json!({"x": 0, "y": 0, "width": 5, "height": 5, "shape": "star"}), json!({"x": 0})] {
             assert!(s.execute("layer.new.frame", bad).is_err());
         }
-    }
-
-    /// #4435: a type layer (and the other rendered layer kinds) goes into a frame like a pixel layer.
-    #[test]
-    fn new_frame_takes_a_type_layer() {
-        let (mut s, a, _) = session();
-        let tid = s
-            .edit("setup", |doc, _| {
-                let cache = doc.layer(a).and_then(|l| l.surface()).cloned();
-                let t = Layer::new("T", LayerContent::Text(photocraft_doc::TextLayer { cache, ..Default::default() }));
-                let id = t.id;
-                doc.layers.push(t);
-                Ok(id)
-            })
-            .unwrap();
-        let r = s.execute("layer.new.frame", json!({"x": 0, "y": 0, "width": 40, "height": 30, "layer": tid.0})).unwrap();
-        let gid = LayerId(r["layer"].as_u64().unwrap());
-        let g = s.active().unwrap().doc.layer(gid).unwrap();
-        assert!(matches!(&g.content, LayerContent::Group(c) if c.children.iter().map(|l| l.id).eq([tid])), "the frame holds the type layer");
-        assert!(s.undo());
-        assert!(s.active().unwrap().doc.layer(tid).is_some(), "undo gives the type layer back");
     }
 
     #[test]

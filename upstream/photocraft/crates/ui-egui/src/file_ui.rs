@@ -55,10 +55,8 @@ fn form(app: &mut PhotocraftApp, command: &str, label: &str, fields: Value, choi
     json!({"dialog": app.ui.open_dialog(DialogKind::Command, f)})
 }
 
-/// File › Scripts › Browse… lists Photoshop's script types (matching its filter, #2452) plus the
-/// JSON/text/droplet files the engine parses; selecting a Photoshop script gets the engine's
-/// "not Photoshop ExtendScript" error instead of hiding those files from the picker.
-const SCRIPT_EXTENSIONS: &[&str] = &["psjs", "ccjs", "jsx", "js", "jsxbin", "json", "txt", "pcdroplet"];
+/// File › Scripts › Browse… lists these script files (plus the JSON/text the engine parses).
+const SCRIPT_EXTENSIONS: &[&str] = &["psjs", "ccjs", "jsx", "js", "jsxbin", "json", "txt"];
 
 /// Menu items fronted here (dialogs before the engine command). `None` when not ours.
 pub fn invoke(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str, params: &Value) -> Option<Result<Value, String>> {
@@ -106,7 +104,7 @@ pub fn invoke(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str, params: &V
         "file.scripts.statistics" => json!({"dialog": crate::stack_dialog::open_statistics(app)}),
         "file.scripts.browse" => {
             return Some(app.pick_file_bytes_filtered(SCRIPT_EXTENSIONS, |app, name, bytes| {
-                let r = app.run("file.scripts.browse", json!({"name": name, "script": String::from_utf8_lossy(&bytes)}));
+                let r = app.run("file.scripts.browse", json!({"script": String::from_utf8_lossy(&bytes)}));
                 if r.is_ok() {
                     let template = "Ran script {name}";
                     app.ui.status = crate::i18n::fmt(tl!(template), &[("name", &name)]);

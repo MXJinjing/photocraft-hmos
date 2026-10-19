@@ -454,38 +454,6 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
 mod tests {
     use super::*;
 
-    /// #5092: a Puppet Warp session left open does not follow the user to a new document.
-    #[test]
-    fn session_is_dropped_when_another_document_becomes_active() {
-        let ctx = egui::Context::default();
-        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), Default::default());
-        app.session.execute("file.new", json!({"width": 100, "height": 80, "depth": 8})).unwrap();
-        app.session.execute("layer.new.layer", json!({})).unwrap();
-        app.session
-            .edit("paint", |doc, active| {
-                doc.layer_mut(active.unwrap()).unwrap().surface_mut().unwrap().fill_rect(Rect::new(20, 30, 80, 50), &[1.0, 0.0, 0.0, 1.0]);
-                Ok(())
-            })
-            .unwrap();
-        app.sync_views();
-        crate::distort_ui::menu(&mut app, &ctx, "edit.puppetWarp", &json!({})).unwrap().unwrap();
-        crate::distort_ui::drop_foreign(&mut app);
-        assert!(app.distort.puppet.is_some());
-        app.session.execute("file.new", json!({"width": 32, "height": 32, "depth": 8})).unwrap();
-        assert!(crate::distort_ui::display_doc(&app, 1).is_some());
-        crate::distort_ui::drop_foreign(&mut app);
-        assert!(app.distort.puppet.is_none());
-        assert!(crate::distort_ui::display_doc(&app, 1).is_none());
-        // Closing the document it was started on drops it too.
-        assert!(app.session.set_active(0));
-        crate::distort_ui::menu(&mut app, &ctx, "edit.puppetWarp", &json!({})).unwrap().unwrap();
-        crate::distort_ui::drop_foreign(&mut app);
-        assert!(app.distort.puppet.is_some());
-        assert!(app.session.close(0).is_some());
-        crate::distort_ui::drop_foreign(&mut app);
-        assert!(app.distort.puppet.is_none());
-    }
-
     /// #4440: ⌘Z / ⌘⇧Z undo and redo pin edits while Puppet Warp is open: placing a pin,
     /// dragging one and removing one are a step each; a click that moves nothing isn't one.
     #[test]

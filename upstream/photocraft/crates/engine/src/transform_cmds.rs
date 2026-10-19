@@ -36,23 +36,6 @@ pub fn transform_bounds(doc: &Document, layer: &Layer) -> Rect {
     }
 }
 
-/// The box Free Transform opens on `layer`, and the Move tool's transform controls show (#5297).
-/// With a selection that limits the transform it is the selection's own bounds, as in Photoshop:
-/// the box and the marching ants are one rectangle, however little of the selection the layer
-/// fills. Empty, like [`transform_bounds`], when the selection holds none of the layer.
-pub fn transform_frame(doc: &Document, layer: &Layer) -> Rect {
-    let b = transform_bounds(doc, layer);
-    if moves_whole(layer) { b } else { framed_by_selection(doc, b) }
-}
-
-/// `bounds` (what a selection left of a transform's content), or the selection's own bounds.
-fn framed_by_selection(doc: &Document, bounds: Rect) -> Rect {
-    match &doc.selection {
-        Some(sel) if !bounds.is_empty() => sel.content_bounds(),
-        _ => bounds,
-    }
-}
-
 /// A group moves all its descendants, so its frame must not clip raster children to the selection.
 fn whole_layer_bounds(layer: &Layer) -> Rect {
     let content = match &layer.content {
@@ -216,12 +199,6 @@ pub fn target_bounds(doc: &Document, surf: &Surface) -> Rect {
     }
 }
 
-/// The box Free Transform opens on a lone target: like [`transform_frame`], the selection's own
-/// bounds when there is one (#5297).
-pub fn target_frame(doc: &Document, surf: &Surface) -> Rect {
-    framed_by_selection(doc, target_bounds(doc, surf))
-}
-
 /// The locks `id` inherits from the groups around it.
 pub(crate) fn group_locks(doc: &Document, id: LayerId) -> Locks {
     doc.path_of(id).and_then(|p| Some(doc.locks_at(p.split_last()?.1))).unwrap_or_default()
@@ -305,12 +282,7 @@ fn check_layer_budget(doc_sel: Option<&Surface>, l: &Layer, h: &Homography) -> R
             }
             _ => {
                 if let Some(surf) = l.surface() {
-                    // With a selection only the lifted pixels are warped (`split_selected`).
-                    let src = match sel {
-                        Some(sel) => surf.content_bounds().intersect(&sel.content_bounds()),
-                        None => surf.content_bounds(),
-                    };
-                    check_budget(src, h, &format!("layer \"{}\"", l.name))?;
+                    check_budget(surf.content_bounds(), h, &format!("layer \"{}\"", l.name))?;
                 }
             }
         }
@@ -411,20 +383,17 @@ fn apply_transform(
         }
         _ => {
             if let Some(surf) = l.surface_mut() {
+                let src = surf.content_bounds();
                 *surf = match doc_sel {
-                    // Only the selected pixels move: lift them, clear them, warp and paste back. The
-                    // lifted pixels' own bounds are the edge a stretch repeats (#3773).
+                    // Only the selected pixels move: lift them, clear them, warp and paste back.
                     Some(sel) => {
                         let (lifted, mut rest) = split_selected(surf, sel)?;
-                        let moved = warp_surface_with(&lifted, lifted.content_bounds(), h, interp, ctl)?.ok_or(EngineError::Cancelled)?;
+                        let moved = warp_surface_with(&lifted, src, h, interp, ctl)?.ok_or(EngineError::Cancelled)?;
                         composite_over(&mut rest, &moved);
                         rest.prune();
                         rest
                     }
-                    None => {
-                        let src = surf.content_bounds();
-                        warp_surface_with(surf, src, h, interp, ctl)?.ok_or(EngineError::Cancelled)?
-                    }
+                    None => warp_surface_with(surf, src, h, interp, ctl)?.ok_or(EngineError::Cancelled)?,
                 };
             }
         }
@@ -476,11 +445,6 @@ pub fn split_selected(surf: &Surface, sel: &Surface) -> Result<(Surface, Surface
         let k = sel.sample_channel(x, y, 0);
         l[n - 1] *= k;
         r[n - 1] *= 1.0 - k;
-        // Likewise an unselected pixel leaves nothing in the lifted surface, so its bounds are the
-        // selected pixels' (what a stretch repeats at the edge, #3773).
-        if l[n - 1] <= 0.0 {
-            l.fill(0.0);
-        }
         if r[n - 1] <= 0.0 {
             r.iter_mut().zip(&rest_clear).for_each(|(d, c)| *d = *c);
         }
@@ -1187,32 +1151,6 @@ mod tests {
         assert_eq!(transform_bounds(&st.doc, st.doc.layer(st.active_layer.unwrap()).unwrap()), Rect::new(10, 10, 15, 20));
     }
 
-    /// #5297: the box Free Transform opens with a selection is the selection's own rectangle,
-    /// not the part of it the layer fills; type still moves whole, and a selection that holds none
-    /// of the layer leaves nothing to transform.
-    #[test]
-    fn the_frame_is_the_selections_own_bounds() {
-        let mut s = session();
-        let frame = |s: &Session| {
-            let st = s.active().unwrap();
-            let l = st.doc.layer(st.active_layer.unwrap()).unwrap();
-            (transform_frame(&st.doc, l), transform_bounds(&st.doc, l))
-        };
-        let content = Rect::new(10, 10, 30, 20);
-        assert_eq!(frame(&s), (content, content), "no selection: the content");
-        s.execute("select.rect", json!({"x": 5, "y": 5, "width": 15, "height": 40})).unwrap();
-        assert_eq!(frame(&s), (Rect::new(5, 5, 20, 45), Rect::new(10, 10, 20, 20)));
-        s.execute("select.rect", json!({"x": 60, "y": 60, "width": 10, "height": 10})).unwrap();
-        assert!(frame(&s).0.is_empty(), "nothing of the layer is selected");
-
-        let mut s = Session::new();
-        s.execute("file.new", json!({"width": 200, "height": 120})).unwrap();
-        s.execute("type.create", json!({"x": 20, "y": 60, "text": "Hello", "size": 36})).unwrap();
-        let whole = active_bounds(&s);
-        s.execute("select.rect", json!({"x": whole.x0, "y": whole.y0, "width": whole.width() / 2, "height": whole.height()})).unwrap();
-        assert_eq!(frame(&s), (whole, whole), "type moves whole");
-    }
-
     #[test]
     fn group_transform_ignores_selections_inside_its_children() {
         group_transform_with_selection(Rect::new(10, 10, 15, 15));
@@ -1309,93 +1247,6 @@ mod tests {
         // Locked layer still refuses transform even if identity.
         s.execute("layer.setProps", json!({"locks": {"position": true}})).unwrap();
         assert!(s.execute("edit.transform", json!({"matrix": [1, 0, 0, 1, 0, 0]})).is_err(), "locked layer refuses identity transform");
-    }
-
-    /// A 1 x 8 px column on a 256 x 256 canvas (#3773).
-    fn column_session() -> Session {
-        let mut s = Session::new();
-        s.execute("file.new", json!({"width": 256, "height": 256})).unwrap();
-        s.execute("layer.new.layer", json!({})).unwrap();
-        s.edit("paint", |doc, active| {
-            let l = doc.layer_mut(active.unwrap()).unwrap();
-            l.surface_mut().unwrap().fill_rect(Rect::new(100, 100, 101, 108), &[0.0, 1.0, 0.0, 1.0]);
-            Ok(())
-        })
-        .unwrap();
-        s
-    }
-
-    fn opaque_green(s: &Session, x: i32, y: i32) -> bool {
-        let st = s.active().unwrap();
-        let surf = st.doc.layer(st.active_layer.unwrap()).unwrap().surface().unwrap();
-        (surf.sample_channel(x, y, 1) - 1.0).abs() < 1e-3 && (surf.sample_channel(x, y, 3) - 1.0).abs() < 1e-3
-    }
-
-    /// The "pixel stretch" (#3773): scales far past 1000% are taken, and the stretched column stays
-    /// solid along its whole length.
-    #[test]
-    fn a_one_pixel_column_stretches_5000_percent() {
-        let mut s = column_session();
-        s.execute("edit.transform", json!({"quad": [[100, 100], [150, 100], [150, 108], [100, 108]]})).unwrap();
-        assert_eq!(active_bounds(&s), Rect::new(100, 100, 150, 108));
-        for x in [100, 101, 125, 149] {
-            for y in 100..108 {
-                assert!(opaque_green(&s, x, y), "({x}, {y})");
-            }
-        }
-    }
-
-    /// The technique as done in Photoshop: select a 1 px column of an image and stretch it across.
-    #[test]
-    fn a_selected_column_stretches_solid_over_the_image() {
-        let mut s = Session::new();
-        s.execute("file.new", json!({"width": 256, "height": 256})).unwrap();
-        s.execute("layer.new.layer", json!({})).unwrap();
-        s.edit("paint", |doc, active| {
-            let surf = doc.layer_mut(active.unwrap()).unwrap().surface_mut().unwrap();
-            surf.fill_rect(Rect::new(0, 0, 256, 256), &[1.0, 0.0, 0.0, 1.0]);
-            surf.fill_rect(Rect::new(10, 0, 11, 256), &[0.0, 1.0, 0.0, 1.0]);
-            Ok(())
-        })
-        .unwrap();
-        s.execute("select.rect", json!({"x": 10, "y": 0, "width": 1, "height": 256})).unwrap();
-        s.execute("edit.transform", json!({"quad": [[10, 0], [250, 0], [250, 256], [10, 256]]})).unwrap();
-        for x in [10, 11, 100, 200, 249] {
-            assert!(opaque_green(&s, x, 128), "x = {x}");
-        }
-        let st = s.active().unwrap();
-        let surf = st.doc.layer(st.active_layer.unwrap()).unwrap().surface().unwrap();
-        assert!(surf.sample_channel(250, 128, 0) > 0.999 && surf.sample_channel(9, 128, 0) > 0.999, "the image either side is untouched");
-    }
-
-    /// Free Transform keeps pixels moved off the canvas, as Photoshop does: an 8 x 8 layer moved
-    /// three canvas widths right and back comes back whole.
-    #[test]
-    fn a_layer_moved_far_off_the_canvas_and_back_keeps_its_pixels() {
-        let mut s = Session::new();
-        s.execute("file.new", json!({"width": 64, "height": 64})).unwrap();
-        s.execute("layer.new.layer", json!({})).unwrap();
-        s.edit("paint", |doc, active| {
-            let surf = doc.layer_mut(active.unwrap()).unwrap().surface_mut().unwrap();
-            for y in 0..8 {
-                for x in 0..8 {
-                    surf.fill_rect(Rect::new(20 + x, 20 + y, 21 + x, 21 + y), &[x as f32 / 8.0, y as f32 / 8.0, 0.5, 1.0]);
-                }
-            }
-            Ok(())
-        })
-        .unwrap();
-        let pixels = |s: &Session| {
-            let st = s.active().unwrap();
-            let surf = st.doc.layer(st.active_layer.unwrap()).unwrap().surface().unwrap();
-            (0..8 * 8 * 4).map(|i| surf.sample_channel(20 + i / 4 % 8, 20 + i / 32, (i % 4) as usize)).collect::<Vec<_>>()
-        };
-        let before = pixels(&s);
-        s.execute("edit.transform", json!({"matrix": [1, 0, 0, 1, 192, 0]})).unwrap();
-        assert_eq!(active_bounds(&s), Rect::new(212, 20, 220, 28));
-        s.execute("edit.transform", json!({"matrix": [1, 0, 0, 1, -192, 0]})).unwrap();
-        assert_eq!(active_bounds(&s), Rect::new(20, 20, 28, 28));
-        assert_eq!(pixels(&s), before);
     }
 
     #[test]

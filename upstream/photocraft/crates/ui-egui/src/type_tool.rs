@@ -121,7 +121,6 @@ pub fn edit_active(app: &mut PhotocraftApp) -> Result<(), String> {
         ed.caret = n;
     }
     let vertical = app.session.active().and_then(|st| text_layer(&st.doc, id)).is_some_and(|t| t.orientation == photocraft_doc::text::Orientation::Vertical);
-    app.ui.text_edit_return_tool = None;
     app.ui.tool = if vertical { crate::state::Tool::VerticalType } else { crate::state::Tool::Type };
     app.ui.mask_target = false;
     app.ui.vector_mask_target = false;
@@ -133,7 +132,6 @@ pub fn edit_active(app: &mut PhotocraftApp) -> Result<(), String> {
 /// type is there.
 pub fn edit_at(app: &mut PhotocraftApp, x: f64, y: f64) -> bool {
     let Some(id) = hit_layer(app, x, y) else { return false };
-    let previous_tool = app.ui.tool;
     commit(app);
     if app.session.select_layer(id).is_err() {
         return false;
@@ -146,9 +144,6 @@ pub fn edit_at(app: &mut PhotocraftApp, x: f64, y: f64) -> bool {
     app.ui.text_edit =
         Some(TextEdit { layer: id.0, caret: off, anchor: off, session: key, created: false, mask: false, dragging: false, resize: None, preedit: None });
     let vertical = app.session.active().and_then(|st| text_layer(&st.doc, id)).is_some_and(|t| t.orientation == photocraft_doc::text::Orientation::Vertical);
-    if !previous_tool.is_type() {
-        app.ui.text_edit_return_tool = Some(previous_tool);
-    }
     app.ui.tool = if vertical { crate::state::Tool::VerticalType } else { crate::state::Tool::Type };
     app.ui.mask_target = false;
     app.ui.vector_mask_target = false;
@@ -276,7 +271,6 @@ pub fn pointer_down(app: &mut PhotocraftApp, x: f64, y: f64, mods: egui::Modifie
         let off = hit_offset(app, id, x, y);
         app.ui.text_edit =
             Some(TextEdit { layer: id.0, caret: off, anchor: off, session: key, created: false, mask: false, dragging: true, resize: None, preedit: None });
-        app.ui.text_edit_return_tool = None;
         return true;
     }
     false
@@ -301,7 +295,6 @@ pub fn pointer_up(app: &mut PhotocraftApp, start: [f64; 2], end: [f64; 2]) {
     if let Some(e) = app.ui.text_edit.as_mut() {
         e.dragging = false;
         e.resize = None;
-        app.ui.caret_blink_time = app.last_frame_time;
         return;
     }
     let (w, h) = ((end[0] - start[0]).abs(), (end[1] - start[1]).abs());
@@ -341,9 +334,7 @@ pub fn pointer_up(app: &mut PhotocraftApp, start: [f64; 2], end: [f64; 2]) {
         }
         // Like Photoshop: the placeholder is selected, so typing replaces it.
         let n = text.chars().count();
-        app.ui.caret_blink_time = app.last_frame_time;
         app.ui.text_edit = Some(TextEdit { layer: id, caret: n, anchor: 0, session: key, created: true, mask, dragging: false, resize: None, preedit: None });
-        app.ui.text_edit_return_tool = None;
     }
 }
 
@@ -782,7 +773,6 @@ pub fn handle_keys(app: &mut PhotocraftApp, ctx: &egui::Context) -> bool {
     let id = LayerId(ed.layer);
     let Some(text) = current_text(app, id) else {
         app.ui.text_edit = None;
-        app.ui.text_edit_return_tool = None;
         return false;
     };
     // Undo/redo can shorten the text under us.
@@ -791,11 +781,7 @@ pub fn handle_keys(app: &mut PhotocraftApp, ctx: &egui::Context) -> bool {
         e.caret = e.caret.min(n);
         e.anchor = e.anchor.min(n);
     }
-    let time = ctx.input(|i| i.time);
-    let elapsed = (time - app.ui.caret_blink_time).max(0.0);
-    let period = 0.530;
-    let remaining = period - (elapsed % period);
-    ctx.request_repaint_after(std::time::Duration::from_secs_f64(remaining.clamp(0.010, period)));
+    ctx.request_repaint_after(std::time::Duration::from_millis(530)); // caret blink
     let events = ctx.input(|i| i.events.clone());
     let vertical_flow = is_vertical(app, id);
     let mut handled = vec![false; events.len()];
@@ -948,7 +934,6 @@ pub fn handle_keys(app: &mut PhotocraftApp, ctx: &egui::Context) -> bool {
         }
     }
     if handled.iter().any(|h| *h) {
-        app.ui.caret_blink_time = ctx.input(|i| i.time);
         let mut k = 0;
         ctx.input_mut(|i| {
             i.events.retain(|_| {
@@ -975,11 +960,6 @@ pub fn commit_with(app: &mut PhotocraftApp, mods: egui::Modifiers) {
     }
     crate::type_transform::reset(app);
     let Some(ed) = app.ui.text_edit.take() else { return };
-    if let Some(tool) = app.ui.text_edit_return_tool.take()
-        && app.ui.tool.is_type()
-    {
-        app.ui.tool = tool;
-    }
     let Some(text) = current_text(app, LayerId(ed.layer)) else { return };
     if ed.mask {
         // Type Mask: the text's glyphs become (or combine with) the selection and the working
@@ -1007,9 +987,6 @@ pub fn commit_with(app: &mut PhotocraftApp, mods: egui::Modifiers) {
 /// Selection highlight, caret and text frame over the canvas.
 pub fn draw_overlay(app: &mut PhotocraftApp, painter: &egui::Painter, xf: &ViewXform) {
     let Some(ed) = app.ui.text_edit.clone() else { return };
-    if ed.dragging {
-        app.ui.caret_blink_time = painter.ctx().input(|i| i.time);
-    }
     let id = LayerId(ed.layer);
     let Some((l, aff, text)) = layout(app, id) else { return };
     if ed.mask {
@@ -1037,20 +1014,20 @@ pub fn draw_overlay(app: &mut PhotocraftApp, painter: &egui::Painter, xf: &ViewX
     }
     // Frame: paragraph text shows its box with handles; point text an underline per line.
     let mods = crate::workspace_ui::sticky_mods(app, painter.ctx().input(|i| i.modifiers));
-    let has_transform = crate::type_transform::draw(app, painter, xf, mods);
+    if crate::type_transform::draw(app, painter, xf, mods) {
+        return;
+    }
     let shape = app.session.active().and_then(|s| text_layer(&s.doc, id).map(|t| t.shape.clone()));
     let frame = Stroke::new(1.0, t.accent);
     match shape {
         Some(photocraft_doc::text::TextShape::Box { x, y, width, height }) => {
-            if !has_transform {
-                let c = [scr_t(x, y), scr_t(x + width, y), scr_t(x + width, y + height), scr_t(x, y + height)];
-                painter.add(egui::Shape::closed_line(c.to_vec(), frame));
-                let mids = [c[0].lerp(c[1], 0.5), c[1].lerp(c[2], 0.5), c[2].lerp(c[3], 0.5), c[3].lerp(c[0], 0.5)];
-                for p in c.iter().chain(mids.iter()) {
-                    let r = egui::Rect::from_center_size(*p, egui::vec2(7.0, 7.0));
-                    painter.rect_filled(r, 0.0, Color32::WHITE);
-                    painter.rect_stroke(r, 0.0, frame, egui::StrokeKind::Inside);
-                }
+            let c = [scr_t(x, y), scr_t(x + width, y), scr_t(x + width, y + height), scr_t(x, y + height)];
+            painter.add(egui::Shape::closed_line(c.to_vec(), frame));
+            let mids = [c[0].lerp(c[1], 0.5), c[1].lerp(c[2], 0.5), c[2].lerp(c[3], 0.5), c[3].lerp(c[0], 0.5)];
+            for p in c.iter().chain(mids.iter()) {
+                let r = egui::Rect::from_center_size(*p, egui::vec2(7.0, 7.0));
+                painter.rect_filled(r, 0.0, Color32::WHITE);
+                painter.rect_stroke(r, 0.0, frame, egui::StrokeKind::Inside);
             }
         }
         _ => {
@@ -1093,10 +1070,9 @@ pub fn draw_overlay(app: &mut PhotocraftApp, painter: &egui::Painter, xf: &ViewX
             }
         }
     } else {
-        // Blinking caret (Photoshop's ~0.53 s rhythm), solid while dragging or immediately after interaction.
+        // Blinking caret (Photoshop's ~0.53 s rhythm), solid while dragging.
         let time = painter.ctx().input(|i| i.time);
-        let elapsed = (time - app.ui.caret_blink_time).max(0.0);
-        if ed.dragging || (elapsed * 1000.0 / 530.0) as i64 % 2 == 0 {
+        if ed.dragging || (time * 1000.0 / 530.0) as i64 % 2 == 0 {
             let (x, top, bot) = l.caret(a);
             let (x, top, bot) = if l.lines.is_empty() { (0.0, -(12.0 * l.px_per_pt.max(1.0)), 3.0) } else { (x, top, bot) };
             let c = if crate::theme::Tokens::get(painter.ctx()).pro { Color32::WHITE } else { Color32::BLACK };
@@ -1577,9 +1553,7 @@ pub(crate) fn family_picker_in(
         let hover_id = egui::Id::new("type-font-hover");
         if let Some(f) = hovered_font {
             ui.ctx().data_mut(|d| d.insert_temp(hover_id, f));
-        } else if egui::ComboBox::is_open(ui.ctx(), response.response.id) {
-            // Only the open menu clears it: the options bar and the Character section both draw
-            // this picker, and the closed one must not wipe the other's hover (#5152).
+        } else {
             ui.ctx().data_mut(|d| d.remove::<String>(hover_id));
         }
     }
@@ -2416,11 +2390,6 @@ fn type_options(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
 pub fn cancel(app: &mut PhotocraftApp) {
     crate::type_transform::reset(app);
     let Some(ed) = app.ui.text_edit.take() else { return };
-    if let Some(tool) = app.ui.text_edit_return_tool.take()
-        && app.ui.tool.is_type()
-    {
-        app.ui.tool = tool;
-    }
     undo_session(app, &ed);
 }
 
@@ -2710,87 +2679,5 @@ mod tests {
         assert_eq!(word_boundary("hello big world", 0, true), 5);
         assert_eq!(word_boundary("hello big world", 7, false), 6);
         assert_eq!(word_boundary("hello big world", 15, false), 10);
-    }
-    #[test]
-    fn arrow_keys_reset_caret_blink_phase() {
-        let mut app = app();
-        pointer_up(&mut app, [10.0, 50.0], [10.0, 50.0]);
-        insert(&mut app, "Hello");
-        app.ui.caret_blink_time = 0.0;
-        let ctx = egui::Context::default();
-
-        let has_caret = |app: &mut PhotocraftApp, ctx: &egui::Context, time: f64| -> bool {
-            let mut out = ctx.run_ui(egui::RawInput { time: Some(time), ..Default::default() }, |ui| {
-                let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(400.0, 400.0));
-                let painter = ui.ctx().layer_painter(egui::LayerId::background()).with_clip_rect(rect);
-                let xf = ViewXform { rect, zoom: 1.0, center: [100.0, 100.0], flip: false, rotation: 0.0, aspect: 1.0 };
-                draw_overlay(app, &painter, &xf);
-            });
-            out.textures_delta.clear();
-            out.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::LineSegment { stroke, .. } if (stroke.width - 1.5).abs() < 1e-4))
-        };
-
-        // Before resetting, the caret is in the off phase at t = 10.5 s (10500 / 530 = 19, odd phase)
-        assert!(!has_caret(&mut app, &ctx, 10.5), "caret should be off at t = 10.5 with phase 0.0");
-
-        ctx.begin_pass(egui::RawInput {
-            time: Some(10.5),
-            events: vec![egui::Event::Key { key: egui::Key::ArrowRight, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::NONE }],
-            ..Default::default()
-        });
-        handle_keys(&mut app, &ctx);
-        assert_eq!(app.ui.caret_blink_time, 10.5);
-
-        // draw_overlay paints the solid caret in the new phase
-        assert!(has_caret(&mut app, &ctx, 10.5), "caret should be painted right after arrow key");
-    }
-
-    #[test]
-    fn pointer_up_click_resets_caret_blink_phase() {
-        let mut app = app();
-        pointer_up(&mut app, [10.0, 50.0], [10.0, 50.0]);
-        insert(&mut app, "Hello");
-        app.ui.caret_blink_time = 0.0;
-        app.last_frame_time = 12.3;
-        pointer_up(&mut app, [10.0, 50.0], [10.0, 50.0]);
-        assert_eq!(app.ui.caret_blink_time, 12.3);
-    }
-
-    #[test]
-    fn double_click_from_move_tool_restores_move_tool_on_commit_and_cancel() {
-        let (mut app, _) = variants();
-        app.ui.tool = crate::state::Tool::Move;
-        assert!(edit_at(&mut app, ON_TEXT.0, ON_TEXT.1));
-        assert_eq!(app.ui.tool, crate::state::Tool::Type);
-        assert_eq!(app.ui.text_edit_return_tool, Some(crate::state::Tool::Move));
-        commit(&mut app);
-        assert_eq!(app.ui.tool, crate::state::Tool::Move, "commit restores the Move tool");
-        assert_eq!(app.ui.text_edit_return_tool, None);
-
-        // Also test cancel
-        app.ui.tool = crate::state::Tool::Move;
-        assert!(edit_at(&mut app, ON_TEXT.0, ON_TEXT.1));
-        assert_eq!(app.ui.tool, crate::state::Tool::Type);
-        cancel(&mut app);
-        assert_eq!(app.ui.tool, crate::state::Tool::Move, "cancel restores the Move tool");
-        assert_eq!(app.ui.text_edit_return_tool, None);
-
-        // Switching tools mid-edit commits without overriding the newly chosen tool
-        app.ui.tool = crate::state::Tool::Move;
-        assert!(edit_at(&mut app, ON_TEXT.0, ON_TEXT.1));
-        assert_eq!(app.ui.tool, crate::state::Tool::Type);
-        assert_eq!(app.ui.text_edit_return_tool, Some(crate::state::Tool::Move));
-        app.ui.tool = crate::state::Tool::Brush;
-        commit(&mut app);
-        assert_eq!(app.ui.tool, crate::state::Tool::Brush, "switching tools keeps the chosen tool");
-        assert_eq!(app.ui.text_edit_return_tool, None);
-
-        // Layers-thumbnail edit stays on Type tool (matches Photoshop)
-        app.ui.tool = crate::state::Tool::Move;
-        edit_active(&mut app).unwrap();
-        assert_eq!(app.ui.tool, crate::state::Tool::Type);
-        assert_eq!(app.ui.text_edit_return_tool, None);
-        commit(&mut app);
-        assert_eq!(app.ui.tool, crate::state::Tool::Type, "Layers-thumbnail edit stays on Type tool");
     }
 }

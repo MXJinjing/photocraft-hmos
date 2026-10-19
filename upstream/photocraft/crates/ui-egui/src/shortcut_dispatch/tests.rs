@@ -315,47 +315,6 @@ fn a_disabled_shortcut_uses_the_command_id_translation() {
     });
 }
 
-/// #3665: Photoshop's second keys reach their command beside its main key: F2/F3/F4 Cut, Copy
-/// and Paste, Shift+F7 Inverse, ⌘+ Zoom In, Shift+Backspace Fill.
-#[test]
-fn alternate_keys_run_their_command() {
-    let mut h = harness();
-    put_focus(&mut h, Place::Canvas);
-    set_dry_run(&h.ctx, true);
-    for (key, want) in [
-        ("F2", "edit.cut"),
-        ("F3", "edit.copy"),
-        ("Cmd+C", "edit.copy"),
-        ("F4", "edit.paste"),
-        ("Shift+F7", "select.inverse"),
-        ("Cmd+Shift+I", "select.inverse"),
-        ("Cmd++", "view.zoomIn"),
-        ("Shift+Backspace", "edit.fill"),
-    ] {
-        press(&mut h, key);
-        let log = take_log(&h.ctx);
-        assert!(matches!(log.as_slice(), [(id, _)] if id == want), "{key}: {log:?}");
-    }
-    // Overriding Copy's main key keeps F3; ⌘C no longer copies.
-    h.state_mut().session.edit_prefs(|p| {
-        p.shortcuts.insert("edit.copy".into(), "Cmd+K".into());
-    });
-    press(&mut h, "F3");
-    assert!(matches!(take_log(&h.ctx).as_slice(), [(id, _)] if id == "edit.copy"));
-    // A key a user gives another command wins over a default alternate.
-    h.state_mut().session.edit_prefs(|p| {
-        p.shortcuts.insert("layer.renameLayer".into(), "F2".into());
-    });
-    assert!(bindings(h.state()).iter().any(|(id, sc)| id == "layer.renameLayer" && *sc == parse("F2").unwrap()));
-    assert!(!bindings(h.state()).iter().any(|(id, sc)| id == "edit.cut" && *sc == parse("F2").unwrap()));
-    // A removed alternate no longer fires.
-    h.state_mut().session.edit_prefs(|p| {
-        p.alternate_shortcuts.insert("edit.paste".into(), Vec::new());
-    });
-    press(&mut h, "F4");
-    assert!(take_log(&h.ctx).is_empty());
-}
-
 /// #352: ⌥[ ⌥] ⌥, ⌥. and ⇧⌥[ walk the Layers panel's rows from the keyboard.
 #[test]
 fn alt_brackets_walk_the_layers_panel() {

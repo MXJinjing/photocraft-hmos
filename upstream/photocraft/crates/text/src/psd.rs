@@ -105,8 +105,8 @@ fn enum_value(d: &Descriptor, key: &str) -> Option<String> {
 
 fn dnum(v: Option<&D>) -> Option<f64> {
     match v {
-        Some(D::Double(x)) if x.is_finite() => Some(*x),
-        Some(D::UnitFloat { value, .. }) if value.is_finite() => Some(*value),
+        Some(D::Double(x)) => Some(*x),
+        Some(D::UnitFloat { value, .. }) => Some(*value),
         Some(D::Integer(i)) => Some(f64::from(*i)),
         _ => None,
     }
@@ -351,19 +351,16 @@ pub fn text_layer_from_tysh(data: &[u8], dpi: f32) -> Option<TextLayer> {
     if let Some(w) = &t.warp {
         let style = enum_value(w, "warpStyle").unwrap_or_else(|| "warpNone".into());
         if style != "warpNone" {
-            // Bend and distortion are percentages in -100..100 (as `type.warpText` clamps them);
-            // clamping before the cast keeps a value beyond f32 from becoming inf.
-            let pct = |k: &str| dnum(w.get(k)).unwrap_or(0.0).clamp(-100.0, 100.0) as f32;
             layer.warp = Some(TextWarp {
                 style,
-                value: pct("warpValue"),
-                horizontal_distortion: pct("warpPerspective"),
-                vertical_distortion: pct("warpPerspectiveOther"),
+                value: dnum(w.get("warpValue")).unwrap_or(0.0) as f32,
+                horizontal_distortion: dnum(w.get("warpPerspective")).unwrap_or(0.0) as f32,
+                vertical_distortion: dnum(w.get("warpPerspectiveOther")).unwrap_or(0.0) as f32,
                 horizontal: enum_value(w, "warpRotate").as_deref() != Some("Vrtc"),
             });
         }
     }
-    let k = 72.0 / if dpi.is_finite() && dpi > 0.0 { dpi } else { 72.0 };
+    let k = 72.0 / if dpi > 0.0 { dpi } else { 72.0 };
     if let Some(e) = engine_data(&t.text) {
         // Without an `Ornt` key, the engine data's writing direction says it (2 = vertical).
         if enum_value(&t.text, "Ornt").is_none() && e.path(&["EngineDict", "Rendered", "Shapes", "WritingDirection"]).and_then(E::as_f64) == Some(2.0) {
@@ -585,8 +582,6 @@ fn lookup<'a>(run: &'a E, base: Option<&'a E>, key: &str) -> Option<&'a E> {
 pub(crate) fn char_style(base: Option<&E>, d: &E, fonts: &[String], k: f32) -> CharStyle {
     let g = |key: &str| lookup(d, base, key);
     let num = |key: &str| g(key).and_then(E::as_f64);
-    // An f32 that a huge finite f64 overflowed to infinity is dropped too.
-    let numk = |key: &str, k: f32| num(key).map(|v| v as f32 * k).filter(|v| v.is_finite());
     let flag = |key: &str| g(key).and_then(E::as_bool);
     let mut s = CharStyle::default();
     if let Some(ps) = g("Font").and_then(E::as_i64).and_then(|i| usize::try_from(i).ok()).and_then(|i| fonts.get(i)) {
@@ -596,18 +591,18 @@ pub(crate) fn char_style(base: Option<&E>, d: &E, fonts: &[String], k: f32) -> C
         s.italic = r.italic;
         s.postscript_name = Some(ps.clone());
     }
-    if let Some(v) = numk("FontSize", k) {
-        s.size_pt = v;
+    if let Some(v) = num("FontSize") {
+        s.size_pt = v as f32 * k;
     }
     if flag("AutoLeading") == Some(false)
-        && let Some(v) = numk("Leading", k)
+        && let Some(v) = num("Leading")
     {
-        s.leading_pt = Some(v);
+        s.leading_pt = Some(v as f32 * k);
     }
-    s.tracking = numk("Tracking", 1.0).unwrap_or(0.0);
-    s.baseline_shift_pt = numk("BaselineShift", k).unwrap_or(0.0);
-    s.horizontal_scale = numk("HorizontalScale", 1.0).unwrap_or(1.0);
-    s.vertical_scale = numk("VerticalScale", 1.0).unwrap_or(1.0);
+    s.tracking = num("Tracking").unwrap_or(0.0) as f32;
+    s.baseline_shift_pt = num("BaselineShift").unwrap_or(0.0) as f32 * k;
+    s.horizontal_scale = num("HorizontalScale").unwrap_or(1.0) as f32;
+    s.vertical_scale = num("VerticalScale").unwrap_or(1.0) as f32;
     s.faux_bold = flag("FauxBold").unwrap_or(false);
     s.faux_italic = flag("FauxItalic").unwrap_or(false);
     s.underline = flag("Underline").unwrap_or(false);
@@ -620,17 +615,14 @@ pub(crate) fn char_style(base: Option<&E>, d: &E, fonts: &[String], k: f32) -> C
         }
     }
     s.kerning = if flag("AutoKerning") == Some(false) { Kerning::Off } else { Kerning::Metrics };
-    s.kern = numk("Kerning", 1.0).unwrap_or(0.0);
+    s.kern = num("Kerning").filter(|v| v.is_finite()).unwrap_or(0.0) as f32;
     s.caps = match g("FontCaps").and_then(E::as_i64) {
         Some(1) => Caps::SmallCaps,
         Some(2) => Caps::AllCaps,
         _ => Caps::Normal,
     };
     if let Some(c) = g("FillColor") {
-        // Positions matter (alpha, then the channels): a non-finite entry voids the colour.
-        let v: Vec<f64> = c.get("Values").and_then(E::as_array).map(|a| a.iter().filter_map(E::as_f64).collect()).unwrap_or_default();
-        let n_raw = c.get("Values").and_then(E::as_array).map_or(0, <[E]>::len);
-        let v = if v.len() == n_raw && v.iter().all(|x| (*x as f32).is_finite()) { v } else { Vec::new() };
+        let v = arr_f(c.get("Values"));
         let a = v.first().copied().unwrap_or(1.0) as f32;
         s.color = match v.len() {
             5 => Color { mode: ColorMode::Cmyk, c: [v[1] as f32, v[2] as f32, v[3] as f32, v[4] as f32], alpha: a },
@@ -644,7 +636,6 @@ pub(crate) fn char_style(base: Option<&E>, d: &E, fonts: &[String], k: f32) -> C
 
 pub(crate) fn para_style(base: Option<&E>, d: &E, k: f32) -> ParagraphStyle {
     let num = |key: &str| lookup(d, base, key).and_then(E::as_f64);
-    let numk = |key: &str, k: f32| num(key).map(|v| v as f32 * k).filter(|v| v.is_finite());
     ParagraphStyle {
         align: match num("Justification").map(|v| v as i64) {
             Some(1) => TextAlign::Right,
@@ -655,12 +646,12 @@ pub(crate) fn para_style(base: Option<&E>, d: &E, k: f32) -> ParagraphStyle {
             Some(6) => TextAlign::JustifyAll,
             _ => TextAlign::Left,
         },
-        first_line_indent_pt: numk("FirstLineIndent", k).unwrap_or(0.0),
-        start_indent_pt: numk("StartIndent", k).unwrap_or(0.0),
-        end_indent_pt: numk("EndIndent", k).unwrap_or(0.0),
-        space_before_pt: numk("SpaceBefore", k).unwrap_or(0.0),
-        space_after_pt: numk("SpaceAfter", k).unwrap_or(0.0),
-        auto_leading: numk("AutoLeading", 1.0).unwrap_or(1.2),
+        first_line_indent_pt: num("FirstLineIndent").unwrap_or(0.0) as f32 * k,
+        start_indent_pt: num("StartIndent").unwrap_or(0.0) as f32 * k,
+        end_indent_pt: num("EndIndent").unwrap_or(0.0) as f32 * k,
+        space_before_pt: num("SpaceBefore").unwrap_or(0.0) as f32 * k,
+        space_after_pt: num("SpaceAfter").unwrap_or(0.0) as f32 * k,
+        auto_leading: num("AutoLeading").unwrap_or(1.2) as f32,
         hyphenate: lookup(d, base, "AutoHyphenate").and_then(E::as_bool).unwrap_or(false),
         ..Default::default()
     }
@@ -1098,7 +1089,7 @@ pub fn set_text_index(tysh: &[u8], index: i32) -> Option<Vec<u8>> {
 
 /// Updates (or creates) an EngineData tree for `layer`.
 pub fn build_engine_data(layer: &TextLayer, template: Option<E>, dpi: f32) -> E {
-    let k = 72.0 / if dpi.is_finite() && dpi > 0.0 { dpi } else { 72.0 };
+    let k = 72.0 / if dpi > 0.0 { dpi } else { 72.0 };
     let fresh = || E::Dict(vec![("EngineDict".into(), E::dict()), ("ResourceDict".into(), E::dict())]);
     // The template comes from the PSD: it may not be a dictionary or may lack `EngineDict`.
     let mut e = match template {
@@ -1342,47 +1333,4 @@ pub fn build_tysh(layer: &TextLayer, dpi: f32, ink: Option<[f32; 4]>) -> Vec<u8>
     let warped = warp.as_ref().is_some_and(|w| enum_value(w, "warpStyle").is_some_and(|s| s != "warpNone"));
     let bounds = if warped { [l, t, r, b] } else { [0.0; 4] };
     write_tysh(&TySh { transform: layer.transform, text, warp, bounds })
-}
-
-#[cfg(test)]
-mod nonfinite_tests {
-    use super::*;
-    use crate::engine_data::parse;
-
-    #[test]
-    fn non_finite_style_numbers_fall_back_to_defaults() {
-        let d = parse(b"<< /FontSize 1e999 /Tracking nan /HorizontalScale inf /Kerning -inf /FillColor << /Values [1.0 nan 0.0 0.0] >> >>").unwrap();
-        let s = char_style(None, &d, &[], 1.0);
-        let dflt = CharStyle::default();
-        assert_eq!(s.size_pt, dflt.size_pt);
-        assert_eq!((s.tracking, s.horizontal_scale, s.kern), (0.0, 1.0, 0.0));
-        assert_eq!(s.color, Color::BLACK);
-        // A finite f64 too big for f32 is dropped as well.
-        let d = parse(b"<< /FontSize 1e300 /StartIndent inf >> ").unwrap();
-        assert_eq!(char_style(None, &d, &[], 1.0).size_pt, dflt.size_pt);
-        assert_eq!(para_style(None, &d, 1.0).start_indent_pt, 0.0);
-        let d = parse(b"<< /FontSize 24.0 >>").unwrap();
-        assert_eq!(char_style(None, &d, &[], 1.0).size_pt, 24.0);
-    }
-
-    #[test]
-    fn warp_values_beyond_f32_clamp_to_the_warp_range() {
-        let warp = Descriptor::new("warp")
-            .with("warpStyle", enumv("warpStyle", "warpArc"))
-            .with("warpValue", D::Double(1e39))
-            .with("warpPerspective", D::Double(-1e39))
-            .with("warpPerspectiveOther", D::Double(250.0))
-            .with("warpRotate", enumv("Ornt", "Hrzn"));
-        let tysh = write_tysh(&TySh { transform: Affine::IDENTITY, text: Descriptor::new("TxLr"), warp: Some(warp), bounds: [0.0; 4] });
-        let w = text_layer_from_tysh(&tysh, 72.0).and_then(|l| l.warp).unwrap();
-        assert_eq!((w.value, w.horizontal_distortion, w.vertical_distortion), (100.0, -100.0, 100.0));
-    }
-
-    #[test]
-    fn infinite_dpi_does_not_write_a_zero_size() {
-        let layer =
-            TextLayer { text: "x".into(), runs: vec![TextRun { len: 1, style: CharStyle { size_pt: 12.0, ..Default::default() } }], ..Default::default() };
-        let out = String::from_utf8_lossy(&crate::engine_data::write(&build_engine_data(&layer, None, f32::INFINITY))).into_owned();
-        assert!(out.contains("/FontSize 12.0"), "{out}");
-    }
 }

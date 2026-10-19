@@ -251,9 +251,9 @@ mod archive {
         broken[90] ^= 0x55;
         let mut a = Archive::open(&broken, Limits::default()).unwrap();
         assert!(a.read("doc.dat").is_err());
-        let mut a = Archive::open(&file, Limits { max_entry: d.len() - 1, max_total: usize::MAX, ..Limits::default() }).unwrap();
+        let mut a = Archive::open(&file, Limits { max_entry: d.len() - 1, max_total: usize::MAX }).unwrap();
         assert!(matches!(a.read("doc.dat"), Err(Error::Limit(_))));
-        let mut a = Archive::open(&file, Limits { max_entry: usize::MAX, max_total: d.len() + 1, ..Limits::default() }).unwrap();
+        let mut a = Archive::open(&file, Limits { max_entry: usize::MAX, max_total: d.len() + 1 }).unwrap();
         a.read("doc.dat").unwrap();
         assert!(matches!(a.read("doc.dat"), Err(Error::Limit(_))));
     }
@@ -457,84 +457,5 @@ mod shapes {
         let (sub, _) = corners(None);
         assert_eq!(sub.segments.len(), 8);
         assert_eq!(sub.segments[3][2], p(5.0, 20.0));
-    }
-}
-
-/// Aggregate materialized-pixel admission (#4960). The entry limits bound what the archive
-/// extracts; these cover what the decoded layers and their working planes cost, which is declared
-/// by each bitmap's `BmpW`/`BmpH` and needs no tile data at all.
-mod pixels {
-    use crate::Error;
-    use crate::container::Limits;
-    use crate::model::{Document, Kind};
-    use crate::synth::{self, F, Method, tag};
-
-    /// A `Rstr` pixel layer whose bitmap declares `w`×`h` pixels and holds no tiles.
-    fn layer(id: u32, w: i32, h: i32) -> F {
-        F::Def(
-            id,
-            vec![tag(b"Rstr")],
-            vec![
-                (tag(b"Desc"), F::Str(format!("Layer {id}"))),
-                (tag(b"Bitm"), F::Def(id + 1, vec![tag(b"DyBm")], vec![(tag(b"BmpW"), F::I32(w)), (tag(b"BmpH"), F::I32(h)), (tag(b"Frmt"), F::Enum(0, 0))])),
-            ],
-        )
-    }
-
-    /// A document whose one page holds a pixel layer per `sizes` entry.
-    fn document(sizes: &[(i32, i32)]) -> Vec<u8> {
-        let children: Vec<F> = sizes.iter().enumerate().map(|(i, &(w, h))| layer(10 + 2 * i as u32, w, h)).collect();
-        let data = synth::stream(&[(
-            tag(b"DocR"),
-            F::Def(
-                1,
-                vec![tag(b"DocN")],
-                vec![(
-                    tag(b"Chld"),
-                    F::Shared(vec![F::Def(
-                        2,
-                        vec![tag(b"Sprd")],
-                        vec![(tag(b"SprB"), F::F64s(vec![0.0, 0.0, 256.0, 256.0])), (tag(b"Chld"), F::Shared(children))],
-                    )]),
-                )],
-            ),
-        )]);
-        synth::container(&[("doc.dat", &data, Method::Zlib)], None)
-    }
-
-    fn imported_layers(d: &Document) -> usize {
-        d.spreads[0].nodes.iter().filter(|n| matches!(n.kind, Kind::Image(_))).count()
-    }
-
-    /// A 64×64 layer costs 16 KiB of RGBA and 16 KiB of planes, so 40 KiB admits one and not two.
-    const ONE_LAYER: usize = 40 << 10;
-
-    #[test]
-    fn a_pixel_layer_within_the_budget_imports() {
-        let limits = Limits { max_pixel_bytes: ONE_LAYER, ..Limits::default() };
-        let d = crate::model::read(&document(&[(64, 64)]), limits).unwrap();
-        assert_eq!(imported_layers(&d), 1, "{:?}", d.warnings);
-    }
-
-    #[test]
-    fn layers_past_the_pixel_budget_are_rejected_before_they_are_allocated() {
-        let limits = Limits { max_pixel_bytes: ONE_LAYER, ..Limits::default() };
-        // The document is a few hundred bytes: the sizes are in the headers, not the entries.
-        let bytes = document(&[(64, 64), (64, 64)]);
-        assert!(bytes.len() < 4096, "the fixture is {} bytes", bytes.len());
-        assert!(matches!(crate::model::read(&bytes, limits), Err(Error::Limit(_))), "the second layer materialized");
-        // Two layers fit once the budget covers their pixels together.
-        let room = Limits { max_pixel_bytes: ONE_LAYER + (32 << 10), ..Limits::default() };
-        assert_eq!(imported_layers(&crate::model::read(&bytes, room).unwrap()), 2);
-    }
-
-    #[test]
-    fn a_declared_size_larger_than_the_budget_is_rejected_on_its_own() {
-        // 2048×2048 is 16 MiB of RGBA and 16 MiB of planes, past a 1 MiB budget.
-        let limits = Limits { max_pixel_bytes: 1 << 20, ..Limits::default() };
-        assert!(
-            matches!(crate::model::read(&document(&[(2048, 2048)]), limits), Err(Error::Limit(_))),
-            "16 MiB of declared pixels materialized under a 1 MiB budget"
-        );
     }
 }

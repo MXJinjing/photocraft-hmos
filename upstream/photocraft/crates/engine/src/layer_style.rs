@@ -98,7 +98,7 @@ pub fn effect_defaults(kind: &str) -> Value {
         }
         "patternOverlay" => json!({"blend": "Normal", "opacity": 100, "pattern": "", "angle": 0, "scale": 100, "link": true}),
         "bevelEmboss" => {
-            json!({"style": "inner", "technique": "smooth", "depth": 100, "direction": "up", "size": 5, "soften": 0, "angle": 120, "useGlobalLight": true, "altitude": 30, "glossContour": "Linear", "contour": false, "contourName": "Linear", "contourRange": 50, "contourAntiAlias": false})
+            json!({"style": "inner", "depth": 100, "direction": "up", "size": 5, "soften": 0, "angle": 120, "useGlobalLight": true, "altitude": 30, "glossContour": "Linear", "contour": false, "contourName": "Linear", "contourRange": 50, "contourAntiAlias": false})
         }
         "satin" => {
             json!({"blend": "Multiply", "color": "#000000", "opacity": 50, "angle": 19, "distance": 11, "size": 14, "contour": "Linear", "antiAlias": true, "invert": true})
@@ -895,10 +895,8 @@ fn replace_effects(s: &mut Session, p: &Value) -> Result<Value> {
         }
         let mode = doc.mode;
         let l = doc.layer_mut(id).ok_or(EngineError::NoLayer(id))?;
-        // The list's master switch (`layer.setEffectsVisible`, the Layers panel's "Effects" eye)
-        // survives the edit: the dialog models per-effect state, not the switch (#3648). A layer
-        // with no effects yet still has the default `enabled: true`, so its style shows.
         l.effects.items = list.into_iter().map(|e| e.in_mode(mode)).collect();
+        l.effects.enabled = true;
         Ok(())
     })?;
     Ok(json!({ "layer": id.0, "effects": count }))
@@ -917,8 +915,7 @@ fn set_effect(s: &mut Session, p: &Value, kind: &str) -> Result<Value> {
         // Colours in the document's mode, as Image › Mode keeps them.
         let fx = fx.in_mode(doc.mode);
         let l = doc.layer_mut(id).ok_or(EngineError::NoLayer(id))?;
-        // Adding or replacing one effect leaves the list's master switch alone (#3648); a fresh
-        // effects list already has the default `enabled: true`, so a first effect still shows.
+        l.effects.enabled = true;
         match l.effects.items.iter_mut().find(|e| same_kind(e, &fx)) {
             Some(slot) if !add => *slot = fx,
             _ => l.effects.items.push(fx),
@@ -1198,62 +1195,6 @@ mod tests {
         assert!(effects(&s).is_empty());
         s.execute("edit.undo", json!({})).unwrap();
         assert_eq!(effects(&s).len(), 1);
-    }
-
-    fn pixel(s: &mut Session) -> Vec<f32> {
-        serde_json::from_value(s.execute("document.pixel", json!({"x": 3, "y": 3})).unwrap()).unwrap()
-    }
-
-    fn list_enabled(s: &Session) -> bool {
-        let d = s.active().unwrap();
-        d.doc.layer(d.active_layer.unwrap()).unwrap().effects.enabled
-    }
-
-    /// #3648: the Layers panel's "Effects" eye (`layer.setEffectsVisible`) must survive a Layer
-    /// Style dialog OK: the dialog's whole-list replace re-creates the items but leaves the
-    /// list's master switch alone.
-    #[test]
-    fn replacing_the_list_keeps_a_disabled_effect_list_disabled() {
-        let mut s = session();
-        s.execute("edit.fill", json!({"contents": "color", "color": "#ff0000"})).unwrap();
-        s.execute("layer.layerStyle.colorOverlay", json!({"color": "#0000ff"})).unwrap();
-        let shown = pixel(&mut s);
-        s.execute("layer.setEffectsVisible", json!({"visible": false})).unwrap();
-        let hidden = pixel(&mut s);
-        assert_ne!(hidden, shown, "the eye really hides the style");
-        let r = s.execute("layer.layerStyle.replace", json!({"effects": [{"kind": "colorOverlay", "params": {"color": "#00ff00"}}]})).unwrap();
-        assert_eq!(r["effects"], 1, "the list itself is updated");
-        assert!(!list_enabled(&s), "the whole-list switch survives the edit");
-        assert!(effects(&s)[0].enabled(), "the effect's own state is updated");
-        assert_eq!(pixel(&mut s), hidden, "a disabled list still draws nothing");
-        s.execute("layer.setEffectsVisible", json!({"visible": true})).unwrap();
-        assert_ne!(pixel(&mut s), hidden, "re-showing the list draws the edited effect");
-    }
-
-    /// #3648: adding or replacing one effect (`layer.layerStyle.<kind>`) also leaves the master
-    /// switch as the user left it.
-    #[test]
-    fn set_effect_keeps_a_disabled_effect_list_disabled() {
-        let mut s = session();
-        s.execute("edit.fill", json!({"contents": "color", "color": "#ff0000"})).unwrap();
-        s.execute("layer.layerStyle.colorOverlay", json!({"color": "#0000ff"})).unwrap();
-        s.execute("layer.setEffectsVisible", json!({"visible": false})).unwrap();
-        let hidden = pixel(&mut s);
-        s.execute("layer.layerStyle.colorOverlay", json!({"color": "#00ff00"})).unwrap();
-        assert!(!list_enabled(&s), "the whole-list switch survives the edit");
-        assert!(effects(&s)[0].enabled(), "the effect's own state is updated");
-        assert_eq!(pixel(&mut s), hidden, "a disabled list still draws nothing");
-    }
-
-    /// A layer that never had effects keeps the default: its first effect shows.
-    #[test]
-    fn a_first_effect_shows_on_a_layer_that_never_had_effects() {
-        let mut s = session();
-        s.execute("edit.fill", json!({"contents": "color", "color": "#ff0000"})).unwrap();
-        let plain = pixel(&mut s);
-        s.execute("layer.layerStyle.colorOverlay", json!({"color": "#00ff00"})).unwrap();
-        assert!(list_enabled(&s), "a fresh effects list defaults to enabled");
-        assert_ne!(pixel(&mut s), plain, "the first effect renders");
     }
 
     /// #3102: an effect row dropped on the Delete button deletes only that effect, in one step.

@@ -46,14 +46,9 @@ pub(crate) fn window(app: &PhotocraftApp, dialog: u64, ui: &mut egui::Ui, f: &mu
         (preview_on && p.key.dialog == dialog && p.key.doc == doc_id && p.key.command == cmd).then(|| p.result.clone().map(|r| (p.key.clone(), r))).flatten()
     });
     // The proxy factor the preview runs at (the filtered key's when it exists, else the request's).
-    // The fallback must be the factor the canvas will ask for, not the document's own: since #6326
-    // the canvas caps it with the view's zoom, and a window that sized its textures from the
-    // uncapped factor built a proxy the canvas never asked for, then rebuilt it (a full-size copy
-    // and upload on the UI thread at 100 %) the moment the first result arrived, shifting this
-    // window's 100 % mapping and pan clamp for a frame.
     let base_k = filtered.as_ref().map(|(k, _)| k.k).unwrap_or_else(|| {
         let params = app.with_mask_target(&cmd, crate::filter_dialog::params_of(f));
-        crate::canvas::filter_preview_factor(app, &st.doc, &cmd, &params)
+        crate::filter_dialog::preview_factor(&cmd, &params, crate::proxy::preview_factor(&st.doc, crate::proxy::reduced_previews(app)))
     });
 
     let t = Tokens::get(ui.ctx());

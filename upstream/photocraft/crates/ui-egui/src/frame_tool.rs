@@ -1,6 +1,6 @@
 //! Frame tool (K): drag on the canvas to draw a rectangular or elliptical frame (the options bar
 //! picks the shape). ⇧ makes it a square or circle, ⌥ draws it from the centre. Drawn over the
-//! selected layer's content, the frame takes that layer in, as in Photoshop; else it is an
+//! selected pixel layer's content, the frame takes that layer in, as in Photoshop; else it is an
 //! empty placeholder. Each frame is one engine command (`layer.new.frame`), so one undo step; this
 //! module only turns the drag into it.
 
@@ -48,13 +48,12 @@ fn drawn(d: &FrameDrag) -> [i64; 4] {
     [a[0].min(b[0]), a[1].min(b[1]), a[0].max(b[0]), a[1].max(b[1])].map(|v| v.round() as i64)
 }
 
-/// The selected pixel, type, shape or smart object layer the frame `r` takes in: one whose content
-/// it overlaps and that can move (not the Background or a position-locked layer).
+/// The selected pixel layer the frame `r` takes in: one whose content it overlaps and that can
+/// move (not the Background or a position-locked layer).
 fn content_layer(app: &PhotocraftApp, r: [i64; 4]) -> Option<u64> {
     let st = app.session.active()?;
     let l = st.doc.layer(st.active_layer?)?;
-    let framable = matches!(l.content, LayerContent::Raster(_) | LayerContent::Text(_) | LayerContent::Shape(_) | LayerContent::Smart(_));
-    if !framable || l.locks.position || l.locks.all {
+    if !matches!(l.content, LayerContent::Raster(_)) || l.locks.position || l.locks.all {
         return None;
     }
     let b = l.surface()?.content_bounds();
