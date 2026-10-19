@@ -7,7 +7,10 @@
 #include <atomic>
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
+#include <map>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -32,6 +35,9 @@ using Notify = void (*)(uint64_t,const uint8_t*,size_t,const uint8_t*,size_t);
 bool pc_init(const uint8_t*,size_t,Notify);
 void pc_attach(uintptr_t,uint32_t,uint32_t);
 void pc_resize(uint32_t,uint32_t);
+void pc_win_attach(uint32_t,uintptr_t,uint32_t,uint32_t);
+void pc_win_resize(uint32_t,uint32_t,uint32_t);
+void pc_win_detach(uint32_t);
 void pc_detach();
 void pc_frame();
 void pc_active(bool);
@@ -51,9 +57,24 @@ napi_threadsafe_function notifyFn = nullptr;
 OH_NativeVSync* vsync = nullptr;
 std::atomic<bool> framePending(false);
 std::atomic<bool> attached(false);
-std::atomic<int32_t> touchId(-1);
-std::atomic<bool> penContact(false);
-std::atomic<bool> fingerContact(false);
+// Contact bookkeeping is per XComponent: the main window (key 0) and every native sub-window
+// (floating document window, key > 0) have independent pointer ownership.
+struct WinState {
+    uint32_t key=0;
+    std::atomic<int32_t> touchId{-1};
+    std::atomic<bool> penContact{false};
+    std::atomic<bool> fingerContact{false};
+};
+std::mutex winMutex;
+std::map<OH_NativeXComponent*,std::shared_ptr<WinState>> windows;
+// XComponent callbacks all run on the ArkUI thread; the active window tags outgoing input.
+thread_local WinState* cur=nullptr;
+WinState* Enter(OH_NativeXComponent* c) {
+    std::lock_guard<std::mutex> lock(winMutex);
+    auto it=windows.find(c);
+    cur=it==windows.end()?nullptr:it->second.get();
+    return cur;
+}
 struct Request {uint64_t id;std::string json;std::vector<uint8_t> data;};
 // 在 ArkTS 线程消费并释放请求；Rust 回调中的借用数据已由 NotifyRust 复制。
 void CallJS(napi_env env,napi_value callback,void*,void* ptr) {
@@ -99,24 +120,63 @@ std::string String(napi_env env,napi_value v) {
     return std::string(data.data(),len);
 }
 napi_value Undefined(napi_env env){napi_value v;napi_get_undefined(env,&v);return v;}
-void Json(const std::string& s){pc_input(reinterpret_cast<const uint8_t*>(s.data()),s.size());}
+void Json(const std::string& s) {
+    // Sub-window input carries its window key so Rust routes it to that viewport.
+    if(cur && cur->key!=0 && s.size()>1 && s[0]=='{') {
+        const std::string tagged="{\"win\":"+std::to_string(cur->key)+","+s.substr(1);
+        pc_input(reinterpret_cast<const uint8_t*>(tagged.data()),tagged.size());
+        return;
+    }
+    pc_input(reinterpret_cast<const uint8_t*>(s.data()),s.size());
+}
 void SurfaceCreated(OH_NativeXComponent* c,void* window) {
-    OH_LOG_Print(LOG_APP, LOG_INFO, 0xD001, "PhotoCraft", "Surface created");
+    auto* state=Enter(c);
+    OH_LOG_Print(LOG_APP, LOG_INFO, 0xD001, "PhotoCraft", "Surface created window=%{public}u", state?state->key:0u);
+    if(!state) {
+        OH_LOG_Print(LOG_APP, LOG_ERROR, 0xD001, "PhotoCraft",
+            "SurfaceCreated with no WinState (registerWindow missing or too late)");
+        return;
+    }
     uint64_t w=0,h=0;
-    if(!window||OH_NativeXComponent_GetXComponentSize(c,window,&w,&h)!=OH_NATIVEXCOMPONENT_RESULT_SUCCESS)return;
+    if(!window||OH_NativeXComponent_GetXComponentSize(c,window,&w,&h)!=OH_NATIVEXCOMPONENT_RESULT_SUCCESS) {
+        OH_LOG_Print(LOG_APP, LOG_ERROR, 0xD001, "PhotoCraft",
+            "SurfaceCreated size failed window=%{public}u", state->key);
+        return;
+    }
     auto ref=OH_NativeWindow_NativeObjectReference(window);
-    OH_LOG_Print(LOG_APP, LOG_INFO, 0xD001, "PhotoCraft", "Window %{public}llu x %{public}llu reference %{public}d", static_cast<unsigned long long>(w),static_cast<unsigned long long>(h),ref);
-    if(ref!=0)return;
+    OH_LOG_Print(LOG_APP, LOG_INFO, 0xD001, "PhotoCraft", "Window %{public}llu x %{public}llu reference %{public}d key=%{public}u", static_cast<unsigned long long>(w),static_cast<unsigned long long>(h),ref,state->key);
+    if(ref!=0) {
+        OH_LOG_Print(LOG_APP, LOG_ERROR, 0xD001, "PhotoCraft",
+            "NativeObjectReference failed %{public}d key=%{public}u", ref, state->key);
+        return;
+    }
     // 将取得的原生窗口引用转交 Rust 的 Window；后者负责在 surface 释放后解除引用。
+    if(state->key!=0) {
+        pc_win_attach(state->key,reinterpret_cast<uintptr_t>(window),static_cast<uint32_t>(w),static_cast<uint32_t>(h));
+        return;
+    }
     attached=true;
     pc_attach(reinterpret_cast<uintptr_t>(window),static_cast<uint32_t>(w),static_cast<uint32_t>(h));
 }
 void SurfaceChanged(OH_NativeXComponent* c,void* window) {
+    auto* state=Enter(c);
+    if(!state)return;
     uint64_t w=0,h=0;
-    if(OH_NativeXComponent_GetXComponentSize(c,window,&w,&h)==OH_NATIVEXCOMPONENT_RESULT_SUCCESS)pc_resize(static_cast<uint32_t>(w),static_cast<uint32_t>(h));
+    if(OH_NativeXComponent_GetXComponentSize(c,window,&w,&h)!=OH_NATIVEXCOMPONENT_RESULT_SUCCESS)return;
+    if(state->key!=0)pc_win_resize(state->key,static_cast<uint32_t>(w),static_cast<uint32_t>(h));
+    else pc_resize(static_cast<uint32_t>(w),static_cast<uint32_t>(h));
 }
-void SurfaceDestroyed(OH_NativeXComponent*,void*) {attached=false;touchId=-1;penContact=false;fingerContact=false;pc_detach();}
+void SurfaceDestroyed(OH_NativeXComponent* c,void*) {
+    auto* state=Enter(c);
+    if(!state)return;
+    state->touchId=-1;state->penContact=false;state->fingerContact=false;
+    if(state->key!=0){pc_win_detach(state->key);return;}
+    attached=false;pc_detach();
+}
 void Touch(OH_NativeXComponent* c,void* window) {
+    auto* state=Enter(c);
+    if(!state)return;
+    auto& touchId=state->touchId;auto& penContact=state->penContact;auto& fingerContact=state->fingerContact;
     OH_NativeXComponent_TouchEvent e{};
     if(OH_NativeXComponent_GetTouchEvent(c,window,&e)!=OH_NATIVEXCOMPONENT_RESULT_SUCCESS)return;
     uint32_t index=0;
@@ -176,7 +236,9 @@ void Touch(OH_NativeXComponent* c,void* window) {
     if(action==1||action==3){touchId=-1;penContact=false;}
 }
 void Mouse(OH_NativeXComponent* c,void* window) {
-    if(penContact || fingerContact)return;
+    auto* state=Enter(c);
+    if(!state)return;
+    if(state->penContact || state->fingerContact)return;
     OH_NativeXComponent_MouseEvent e{};
     if(OH_NativeXComponent_GetMouseEvent(c,window,&e)!=OH_NATIVEXCOMPONENT_RESULT_SUCCESS)return;
     if(e.action==OH_NATIVEXCOMPONENT_MOUSE_CANCEL){Json("{\"kind\":\"pointer\",\"action\":3}");return;}
@@ -189,6 +251,7 @@ void Mouse(OH_NativeXComponent* c,void* window) {
     Json("{\"kind\":\"pointer\",\"action\":"+std::to_string(action)+",\"button\":"+std::to_string(button)+",\"x\":"+std::to_string(e.x)+",\"y\":"+std::to_string(e.y)+"}");
 }
 bool Key(OH_NativeXComponent* c,void*) {
+    if(!Enter(c))return false;
     OH_NativeXComponent_KeyEvent* event=nullptr;
     OH_NativeXComponent_KeyAction action=OH_NATIVEXCOMPONENT_KEY_ACTION_UNKNOWN;
     OH_NativeXComponent_KeyCode code=static_cast<OH_NativeXComponent_KeyCode>(-1);
@@ -220,8 +283,10 @@ bool Key(OH_NativeXComponent* c,void*) {
          ",\"text\":\""+text+"\"}");
     return true;
 }
-void Axis(OH_NativeXComponent*,ArkUI_UIInputEvent* event,ArkUI_UIInputEvent_Type type) {
-    if(!event||type!=ARKUI_UIINPUTEVENT_TYPE_AXIS || penContact)return;
+void Axis(OH_NativeXComponent* c,ArkUI_UIInputEvent* event,ArkUI_UIInputEvent_Type type) {
+    auto* state=Enter(c);
+    if(!state)return;
+    if(!event||type!=ARKUI_UIINPUTEVENT_TYPE_AXIS || state->penContact)return;
     double x=-OH_ArkUI_AxisEvent_GetHorizontalAxisValue(event);
     double y=-OH_ArkUI_AxisEvent_GetVerticalAxisValue(event);
     double zoom=OH_ArkUI_AxisEvent_GetPinchAxisScaleValue(event);
@@ -232,14 +297,81 @@ void Axis(OH_NativeXComponent*,ArkUI_UIInputEvent* event,ArkUI_UIInputEvent_Type
          ",\"x\":"+std::to_string(px)+",\"y\":"+std::to_string(py)+",\"dx\":"+std::to_string(x)+
          ",\"dy\":"+std::to_string(y)+",\"zoom\":"+std::to_string(zoom)+"}");
 }
-void Blur(OH_NativeXComponent*,void*) {touchId=-1;penContact=false;fingerContact=false;Json("{\"kind\":\"blur\"}");}
-void Hover(OH_NativeXComponent*,bool isHover) {
+void Blur(OH_NativeXComponent* c,void*) {
+    auto* state=Enter(c);
+    if(!state)return;
+    state->touchId=-1;state->penContact=false;state->fingerContact=false;Json("{\"kind\":\"blur\"}");
+}
+void Hover(OH_NativeXComponent* c,bool isHover) {
+    auto* state=Enter(c);
+    if(!state)return;
     // Entry has no position to replay; the next real movement resumes the preview.
-    if(!isHover && !penContact && !fingerContact)Json("{\"kind\":\"hover_leave\"}");
+    if(!isHover && !state->penContact && !state->fingerContact)Json("{\"kind\":\"hover_leave\"}");
 }
 OH_NativeXComponent_Callback callbacks{SurfaceCreated,SurfaceChanged,SurfaceDestroyed,Touch};
 OH_NativeXComponent_MouseEvent_Callback mouseCallbacks{Mouse,Hover};
 
+// Register the shared callback set for one XComponent.
+// Main window id is 'photocraft-native' (key 0). Sub-windows use 'pc-win-<N>' and SHOULD pass
+// key explicitly from ArkTS: LocalStorageProp can still be 0 on first build, which used to
+// reject registration (parsed<=0) and leave the sub-window surface forever black.
+bool RegisterComponent(OH_NativeXComponent* c, uint32_t explicit_key) {
+    if(!c)return false;
+    char id[OH_XCOMPONENT_ID_LEN_MAX+1]={0};
+    uint64_t size=OH_XCOMPONENT_ID_LEN_MAX+1;
+    if(OH_NativeXComponent_GetXComponentId(c,id,&size)!=OH_NATIVEXCOMPONENT_RESULT_SUCCESS)return false;
+    uint32_t key=explicit_key;
+    const std::string name(id);
+    const std::string prefix="pc-win-";
+    if(key==0 && name.compare(0,prefix.size(),prefix)==0) {
+        const long parsed=std::strtol(name.c_str()+prefix.size(),nullptr,10);
+        if(parsed<=0||parsed>0x7fffffff) {
+            OH_LOG_Print(LOG_APP, LOG_ERROR, 0xD001, "PhotoCraft",
+                "Rejecting XComponent id=%{public}s (need key>0)", id);
+            return false;
+        }
+        key=static_cast<uint32_t>(parsed);
+    }
+    {
+        std::lock_guard<std::mutex> lock(winMutex);
+        // A destroyed XComponent's address can be reused by another window: trust the key, and
+        // always re-register callbacks (the object may be new).
+        auto it=windows.find(c);
+        if(it==windows.end()||it->second->key!=key) {
+            auto state=std::make_shared<WinState>();
+            state->key=key;
+            windows[c]=state;
+        } else {
+            it->second->key=key;
+        }
+    }
+    OH_LOG_Print(LOG_APP, LOG_INFO, 0xD001, "PhotoCraft",
+        "Registering XComponent callbacks id=%{public}s window=%{public}u explicit=%{public}u",
+        id, key, explicit_key);
+    OH_NativeXComponent_RegisterCallback(c,&callbacks);
+    OH_NativeXComponent_RegisterMouseEventCallback(c,&mouseCallbacks);
+    OH_NativeXComponent_RegisterKeyEventCallbackWithResult(c,Key);
+    OH_NativeXComponent_RegisterBlurEventCallback(c,Blur);
+    OH_NativeXComponent_RegisterUIInputEventCallback(c,Axis,ARKUI_UIINPUTEVENT_TYPE_AXIS);
+    return true;
+}
+// ArkTS XComponent.onLoad(context[, key]) → bind a sub-window's XComponent to viewport key.
+napi_value RegisterWindow(napi_env env,napi_callback_info info) {
+    size_t n=2;napi_value args[2];napi_get_cb_info(env,info,&n,args,nullptr,nullptr);
+    bool ok=false;
+    uint32_t key=0;
+    if(n>=2) {
+        double value=0;
+        if(napi_get_value_double(env,args[1],&value)==napi_ok && value>0 && value<=0x7fffffff)
+            key=static_cast<uint32_t>(value);
+    }
+    if(n>=1){
+        napi_value value;OH_NativeXComponent* c=nullptr;
+        if(napi_get_named_property(env,args[0],OH_NATIVE_XCOMPONENT_OBJ,&value)==napi_ok&&
+           napi_unwrap(env,value,reinterpret_cast<void**>(&c))==napi_ok)ok=RegisterComponent(c,key);
+    }
+    napi_value result;napi_get_boolean(env,ok,&result);return result;
+}
 napi_value InitHost(napi_env env,napi_callback_info info) {
     OH_LOG_Print(LOG_APP, LOG_INFO, 0xD001, "PhotoCraft", "Initializing Rust host");
     size_t n=2;napi_value args[2];napi_get_cb_info(env,info,&n,args,nullptr,nullptr);
@@ -267,6 +399,8 @@ napi_value InitHost(napi_env env,napi_callback_info info) {
 }
 napi_value Input(napi_env env,napi_callback_info info) {
     size_t n=1;napi_value arg;napi_get_cb_info(env,info,&n,&arg,nullptr,nullptr);
+    // Input from ArkTS names its own window; never inherit the last XComponent callback's.
+    cur=nullptr;
     if(n){auto s=String(env,arg);Json(s);}return Undefined(env);
 }
 napi_value Command(napi_env env,napi_callback_info info) {
@@ -340,6 +474,7 @@ napi_value Init(napi_env env,napi_value exports) {
     const napi_property_descriptor props[]={
         {"init",nullptr,InitHost,nullptr,nullptr,nullptr,napi_default,nullptr},
         {"input",nullptr,Input,nullptr,nullptr,nullptr,napi_default,nullptr},
+        {"registerWindow",nullptr,RegisterWindow,nullptr,nullptr,nullptr,napi_default,nullptr},
         {"reply",nullptr,Reply,nullptr,nullptr,nullptr,napi_default,nullptr},
         {"open",nullptr,Open,nullptr,nullptr,nullptr,napi_default,nullptr},
         {"replyFile",nullptr,ReplyFile,nullptr,nullptr,nullptr,napi_default,nullptr},
@@ -353,12 +488,7 @@ napi_value Init(napi_env env,napi_value exports) {
     napi_define_properties(env,exports,sizeof(props)/sizeof(props[0]),props);
     napi_value value;OH_NativeXComponent* c=nullptr;
     if(napi_get_named_property(env,exports,OH_NATIVE_XCOMPONENT_OBJ,&value)==napi_ok&&napi_unwrap(env,value,reinterpret_cast<void**>(&c))==napi_ok&&c) {
-        OH_LOG_Print(LOG_APP, LOG_INFO, 0xD001, "PhotoCraft", "Registering XComponent callbacks");
-        OH_NativeXComponent_RegisterCallback(c,&callbacks);
-        OH_NativeXComponent_RegisterMouseEventCallback(c,&mouseCallbacks);
-        OH_NativeXComponent_RegisterKeyEventCallbackWithResult(c,Key);
-        OH_NativeXComponent_RegisterBlurEventCallback(c,Blur);
-        OH_NativeXComponent_RegisterUIInputEventCallback(c,Axis,ARKUI_UIINPUTEVENT_TYPE_AXIS);
+        RegisterComponent(c,0);
     }
     napi_add_env_cleanup_hook(env,Cleanup,nullptr);
     return exports;
