@@ -96,10 +96,13 @@ pub(crate) fn paste(s: &mut Session, p: &Value, k: usize, in_place: bool, limit:
             return Err(EngineError::Other(format!("no colour channel {k} in this layer")));
         }
         if !area.is_empty() {
-            let mut rgba = vec![[0.0f32; 4]; area.width() as usize * area.height() as usize];
+            let len = (area.width() as usize).checked_mul(area.height() as usize).ok_or_else(|| EngineError::Other("the channel paste is too large".into()))?;
+            let mut rgba = crate::allocation::filled(len, [0.0f32; 4], "pasting into a channel")?;
             src.read_rgba_into(area, &mut rgba);
-            let weight = limit.map(|m| (m.read_region(area), m.format().channels().max(1)));
-            let mut px = surf.read_region(area);
+            let weight = limit
+                .map(|m| crate::allocation::read_region(m, area, "reading the channel paste selection").map(|v| (v, m.format().channels().max(1))))
+                .transpose()?;
+            let mut px = crate::allocation::read_region(surf, area, "pasting into a channel")?;
             for (i, (dst, s)) in px.chunks_exact_mut(n).zip(&rgba).enumerate() {
                 let w = s[3] * weight.as_ref().map_or(1.0, |(m, mk)| m.get(i * mk).copied().unwrap_or(0.0));
                 let v = photocraft_color::convert::rgb_to_gray([s[0], s[1], s[2]]);
@@ -107,7 +110,7 @@ pub(crate) fn paste(s: &mut Session, p: &Value, k: usize, in_place: bool, limit:
                     *c += (v - *c) * w.clamp(0.0, 1.0);
                 }
             }
-            surf.write_region(area, &px);
+            surf.try_write_region(area, &px)?;
             surf.prune();
         }
         doc.selection = None;

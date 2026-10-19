@@ -289,6 +289,153 @@ fn known_params(class: &str, f: Option<&Descriptor>) -> Option<(&'static str, J)
     Some((k.command, params))
 }
 
+// ---------- Filter Gallery ----------
+//
+// Filter › Filter Gallery stores its effect stack in a `GEfc` filter (filterID `GEfc`). Photoshop
+// writes a single effect inline; Photopea writes a list (also for one effect):
+//
+// ```text
+// Fltr = GEfc { GEfk = GEft enum (the effect), <settings as long> }                          (Photoshop)
+// Fltr = GEfc { GEfs = [ GEfc { <settings as long>, GEfk = GEft enum, GELv = visible } ] }   (Photopea)
+// ```
+//
+// The list is in application order, like `filter.filterGallery`'s `effects`. The item's
+// `FrgC`/`BckC` are the colours the Sketch effects read. Only effects whose settings we know are
+// mapped; a stack with any other effect (or setting) stays an [`UNSUPPORTED_FILTER`].
+
+const GALLERY_CLASS: &str = "GEfc";
+const GALLERY_COMMAND: &str = "filter.filterGallery";
+const GALLERY_NAME: &str = "Filter Gallery...";
+
+/// One gallery effect: our filter key, Photoshop's `GEft` code and its settings (PSD key, our key).
+struct GalleryCode {
+    key: &'static str,
+    code: &'static str,
+    settings: &'static [(&'static str, &'static str)],
+}
+
+const GALLERY_EFFECTS: [GalleryCode; 1] = [GalleryCode { key: "chrome", code: "Chrm", settings: &[("Dtl ", "detail"), ("Smth", "smoothness")] }];
+
+/// An `RGBC` descriptor (0–255 channels) as straight `[r, g, b, a]`, 0–1.
+fn rgbc_colour(d: &Descriptor) -> Option<J> {
+    let c = |k: &str| px(d, k).map(|v| (v / 255.0).clamp(0.0, 1.0));
+    Some(json!([c("Rd  ")?, c("Grn ")?, c("Bl  ")?, 1.0]))
+}
+
+/// `filter.filterGallery` params for a `GEfc` filter item; `None` when an effect or setting is
+/// not modelled.
+fn gallery_params(item: &Descriptor, f: &Descriptor) -> Option<J> {
+    let list: Vec<&Descriptor> = match f.get("GEfs") {
+        Some(Value::List(list)) => list
+            .iter()
+            .map(|v| match v {
+                Value::Descriptor(e) => Some(e),
+                _ => None,
+            })
+            .collect::<Option<_>>()?,
+        Some(_) => return None,
+        None if f.get("GEfk").is_some() => vec![f],
+        None => return None,
+    };
+    let mut effects = Vec::with_capacity(list.len());
+    for e in list {
+        let code = enum_of(e, "GEfk")?;
+        let g = GALLERY_EFFECTS.iter().find(|g| g.code.as_bytes() == code)?;
+        let mut params = Map::new();
+        for (k, v) in &e.items {
+            if k.is("GEfk") || k.is("GELv") {
+                continue;
+            }
+            let (_, ours) = g.settings.iter().find(|(psd, _)| k.is(psd))?;
+            params.insert((*ours).into(), json!(int_value(v)?));
+        }
+        effects.push(json!({"filter": g.key, "params": params, "visible": bool_or(e, "GELv", true)}));
+    }
+    if effects.is_empty() {
+        return None;
+    }
+    let mut out = Map::new();
+    out.insert("effects".into(), J::Array(effects));
+    for (psd, ours) in [("FrgC", "foreground"), ("BckC", "background")] {
+        if let Some(c) = get_desc(item, psd).and_then(rgbc_colour) {
+            out.insert(ours.into(), c);
+        }
+    }
+    Some(J::Object(out))
+}
+
+fn colour_rgb(v: &J) -> Option<[f64; 3]> {
+    match v {
+        J::Array(a) => Some([a.first()?.as_f64()?, a.get(1)?.as_f64()?, a.get(2)?.as_f64()?]),
+        J::String(h) if h.len() == 7 && h.starts_with('#') => {
+            let ch = |j: usize| h.get(j..j + 2).and_then(|s| u8::from_str_radix(s, 16).ok()).map(|v| f64::from(v) / 255.0);
+            Some([ch(1)?, ch(3)?, ch(5)?])
+        }
+        _ => None,
+    }
+}
+
+/// A `[r, g, b(, a)]` (0–1) or `#rrggbb` colour param as an `RGBC` descriptor (0–255).
+fn colour_rgbc(v: Option<&J>, default: f64) -> Result<Value, String> {
+    let Some(v) = v else { return Ok(rgbc(default)) };
+    let rgb = colour_rgb(v).filter(|c| c.iter().all(|v| v.is_finite())).ok_or("a colour is not [r, g, b] or #rrggbb")?;
+    let c = |v: f64| Value::Double(v.clamp(0.0, 1.0) * 255.0);
+    Ok(Value::Descriptor(Descriptor::new("RGBC").with("Rd  ", c(rgb[0])).with("Grn ", c(rgb[1])).with("Bl  ", c(rgb[2]))))
+}
+
+/// The `filterFXList` item for a `filter.filterGallery` smart filter.
+fn gallery_item(f: &SmartFilter) -> Result<Descriptor, String> {
+    let p = &f.params;
+    if let Some(k) = p.as_object().and_then(|o| o.keys().find(|k| !is_meta(k) && !["effects", "foreground", "background"].contains(&k.as_str()))) {
+        return Err(format!("setting `{k}` has no PSD equivalent"));
+    }
+    let list = p.get("effects").and_then(J::as_array).ok_or("it has no effects")?;
+    let mut out = Vec::with_capacity(list.len());
+    for e in list {
+        let key = e.get("filter").and_then(J::as_str).ok_or("an effect has no `filter`")?;
+        let g = GALLERY_EFFECTS.iter().find(|g| g.key == key).ok_or_else(|| format!("gallery effect `{key}` has no PSD equivalent"))?;
+        let params = e.get("params").filter(|v| v.is_object()).unwrap_or(e);
+        if let Some(k) = params.as_object().and_then(|o| {
+            o.keys().find(|k| !is_meta(k) && !["filter", "params", "visible"].contains(&k.as_str()) && !g.settings.iter().any(|(_, ours)| ours == k))
+        }) {
+            return Err(format!("gallery setting `{key}.{k}` has no PSD equivalent"));
+        }
+        let defaults = photocraft_algo::GalleryFilter::from_key(key).map(photocraft_algo::GalleryEffect::new);
+        let settings: Vec<(&str, Value)> =
+            g.settings.iter().map(|(psd, ours)| (*psd, pi(params, ours, defaults.as_ref().map_or(0.0, |x| f64::from(x.get(ours)))))).collect();
+        out.push((g.code, settings, e.get("visible").and_then(J::as_bool).unwrap_or(true)));
+    }
+    let gallery = || {
+        let mut d = Descriptor::new(GALLERY_CLASS);
+        d.name = UnicodeString::new_nul("Filter Gallery");
+        d
+    };
+    // One visible effect: inline, as Photoshop writes it. Otherwise the effect list.
+    let fltr = match out.as_slice() {
+        [] => return Err("it has no effects".into()),
+        [(code, settings, true)] => settings.iter().fold(gallery().with("GEfk", enumv("GEft", code)), |d, (k, v)| d.with(k, v.clone())),
+        _ => {
+            let list = out
+                .into_iter()
+                .map(|(code, settings, visible)| {
+                    let d = settings.into_iter().fold(gallery(), |d, (k, v)| d.with(k, v));
+                    Value::Descriptor(d.with("GEfk", enumv("GEft", code)).with("GELv", Value::Boolean(visible)))
+                })
+                .collect();
+            gallery().with("GEfs", Value::List(list))
+        }
+    };
+    Ok(Descriptor::new("filterFX")
+        .with("Nm  ", Value::Text(UnicodeString::new_nul(GALLERY_NAME)))
+        .with("blendOptions", blend_options(f))
+        .with("enab", Value::Boolean(f.visible))
+        .with("hasoptions", Value::Boolean(true))
+        .with("FrgC", colour_rgbc(p.get("foreground"), 0.0)?)
+        .with("BckC", colour_rgbc(p.get("background"), 255.0)?)
+        .with("Fltr", Value::Descriptor(fltr))
+        .with("filterID", Value::Integer(code(b"GEfc"))))
+}
+
 /// Lowercase hex of `bytes`.
 fn to_hex(bytes: &[u8]) -> String {
     const H: &[u8; 16] = b"0123456789abcdef";
@@ -322,6 +469,7 @@ pub fn filter_from_item(item: &Descriptor) -> SmartFilter {
     let known = match class.as_deref() {
         Some(camera_raw::CLASS) => camera_raw::import_params(item).map(|p| (camera_raw::COMMAND, p)),
         Some(displace::CLASS) => displace::import_params(item).map(|p| (displace::COMMAND, p)),
+        Some(GALLERY_CLASS) => fltr.and_then(|f| gallery_params(item, f)).map(|p| (GALLERY_COMMAND, p)),
         c => c.and_then(|c| known_params(c, fltr)),
     };
     let (command, params) = match known {
@@ -472,6 +620,9 @@ pub fn item_for_filter(f: &SmartFilter) -> Result<Descriptor, String> {
         set(&mut d, "blendOptions", blend_options(f));
         set(&mut d, "enab", Value::Boolean(f.visible));
         return Ok(d);
+    }
+    if f.command == GALLERY_COMMAND {
+        return gallery_item(f);
     }
     if f.command == UNSUPPORTED_FILTER {
         let raw = f.params.get("psd").and_then(J::as_str).and_then(from_hex).ok_or("its filter data is missing")?;
@@ -735,6 +886,45 @@ pub fn mask_from_item(item: &FilterEffectsItem, sample: SampleType, stack: &Filt
     Ok(Some(LayerMask { surface, enabled: stack.mask_enabled, linked: stack.mask_linked, density: 1.0, feather: 0.0 }))
 }
 
+/// The unfiltered placed pixels of an `FEid` item (the inverse of [`feid_item`]), in `fmt`: colour
+/// channels from slot 0, transparency from the last slot (opaque without it). `None` when the
+/// item has no colour planes, its depth isn't `fmt`'s, or a plane doesn't decode.
+pub fn unfiltered_from_item(item: &FilterEffectsItem, fmt: PixelFormat) -> Option<Surface> {
+    let depth = u16::try_from(item.depth).ok()?;
+    if u32::from(crate::pixels::psd_depth(fmt.sample)) != item.depth || !fmt.alpha {
+        return None;
+    }
+    let (w, h) = item.rect.size().ok()?;
+    let n = w.checked_mul(h)?;
+    let cc = fmt.mode.color_channels();
+    let mut planes = Vec::with_capacity(cc + 1);
+    for slot in (0..cc).chain(std::iter::once(item.slots.len().saturating_sub(1))) {
+        planes.push(match item.slots.get(slot).and_then(Option::as_ref) {
+            Some(p) => Some(p.decode(w, h, depth).ok()?),
+            None if slot < cc => return None,
+            None => None,
+        });
+    }
+    let refs: Vec<Option<&[u8]>> = planes.iter().map(|p| p.as_deref()).collect();
+    let mut fill = vec![crate::pixels::zero_sample(fmt.sample); cc];
+    // Without a transparency plane the pixels are opaque (a native-endian full sample).
+    fill.push(match fmt.sample {
+        SampleType::U8 => vec![u8::MAX],
+        SampleType::U16 => u16::MAX.to_ne_bytes().to_vec(),
+        SampleType::F32 => 1.0f32.to_ne_bytes().to_vec(),
+    });
+    let mut invert = vec![fmt.mode == ColorMode::Cmyk; cc];
+    invert.push(false);
+    let mut bytes = crate::pixels::interleave(&refs, &fill, n, fmt.sample, &invert);
+    if fmt.mode == ColorMode::Lab && fmt.sample == SampleType::U16 {
+        crate::pixels::lab16_chroma(&mut bytes, cc + 1, true);
+    }
+    let mut surface = Surface::new(fmt);
+    surface.write_interleaved(GeomRect::new(item.rect.left, item.rect.top, item.rect.right, item.rect.bottom), &bytes);
+    surface.prune();
+    Some(surface)
+}
+
 /// An `FEid` item for a smart object with filters: the unfiltered placed pixels Photoshop
 /// filters from (colour channels from slot 0, transparency in the last slot; in the document's
 /// pixel format, CMYK inverted as in layer channels) and the filter mask over `bounds` (white
@@ -911,6 +1101,161 @@ mod tests {
         // A known filter with a setting we don't model is kept verbatim too.
         let odd = Descriptor::new("filterFX").with("Fltr", Value::Descriptor(Descriptor::new("GsnB"))).with("filterID", Value::Integer(code(b"GsnB")));
         assert_eq!(filter_from_item(&odd).command, UNSUPPORTED_FILTER);
+    }
+
+    /// A Filter Gallery item as Photopea writes it (Chrome, Detail 12, Smoothness 4).
+    fn gallery_item_with(effects: Vec<Descriptor>) -> Descriptor {
+        let rgb =
+            |v: f64| Value::Descriptor(Descriptor::new("RGBC").with("Rd  ", Value::Double(v)).with("Grn ", Value::Double(v)).with("Bl  ", Value::Double(v)));
+        Descriptor::new("filterFX")
+            .with("Nm  ", Value::Text(UnicodeString::new_nul("Filtergalerie")))
+            .with("blendOptions", Value::Descriptor(Descriptor::new("blendOptions").with("Opct", unit(b"#Prc", 100.0)).with("Md  ", enumv("BlnM", "normal"))))
+            .with("enab", Value::Boolean(true))
+            .with("hasoptions", Value::Boolean(true))
+            .with("FrgC", rgb(0.0))
+            .with("BckC", rgb(255.0))
+            .with("Fltr", Value::Descriptor(Descriptor::new("GEfc").with("GEfs", Value::List(effects.into_iter().map(Value::Descriptor).collect()))))
+            .with("filterID", Value::Integer(code(b"GEfc")))
+    }
+
+    fn chrome(detail: i32, smoothness: i32, visible: bool) -> Descriptor {
+        Descriptor::new("GEfc")
+            .with("Dtl ", Value::Integer(detail))
+            .with("Smth", Value::Integer(smoothness))
+            .with("GEfk", enumv("GEft", "Chrm"))
+            .with("GELv", Value::Boolean(visible))
+    }
+
+    #[test]
+    fn filter_gallery_chrome_imports_as_editable_gallery() {
+        let f = filter_from_item(&gallery_item_with(vec![chrome(12, 4, true), chrome(3, 9, false)]));
+        assert_eq!(f.command, "filter.filterGallery");
+        assert_eq!(
+            f.params,
+            json!({
+                "effects": [
+                    {"filter": "chrome", "params": {"detail": 12, "smoothness": 4}, "visible": true},
+                    {"filter": "chrome", "params": {"detail": 3, "smoothness": 9}, "visible": false},
+                ],
+                "foreground": [0.0, 0.0, 0.0, 1.0],
+                "background": [1.0, 1.0, 1.0, 1.0],
+            })
+        );
+        // Written back and read again: unchanged, also when re-blended and hidden.
+        let mut g = f.clone();
+        g.blend = BlendMode::Multiply;
+        g.opacity = 0.5;
+        g.visible = false;
+        let d = item_for_filter(&g).unwrap();
+        assert_eq!(filter_from_item(&Descriptor::from_bytes(&d.to_bytes()).unwrap()), g);
+        let fltr = get_desc(&d, "Fltr").unwrap();
+        assert!(fltr.class_id.is("GEfc"));
+        assert_eq!(int(&d, "filterID"), Some(code(b"GEfc")));
+    }
+
+    /// A single effect as Photoshop 27 writes it: inline in `Fltr`, no `GEfs` list or `GELv`.
+    fn photoshop_chrome(detail: i32, smoothness: i32) -> Descriptor {
+        let rgb =
+            |v: f64| Value::Descriptor(Descriptor::new("RGBC").with("Rd  ", Value::Double(v)).with("Grn ", Value::Double(v)).with("Bl  ", Value::Double(v)));
+        let mut fltr =
+            Descriptor::new("GEfc").with("GEfk", enumv("GEft", "Chrm")).with("Dtl ", Value::Integer(detail)).with("Smth", Value::Integer(smoothness));
+        fltr.name = UnicodeString::new_nul("Filter Gallery");
+        Descriptor::new("filterFX")
+            .with("Nm  ", Value::Text(UnicodeString::new_nul("Filter Gallery...")))
+            .with("blendOptions", Value::Descriptor(Descriptor::new("blendOptions").with("Opct", unit(b"#Prc", 100.0)).with("Md  ", enumv("BlnM", "Nrml"))))
+            .with("enab", Value::Boolean(true))
+            .with("hasoptions", Value::Boolean(true))
+            .with("FrgC", rgb(255.0))
+            .with("BckC", rgb(0.0))
+            .with("Fltr", Value::Descriptor(fltr))
+            .with("filterID", Value::Integer(code(b"GEfc")))
+    }
+
+    #[test]
+    fn filter_gallery_photoshop_inline_effect_imports_and_writes_back_inline() {
+        let item = photoshop_chrome(10, 4);
+        let f = filter_from_item(&item);
+        assert_eq!(f.command, "filter.filterGallery");
+        assert_eq!(
+            f.params,
+            json!({
+                "effects": [{"filter": "chrome", "params": {"detail": 10, "smoothness": 4}, "visible": true}],
+                "foreground": [1.0, 1.0, 1.0, 1.0],
+                "background": [0.0, 0.0, 0.0, 1.0],
+            })
+        );
+        // Written back in Photoshop's own layout.
+        let d = item_for_filter(&f).unwrap();
+        assert_eq!(get_desc(&d, "Fltr"), get_desc(&item, "Fltr"));
+        assert_eq!((get_desc(&d, "FrgC"), get_desc(&d, "BckC")), (get_desc(&item, "FrgC"), get_desc(&item, "BckC")));
+        assert_eq!(filter_from_item(&Descriptor::from_bytes(&d.to_bytes()).unwrap()), f);
+        // A hidden single effect needs the list (only it has a visibility flag).
+        let mut hidden = f.clone();
+        hidden.params["effects"][0]["visible"] = json!(false);
+        let d = item_for_filter(&hidden).unwrap();
+        assert!(get_desc(&d, "Fltr").unwrap().get("GEfs").is_some());
+        assert_eq!(filter_from_item(&d), hidden);
+        // Inline effects we don't model stay verbatim.
+        let mut odd = photoshop_chrome(10, 4);
+        set(&mut odd, "Fltr", Value::Descriptor(Descriptor::new("GEfc").with("GEfk", enumv("GEft", "Ctot")).with("Dtl ", Value::Integer(1))));
+        assert_eq!(filter_from_item(&odd).command, UNSUPPORTED_FILTER);
+        let mut extra = photoshop_chrome(10, 4);
+        set(&mut extra, "Fltr", Value::Descriptor(Descriptor::new("GEfc").with("GEfk", enumv("GEft", "Chrm")).with("Xtra", Value::Integer(1))));
+        assert_eq!(filter_from_item(&extra).command, UNSUPPORTED_FILTER);
+    }
+
+    #[test]
+    fn gallery_table_matches_the_gallery_filters() {
+        for g in &GALLERY_EFFECTS {
+            let f = photocraft_algo::GalleryFilter::from_key(g.key).unwrap();
+            let keys: Vec<&str> = f.params().iter().map(|p| p.key).collect();
+            for (_, ours) in g.settings {
+                assert!(keys.contains(ours), "{}.{ours}", g.key);
+            }
+        }
+    }
+
+    #[test]
+    fn filter_gallery_written_with_defaults_and_colours() {
+        let f = sf("filter.filterGallery", json!({"effects": [{"filter": "chrome"}], "foreground": "#ff0000", "background": [0.0, 0.0, 1.0, 1.0]}));
+        let back = filter_from_item(&item_for_filter(&f).unwrap());
+        assert_eq!(back.params["effects"][0]["params"], json!({"detail": 4, "smoothness": 7}));
+        assert_eq!(back.params["foreground"], json!([1.0, 0.0, 0.0, 1.0]));
+        assert_eq!(back.params["background"], json!([0.0, 0.0, 1.0, 1.0]));
+    }
+
+    #[test]
+    fn filter_gallery_we_dont_model_is_kept_verbatim() {
+        // Another effect, an extra setting, a wrong-typed setting, no effects, a non-list.
+        let other = Descriptor::new("GEfc").with("GEfk", enumv("GEft", "Ctot")).with("GELv", Value::Boolean(true));
+        let extra = chrome(4, 7, true).with("Xtra", Value::Integer(1));
+        let typed = Descriptor::new("GEfc").with("Dtl ", Value::Double(4.0)).with("GEfk", enumv("GEft", "Chrm"));
+        for effects in [vec![chrome(4, 7, true), other], vec![extra], vec![typed], vec![]] {
+            let item = gallery_item_with(effects);
+            let f = filter_from_item(&item);
+            assert_eq!(f.command, UNSUPPORTED_FILTER);
+            assert_eq!(item_for_filter(&f).unwrap(), item);
+        }
+        let odd = Descriptor::new("filterFX").with("Fltr", Value::Descriptor(Descriptor::new("GEfc").with("GEfs", Value::Integer(3))));
+        assert_eq!(filter_from_item(&odd).command, UNSUPPORTED_FILTER);
+        let bare = Descriptor::new("filterFX").with("filterID", Value::Integer(code(b"GEfc")));
+        assert_eq!(filter_from_item(&bare).command, UNSUPPORTED_FILTER);
+    }
+
+    #[test]
+    fn filter_gallery_without_psd_equivalent_is_reported() {
+        for p in [
+            json!({"effects": [{"filter": "cutout"}]}),
+            json!({"effects": [{"filter": "chrome", "params": {"sparkle": 1}}]}),
+            json!({"effects": [{"params": {}}]}),
+            json!({"effects": []}),
+            json!({}),
+            json!({"effects": [{"filter": "chrome"}], "list": true}),
+            json!({"effects": [{"filter": "chrome"}], "foreground": "red"}),
+            json!(null),
+        ] {
+            assert!(item_for_filter(&sf("filter.filterGallery", p.clone())).is_err(), "{p}");
+        }
     }
 
     #[test]
