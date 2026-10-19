@@ -9,7 +9,7 @@ OHPM="${PHOTOCRAFT_OHPM:-/Applications/DevEco-Studio.app/Contents/tools/ohpm/bin
 export DEVECO_SDK_HOME="${DEVECO_SDK_HOME:-/Applications/DevEco-Studio.app/Contents/sdk}"
 export JAVA_HOME="${JAVA_HOME:-/Applications/DevEco-Studio.app/Contents/jbr/Contents/Home}"
 export PATH="/Applications/DevEco-Studio.app/Contents/tools/node/bin:$PATH"
-BUNDLE=io.github.mxjinjing.photocraft
+BUNDLE="${PHOTOCRAFT_BUNDLE:-io.github.storytold.photocraft.hmos}"
 one_device() {
   local count
   count="$("$HDC" list targets | tr -d '\r' | awk 'NF && $0 != "[Empty]" {n++} END {print n+0}')"
@@ -20,7 +20,7 @@ build() {
   cd "$ROOT"
   "$OHPM" install
   "$HVIGOR" assembleHap --mode module -p product=default -p buildMode=debug --no-daemon
-  python3 "$ROOT/scripts/verify_native.py" "$ROOT/entry/build/default/outputs/default/entry-default-unsigned.hap"
+  python3 "$ROOT/scripts/verify_native.py" "$ROOT/entry/build/default/outputs/default/entry-default-unsigned.hap" --expected-bundle "$BUNDLE"
 }
 install() {
   one_device

@@ -13,9 +13,11 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class NativePackageTests(unittest.TestCase):
-    def package(self, path, libraries):
+    def package(self, path, libraries, bundle=None):
         config = json.loads((ROOT / 'entry/src/main/module.json5').read_text())
         config['app'] = json.loads((ROOT / 'AppScope/app.json5').read_text())['app']
+        if bundle is not None:
+            config['app']['bundleName'] = bundle
         with zipfile.ZipFile(path, 'w') as archive:
             archive.writestr('module.json', json.dumps(config))
             archive.writestr('resources/base/profile/main_pages.json', json.dumps({'src': ['pages/Index']}))
@@ -49,6 +51,13 @@ class NativePackageTests(unittest.TestCase):
             with zipfile.ZipFile(path, 'a') as archive:
                 archive.writestr('libs/x86_64/libc++_shared.so', b'foreign runtime')
             with self.assertRaisesRegex(ValueError, 'unexpected ABIs'):
+                verify(path)
+
+    def test_wrong_public_bundle_fails(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'native.hap'
+            self.package(path, [('arm64-v8a', 183)], bundle='io.github.mxjinjing.photocraft')
+            with self.assertRaisesRegex(ValueError, 'unexpected bundle name'):
                 verify(path)
 
 
