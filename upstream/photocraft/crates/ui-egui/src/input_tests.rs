@@ -614,6 +614,40 @@ fn blocking_finger_input_pans_with_one_finger_and_does_not_paint() {
 }
 
 #[test]
+fn blocking_finger_input_suppresses_native_tap_within_one_frame() {
+    for blocked in [false, true] {
+        let mut h = harness();
+        h.state_mut().ui.tool = crate::state::Tool::Brush;
+        h.state_mut().session.edit_prefs(|p| p.tools.block_finger_input = blocked);
+        h.state_mut().stylus.feed.report(crate::stylus::PointerSource::Touch, None);
+        let p = h.state().last_canvas_rect.center();
+        let revision = h.state().session.active().unwrap().revision;
+        let contact = |phase| egui::Event::Touch {
+            device_id: egui::TouchDeviceId(0),
+            id: egui::TouchId(1),
+            phase,
+            pos: p,
+            force: None,
+        };
+        h.input_mut().events.extend([
+            contact(egui::TouchPhase::Start),
+            egui::Event::PointerMoved(p),
+            pointer_button(p, true),
+            contact(egui::TouchPhase::End),
+            pointer_button(p, false),
+            egui::Event::PointerGone,
+        ]);
+        h.run_steps(1);
+        let after = h.state().session.active().unwrap().revision;
+        if blocked {
+            assert_eq!(after, revision, "a blocked same-frame touch must not paint");
+        } else {
+            assert!(after > revision, "an allowed same-frame touch must still paint");
+        }
+    }
+}
+
+#[test]
 fn blocking_finger_input_still_lets_the_pen_paint() {
     let mut h = harness();
     h.state_mut().ui.tool = crate::state::Tool::Brush;

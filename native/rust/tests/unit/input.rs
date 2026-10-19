@@ -1476,6 +1476,65 @@ fn mouse_echo_after_pinch_cannot_press_or_move_a_tool() {
 }
 
 #[test]
+fn mouse_echo_after_single_finger_lift_cannot_reclassify_the_tap() {
+    let mut state = super::State::default();
+    let mut events = vec![];
+    snapshot(&mut state, &[(1, 200., 200.)], &mut events);
+    snapshot(&mut state, &[], &mut events);
+    events.clear();
+    state.push(
+        super::Input {
+            kind: "axis".into(),
+            action: 2,
+            zoom: 1.01,
+            x: 200.,
+            y: 200.,
+            ..Default::default()
+        },
+        2.,
+        &mut events,
+    );
+    assert_eq!(state.feed.source(), super::PointerSource::Touch);
+    events.clear();
+    state.push(
+        super::Input {
+            kind: "pointer".into(),
+            action: 3,
+            ..Default::default()
+        },
+        2.,
+        &mut events,
+    );
+    for action in [0, 2, 1] {
+        state.push(
+            super::Input {
+                kind: "pointer".into(),
+                action,
+                x: 200.,
+                y: 200.,
+                ..Default::default()
+            },
+            2.,
+            &mut events,
+        );
+    }
+    assert!(events.is_empty(), "post-lift mouse echo leaked: {events:?}");
+    assert_eq!(state.feed.source(), super::PointerSource::Touch);
+    state.push(
+        super::Input {
+            kind: "pointer".into(),
+            x: 400.,
+            y: 200.,
+            ..Default::default()
+        },
+        2.,
+        &mut events,
+    );
+    assert_eq!(state.pressed, Some(egui::PointerButton::Primary));
+    assert_eq!(state.feed.source(), super::PointerSource::Mouse);
+}
+
+#[test]
 fn blocked_finger_with_interleaved_axis_never_edits_the_document() {
     use photocraft_ui_egui::{PhotocraftApp, Services, state::Tool};
     let ctx = egui::Context::default();

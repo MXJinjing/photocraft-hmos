@@ -167,7 +167,10 @@ pub fn update(app: &mut PhotocraftApp, ctx: &Context, eligible: bool) -> bool {
         return false;
     }
     let touches = touch_count(ctx);
-    let one_finger_pan = app.session.prefs().tools.block_finger_input && app.stylus.is_finger() && touches >= 1;
+    // A short tap can start and end between UI frames. Its Primary click still exists in
+    // this frame even though no contact remains, so count the touch events as well.
+    let touched_this_frame = ctx.input(|i| i.events.iter().any(|e| matches!(e, Event::Touch { .. })));
+    let one_finger_pan = app.session.prefs().tools.block_finger_input && app.stylus.is_finger() && (touches >= 1 || touched_this_frame);
     if one_finger_pan {
         clear_grace(ctx);
         abort_tools(app, ctx);

@@ -7,6 +7,9 @@ use std::time::{Duration, Instant};
 /// After multi-touch ends, ignore Primary from a leftover finger re-reported across an
 /// empty platform snapshot. Short enough that a rapid second pinch is not swallowed.
 const LEFTOVER_GUARD: Duration = Duration::from_millis(100);
+/// Ignore mouse callbacks replayed at the finger's lift point after the touch snapshot clears.
+const MOUSE_ECHO_GUARD: Duration = Duration::from_millis(100);
+const MOUSE_ECHO_RADIUS_SQ: f32 = 24.0 * 24.0;
 #[derive(Deserialize, Default)]
 pub struct Contact {
     pub id: u64,
@@ -129,6 +132,7 @@ pub struct State {
     /// After nav ends with an empty snapshot, briefly block Primary so a re-reported
     /// leftover finger (platform quirk) cannot deposit a stroke/dot.
     leftover_guard_until: Option<Instant>,
+    mouse_echo_guard: Option<(Instant, Pos2)>,
     axis_zoom: Option<f32>,
     pub modifiers: Modifiers,
     pub feed: StylusFeed,
@@ -141,6 +145,18 @@ impl State {
             || self
                 .leftover_guard_until
                 .is_some_and(|until| Instant::now() < until)
+    }
+
+    fn touch_settling(&self) -> bool {
+        self.mouse_echo_guard
+            .is_some_and(|(until, _)| Instant::now() < until)
+    }
+
+    fn mouse_echo_at(&self, pos: Pos2) -> bool {
+        self.touch_settling()
+            && self
+                .mouse_echo_guard
+                .is_some_and(|(_, anchor)| anchor.distance_sq(pos) <= MOUSE_ECHO_RADIUS_SQ)
     }
 
     /// Synthesize the first contact immediately. The shared canvas state machine owns
@@ -277,6 +293,7 @@ impl State {
         self.ignore_fingers = false;
         self.touch_nav_active = false;
         self.leftover_guard_until = None;
+        self.mouse_echo_guard = None;
         self.axis_zoom = None;
         if let Some(button) = self.pressed.take() {
             events.push(Event::PointerButton {
@@ -344,6 +361,13 @@ impl State {
                     .into_iter()
                     .map(|p| (p.id, Pos2::new(p.x / scale, p.y / scale)))
                     .collect();
+                if next.is_empty() {
+                    if let Some(anchor) = self.finger_anchor() {
+                        self.mouse_echo_guard = Some((Instant::now() + MOUSE_ECHO_GUARD, anchor));
+                    }
+                } else {
+                    self.mouse_echo_guard = None;
+                }
                 self.feed.report(PointerSource::Touch, None);
                 for (&id, &pos) in &self.touches {
                     if !next.contains_key(&id) {
@@ -444,7 +468,7 @@ impl State {
                 // Axis callbacks can interleave with touchscreen snapshots, including
                 // the lift frame. They do not establish a new pointer owner: changing
                 // Touch to Mouse bypasses the canvas's block-finger-input preference.
-                if !self.finger_owns_pointer() {
+                if !self.finger_owns_pointer() && !self.touch_settling() {
                     self.feed.report(PointerSource::Mouse, None);
                 }
                 events.push(Event::PointerMoved(pos));
@@ -473,8 +497,15 @@ impl State {
                 // XComponent may replay a mouse callback after fingerContact was
                 // cleared by UP. Apply the same ownership/settling guard as touch
                 // snapshots, before cancellation or feed updates can clear it.
-                if input.source == PointerSource::Mouse && self.finger_owns_pointer() {
+                if input.source == PointerSource::Mouse
+                    && (self.finger_owns_pointer()
+                        || self.mouse_echo_at(pos)
+                        || (input.action == 3 && self.touch_settling()))
+                {
                     return;
+                }
+                if input.source != PointerSource::Mouse || !self.mouse_echo_at(pos) {
+                    self.mouse_echo_guard = None;
                 }
                 if input.action == 3 {
                     let resume = (self.preview_hidden
