@@ -58,6 +58,7 @@ curl -sfL -o assets/icons/<name>.svg https://raw.githubusercontent.com/lucide-ic
 | Quick layer pick | `quick_pick.rs` | macOS: ⌘⌥⌃-click with any tool selects the topmost visible layer with pixels under the pointer (`layer.pickAt`) without switching tools; the drag and release are swallowed. Windows/Linux have no third modifier distinct from the ⌃⌥ brush resize, so the gesture is a no-op there (use the Move tool's Auto-Select). A failed pick is a status-bar error. |
 | Layers rows | `panels.rs` | Double-click: on the name renames in place; on the Background makes it a normal layer; on an adjustment or fill thumbnail opens its Properties; on a Smart Object thumbnail opens its contents (Edit Contents); anywhere else on the row opens Layer Style. |
 | Layer masks | `panels.rs` | Clicking the mask thumbnail targets the mask (corner-bracket frame; the tab reads "Layer, Layer Mask/8"). Brush, eraser (paints background colour), gradient, bucket and moving the selected pixels (⌘-drag, `select.float`; the hole takes the background colour) then send `"target": "mask"`. Adjustment and fill layers target their mask automatically. |
+| Channels selection | `channels_panel.rs` | Load channel as selection in the footer follows the highlighted channel row. When the active layer mask is targeted for painting while the underlying channel view remains Composite, it loads that layer mask; otherwise it loads the selected composite, color, alpha or vector mask channel. |
 | Path thumbnails | `vector_ui.rs` | Ctrl/Cmd-click the thumbnail of a Work Path, saved path or layer path to load it as a selection; Shift adds, Alt subtracts, Shift+Alt intersects. Clicking the row name only selects the path. |
 | Levels / Curves | `tone.rs` | Histogram of the image *below* the adjustment. Curves: click to add a point, drag out to delete. Every change is a coalesced `layer.setAdjustment`, so one drag = one undo step and the canvas updates at full resolution on the GPU. |
 | Shape Stroke Options | `shape_stroke_ui.rs`, `vector_ui.rs` | Direct editing: valid changes apply immediately, with one numeric drag per undo step in Properties. Escape/outside click closes the popup and retains changes; a child dropdown keeps the parent open. The options bar sets new-shape defaults; Properties edits the selected shape. |
@@ -97,7 +98,7 @@ The app's top bar (`panels::title_bar`) starts with the brand mark (the app icon
 
 - **Windows and Linux:** the window has no OS decorations, so there is one bar, not two stacked. The top bar is the title bar (`titlebar.rs`): Minimize, Maximize/Restore and Close (red on hover, `caption_close` tokens) sit flush in the window's top-right corner, the free gap between the menus and the controls drags the window and a double-click there maximizes it, and invisible 5 pt edges (12 pt corners) resize it. Close runs File › Exit, so unsaved documents are asked about first.
 - **macOS:** the traffic lights sit over the integrated title strip (`integrated_titlebar`).
-- **Narrow windows** drop controls that are also in a menu before anything overlaps: Discord (Help › Discord), then the theme toggle, then search (Edit › Search), then the workspace switcher narrows (Window › Workspace).
+- **Narrow windows** drop controls that are also in a menu before anything overlaps: the theme toggle (Preferences), then search (Edit › Search), then the workspace switcher narrows (Window › Workspace).
 
 ## Compact tool controls
 
@@ -172,6 +173,15 @@ Wayland's fractional scale or X11's `Xft.dpi`), and updates when the window move
 monitors. A 4K display the system runs at 100% stays at 100% (#1278). The fixed choices (75% to
 300%) set an absolute UI scale, for example 200% on an unscaled 4K display. Canvas zoom shortcuts
 continue to control the document independently of UI scaling.
+
+On a Wayland session with a fractional display scale, the interface is sharp only in a native
+Wayland window, where the window is drawn at the display's physical resolution
+(`wp_fractional_scale_v1`). Through Xwayland the compositor enlarges a lower-resolution window, so
+everything is blurred and looks larger than the chosen scale (#1072). The window opens through
+Xwayland when a pen is attached (#639), with Preferences › Performance › Linux display server =
+X11, or with `WAYLAND_DISPLAY=` cleared; those are also the ways to get file drag and drop, which
+native Wayland lacks (#386). Sharp text or drag and drop: on such a desktop it is one or the other
+until winit supports Wayland drops.
 
 Interface → UI Font Size changes interface text independently of UI Scale and canvas zoom.
 Tiny, Small (the default), Medium and Large use 10/12, 1, 14/12 and 16/12 of the theme's original

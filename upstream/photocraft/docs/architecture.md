@@ -7,8 +7,8 @@
 What exists on `main` today. The numbered sections below are the original design plan of
 2026-09-30; where the code differs, this summary wins.
 
-- **Workspace:** 25 library crates under `crates/`, 3 apps (`photocraft` desktop, `photocraft-cli`,
-  `photocraft-web`), `xtask`, an example plug-in and 5 fuzz crates; ~539,000 lines of Rust in
+- **Workspace:** 25 library crates under `crates/`, 4 apps (`photocraft` desktop, `photocraft-cli`,
+  `photocraft-web`, `photocraft-web-boot`), `xtask`, an example plug-in and 5 fuzz crates; ~539,000 lines of Rust in
   ~1,310 files; ~8,040 `#[test]` functions (ui-egui 2,809, engine 1,796, algo 572, io 539,
   codecs 426, psd 341), counted 2026-10-13. Crate map and layers: [`AGENTS.md`](../AGENTS.md) §2 and
   `xtask/src/layers.rs` (enforced by `cargo xtask layers`).
@@ -146,7 +146,8 @@ photocraft/
 ├─ apps/
 │  ├─ photocraft/              desktop binary (winit + wgpu + ui-egui + platform-native)
 │  ├─ photocraft-cli/          headless batch CLI (open → commands → export), also hosts `mcp` subcommand
-│  └─ photocraft-web/          wasm32 binary (ui-egui + platform-web), demo
+│  ├─ photocraft-web/          wasm32 binary (ui-egui + platform-web), demo
+│  └─ photocraft-web-boot/     wasm32 binary that starts the packaged web app from parts of its wasm
 ├─ shaders/                    (or inside gpu/) WGSL, with generated struct headers
 ├─ assets/                     icons, bundled fonts, default brushes/swatches/presets
 ├─ fuzz/                       cargo-fuzz targets (psd, codecs, format)

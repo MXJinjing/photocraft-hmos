@@ -66,11 +66,17 @@ impl Tile {
     }
 
     fn filled(format: &PixelFormat, pixel: &[u8]) -> Self {
-        let n = (TILE_SIZE * TILE_SIZE) as usize;
-        let mut data = vec![0u8; n * format.bytes_per_pixel()];
+        let row_len = TILE_SIZE as usize * format.bytes_per_pixel();
+        let mut data = vec![0u8; row_len * TILE_SIZE as usize];
         if pixel.iter().any(|&b| b != 0) {
-            for px in data.chunks_exact_mut(pixel.len()) {
-                px.copy_from_slice(pixel);
+            // One prebuilt row copied per tile row: 256 bulk copies instead of one
+            // copy_from_slice per pixel.
+            let mut row = Vec::with_capacity(row_len);
+            for _ in 0..TILE_SIZE {
+                row.extend_from_slice(pixel);
+            }
+            for out in data.chunks_mut(row_len) {
+                out.copy_from_slice(&row);
             }
         }
         Tile { data: data.into_boxed_slice() }
@@ -763,7 +769,20 @@ impl Surface {
         let moved = content.translate(dx, dy);
         let targets: std::collections::BTreeSet<TileCoord> = sources().flat_map(|(c, _)| c.rect().translate(dx, dy).intersect(&moved).tiles()).collect();
         let mut uniform = UniformTiles::default();
-        let zero = vec![0u8; bpp];
+        // The fill row: one tile row of the default pixel, so the regions a shift vacates
+        // fill with bulk copies (empty when the default is zero — the tile starts zeroed).
+
+        // One row of the default pixel, so the regions a shift vacates fill with bulk copies.
+        let fill_row: Vec<u8> = if self.default_pixel.iter().any(|&b| b != 0) {
+            let mut row = Vec::with_capacity(TILE_SIZE as usize * bpp);
+            for _ in 0..TILE_SIZE {
+                row.extend_from_slice(&self.default_pixel);
+            }
+            row
+        } else {
+            Vec::new()
+        };
+
         // One tile row of the default pixel, to compare a finished tile with a row at a time.
         let default_row = self.default_pixel.repeat(TILE_SIZE.unsigned_abs() as usize);
         for dc in targets {
@@ -783,22 +802,82 @@ impl Surface {
                 }
                 continue;
             }
-            // A covered target is overwritten whole, so skip filling it with the default pixel.
-            let mut tile = Tile::filled(&self.format, if covered { &zero } else { &self.default_pixel });
-            for sc in sr.intersect(&content).tiles() {
-                let Some(st) = self.tiles.get(&sc) else { continue };
-                let part = sc.rect().intersect(&sr);
-                let span = part.width() as usize * bpp;
-                // Offsets inside the tiles (the target's computed wide: an offset near the i32
-                // limits saturates `translate`, and such rows are skipped rather than misplaced).
-                let at = |x: i64, y: i64| usize::try_from(y * i64::from(TILE_SIZE) + x).ok().map(|i| i * bpp);
-                for y in part.y0..part.y1 {
-                    let src = at(i64::from(part.x0 - sc.tx * TILE_SIZE), i64::from(y - sc.ty * TILE_SIZE));
-                    let dst = at(i64::from(part.x0) + i64::from(dx) - i64::from(dr.x0), i64::from(y) + i64::from(dy) - i64::from(dr.y0));
-                    let (Some(src), Some(dst)) = (src, dst) else { continue };
-                    if let (Some(d), Some(s)) = (tile.data.get_mut(dst..dst + span), st.data.get(src..src + span)) {
-                        d.copy_from_slice(s);
+
+            let mut tile = Tile { data: vec![0u8; (TILE_SIZE * TILE_SIZE) as usize * bpp].into_boxed_slice() };
+            let (tx0, ty0) = (i64::from(dc.tx) * i64::from(TILE_SIZE), i64::from(dc.ty) * i64::from(TILE_SIZE));
+            let row_len = TILE_SIZE as usize * bpp;
+            // Per stored row: copy the source span that falls inside the content in as few
+            // memcpys as the tile grid allows, and fill the vacated edges from the default
+            // row — no whole-tile pre-fill, which rewrote nearly every byte twice.
+            for local_y in 0..i64::from(TILE_SIZE) {
+                let y = ty0 + local_y;
+                let Some(row) = tile.data.get_mut(local_y as usize * row_len..(local_y as usize + 1) * row_len) else { continue };
+                let in_content_y = y - i64::from(dy) >= i64::from(content.y0) && y - i64::from(dy) < i64::from(content.y1);
+                // The row's target columns whose SOURCE lies inside the content are copied
+                // (the copy loop crosses source tiles as needed); the rest stays default —
+                // exactly the pixels the shift vacated.
+                let cx0 = (i64::from(content.x0) + i64::from(dx)).max(tx0);
+                let cx1 = (i64::from(content.x1) + i64::from(dx)).min(tx0 + i64::from(TILE_SIZE));
+                if !in_content_y || cx1 <= cx0 {
+                    if !fill_row.is_empty() {
+                        row.copy_from_slice(&fill_row);
                     }
+                    continue;
+                }
+                let left = (cx0.max(tx0) - tx0) as usize * bpp;
+                let copied_end = (cx1.min(tx0 + i64::from(TILE_SIZE)) - tx0) as usize * bpp;
+                if !fill_row.is_empty() {
+                    if left > 0 {
+                        row[..left].copy_from_slice(&fill_row[..left]);
+                    }
+                    if copied_end < row_len {
+                        row[copied_end..].copy_from_slice(&fill_row[copied_end..]);
+                    }
+                }
+                let mut x = cx0.max(tx0);
+                let x_end = cx1.min(tx0 + i64::from(TILE_SIZE));
+                // Rows run over the same one or two source tiles: cache the last lookup.
+                let mut cached: Option<(i64, i64, &std::sync::Arc<Tile>)> = None;
+                while x < x_end {
+                    // The source document position this target column reads, and the source
+                    // tile it lives in (the shift crosses source tiles as x runs).
+                    let (sx, sy) = (x - i64::from(dx), y - i64::from(dy));
+                    let (tx, ty) = (sx.div_euclid(i64::from(TILE_SIZE)), sy.div_euclid(i64::from(TILE_SIZE)));
+                    // A missing source tile inside the content holds the default pixel, not
+                    // zeros: fill the span from the default row instead of skipping it
+                    // (echelon's white-mask-with-sparse-tiles case).
+                    let st = match cached.take() {
+                        Some((ctx, cty, t)) if ctx == tx && cty == ty => {
+                            cached = Some((ctx, cty, t));
+                            t
+                        }
+                        _ => match self.tiles.get(&TileCoord::new(tx as i32, ty as i32)) {
+                            Some(t) => {
+                                cached = Some((tx, ty, t));
+                                t
+                            }
+                            None => {
+                                let span_end = ((tx + 1) * i64::from(TILE_SIZE) + i64::from(dx)).min(x_end).max(x + 1);
+                                if !fill_row.is_empty() {
+                                    let at = (x - tx0) as usize * bpp;
+                                    let len = (span_end - x) as usize * bpp;
+                                    if let Some(d) = row.get_mut(at..at + len) {
+                                        d.copy_from_slice(&fill_row[at..at + len]);
+                                    }
+                                }
+                                x = span_end;
+                                continue;
+                            }
+                        },
+                    };
+                    let span_end = (((tx + 1) * i64::from(TILE_SIZE) + i64::from(dx)).min(x_end)).max(x + 1);
+                    let span = (span_end - x) as usize * bpp;
+                    let src = ((sy - ty * i64::from(TILE_SIZE)) * row_len as i64 + (sx - tx * i64::from(TILE_SIZE)) * bpp as i64) as usize;
+                    let dst = (x - tx0) as usize * bpp;
+                    if let (Some(d), Some(sr)) = (row.get_mut(dst..dst + span), st.data.get(src..src + span)) {
+                        d.copy_from_slice(sr);
+                    }
+                    x = span_end;
                 }
             }
             // A target that got only default pixels isn't stored, as `prune` would drop it. Checked
@@ -1529,5 +1608,62 @@ mod tests {
         s.fill_rect(Rect::new(0, 0, 2000, 1500), &[1.0]);
         s.fill_rect(Rect::new(-700, 4000, -699, 4001), &[0.5]);
         assert_eq!(s.content_bounds(), Rect::new(-700, 0, 2000, 4001));
+    }
+}
+
+#[cfg(test)]
+mod echelon_case {
+    use super::*;
+
+    #[test]
+    fn sparse_missing_tiles_read_the_default_after_a_shift() {
+        let mut s = Surface::with_default(PixelFormat::GRAY8, &[1.0]);
+        s.fill_rect(Rect::new(0, 0, 10, 10), &[0.0]);
+        s.fill_rect(Rect::new(600, 0, 610, 10), &[0.0]);
+        let t = s.translated(5, 0, Rect::new(0, 0, 768, 256));
+        assert_eq!(t.pixel(305, 20), vec![1.0]);
+    }
+
+    /// The rewrite must not change output: the misaligned path is compared against a
+    /// straightforward reference gather (read each pixel, write it shifted) over randomized
+    /// formats, default pixels, sparse tiles and shifts that cross tile boundaries.
+    #[test]
+    fn randomized_shifts_match_a_reference_gather() {
+        let mut rng: u64 = 0x1234_5678_9abc_def0;
+        let mut next = move || {
+            rng ^= rng << 13;
+            rng ^= rng >> 7;
+            rng ^= rng << 17;
+            rng
+        };
+        for case in 0..200u32 {
+            let fmt = [PixelFormat::RGBA8, PixelFormat::RGBA16, PixelFormat::RGBA32F, PixelFormat::GRAY8, PixelFormat::GRAYA8][(next() % 5) as usize];
+            let def: Vec<f32> = (0..fmt.channels()).map(|i| if case % 3 == 0 { 0.0 } else { ((i + case as usize) % 7) as f32 / 6.0 }).collect();
+            let mut s = Surface::with_default(fmt, &def);
+            // Sparse content: a few small patches at random positions.
+            for _ in 0..(1 + next() % 4) {
+                let x = (next() % 1600) as i32 - 800;
+                let y = (next() % 1200) as i32 - 600;
+                let w = 1 + (next() % 90) as i32;
+                let h = 1 + (next() % 70) as i32;
+                let v: Vec<f32> = (0..fmt.channels()).map(|i| ((i as u64 + next()) % 251) as f32 / 250.0).collect();
+                s.fill_rect(Rect::new(x, y, x + w, y + h), &v);
+            }
+            let content = Rect::new(-900, -700, 1700, 1300);
+            let (dx, dy) = ((next() % 1200) as i32 - 600, (next() % 900) as i32 - 450);
+            let t = s.translated(dx, dy, content);
+            // Reference: every pixel of the moved extent reads the source at (x-dx, y-dy),
+            // inside the content, through the surface's default-aware reader.
+            for _ in 0..64 {
+                let x = (next() % 1500) as i32 - 750 + dx;
+                let y = (next() % 1100) as i32 - 550 + dy;
+                if !content.translate(dx, dy).contains(x, y) {
+                    continue;
+                }
+                let want = if content.contains(x - dx, y - dy) { s.pixel(x - dx, y - dy) } else { s.default_pixel() };
+                let got = t.pixel(x, y);
+                assert_eq!(got, want, "case {case} fmt {fmt:?} shift ({dx},{dy}) at ({x},{y})");
+            }
+        }
     }
 }
