@@ -67,9 +67,23 @@ fn dim(ui: &mut egui::Ui, s: &str) {
     ui.label(RichText::new(s).color(t.text_dim));
 }
 
-/// `Control: [Off ▾] [25]`: the controller pop-up plus Fade's step count. `angle` offers the
+/// Whether a dynamic's control has a 0..1 input its own response curve shapes (not Off, not the
+/// direction controls, not Angle Jitter, whose controls set an angle).
+pub(crate) fn takes_curve(control: Control, angle: bool) -> bool {
+    !angle && matches!(control, Control::Fade | Control::PenPressure | Control::PenTilt | Control::StylusWheel | Control::Rotation)
+}
+
+/// egui memory key of the open/closed state of a dynamic's curve editor.
+pub(crate) fn curve_open_id(id: &str) -> egui::Id {
+    egui::Id::new(("brush-curve-open", id))
+}
+
+/// `Control: [Off ▾] [25] [~]`: the controller pop-up, Fade's step count and the button that
+/// shows this dynamic's own response curve (lit while the curve isn't linear). `angle` offers the
 /// direction controls (Photoshop only has them for Angle Jitter).
 fn control_row(ui: &mut egui::Ui, id: &str, d: &mut Dynamic, angle: bool) {
+    let open_id = curve_open_id(id);
+    let mut open: bool = ui.data(|m| m.get_temp(open_id)).unwrap_or(false);
     ui.horizontal(|ui| {
         dim(ui, tl!("Control:"));
         let n = if angle || matches!(d.control, Control::InitialDirection | Control::Direction) { 8 } else { 6 };
@@ -80,7 +94,17 @@ fn control_row(ui: &mut egui::Ui, id: &str, d: &mut Dynamic, angle: bool) {
                 d.fade_steps = steps.round().clamp(1.0, 9999.0) as u32;
             }
         }
+        if takes_curve(d.control, angle) && crate::icons::button(ui, "spline", 22.0, open || !d.curve.is_linear(), tl!("Response curve")).clicked() {
+            open = !open;
+        }
     });
+    if open && takes_curve(d.control, angle) {
+        let mut points = d.curve.points();
+        if crate::pressure_curve_ui::edit_points(ui, egui::Id::new(("brush-curve-rect", id)), &mut points) {
+            d.curve = paint::ResponseCurve::new(&points);
+        }
+    }
+    ui.data_mut(|m| m.insert_temp(open_id, open));
     ui.add_space(2.0);
 }
 
@@ -334,6 +358,7 @@ fn tip_shape(ui: &mut egui::Ui, b: &mut BrushSettings, presets: &[BrushPreset], 
 }
 
 fn shape_dynamics(ui: &mut egui::Ui, b: &mut BrushSettings) {
+    let size_control = b.shape_dynamics.size.control;
     {
         let sd = &mut b.shape_dynamics;
         pct(ui, tl!("Size Jitter"), &mut sd.size.jitter, 1.0);
@@ -354,7 +379,9 @@ fn shape_dynamics(ui: &mut egui::Ui, b: &mut BrushSettings) {
         widgets::checkbox(ui, &mut sd.brush_projection, tl!("Brush Projection")).on_hover_text(tl!("Apply the pen's tilt and rotation to the tip shape"));
     }
     // Pen Pressure on Size lights the options-bar Pressure for Size button.
-    b.sync_pressure_flags_from_dynamics();
+    if b.shape_dynamics.size.control != size_control {
+        b.sync_pressure_flags_from_dynamics();
+    }
 }
 
 fn scattering(ui: &mut egui::Ui, b: &mut BrushSettings) {
@@ -523,6 +550,7 @@ fn color_dynamics(ui: &mut egui::Ui, b: &mut BrushSettings) {
 }
 
 fn transfer(ui: &mut egui::Ui, b: &mut BrushSettings) {
+    let opacity_control = b.transfer.opacity.control;
     {
         let tr = &mut b.transfer;
         dynamic(ui, "brush-opacity-ctl", tl!("Opacity Jitter"), &mut tr.opacity, 1.0, Some(tl!("Minimum")), false);
@@ -531,7 +559,9 @@ fn transfer(ui: &mut egui::Ui, b: &mut BrushSettings) {
         dynamic(ui, "brush-mix-ctl", tl!("Mix Jitter"), &mut tr.mix, 1.0, Some(tl!("Minimum")), false);
     }
     // Pen Pressure on Opacity lights the options-bar Pressure for Opacity button.
-    b.sync_pressure_flags_from_dynamics();
+    if b.transfer.opacity.control != opacity_control {
+        b.sync_pressure_flags_from_dynamics();
+    }
 }
 
 /// The Mixer Brush options the brush carries (Photoshop shows them in the Mixer Brush's options

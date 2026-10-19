@@ -19,95 +19,10 @@ pub(crate) fn modal_allows(app: &PhotocraftApp, id: &str) -> bool {
 /// Top-level menus in Photoshop order.
 pub const TOP_MENUS: [&str; 10] = ["File", "Edit", "Image", "Layer", "Type", "Select", "Filter", "View", "Window", "Help"];
 
-/// UI-level commands (handled by the shell rather than the engine): id, label, menu, shortcut.
-pub const UI_COMMANDS: &[(&str, &str, &[&str], Option<&str>)] = &[
-    ("ui.symmetryTransform", "Transform Symmetry", &[], None),
-    // Right-click the options bar's tool icon (#2825); `tool.resetAll` asks first.
-    ("tool.reset", "Reset Tool", &[], None),
-    ("tool.resetAll", "Reset All Tools", &[], None),
-    ("window.panel.group", "Change Panel Group", &[], None),
-    ("window.panel.layout", "Change Panel Layout", &[], None),
-    ("window.panel.move", "Move Panel", &[], None),
-    ("window.panel.float", "Float Panel", &[], None),
-    ("window.panel.dock", "Dock Panel", &[], None),
-    ("window.panel.activate", "Activate Panel", &[], None),
-    ("window.panel.close", "Close Panel", &[], None),
-    ("file.open", "Open…", &["File"], Some("Cmd+O")),
-    ("file.save", "Save", &["File"], Some("Cmd+S")),
-    ("file.saveAs", "Save As…", &["File"], Some("Cmd+Shift+S")),
-    ("file.exit", "Exit", &["File"], Some("Cmd+Q")),
-    ("edit.freeTransform", "Free Transform", &["Edit"], Some("Cmd+T")),
-    ("file.export.exportAs", "Export As…", &["File", "Export"], Some("Cmd+Alt+Shift+W")),
-    ("file.export.quickExportAsPng", "Quick Export as PNG", &["File", "Export"], None),
-    ("edit.transform.scale", "Scale", &["Edit", "Transform"], None),
-    ("edit.transform.rotate", "Rotate", &["Edit", "Transform"], None),
-    ("edit.transform.skew", "Skew", &["Edit", "Transform"], None),
-    ("edit.transform.distort", "Distort", &["Edit", "Transform"], None),
-    ("edit.transform.perspective", "Perspective", &["Edit", "Transform"], None),
-    ("select.selectAndMask", "Select and Mask…", &["Select"], Some("Cmd+Alt+R")),
-    ("view.rulers", "Rulers", &["View"], Some("Cmd+R")),
-    ("view.show.grid", "Grid", &["View", "Show"], Some("Cmd+'")),
-    ("view.show.guides", "Guides", &["View", "Show"], Some("Cmd+;")),
-    ("view.snap", "Snap", &["View"], Some("Cmd+Shift+;")),
-    ("view.lockGuides", "Lock Guides", &["View"], Some("Cmd+Alt+;")),
-    ("view.extras", "Extras", &["View"], Some("Cmd+H")),
-    ("view.show.targetPath", "Target Path", &["View", "Show"], Some("Cmd+Shift+H")),
-    ("view.screenMode.cycle", "Cycle Screen Mode", &[], Some("F")),
-    ("edit.freeTransformCopy", "Free Transform a Copy", &[], Some("Cmd+Alt+T")),
-    ("type.editText", "Edit Type", &[], None),
-    ("view.zoomIn", "Zoom In", &["View"], Some("Cmd+=")),
-    ("view.zoomOut", "Zoom Out", &["View"], Some("Cmd+-")),
-    ("view.fitOnScreen", "Fit on Screen", &["View"], Some("Cmd+0")),
-    ("view.actualPixels", "100%", &["View"], Some("Cmd+1")),
-    ("view.rotateView", "Rotate View", &[], None),
-    ("view.resetView", "Reset View", &["View"], None),
-    ("window.newWindowForDocument", "New Window for Document", &["Window", "Arrange"], None),
-    ("window.toggle.layers", "Layers", &["Window"], Some("F7")),
-    ("window.toggle.history", "History", &["Window"], None),
-    ("window.toggle.properties", "Properties", &["Window"], None),
-    ("window.toggle.color", "Color", &["Window"], Some("F6")),
-    ("window.toggle.brushSettings", "Brush Settings", &["Window"], Some("F5")),
-    ("window.toggle.navigator", "Navigator", &["Window"], None),
-    ("window.toggle.toolbar", "Tools", &["Window"], None),
-    // Photoshop's Tab and ⇧Tab: all panels (Tools, options bar and the dock), or only the dock.
-    ("window.togglePanels", "Show/Hide All Panels", &[], Some("Tab")),
-    ("window.toggle.dock", "Show/Hide Panels", &[], Some("Shift+Tab")),
-    ("window.toggle.options", "Options", &["Window"], None),
-    // Photoshop's Ctrl+Tab and Ctrl+Shift+Tab, on macOS too (⌘Tab belongs to the system, #2340).
-    ("window.nextDocument", "Next Document", &[], Some("Ctrl+Tab")),
-    ("window.previousDocument", "Previous Document", &[], Some("Ctrl+Shift+Tab")),
-    ("window.theme.toggle", "Next Appearance Mode", &["Window"], None),
-    ("window.theme.pro", "Pro Theme", &["Window", "Theme"], None),
-    ("window.theme.proMedium", "Pro Medium Gray Theme", &["Window", "Theme"], None),
-    ("window.theme.proLightGray", "Pro Light Gray Theme", &["Window", "Theme"], None),
-    ("window.theme.proLight", "Pro Light Theme", &["Window", "Theme"], None),
-    ("window.theme.studio", "Studio Theme", &["Window", "Theme"], None),
-    ("window.theme.studioLight", "Studio Light Theme", &["Window", "Theme"], None),
-    ("window.theme.classic", "Classic Theme", &["Window", "Theme"], None),
-    ("window.theme.solarizedDark", "Solarized Dark Theme", &["Window", "Theme"], None),
-    ("window.theme.adwaita", "Adwaita Light Theme", &["Window", "Theme"], None),
-    ("window.theme.adwaitaDark", "Adwaita Dark Theme", &["Window", "Theme"], None),
-    ("window.theme.breezeLight", "Breeze Light Theme", &["Window", "Theme"], None),
-    ("window.theme.breezeDark", "Breeze Dark Theme", &["Window", "Theme"], None),
-    ("window.theme.softLight", "Soft Light Theme", &["Window", "Theme"], None),
-    ("window.theme.softDark", "Soft Dark Theme", &["Window", "Theme"], None),
-    ("window.theme.arkuiLight", "ArkUI Light Theme", &["Window", "Theme"], None),
-    ("window.theme.arkuiDark", "ArkUI Dark Theme", &["Window", "Theme"], None),
-    ("window.theme.arkuiProLight", "ArkUI Pro Light Theme", &["Window", "Theme"], None),
-    ("window.theme.arkuiProDark", "ArkUI Pro Dark Theme", &["Window", "Theme"], None),
-    ("window.theme.system", "Sync with system", &["Window", "Theme"], None),
-    ("edit.search", "Search…", &["Edit"], Some("Cmd+F")),
-    #[cfg(not(feature = "harmonyos-ui"))]
-    ("help.discord", "Join the ArtCraft Discord…", &["Help"], None),
-    #[cfg(not(feature = "harmonyos-ui"))]
-    ("help.website", "PhotoCraft Website", &["Help"], None),
-    #[cfg(not(feature = "harmonyos-ui"))]
-    ("help.artcraftWebsite", "ArtCraft Website", &["Help"], None),
-    ("help.github", "PhotoCraft on GitHub", &["Help"], None),
-    ("help.reportIssue", "Report an Issue…", &["Help"], None),
-    ("help.systemInfo", "System Info…", &["Help"], None),
-    ("help.about", "About PhotoCraft", &["Help"], None),
-];
+/// The table is the engine's ([`photocraft_engine::shell_commands::SHELL_COMMANDS`]), so the
+/// commands and their keys exist without this UI (headless shortcut sets, lists, conflicts).
+pub const UI_COMMANDS: &[(&str, &str, &[&str], Option<&str>)] = photocraft_engine::shell_commands::SHELL_COMMANDS;
+
 
 /// Window › <document>: the open documents, listed at the end of the Window menu as in Photoshop.
 /// The id ends in the document's index, which is its tab's position.
@@ -171,7 +86,7 @@ pub fn invoke(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str, params: Va
 /// [`invoke`] without the unsaved-changes prompt, for once the user has already answered it.
 pub(crate) fn invoke_unguarded(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str, params: Value) -> Result<Value, String> {
     if let Some(tool) = crate::tool_shortcuts::tool(id) {
-        app.ui.tool = tool;
+        crate::tool_memory::select(app, tool);
         return Ok(json!({"tool": tool}));
     }
     if id == "ui.symmetryTransform" {
@@ -312,6 +227,9 @@ pub(crate) fn invoke_unguarded(app: &mut PhotocraftApp, ctx: &egui::Context, id:
         "file.import.videoFramesToLayers" if params.get("path").and_then(Value::as_str).is_none() => {
             app.ask_folder(|app, path| app.run("file.import.videoFramesToLayers", json!({"path": path})).map_err(|e| e.to_string()))
         }
+        "file.export.renderVideo" if params.get("dir").and_then(Value::as_str).is_none() => {
+            app.ask_folder(|app, dir| app.run("file.export.renderVideo", json!({"dir": dir})).map_err(|e| e.to_string()))
+        }
         "file.save" => {
             // Writes back only to a layered file that holds the whole document; anything else
             // goes through Save As, so the original is never overwritten with less (#3806).
@@ -323,7 +241,13 @@ pub(crate) fn invoke_unguarded(app: &mut PhotocraftApp, ctx: &egui::Context, id:
                     let own = app.session.active().and_then(|d| d.path.clone().map(|p| (photocraft_engine::file_cmds::holds_at(&d.doc, &p), p, d)));
                     let own = own.filter(|(_, path, _)| !path.starts_with("save-as/"));
                     match own {
-                        Some((true, path, _)) => app.save_in_place(path),
+                        Some((true, path, d)) => {
+                            if let Some(r) = crate::disk_change_prompt::intercept(app, d.doc.id, &path, false) {
+                                r
+                            } else {
+                                app.save_in_place(path)
+                            }
+                        }
                         Some((false, path, d)) if photocraft_engine::file_cmds::saves_in_place(&path) => {
                             // Its own file is layered but can't hold what the document has now.
                             let losses = photocraft_engine::file_cmds::losses_at(&d.doc, &path);
@@ -332,9 +256,9 @@ pub(crate) fn invoke_unguarded(app: &mut PhotocraftApp, ctx: &egui::Context, id:
                             let mut lines = losses;
                             lines.push(tl!("Choose a format that keeps it, such as Photoshop (PSD), or save a copy.").to_string());
                             crate::notices::post(app, title, lines, false, None);
-                            app.save_as_with(None, tga_bits)
+                            app.save_dialog_flow(None, tga_bits, true)
                         }
-                        _ => app.save_as_with(None, tga_bits),
+                        _ => app.save_dialog_flow(None, tga_bits, true),
                     }
                 }
             }
@@ -372,6 +296,8 @@ pub(crate) fn invoke_unguarded(app: &mut PhotocraftApp, ctx: &egui::Context, id:
             app.save_as_with(params.get("path").and_then(Value::as_str).map(str::to_string), tga_bits)
         }
         "view.zoomIn" | "view.zoomOut" | "view.fitOnScreen" | "view.actualPixels" => app.run(id, params),
+        "view.darkenInterface" => crate::prefs_ui::step_brightness(app, ctx, false).map(|()| Value::Null),
+        "view.lightenInterface" => crate::prefs_ui::step_brightness(app, ctx, true).map(|()| Value::Null),
         "window.newWindowForDocument" => {
             let doc = app.session.active_index().ok_or("no document")?;
             let wid = app.ui.alloc_id();
@@ -531,6 +457,9 @@ pub(crate) fn invoke_unguarded(app: &mut PhotocraftApp, ctx: &egui::Context, id:
         // the engine directly).
         photocraft_engine::pattern_fill_cmds::CREATE if params.as_object().is_none_or(|o| o.is_empty()) => {
             Ok(json!({"dialog": crate::pattern_fill_ui::open_new(app)?}))
+        }
+        "layer.newFillLayer.solidColor" if params.as_object().is_none_or(|o| o.is_empty()) => {
+            Ok(json!({"dialog": crate::solid_fill_ui::open_new(app).ok_or("no document is open")?}))
         }
         // Edit › Fill… from the menu or its shortcuts: the Fill dialog (with params: the engine).
         crate::fill_ui::COMMAND if params.as_object().is_none_or(|o| o.is_empty()) => {
@@ -765,7 +694,8 @@ pub fn is_enabled(app: &PhotocraftApp, id: &str) -> bool {
     match id {
         "window.panel.activate" | "window.panel.layout" => true,
         "window.panel.group" | "window.panel.move" | "window.panel.float" | "window.panel.dock" | "window.panel.close" => !app.session.prefs().workspace_locked,
-        "file.open" | "file.exit" | "file.clearRecent" | "file.removeRecent" | "help.about" | "help.systemInfo" | "edit.search" => true,
+        "file.open" | "file.exit" | "file.clearRecent" | "file.removeRecent" | "help.about" | "help.systemInfo" | "edit.search"
+        | "view.darkenInterface" | "view.lightenInterface" => true,
         i if i.starts_with("file.openRecent.") => true,
         i if i.starts_with(DOCUMENT_ITEM) => true,
         i if crate::links::url_for(i).is_some() => true,
@@ -998,6 +928,9 @@ pub fn menu_items(app: &PhotocraftApp) -> Vec<MenuItem> {
     // 2) Our commands that Photoshop's tree doesn't list (or lists under another id).
     let mut extra: Vec<MenuItem> = Vec::new();
     for &(id, label, path, sc) in UI_COMMANDS {
+        if cfg!(feature = "harmonyos-ui") && matches!(id, "help.discord" | "help.website" | "help.artcraftWebsite") {
+            continue;
+        }
         extra.push(MenuItem {
             id: id.into(),
             label: label.into(),
@@ -1151,7 +1084,7 @@ pub fn menu_items(app: &PhotocraftApp) -> Vec<MenuItem> {
         }
     }
     if !prefs.menus.hidden.is_empty() {
-        items.retain(|i| !prefs.menus.hidden.contains(&i.id));
+        items.retain(|i| matches!(i.id.as_str(), "edit.menus" | "file.exit") || !prefs.menus.hidden.contains(&i.id));
     }
     if prefs.interface.show_menu_colors {
         for it in &mut items {
@@ -1246,6 +1179,9 @@ pub fn menu_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui, budget: f32) -> f32 
     let mut clicked: Option<String> = None;
     let t = crate::theme::Tokens::get(ui.ctx());
     let mut nav = crate::menu_nav::Nav::load(ui.ctx());
+    let mut keys = crate::menu_keys::Keys::load(ui.ctx());
+    nav.underline = keys.show_underlines(ui.ctx());
+    keys.take_first_row(&mut nav);
     ui.scope(|ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
         let v = &mut ui.style_mut().visuals;
@@ -1260,6 +1196,9 @@ pub fn menu_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui, budget: f32) -> f32 
             ui.spacing_mut().button_padding = egui::vec2(6.0, 3.0);
             nav.bar_bottom = Some(ui.max_rect().bottom());
             let collapse = menu_bar_collapses(menu_bar_needed_width(ui), budget);
+            let labels: Vec<&str> = TOP_MENUS.iter().map(|top| crate::i18n::tr(lang, top)).collect();
+            let preferred: Vec<Option<char>> = crate::menu_keys::TOP_PREFERRED.iter().map(|(_, c)| Some(*c)).collect();
+            let mnemonics = crate::menu_keys::assign(&labels, &preferred);
             let mut buttons = Vec::with_capacity(if collapse { 1 } else { TOP_MENUS.len() });
             if collapse {
                 // Three-line (align-justify) SVG: opens a secondary menu of File…Help.
@@ -1301,7 +1240,7 @@ pub fn menu_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui, budget: f32) -> f32 
                                 let mine: Vec<&MenuItem> = items.iter().filter(|i| i.path.first().map(String::as_str) == Some(top)).collect();
                                 let enabled = !mine.is_empty();
                                 ui.add_enabled_ui(enabled, |ui| {
-                                    nav.row(ui, 0, enabled, None, |ui, nav| {
+                                    nav.row(ui, 0, enabled, None, None, |ui, nav| {
                                         let label = crate::i18n::tr(lang, top);
                                         let r = ui.menu_button(label, |ui| {
                                             ui.set_min_width(220.0);
@@ -1328,10 +1267,16 @@ pub fn menu_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui, budget: f32) -> f32 
                     });
                 buttons.push(title);
             } else {
-                for top in TOP_MENUS {
+                for (index, &top) in TOP_MENUS.iter().enumerate() {
                     // egui's menu_button toggles on release; these titles open on the press (one
                     // gesture can press, drag to an item and release), so each drives its popup.
-                    let title = ui.add(egui::Button::new(egui::RichText::new(crate::i18n::tr(lang, top)).color(t.text_dim)));
+                    let label = crate::i18n::tr(lang, top);
+                    let label = if keys.show_underlines(ui.ctx()) {
+                        crate::menu_keys::mnemonic_text(ui, "", label, mnemonics[index], Some(t.text_dim))
+                    } else {
+                        egui::RichText::new(label).color(t.text_dim).into()
+                    };
+                    let title = ui.add(egui::Button::new(label));
                     // The bar's close behaviour and style, as a menu (not bar) config so submenus inside
                     // render as submenus.
                     let bar = egui::containers::menu::MenuConfig::find(ui);
@@ -1395,10 +1340,16 @@ pub fn menu_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui, budget: f32) -> f32 
             if rtl {
                 tops.reverse();
             }
+            let mut mnemonics = if collapse { vec![None] } else { mnemonics };
+            if rtl {
+                mnemonics.reverse();
+            }
+            keys.keys(ui.ctx(), &tops, &mnemonics, &mut nav, &mut clicked);
             nav.keys(ui.ctx(), &tops, &mut clicked);
         });
     });
     nav.store(ui.ctx());
+    keys.store(ui.ctx());
     // No menu open this frame: nothing is kept.
     app.menu_cache = built.into_inner();
     // The press-drag gesture ends with the button (its release was handled by the rows above).
@@ -1552,7 +1503,7 @@ fn help_search(ui: &mut egui::Ui, items: &[MenuItem], opening: bool, clicked: &m
             if let Some(sc) = &it.shortcut {
                 b = b.shortcut_text(crate::shortcuts::pretty(sc));
             }
-            let hit = nav.row(ui, 0, it.enabled, Some(&it.id), |ui, _| {
+            let hit = nav.row(ui, 0, it.enabled, Some(&it.id), None, |ui, _| {
                 let r = ui.add_enabled(it.enabled, b);
                 let hit = r.clicked() || released_on(ui, &r);
                 (r, hit)
@@ -1577,6 +1528,18 @@ const MENU_SEPARATOR: f32 = 9.0;
 
 fn render_level_rows(ui: &mut egui::Ui, items: &[&MenuItem], depth: usize, clicked: &mut Option<String>, nav: &mut crate::menu_nav::Nav) {
     let lang = crate::i18n::current();
+    let mut labels = Vec::new();
+    let mut unique_subs = std::collections::HashSet::new();
+    for it in items {
+        if it.path.len() == depth && it.label != "---" {
+            labels.push(translated_menu_label(lang, it));
+        } else if it.path.len() > depth && unique_subs.insert(it.path[depth].as_str()) {
+            labels.push(crate::i18n::tr(lang, &it.path[depth]).to_string());
+        }
+    }
+    let labels_ref: Vec<&str> = labels.iter().map(String::as_str).collect();
+    let row_mnemonics = crate::menu_keys::assign(&labels_ref, &[]);
+    let mut row_mnemonics = row_mnemonics.into_iter();
     // Items never wrap: the menu widens to its longest label plus shortcut (translations can be
     // longer than the English).
     ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
@@ -1602,6 +1565,8 @@ fn render_level_rows(ui: &mut egui::Ui, items: &[&MenuItem], depth: usize, click
             if let Some(c) = it.checked {
                 text = format!("{} {}", if c { "✔" } else { "  " }, text);
             }
+            let mnemonic = row_mnemonics.next().flatten();
+            let text = if nav.underline { crate::menu_keys::mnemonic_text(ui, "", &text, mnemonic, None) } else { text.into() };
             let mut b = egui::Button::new(text);
             if let Some(tint) = it.color.as_deref().and_then(menu_tint) {
                 b = b.fill(tint.gamma_multiply(0.55));
@@ -1609,7 +1574,7 @@ fn render_level_rows(ui: &mut egui::Ui, items: &[&MenuItem], depth: usize, click
             if let Some(sc) = &it.shortcut {
                 b = b.shortcut_text(crate::shortcuts::pretty(sc));
             }
-            let hit = nav.row(ui, depth - 1, it.enabled, Some(&it.id), |ui, _| {
+            let hit = nav.row(ui, depth - 1, it.enabled, Some(&it.id), mnemonic, |ui, _| {
                 let r = ui.add_enabled(it.enabled, b);
                 let r = match it.id.as_str() {
                     "image.mode.bits8" | "image.mode.bits16" => r.on_hover_text(crate::i18n::tr(lang, "Integer")),
@@ -1630,11 +1595,14 @@ fn render_level_rows(ui: &mut egui::Ui, items: &[&MenuItem], depth: usize, click
                 continue;
             }
             shown_subs.push(name);
+            let mnemonic = row_mnemonics.next().flatten();
             let child: Vec<&MenuItem> = items.iter().copied().filter(|c| c.path.len() > depth && c.path[depth] == name).collect();
             let enabled = submenu_enabled(&child);
             ui.add_enabled_ui(enabled, |ui| {
-                nav.row(ui, depth - 1, enabled, None, |ui, nav| {
-                    let r = ui.menu_button(crate::i18n::tr(lang, name), |ui| render_level(ui, &child, depth + 1, clicked, nav));
+                nav.row(ui, depth - 1, enabled, None, mnemonic, |ui, nav| {
+                    let label = crate::i18n::tr(lang, name);
+                    let label = if nav.underline { crate::menu_keys::mnemonic_text(ui, "", label, mnemonic, None) } else { label.into() };
+                    let r = ui.menu_button(label, |ui| render_level(ui, &child, depth + 1, clicked, nav));
                     if r.inner.is_some() {
                         // Where the submenu hangs from, to keep it below the menu bar (#319).
                         nav.set_anchor(depth, r.response.rect);
@@ -2249,7 +2217,8 @@ mod open_recent_tests {
         assert_eq!(app.ui.recent_files.first().map(String::as_str), Some(p.as_str()));
         // Re-open via the recent entry.
         invoke(&mut app, &ctx, "file.openRecent.0", json!({})).unwrap();
-        assert_eq!(app.session.documents().len(), 2);
+        assert_eq!(app.session.documents().len(), 1, "an already open file is focused instead of duplicated");
+        assert_eq!(app.session.active().and_then(|st| st.path.as_deref()), Some(p.as_str()));
         let _ = std::fs::remove_file(&path);
     }
 }

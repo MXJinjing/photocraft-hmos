@@ -125,7 +125,7 @@ mod tests {
         let app = PhotocraftApp::new(photocraft_engine::Session::new(), Default::default());
         let help: Vec<String> = crate::menus::menu_items(&app).into_iter().filter(|i| i.path == ["Help"]).map(|i| i.id).collect();
         assert_eq!(help, ["help.github", "help.reportIssue", "---", "help.systemInfo", "help.about"]);
-        let links: Vec<&str> = crate::menus::UI_COMMANDS.iter().filter(|c| url_for(c.0).is_some()).map(|c| c.0).collect();
+        let links: Vec<String> = crate::menus::menu_items(&app).into_iter().filter(|i| i.path == ["Help"] && url_for(&i.id).is_some()).map(|i| i.id).collect();
         assert_eq!(links, ["help.github", "help.reportIssue"]);
         assert_eq!(url_for("help.github"), Some("https://github.com/MXJinjing/photocraft-hmos"));
         assert_eq!(url_for("help.reportIssue"), Some("https://github.com/MXJinjing/photocraft-hmos/issues"));

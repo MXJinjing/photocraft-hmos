@@ -779,6 +779,23 @@ fn temporary_type_transform_visibility_and_cursors() {
     assert!(crate::type_transform::visible(h.state(), sticky));
 }
 
+#[test]
+fn type_selection_highlight_visible_with_command_held() {
+    let (app, _id) = transform_app(false, false, Affine::IDENTITY);
+    let mut h = harness(1.0, app);
+    if let Some(ed) = h.state_mut().ui.text_edit.as_mut() {
+        ed.anchor = 0;
+        ed.caret = 5;
+    }
+    hold(&mut h, type_command());
+    h.run();
+    let accent = crate::theme::Tokens::get(&h.ctx).accent;
+    let expected_fill = egui::Color32::from_rgba_unmultiplied(accent.r(), accent.g(), accent.b(), 110);
+    let has_selection_highlight =
+        h.output().shapes.iter().any(|clipped| if let egui::Shape::Path(path) = &clipped.shape { path.fill == expected_fill && path.closed } else { false });
+    assert!(has_selection_highlight, "selection highlight must remain visible while Ctrl/Cmd is held");
+}
+
 /// Real canvas input: layer-local scaling stays correct across orientation, zoom, HiDPI and flip.
 #[test]
 fn temporary_type_transform_scales_without_reflow_or_leaving_type() {
@@ -1113,6 +1130,7 @@ fn temporary_type_transform_captures_press_and_rejects_collapsed_geometry() {
 #[test]
 #[ignore = "writes visual evidence to target/issue-1091; run explicitly for visual QA"]
 fn temporary_type_transform_visual_evidence() {
+    let _gpu = photocraft_testkit::gpu_lock();
     let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/issue-1091");
     std::fs::create_dir_all(&out).unwrap();
     for (index, theme) in crate::theme::ThemeKind::ALL.into_iter().enumerate() {
@@ -1271,6 +1289,9 @@ fn font_styles_keep_metadata_names_and_numeric_labels() {
 
 #[test]
 fn postscript_only_style_shows_actual_subfamily() {
+    // selected_style reads the engine only once the font scan is done (try_shared). Under nextest
+    // this test runs in a process of its own, where nothing else has started the scan, so start it.
+    let _ = photocraft_text::shared();
     let style = photocraft_doc::text::CharStyle { font_family: "Inter".into(), postscript_name: Some("Inter-SemiBold".into()), ..Default::default() };
     assert_eq!(super::selected_style(&style), "SemiBold");
 }
@@ -1526,6 +1547,26 @@ mod multi_layer_formatting {
         number(&mut h, "Font size", "40");
         assert_eq!((size_at(h.state(), ids[0], 0), size_at(h.state(), ids[0], 1), size_at(h.state(), ids[0], 3)), (30.0, 20.0, 30.0));
         assert_eq!(text(h.state(), ids[1]).char_runs(), peer);
+    }
+
+    /// #5717: a layer scaled so its shown size or leading is past a field's range (2400 pt, or
+    /// 0.08 pt) keeps it while the Character panel and the options bar only show it.
+    #[test]
+    fn showing_a_scaled_layer_past_the_size_range_does_not_change_it() {
+        for (layer, scale) in [(0, 200.0), (1, 0.005)] {
+            for properties in [true, false] {
+                let (mut app, ids) = fixture();
+                let id = ids[layer];
+                app.run("type.edit", json!({"layer": id.0, "transform": [scale, 0.0, 0.0, scale, 0.0, 0.0]})).unwrap();
+                selected(&mut app, &[id]);
+                let before = text(&app, id).char_runs();
+                let steps = app.session.active().unwrap().history.entries().len();
+                let mut h = controls(app, properties);
+                h.run_steps(3);
+                assert_eq!(text(h.state(), id).char_runs(), before, "scale {scale}, properties {properties}");
+                assert_eq!(h.state().session.active().unwrap().history.entries().len(), steps, "no history step");
+            }
+        }
     }
 
     #[test]

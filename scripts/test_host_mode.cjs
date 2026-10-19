@@ -31,6 +31,7 @@ function load(name, dependencies) {
       '../WindowChrome': { WindowChrome: class { start() {} stop() {} refresh() {} } },
       '../SystemTheme': { publishSystemTheme() {}, systemThemeFromColorMode: () => 'dark' },
       '../Fullscreen': { FullscreenSync: class { start() {} stop() {} reassert() {} } },
+      '../SubWindowHost': { subWindowHost: { attach() {}, closeAll() {} } },
       '../input/NativeCursorAdapter': { restorePointerVisibility() {} },
       '../openInbox': { acceptOpenWant: want => calls.push(['open', want.uri]) },
       '../closeGuard': { resetCloseGuard() {}, requestWindowClose() {} },

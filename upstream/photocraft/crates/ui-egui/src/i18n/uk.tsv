@@ -324,6 +324,9 @@
 # Field Blur pins (#3373)
 	No pin selected	Шпильку не вибрано
 	Click the image to add a pin; drag a pin to move it, or its ring to change its blur. Delete removes the selected pin.	Клацніть зображення, щоб додати шпильку; перетягніть шпильку, щоб перемістити її, або її кільце, щоб змінити розмиття. Delete видаляє вибрану шпильку.
+	Drag the handles on the outline to resize and turn it, the square to round its corners, and the dots inside to set where the blur starts.	Перетягуйте маркери на контурі, щоб змінити розмір і повернути його, квадрат — щоб заокруглити кути, а точки всередині — щоб задати, де починається розмиття.
+	Drag the pin to move the band, or its ring to change its blur. Drag the solid lines to widen the sharp band, the dashed lines to set the transition, and the dots to turn it.	Перетягніть шпильку, щоб зсунути смугу, або її кільце, щоб змінити розмиття. Суцільні лінії розширюють різку смугу, пунктирні задають перехід, а точки повертають її.
+	Drag the handles on the outline to resize and turn it; the ring sets the blur angle.	Перетягуйте маркери на контурі, щоб змінити розмір і повернути його; кільце задає кут розмиття.
 	Iris Blur…	Розмиття діафрагми…
 	Tilt-Shift…	Нахил і зсув…
 	Path Blur…	Розмиття вздовж контуру…
@@ -887,9 +890,7 @@
 	Newspaper	Газета
 	Working Spaces	Робочі простори
 	Color Management Policies	Політики керування кольором
-	Convert document's colors to the working space	Перетворити кольори документа в робочий простір
 	Assign working space	Призначити робочий простір
-	Use the embedded profile (instead of the working space)	Використати вбудований профіль (замість робочого простору)
 	Leave as is (don't color manage)	Залишити як є (без керування кольором)
 	Discard the embedded profile (don't color manage)	Відкинути вбудований профіль (без керування кольором)
 	Embed Color Profile	Вбудувати колірний профіль
@@ -1681,6 +1682,7 @@
 	These settings aren't available in PhotoCraft yet.	Ці параметри ще недоступні у PhotoCraft.
 	Shortcut removed.	Клавіатурне скорочення вилучено.
 	All shortcuts reset to PhotoCraft defaults.	Усі клавіатурні скорочення скинуто до типових значень PhotoCraft.
+	Add Shortcut	Додати клавіатурне скорочення
 	Delete Shortcut	Видалити клавіатурне скорочення
 	Press keys…	Натисніть клавіші…
 	shortcut	клавіатурне скорочення
@@ -2283,6 +2285,8 @@
 	Camera Raw Defaults	Типові параметри Camera Raw
 	Canvas border	Межа полотна
 	Show canvas dots	Показувати крапки полотна
+	Clip thumbnails to layer bounds	Обрізати мініатюри до меж шару
+	Clip Thumbnails to Layer Bounds	Обрізати мініатюри до меж шару
 	Canvas color	Колір полотна
 	Canvas custom color	Довільний колір полотна
 	Classic	Класична
@@ -2453,7 +2457,6 @@
 	Cancelled opening {name}	Відкриття {name} скасовано
 	The document “{name}” does not have an embedded {mode} profile.	Документ «{name}» не має вбудованого профілю {mode}.
 	The document “{name}” has an embedded color profile that does not match the current {mode} working space.	Вбудований колірний профіль документа «{name}» не відповідає поточному робочому простору {mode}.
-	Embedded: {embedded}	Вбудований: {embedded}
 	Working: {working}	Робочий простір: {working}
 	Developing {name}	Обробка {name}
 	Cancelled {label}	Скасовано: {label}
@@ -2680,7 +2683,6 @@ cameraRaw	Roughness	Шорсткість
 	Redrawing	Перемальовування
 	This redraw took {seconds} s on the CPU.	Це перемальовування на CPU тривало {seconds} с.
 	Edits that change the whole document, such as a layer's blend mode, opacity or visibility, redraw all of it.	Зміни, що впливають на весь документ, як-от режим накладання, непрозорість чи видимість шару, перемальовують його повністю.
-	Its layers don't fit the GPU memory budget. Raising Memory usage in Preferences › Performance raises the budget, up to a quarter of this computer's memory.	Його шари не вміщуються в бюджет пам'яті GPU. Збільшення використання пам'яті в Налаштування › Продуктивність підвищує бюджет до чверті пам'яті цього комп'ютера.
 	The GPU compositor wasn't used: {reason}	Компонувальник GPU не використовувався: {reason}
 fontWeight	Thin	Тонкий
 fontWeight	ExtraLight	Екстралегкий
@@ -2907,7 +2909,8 @@ fontWeight	Italic	Курсивний
 	Frame {current} / {total}	Кадр {current} / {total}
 	Create new brush from the current settings	Створити новий пензель із поточних параметрів
 	Delete brush	Видалити пензель
-	Import Brushes… (.abr)	Імпортувати пензлі… (.abr)
+	Import Brushes… (.abr or image)	Імпортувати пензлі… (.abr або зображення)
+	Import Brush from Image…	Імпортувати пензель із зображення…
 	System Info	Інформація про систему
 	Click to sample the foreground colour  ·  {key}-click for background	Клацання бере зразок переднього плану  ·  {key}+клацання для фону
 	Create Warped Text	Створити деформований текст
@@ -3609,6 +3612,8 @@ cameraRaw	Masking	Маскування
 	Color Picker (Layer Style Color)	Палітра кольорів (колір стилю шару)
 	Auto Hide Notifications	Автоматично приховувати сповіщення
 	Notification Duration (seconds)	Тривалість сповіщення (секунди)
+	Bundle Arrow-Key Nudges	Поєднувати зсуви стрілками
+	Nudge Bundle Pause (ms)	Пауза поєднання зсувів (мс)
 	Appearance Mode	Режим вигляду
 	Dark Theme	Темна тема
 	Light Theme	Світла тема
@@ -3722,6 +3727,7 @@ cameraData	Lens	Об'єктив
 	No matching settings	Немає відповідних налаштувань
 	PhotoCraft — Screen Color Picker	PhotoCraft — Піпетка кольору екрана
 	Loading fonts…	Завантаження шрифтів…
+	Response curve	Крива відгуку
 	Simulate Pressure	Імітувати натиск
 	Stroke Path…	Обвести контур…
 	Background Eraser	Фонова гумка
@@ -3812,6 +3818,7 @@ curves	Smooth	Згладити
 	Remove after each stroke	Видаляти після кожного штриха
 	Apply the removal ({key})	Застосувати видалення ({key})
 	Strokes to remove: {n} (Enter applies, Esc cancels)	Штрихів для видалення: {n} (Enter застосовує, Esc скасовує)
+	Show home recent files	Показувати нещодавні файли на головному екрані
 	Clear Brush Controls	Очистити параметри пензля
 	Reset All Locked Settings	Скинути всі заблоковані параметри
 	Copy Texture to Other Tools	Скопіювати текстуру в інші інструменти
@@ -3838,6 +3845,9 @@ curves	Smooth	Згладити
 	Action playback stopped	Відтворення операції зупинено
 	Step {step} is waiting for its dialog	Крок {step} очікує на свій діалог
 @plural	{n} action|{n} actions	{n} операція|{n} операції|{n} операцій
+	Background (Default)	Фон (типовий)
+# Batch / Image Processor
+	Include All Subfolders	Включити всі вкладені папки
 	Auto Add/Delete	Автододавання/видалення
 
 # Native Windows printing qualification
@@ -3847,7 +3857,63 @@ curves	Smooth	Згладити
 	Sent to {printer}	Надіслано на {printer}
 	set in Print Settings…	задається в параметрах друку…
 	ICO is limited to 256 × 256 pixels	ICO обмежено розміром 256 × 256 пікселів
+# Embedded Profile Mismatch: profile names beside the choices, Remember this choice
+	Use the embedded profile ({profile})	Використати вбудований профіль ({profile})
+	Convert to the working space ({profile})	Перетворити в робочий простір ({profile})
+	Remember this choice for future images	Запам’ятати цей вибір для наступних зображень
+	Turn the prompt back on with Ask On Mismatch in Edit › Color Settings.	Знову ввімкнути запитання можна параметром Ask On Mismatch у Редагування › Налаштування кольору.
+	Button Mode	Режим кнопок
+	Button Mode On	Режим кнопок увімкнено
 
+# Darken / Lighten Interface (⇧⌘F1 / ⇧⌘F2)
+	Darken Interface	Зробити інтерфейс темнішим
+	Lighten Interface	Зробити інтерфейс світлішим
+# Bevel & Emboss Technique.
+	Technique	Метод
+	Chisel Hard	Жорстке різьблення
+	Chisel Soft	М'яке різьблення
+	Open color-less EXR as ACEScg	Відкривати EXR без колірного профілю як ACEScg
+
+# View › Guides › right-click a guide
+	Edit Selected Guides	Редагувати вибрані напрямні
+	Clear Selected Guides	Очистити вибрані напрямні
+	Delete this set	Видалити цей набір
+	New Set…	Новий набір…
+	PhotoCraft Defaults	Стандартні PhotoCraft
+	Save a list of these shortcuts as a web page	Зберегти список цих клавіатурних скорочень як вебсторінку
+	Save the changes to this set	Зберегти зміни в цьому наборі
+	Save these shortcuts as a .kys file	Зберегти ці клавіатурні скорочення як файл .kys
+	Save these shortcuts as a new set	Зберегти ці клавіатурні скорочення як новий набір
+	Set deleted.	Набір видалено.
+	Set saved.	Набір збережено.
+	Set:	Набір:
+	Summarize…	Зведення…
+	There are too many sets: delete one first.	Забагато наборів: спершу видаліть один.
+	set name	назва набору
+	{set} (modified)	{set} (змінено)
+	Accept and Go to Conflict	Прийняти й перейти до конфлікту
+	Changes undone.	Зміни скасовано.
+	Choose a new shortcut for this command, or leave it without one.	Виберіть нове клавіатурне скорочення для цієї команди або залиште її без нього.
+	Put this command's shortcuts back as they were	Повернути клавіатурні скорочення цієї команди
+	Take the shortcut from the other command and select it	Забрати скорочення в іншої команди й вибрати її
+	Undo Changes	Скасувати зміни
+	{shortcut} is reserved by the system and can't be assigned.	{shortcut} зарезервовано системою, його не можна призначити.
+	Low-Latency Drawing (vsync off, applies at next launch)	Малювання з малою затримкою (без вертикальної синхронізації, після перезапуску)
+# Free Transform: a new layer while the box is open (#5859)
+	Free Transform is still being applied; try again when it has finished.	Вільне трансформування ще застосовується; спробуйте знову, коли воно завершиться.
+	The transform couldn't be applied.	Не вдалося застосувати трансформування.
+# Preferences › Performance › GPU Memory; the status bar and slow-redraw notice
+	Its layers need {needed} of GPU memory; the budget leaves them {budget}.	Його шарам потрібно {needed} пам'яті GPU; бюджет залишає їм {budget}.
+	Set GPU Memory in Preferences › Performance to what your graphics card can hold, at most 3/8 of its memory. Automatic follows Memory Usage, within a quarter of this computer's memory and 3/8 of the card's, and doesn't count the document against a card whose memory is known. The status bar shows GPU Memory Full while they don't fit.	Задайте «Пам'ять GPU» в Налаштування › Продуктивність відповідно до того, скільки вміщує ваша відеокарта, не більше 3/8 її пам'яті. «Автоматично» стежить за використанням пам'яті, у межах чверті пам'яті цього комп'ютера й 3/8 пам'яті відеокарти, і не враховує документ на відеокарті з відомим обсягом пам'яті. Поки шари не вміщуються, рядок стану показує «Пам'ять GPU заповнена».
+	GPU Memory Full	Пам'ять GPU заповнена
+	The layers need {needed} of GPU memory and may hold {budget}, so edits that redraw the whole document do it on the CPU. Click to set GPU Memory.	Шарам потрібно {needed} пам'яті GPU, а займати вони можуть {budget}, тому зміни, що перемальовують увесь документ, виконуються на CPU. Натисніть, щоб задати «Пам'ять GPU».
+	GPU memory budget: {budget}	Бюджет пам'яті GPU: {budget}
+	This document's layers: {needed} of {budget} for layers	Шари цього документа: {needed} з {budget} для шарів
+	This document's layers need {needed} but may hold {budget}: whole-document redraws use the CPU	Шарам цього документа потрібно {needed}, але займати вони можуть {budget}: увесь документ перемальовується на CPU
+	GPU Memory (MB, 0 = Automatic)	Пам'ять GPU (МБ, 0 = автоматично)
+	Replace	Замінити
+	{name} was changed by another app after it was opened or saved here.	Файл {name} змінила інша програма після того, як його тут відкрили або зберегли.
+	Replace it with this document, or cancel and use File › Save As to keep both.	Замініть його цим документом або скасуйте й скористайтеся Файл › Зберегти як, щоб зберегти обидва.
 # HarmonyOS host additions retained during upstream sync
 	Double-tap pen body	Подвійне торкання корпусу пера
 	Current tool and Eraser	Поточний інструмент і Гумка
