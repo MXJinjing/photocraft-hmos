@@ -1108,7 +1108,11 @@ pub fn form_body(ui: &mut egui::Ui, f: &mut Map<String, Value>) {
                             crate::widgets::dropdown(ui, &format!("form-{k}"), &mut s, &refs, 200.0);
                         }
                         None => {
-                            ui.add(egui::TextEdit::singleline(&mut s).desired_width(260.0));
+                            // Sandboxed hosts: input/output folders and files come from the system picker.
+                            let command = f.get("__command").and_then(Value::as_str).unwrap_or("");
+                            if !crate::path_pick::locked_field(ui, crate::path_pick::kind_for(command, &k), &format!("/{k}"), &s, 330.0) {
+                                ui.add(egui::TextEdit::singleline(&mut s).desired_width(260.0));
+                            }
                         }
                     }
                     json!(s)

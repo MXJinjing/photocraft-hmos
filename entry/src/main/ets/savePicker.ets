@@ -7,7 +7,8 @@ export function savePickerOptions(suggested: string, directoryUri: string): pick
   options.newFileNames = [name];
   options.fileSuffixChoices = saveFormatChoices(name);
   // DEFAULT displays the full system picker. DOWNLOAD would skip the UI and ignore this URI.
-  options.defaultFilePathUri = directoryUri;
+  // Empty when DOWNLOAD authorization failed at startup: the picker's own default then.
+  if (directoryUri.length > 0) { options.defaultFilePathUri = directoryUri; }
   return options;
 }
 

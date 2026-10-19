@@ -85,6 +85,7 @@ pub mod export_dialog;
 pub mod eyedropper_ui;
 pub mod field_tab;
 pub mod file_dialog;
+pub mod path_pick;
 pub mod file_open;
 pub mod file_ui;
 pub mod fill_ui;
@@ -391,6 +392,10 @@ pub struct Recoverable {
     pub path: Option<String>,
     pub load: Box<dyn FnOnce() -> Result<Document, String> + Send + 'static>,
 }
+/// Show a folder picker for a synchronous host (one without [`Services::file_dialog`]).
+/// `true` asks for an output folder (the command writes there), `false` for one it reads.
+/// `None`: cancelled; `Some(Err(_))`: the picker could not be shown or the folder is unusable.
+pub type PickFolderFn = Box<dyn FnMut(bool) -> Option<Result<String, String>>>;
 /// Append text to a file (History Log).
 pub type AppendTextFn = Box<dyn FnMut(&str, &str) -> Result<(), String>>;
 /// Requests from the operating system since the last call (see [`OsEvent`]).
@@ -424,6 +429,16 @@ pub struct Services {
     pub pick_open_paths: Option<PickOpenPathsFn>,
     /// Show a "save file" dialog; returns a path/name to write.
     pub pick_save: Option<PickSaveFn>,
+    /// Folder picker for synchronous hosts (see [`PickFolderFn`]); without one, a folder request
+    /// on such a host is cancelled.
+    pub pick_folder: Option<PickFolderFn>,
+    /// Sandboxed hosts (HarmonyOS): path fields are read-only and filled only through the system
+    /// pickers (a "Choose…" button beside each field); typing a path is not allowed.
+    pub path_pickers_only: bool,
+    /// The host's private, writable application directory. Files picked for path fields are
+    /// copied under it (`imports/`, `plugins/`, `icc/`), since a sandboxed app has no paths to
+    /// the user's files.
+    pub sandbox_dir: Option<String>,
     /// Always choose a target, even for Save of a named document. Hosts with
     /// opaque storage URIs use the picker to associate the display name with
     /// write authority. They also export through these services instead of

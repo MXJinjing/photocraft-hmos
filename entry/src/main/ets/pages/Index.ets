@@ -25,6 +25,7 @@ import { subWindowHost, WindowRequest } from '../SubWindowHost';
 import { window } from '@kit.ArkUI';
 import { configureDisplayColor } from '../DisplayColor';
 import { SYSTEM_THEME_DARK, SYSTEM_THEME_LIGHT } from '../SystemTheme';
+import { pickFolder, sandboxDocumentDirectory } from '../folderPicker';
 
 class NativeConfig {
   files: string;
@@ -153,9 +154,19 @@ struct Index {
   private async initializeHost(generation: number): Promise<void> {
     // 先取得文档目录再创建原生宿主，避免首次保存时目录尚未准备好。
     try {
-      let uri = await applicationDocumentUri(this.context);
-      let documents = new fileUri.FileUri(uri).path;
-      if (documents.length === 0) throw new Error('Application document directory has no path');
+      let uri: string = '';
+      let documents: string = '';
+      try {
+        uri = await applicationDocumentUri(this.context);
+        documents = new fileUri.FileUri(uri).path;
+        if (documents.length === 0) throw new Error('Application document directory has no path');
+      } catch (error) {
+        // DOWNLOAD authorization failed: documents stay in the sandbox (filesDir/Documents)
+        // and the save picker opens at its own default location.
+        console.error(`PhotoCraft DOWNLOAD directory unavailable: ${(error as Error).message}`);
+        uri = '';
+        documents = sandboxDocumentDirectory(this.context);
+      }
       if (!this.alive || generation !== this.generation) { return; }
       this.documents = new LocalDocuments(documents, this.context.filesDir);
       this.documentUri = uri;
@@ -246,6 +257,7 @@ struct Index {
       }).catch((error: BusinessError) => { console.info(`Fullscreen request: ${error.code} ${error.message}`); });
     }
     else if (request.kind === 'open') { this.openFile(id); }
+    else if (request.kind === 'folder') { this.selectFolder(id, request.text === 'output'); }
     else if (request.kind === 'save_default') { this.selectSave(id, request.text, true); }
     else if (request.kind === 'save_select') { this.selectSave(id, request.text); }
     else if (request.kind === 'write') { this.writeFile(id, request.text, data); }
@@ -345,6 +357,22 @@ struct Index {
     options.maxSelectNumber = 1;
     let result = await new photoAccessHelper.PhotoViewPicker().select(options);
     return result.photoUris;
+  }
+  private async selectFolder(id: number, output: boolean): Promise<void> {
+    // Native path fields (batch input/output, plug-in folder, export folders) ask for a folder.
+    this.ime.stop(); this.cursor.reset();
+    let generation = this.generation;
+    try {
+      let path = await pickFolder(this.context, output, this.documents?.root() ?? '');
+      if (!this.alive || generation !== this.generation || path.length === 0) {
+        native.reply(id, false, 'cancelled', new ArrayBuffer(0)); return;
+      }
+      native.reply(id, true, path, new ArrayBuffer(0));
+    } catch (error) {
+      native.reply(id, false, (error as Error).message, new ArrayBuffer(0));
+    } finally {
+      this.restoreEditorFocus();
+    }
   }
   private async selectSave(id: number, suggested: string, ordinary: boolean = false): Promise<void> {
     this.ime.stop(); this.cursor.reset();

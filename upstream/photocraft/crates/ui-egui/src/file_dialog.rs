@@ -86,6 +86,11 @@ pub(crate) struct Pending {
     then: Then,
 }
 
+thread_local! {
+    /// The next folder request is for output (see [`PhotocraftApp::ask_output_folder`]).
+    static FOLDER_FOR_OUTPUT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
 /// The error of a cancelled dialog: not reported, since backing out is the user's choice.
 pub(crate) const CANCELLED: &str = "cancelled";
 const UNEXPECTED: &str = "the file dialog gave an unexpected answer";
@@ -115,11 +120,19 @@ impl PhotocraftApp {
                     Some((name, bytes)) => Some(FileDialogAnswer::Contents(name, bytes?)),
                     None => None,
                 },
-                // Sync hosts have no folder picker; fall through to cancel.
-                FileDialogRequest::Folder { .. } => None,
+                // Sync hosts answer folders through `pick_folder` (HarmonyOS); without one, cancel.
+                FileDialogRequest::Folder { .. } => {
+                    let output = FOLDER_FOR_OUTPUT.with(|o| o.replace(false));
+                    match self.services.pick_folder.as_mut().and_then(|pick| pick(output)) {
+                        Some(Ok(path)) => Some(FileDialogAnswer::FolderTo(path)),
+                        Some(Err(why)) => return Err(why),
+                        None => None,
+                    }
+                }
             };
             return then(self, answer.ok_or(CANCELLED)?);
         }
+        FOLDER_FOR_OUTPUT.with(|o| o.set(false));
         if self.file_dialog.is_some() {
             return Err("a file dialog is already open".into());
         }
@@ -145,6 +158,16 @@ impl PhotocraftApp {
             FileDialogAnswer::FolderTo(path) => then(app, path),
             _ => Err(UNEXPECTED.into()),
         })
+    }
+
+    /// [`Self::ask_folder`] for a folder the command writes into (an export or batch output).
+    /// Synchronous hosts' [`crate::Services::pick_folder`] is told so: a device without a folder
+    /// picker can offer its own writable folder for output, but not for input.
+    pub(crate) fn ask_output_folder(&mut self, then: impl FnOnce(&mut Self, String) -> Result<Value, String> + 'static) -> Result<Value, String> {
+        FOLDER_FOR_OUTPUT.with(|o| o.set(true));
+        let r = self.ask_folder(then);
+        FOLDER_FOR_OUTPUT.with(|o| o.set(false));
+        r
     }
 
     /// Ask where to save: `then` gets the chosen path, with a lowercase extension when

@@ -30,10 +30,12 @@ mod ime;
 mod input;
 #[cfg(any(target_env = "ohos", test))]
 mod recovery;
-#[cfg(any(target_env = "ohos", test))]
-mod viewports;
 #[cfg(target_env = "ohos")]
 mod render;
+#[cfg(any(target_env = "ohos", test))]
+mod sandbox_paths;
+#[cfg(any(target_env = "ohos", test))]
+mod viewports;
 #[cfg(any(target_env = "ohos", test))]
 mod working_directory;
 #[cfg(target_env = "ohos")]
@@ -156,6 +158,33 @@ fn services(
                     None
                 }
             }
+        })),
+        // Folders come from the system file manager (FOLDER mode on 2in1). Tablets have no
+        // folder picker: ArkTS copies picked files into a fresh sandbox folder for input, and
+        // offers the app's document folder for output. The answer is granted to the engine.
+        pick_folder: Some(Box::new(|output| {
+            match bridge::request("folder", if output { "output" } else { "input" }, &[]) {
+                Ok((path, _)) => {
+                    sandbox_paths::grant(&path);
+                    Some(Ok(path))
+                }
+                Err(e) if e == "cancelled" => None,
+                Err(e) => Some(Err(e)),
+            }
+        })),
+        // A sandboxed app has no paths to the user's files: path fields use the pickers.
+        path_pickers_only: true,
+        sandbox_dir: Some(files.to_string()),
+        // History Log text file: only inside the sandbox or a granted folder.
+        append_text: Some(Box::new(|path, text| {
+            use std::io::Write;
+            sandbox_paths::check(path)?;
+            std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(path)
+                .and_then(|mut f| f.write_all(text.as_bytes()))
+                .map_err(|e| format!("{path}: {e}"))
         })),
         write: Some(Box::new(move |name, bytes| {
             bridge::request("write", name, bytes).map(|_| ())
@@ -469,6 +498,14 @@ fn worker(config: Config, rx: mpsc::Receiver<Message>) {
     let documents = std::sync::Arc::new(std::sync::Mutex::new(documents::Documents::new(
         document_files,
     )));
+    // Sandbox: the app's files and document folder, plus folders granted by the file manager.
+    sandbox_paths::init(&[config.files.as_str(), document_files.as_str()]);
+    let profiles = std::path::Path::new(&config.files).join("icc");
+    if let Err(error) = std::fs::create_dir_all(&profiles) {
+        let message = format!("ICC folder {}: {error}", profiles.display());
+        bridge::notify(0, "diagnostic", &message, &[]);
+    }
+    photocraft_engine::installed_profiles::set_app_profile_dir(Some(profiles));
     let ctx = egui::Context::default();
     PhotocraftApp::setup_context(&ctx, Default::default());
     bridge::notify(0, "stage", "egui context ready", &[]);
@@ -489,6 +526,8 @@ fn worker(config: Config, rx: mpsc::Receiver<Message>) {
     app.session.print_service = Some(|pdf, metadata| {
         bridge::request("print", &metadata.to_string(), pdf).map(|(message, _)| message)
     });
+    // Scripts, actions and batch commands that name a path outside the sandbox are refused.
+    app.session.authorize = Some(sandbox_paths::gate);
     app.session.print_save_service =
         Some(|target, pdf| bridge::request("write", target, pdf).map(|_| ()));
 
@@ -573,8 +612,8 @@ fn worker(config: Config, rx: mpsc::Receiver<Message>) {
             &message,
             Message::Attach(..) | Message::Resize(..) | Message::Detach | Message::Frame
         );
-        let result =
-            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| -> Result<(), String> {
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(
+            || -> Result<(), String> {
                 match message {
                     Message::Attach(ptr, w, h) => {
                         if render.recovery.halted {
@@ -632,7 +671,9 @@ fn worker(config: Config, rx: mpsc::Receiver<Message>) {
                             bridge::notify(
                                 0,
                                 "diagnostic",
-                                &format!("Native sub-window {key} attach ignored (recovery halted)"),
+                                &format!(
+                                    "Native sub-window {key} attach ignored (recovery halted)"
+                                ),
                                 &[],
                             );
                             return Ok(());
@@ -648,10 +689,11 @@ fn worker(config: Config, rx: mpsc::Receiver<Message>) {
                             );
                             return Ok(());
                         }
-                        let attached = std::panic::catch_unwind(std::panic::AssertUnwindSafe(
-                            || render.attach_child(key, window, w, h),
-                        ))
-                        .unwrap_or_else(|_| Err("native sub-window surface panicked".into()));
+                        let attached =
+                            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                                render.attach_child(key, window, w, h)
+                            }))
+                            .unwrap_or_else(|_| Err("native sub-window surface panicked".into()));
                         match attached {
                             Ok(()) => registry.borrow_mut().attach(key, w, h),
                             Err(error) => {
@@ -671,10 +713,11 @@ fn worker(config: Config, rx: mpsc::Receiver<Message>) {
                         if render.recovery.halted {
                             return Ok(());
                         }
-                        let resized = std::panic::catch_unwind(std::panic::AssertUnwindSafe(
-                            || render.resize_child(key, w, h),
-                        ))
-                        .unwrap_or_else(|_| Err("native sub-window resize panicked".into()));
+                        let resized =
+                            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                                render.resize_child(key, w, h)
+                            }))
+                            .unwrap_or_else(|_| Err("native sub-window resize panicked".into()));
                         if let Err(error) = resized {
                             bridge::notify(0, "diagnostic", &error, &[]);
                             render.remove_child(key);
@@ -954,7 +997,8 @@ fn worker(config: Config, rx: mpsc::Receiver<Message>) {
                     }
                 }
                 Ok(())
-            }));
+            },
+        ));
         let failure = match result {
             Ok(Ok(())) => None,
             Ok(Err(error)) if rendering_operation => Some(error),

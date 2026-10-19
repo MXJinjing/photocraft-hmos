@@ -7,6 +7,7 @@ export class LocalDocuments {
   private directory: string;
   private staging: string;
   constructor(directory: string, staging: string) { this.directory = directory; this.staging = staging; }
+  root(): string { return this.directory; }
   owns(path: string): boolean {
     // 普通保存只接受应用文档目录的直接子文件，不把外部路径或子目录当成本地文档。
     let prefix = this.directory + '/';

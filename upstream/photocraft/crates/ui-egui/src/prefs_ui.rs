@@ -1591,7 +1591,11 @@ fn field_rows(ui: &mut egui::Ui, section: &str, obj: &mut Map<String, Value>, ke
             Value::String(s) => {
                 ui.label(RichText::new(tl!(&label)).color(t.text_dim));
                 let mut s = s.clone();
-                ui.add(egui::TextEdit::singleline(&mut s).desired_width(260.0));
+                // Sandboxed hosts: folders and files are chosen with the system picker.
+                let pointer = format!("/values/{section}/{k}");
+                if !crate::path_pick::locked_field(ui, crate::path_pick::kind_for("prefs", &path), &pointer, &s, 330.0) {
+                    ui.add(egui::TextEdit::singleline(&mut s).desired_width(260.0));
+                }
                 obj.insert(k, json!(s));
             }
             Value::Number(n) => {
@@ -1617,12 +1621,16 @@ fn field_rows(ui: &mut egui::Ui, section: &str, obj: &mut Map<String, Value>, ke
                 ui.label(RichText::new(tl!("Scratch disks")).color(t.text_dim));
                 let mut items = items.clone();
                 ui.vertical(|ui| {
-                    for d in &mut items {
+                    for (i, d) in items.iter_mut().enumerate() {
                         ui.horizontal(|ui| {
                             let mut on = d.get("enabled").and_then(Value::as_bool).unwrap_or(false);
                             let mut path = d.get("path").and_then(Value::as_str).unwrap_or("").to_string();
                             crate::widgets::checkbox(ui, &mut on, "");
-                            ui.add(egui::TextEdit::singleline(&mut path).desired_width(240.0));
+                            // Sandboxed hosts: a scratch disk is a folder from the system picker.
+                            let pointer = format!("/values/{section}/disks/{i}/path");
+                            if !crate::path_pick::locked_field(ui, Some(crate::path_pick::PickKind::OutputFolder), &pointer, &path, 310.0) {
+                                ui.add(egui::TextEdit::singleline(&mut path).desired_width(240.0));
+                            }
                             *d = json!({"enabled": on, "path": path});
                         });
                     }
@@ -2934,10 +2942,7 @@ mod tests {
         assert!(!prefs::is_hidden("interface.uiScale"));
         assert!(!prefs::is_hidden("interface.uiFontSize"));
         // LINUX_ONLY: follow is_desktop_linux() (target_env = "ohos" on HarmonyOS triples).
-        assert_eq!(
-            prefs::is_hidden("performance.linuxDisplayServer"),
-            !prefs::is_desktop_linux()
-        );
+        assert_eq!(prefs::is_hidden("performance.linuxDisplayServer"), !prefs::is_desktop_linux());
         assert!(prefs::is_hidden_for("performance.linuxDisplayServer", false));
         assert!(!prefs::is_hidden_for("performance.linuxDisplayServer", true));
         // Hidden values still round-trip through the dialog untouched.
