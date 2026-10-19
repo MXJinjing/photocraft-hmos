@@ -5,10 +5,11 @@ import { savePickerOptions, SaveTargets } from '../savePicker';
 import { NativePrintAdapter } from '../NativePrintAdapter';
 import { common } from '@kit.AbilityKit';
 import { fileIo, fileUri, picker } from '@kit.CoreFileKit';
+import { photoAccessHelper } from '@kit.MediaLibraryKit';
 import { i18n } from '@kit.LocalizationKit';
 import { BusinessError } from '@kit.BasicServicesKit';
-import { KeyboardAvoidMode } from '@kit.ArkUI';
-import { applySystemBars, LOADING_CHROME, normalizeChrome } from '../SystemBars';
+import { ComponentContent, KeyboardAvoidMode } from '@kit.ArkUI';
+import { applySystemBars, isDarkChrome, LOADING_CHROME, normalizeChrome } from '../SystemBars';
 import { setOpenListener, takeOpens } from '../openInbox';
 import { allowConfirmedClose, setCloseRequest } from '../closeGuard';
 import { HarmonyStylusAdapter } from '../stylus/HarmonyStylusAdapter';
@@ -59,6 +60,39 @@ class NativeInput {
   alt: boolean = false;
   dx: number = 0;
   dy: number = 0;
+}
+
+interface OpenSourceActions {
+  background: string;
+  text: string;
+  card: string;
+  onFiles: () => void;
+  onGallery: () => void;
+  onCancel: () => void;
+}
+
+@Builder
+function openSourceContent(actions: OpenSourceActions) {
+  Column({ space: 6 }) {
+    Button('从文件管理导入', { type: ButtonType.Normal })
+      .width('100%').height(46).borderRadius(12)
+      .fontSize(15).fontWeight(FontWeight.Medium).fontColor(actions.text)
+      .backgroundColor(actions.card)
+      .onClick(actions.onFiles)
+    Button('从图库导入', { type: ButtonType.Normal })
+      .width('100%').height(46).borderRadius(12)
+      .fontSize(15).fontWeight(FontWeight.Medium).fontColor(actions.text)
+      .backgroundColor(actions.card)
+      .onClick(actions.onGallery)
+    Button('取消', { type: ButtonType.Normal })
+      .width('100%').height(46).borderRadius(12)
+      .fontSize(15).fontWeight(FontWeight.Medium).fontColor(actions.text)
+      .backgroundColor(actions.card)
+      .onClick(actions.onCancel)
+  }
+  .width('82%').constraintSize({ maxWidth: 360 })
+  .padding(18)
+  .backgroundColor(actions.background).borderRadius(24)
 }
 
 @Entry
@@ -239,10 +273,16 @@ struct Index {
     }
   }
   private async openFile(id: number): Promise<void> {
+    // File › Open / homepage Open / Ctrl+O all arrive here via native pick_open → kind "open".
+    // Choose a source in a centered ArkUI dialog before opening a system picker.
+    this.ime.stop(); this.cursor.reset();
     let generation = this.generation;
     try {
-      let options = new picker.DocumentSelectOptions(); options.maxSelectNumber = 1;
-      let uris = await new picker.DocumentViewPicker(this.context).select(options);
+      let source = await this.chooseOpenSource();
+      if (!this.alive || generation !== this.generation || source.length === 0) {
+        native.reply(id, false, 'cancelled', new ArrayBuffer(0)); return;
+      }
+      let uris = source === 'gallery' ? await this.selectGalleryUris() : await this.selectDocumentUris();
       if (!this.alive || generation !== this.generation || uris.length === 0) {
         native.reply(id, false, 'cancelled', new ArrayBuffer(0)); return;
       }
@@ -260,6 +300,51 @@ struct Index {
     } finally {
       this.restoreEditorFocus();
     }
+  }
+  private chooseOpenSource(): Promise<string> {
+    return new Promise<string>((resolve: (value: string) => void, reject: (reason: Error) => void) => {
+      const prompt = this.getUIContext().getPromptAction();
+      let source: string = '';
+      let closing: boolean = false;
+      let content: ComponentContent<OpenSourceActions>;
+      const select = (value: string): void => {
+        if (closing) { return; }
+        closing = true;
+        source = value;
+        prompt.closeCustomDialog(content).catch((error: BusinessError) => {
+          reject(error);
+        });
+      };
+      const background: string = normalizeChrome(this.chrome) || LOADING_CHROME;
+      const dark: boolean = isDarkChrome(background);
+      const actions: OpenSourceActions = {
+        background: background,
+        text: dark ? '#FFFFFFFF' : '#FF000000',
+        card: dark ? '#26FFFFFF' : '#14000000',
+        onFiles: (): void => select('files'),
+        onGallery: (): void => select('gallery'),
+        onCancel: (): void => select(''),
+      };
+      content = new ComponentContent(this.getUIContext(), wrapBuilder(openSourceContent), actions);
+      prompt.openCustomDialog(content, {
+        alignment: DialogAlignment.Center,
+        isModal: true,
+        autoCancel: true,
+        onDidDisappear: (): void => { content.dispose(); resolve(source); },
+      }).catch((error: BusinessError) => { content.dispose(); reject(error); });
+    });
+  }
+  private async selectDocumentUris(): Promise<Array<string>> {
+    let options = new picker.DocumentSelectOptions();
+    options.maxSelectNumber = 1;
+    return await new picker.DocumentViewPicker(this.context).select(options);
+  }
+  private async selectGalleryUris(): Promise<Array<string>> {
+    let options = new photoAccessHelper.PhotoSelectOptions();
+    options.MIMEType = photoAccessHelper.PhotoViewMIMETypes.IMAGE_TYPE;
+    options.maxSelectNumber = 1;
+    let result = await new photoAccessHelper.PhotoViewPicker().select(options);
+    return result.photoUris;
   }
   private async selectSave(id: number, suggested: string, ordinary: boolean = false): Promise<void> {
     this.ime.stop(); this.cursor.reset();

@@ -33,7 +33,7 @@ export function normalizeChrome(color: string): string {
 }
 
 // White status-bar icons on a dark chrome, black icons on a light one.
-function lightIcons(argb: string): boolean {
+export function isDarkChrome(argb: string): boolean {
   let r: number = parseInt(argb.substring(3, 5), 16);
   let g: number = parseInt(argb.substring(5, 7), 16);
   let b: number = parseInt(argb.substring(7, 9), 16);
@@ -59,7 +59,7 @@ export function paintWindow(win: window.Window, color: string): void {
   if (argb.length === 0) {
     return;
   }
-  let content: string = lightIcons(argb) ? '#FFFFFFFF' : '#FF1A1A1A';
+  let content: string = isDarkChrome(argb) ? '#FFFFFFFF' : '#FF1A1A1A';
   let light: boolean = content === '#FFFFFFFF';
   paintDecorButtons(win, light);
   try {
