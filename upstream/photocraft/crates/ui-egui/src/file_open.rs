@@ -80,6 +80,12 @@ pub fn is_ephemeral_save_token(path: &str) -> bool {
     path.starts_with("save-default/") || path.starts_with("save-as/")
 }
 
+/// HarmonyOS DocumentViewPicker URIs persisted with `FILE_ACCESS_PERSIST`. Opened via
+/// [`Services::read_uri`] (activate + CoreFileKit), not `std::fs`.
+pub fn is_file_uri(path: &str) -> bool {
+    path.starts_with("file://") && path.len() > "file://".len()
+}
+
 impl PhotocraftApp {
     /// Open `bytes` read from the file at `path`: the document is named after the file, keeps
     /// `path` for File › Save unless it is a derivative preview, and `path` goes to the top of Open Recent. Returns the import
@@ -130,6 +136,21 @@ impl PhotocraftApp {
         }
         if self.show_if_open(path) {
             return Ok(Vec::new());
+        }
+        // Persisted HarmonyOS Picker URIs: host activates FILE_ACCESS_PERSIST then returns bytes.
+        // Never use std::fs / background Path reads — those cannot open file://docs/… grants.
+        if is_file_uri(path) {
+            let bytes = match self.services.read_uri.as_mut() {
+                Some(read) => read(path).map_err(|e| {
+                    self.remove_recent(path);
+                    e
+                })?,
+                None => {
+                    self.remove_recent(path);
+                    return Err("that file URI cannot be opened on this host; use File › Open".into());
+                }
+            };
+            return self.open_file(path, &bytes);
         }
         // Documents opening in the background are read on the worker too (a 2 GB PSB read
         // would block the window). Preset files (brushes, gradients) go the usual way.

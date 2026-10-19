@@ -370,6 +370,8 @@ pub type ExportFn = Box<dyn Fn(&Document, &str, &ExportSettings) -> Result<(Vec<
 pub type PickOpenFn = Box<dyn FnMut() -> Option<(String, Result<Vec<u8>, String>)>>;
 /// File › Open's multi-file picker: the selected paths, `None` when cancelled.
 pub type PickOpenPathsFn = Box<dyn FnMut() -> Option<Vec<String>>>;
+/// Read bytes for a persisted host URI (`file://…`), after activating durable access.
+pub type ReadUriFn = Box<dyn FnMut(&str) -> Result<Vec<u8>, String>>;
 pub type PickSaveFn = Box<dyn FnMut(&str) -> Option<String>>;
 /// Host-owned destination for ordinary Save, with the current document source path.
 pub type DefaultSaveFn = Box<dyn FnMut(&Document, Option<&str>) -> Result<String, String>>;
@@ -487,6 +489,8 @@ pub struct Services {
     pub pick_import: Option<PickOpenFn>,
     /// Show File › Open's multi-file picker; returns the selected paths.
     pub pick_open_paths: Option<PickOpenPathsFn>,
+    /// Open a persisted `file://` URI (HarmonyOS FILE_ACCESS_PERSIST) for Home › Recent.
+    pub read_uri: Option<ReadUriFn>,
     /// Show a "save file" dialog; returns a path/name to write.
     pub pick_save: Option<PickSaveFn>,
     /// Folder picker for synchronous hosts (see [`PickFolderFn`]); without one, a folder request

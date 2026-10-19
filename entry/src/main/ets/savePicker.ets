@@ -12,17 +12,39 @@ export function savePickerOptions(suggested: string, directoryUri: string): pick
   return options;
 }
 
+/**
+ * Maps a durable save key (app download path, persisted file:// URI, or legacy
+ * save-default/save-as token) to the Picker-granted URI used for CoreFileKit I/O.
+ */
 export class SaveTargets {
   private targets: Map<string, string> = new Map();
-  select(id: number, name: string, uri: string, ordinary: boolean): string {
-    let target = (ordinary ? 'save-default/' : 'save-as/') + id.toString() + '/' + name;
+  /** Ordinary Save retains the grant for repeat Ctrl+S; Save As is one-shot. */
+  private retain: Map<string, boolean> = new Map();
+
+  /**
+   * @param durable When set (persisted URI or owned filesystem path), Recent / Save use that
+   *   key instead of a session-only save-default/ / save-as/ token.
+   */
+  select(id: number, name: string, uri: string, ordinary: boolean, durable?: string): string {
+    let target = (durable !== undefined && durable.length > 0)
+      ? durable
+      : ((ordinary ? 'save-default/' : 'save-as/') + id.toString() + '/' + name);
     this.targets.set(target, uri);
+    this.retain.set(target, ordinary);
     return target;
   }
+
   take(target: string): string | undefined {
     let uri = this.targets.get(target);
-    if (!target.startsWith('save-default/')) this.targets.delete(target);
+    if (uri !== undefined && this.retain.get(target) !== true) {
+      this.targets.delete(target);
+      this.retain.delete(target);
+    }
     return uri;
   }
-  clear(): void { this.targets.clear(); }
+
+  clear(): void {
+    this.targets.clear();
+    this.retain.clear();
+  }
 }

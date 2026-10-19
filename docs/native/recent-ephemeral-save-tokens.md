@@ -26,3 +26,9 @@ Real document-directory paths (`Documents.owns`) are unchanged and still appear 
 
 - `cargo test -p photocraft-ui-egui ephemeral_save_tokens_are_not_listed_in_recent ephemeral_save_token_recent_is_dropped_on_open`
 - Broader open-recent tests still pass.
+
+## Follow-up
+
+Persisting Picker grants with `FILE_ACCESS_PERSIST` so Recent can reopen real external
+files is described in [recent-persist-permission.md](recent-persist-permission.md).
+

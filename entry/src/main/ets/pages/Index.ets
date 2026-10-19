@@ -2,6 +2,7 @@ import native from 'libphotocraft.so';
 import { applicationDocumentUri } from '../documentDirectory';
 import { LocalDocuments } from '../LocalDocuments';
 import { savePickerOptions, SaveTargets } from '../savePicker';
+import { activateUri, isFileUri, persistUri } from '../persistPermission';
 import { NativePrintAdapter } from '../NativePrintAdapter';
 import { common } from '@kit.AbilityKit';
 import { fileIo, fileUri, picker } from '@kit.CoreFileKit';
@@ -142,7 +143,13 @@ struct Index {
       let name = file.name;
       try {
         let path = file.uri.length > 0 ? new fileUri.FileUri(file.uri).path : '';
-        if (this.documents?.owns(path)) name = path;
+        if (this.documents?.owns(path)) {
+          name = path;
+        } else if (isFileUri(file.uri)) {
+          // Prefer the system URI so Recent can reopen after persistPermission.
+          name = file.uri;
+          void persistUri(file.uri, true);
+        }
       } catch (error) { console.info('Open source path unavailable'); }
       try {
         native.openFile(name, file.file.fd);
@@ -313,6 +320,7 @@ struct Index {
     else if (request.kind === 'open') { this.openFile(id); }
     else if (request.kind === 'import') { this.importFile(id); }
     else if (request.kind === 'folder') { this.selectFolder(id, request.text === 'output'); }
+    else if (request.kind === 'open_uri') { this.openPersistedUri(id, request.text); }
     else if (request.kind === 'save_default') { this.selectSave(id, request.text, true); }
     else if (request.kind === 'save_select') { this.selectSave(id, request.text); }
     else if (request.kind === 'export_write') { this.writeExport(id, request.text, data); }
@@ -360,7 +368,14 @@ struct Index {
           native.reply(id, false, 'cancelled', new ArrayBuffer(0)); return;
         }
         let opened = new fileUri.FileUri(uris[0]);
-        native.replyFile(id, this.documents?.owns(opened.path) ? opened.path : opened.name, file.fd);
+        let name = opened.name;
+        if (this.documents?.owns(opened.path)) {
+          name = opened.path;
+        } else if (await persistUri(uris[0], true)) {
+          // Durable file:// for Open Recent / Save after restart.
+          name = uris[0];
+        }
+        native.replyFile(id, name, file.fd);
       } finally { await fileIo.close(file); }
     } catch (error) {
       let failure = error as Error;
@@ -458,6 +473,32 @@ struct Index {
       this.restoreEditorFocus();
     }
   }
+
+  /** Home › Recent / Open Recent: activate a persisted Picker URI and hand its fd to native. */
+  private async openPersistedUri(id: number, uri: string): Promise<void> {
+    let generation = this.generation;
+    try {
+      if (!isFileUri(uri)) {
+        throw new Error('Not a persisted file URI');
+      }
+      if (!(await activateUri(uri, true))) {
+        throw new Error('Persisted file access is no longer available; open the file from File › Open');
+      }
+      if (!this.alive || generation !== this.generation) {
+        native.reply(id, false, 'cancelled', new ArrayBuffer(0)); return;
+      }
+      let file = await fileIo.open(uri, fileIo.OpenMode.READ_ONLY);
+      try {
+        if (!this.alive || generation !== this.generation) {
+          native.reply(id, false, 'cancelled', new ArrayBuffer(0)); return;
+        }
+        native.replyFile(id, uri, file.fd);
+      } finally { await fileIo.close(file); }
+    } catch (error) {
+      let failure = error as Error;
+      native.reply(id, false, failure.message, new ArrayBuffer(0));
+    }
+  }
   private async selectSave(id: number, suggested: string, ordinary: boolean = false): Promise<void> {
     this.ime.stop(); this.cursor.reset();
     let generation = this.generation;
@@ -467,9 +508,16 @@ struct Index {
       if (!this.alive || generation !== this.generation || uris.length === 0) {
         native.reply(id, false, 'cancelled', new ArrayBuffer(0)); return;
       }
-      let selectedName = new fileUri.FileUri(uris[0]).name;
+      let selected = new fileUri.FileUri(uris[0]);
+      let selectedName = selected.name;
       if (selectedName.length === 0) throw new Error('Selected file has no name');
-      let target = this.saveTargets.select(id, selectedName, uris[0], ordinary);
+      let durable: string | undefined = undefined;
+      if (this.documents?.owns(selected.path)) {
+        durable = selected.path;
+      } else if (await persistUri(uris[0], true)) {
+        durable = uris[0];
+      }
+      let target = this.saveTargets.select(id, selectedName, uris[0], ordinary, durable);
       native.reply(id, true, target, new ArrayBuffer(0));
     } catch (error) {
       let failure = error as Error;
@@ -495,7 +543,17 @@ struct Index {
         return;
       }
       let uri = this.saveTargets.take(name);
+      if (uri === undefined && isFileUri(name)) {
+        // Reopen-from-Recent / cold session: document.path is the persisted URI itself.
+        uri = name;
+      }
       if (uri === undefined) throw new Error('No system save target for ' + name);
+      if (isFileUri(uri)) {
+        // After restart the grant must be activated before CoreFileKit open.
+        if (!(await activateUri(uri, true))) {
+          throw new Error('Persisted save target is no longer available');
+        }
+      }
       let file = await fileIo.open(uri, fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.CREATE);
       try {
         await fileIo.truncate(file.fd, 0);

@@ -12,7 +12,8 @@
       {
         "name": "ohos.permission.PRINT"
       },
-      { "name": "ohos.permission.INTERNET" }
+      { "name": "ohos.permission.INTERNET" },
+      { "name": "ohos.permission.FILE_ACCESS_PERSIST" }
     ],
     "abilities": [
       {

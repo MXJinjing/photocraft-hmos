@@ -64,3 +64,25 @@ fn opened_local_psd_reuses_source_but_external_and_flat_files_need_picker() {
         Some("save-default/22/picked.psd")
     );
 }
+
+
+#[test]
+fn persisted_file_uris_are_valid_ordinary_save_targets() {
+    let mut docs = Documents::new("/Download/test.bundle");
+    let uri = "file://docs/storage/Users/currentUser/Documents/pad.psd";
+    docs.select(1, uri).unwrap();
+    assert_eq!(docs.target(1).as_deref(), Some(uri));
+    assert_eq!(docs.existing(1, Some("save-as/9/x.psd")).as_deref(), Some(uri));
+    assert!(docs.select(2, "file://").is_err());
+    assert!(docs.select(2, "https://example/a.psd").is_err());
+}
+
+#[test]
+fn opened_persisted_psd_uri_reuses_source_without_picker() {
+    let mut docs = Documents::new("/Download/test.bundle");
+    let uri = "file://docs/storage/Users/currentUser/Documents/external.PSB";
+    assert_eq!(docs.existing(1, Some(uri)).as_deref(), Some(uri));
+    assert!(docs
+        .existing(2, Some("file://docs/storage/Users/currentUser/Documents/flat.png"))
+        .is_none());
+}

@@ -933,6 +933,41 @@ fn ephemeral_save_token_recent_is_dropped_on_open() {
     assert!(app.session.prefs().file_handling.recent_files.is_empty());
 }
 
+/// Persisted HarmonyOS `file://` Recent entries must go through `services.read_uri`, not std::fs.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn file_uri_open_uses_read_uri_service() {
+    let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), Services::default());
+    let uri = "file://docs/storage/Users/u/Documents/from-recent.psd";
+    app.ui.recent_files = vec![uri.into()];
+    app.session.prefs.edit(|p| p.file_handling.recent_files = vec![uri.into()]);
+    let called = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let flag = called.clone();
+    app.services.read_uri = Some(Box::new(move |u| {
+        assert_eq!(u, "file://docs/storage/Users/u/Documents/from-recent.psd");
+        flag.store(true, std::sync::atomic::Ordering::SeqCst);
+        Err("simulated host activate failure".into())
+    }));
+    let err = app.open_path(uri).unwrap_err();
+    assert!(called.load(std::sync::atomic::Ordering::SeqCst));
+    assert!(err.contains("simulated host activate failure"));
+    // Failed activate drops the stale Recent entry.
+    assert!(!app.ui.recent_files.iter().any(|p| p == uri));
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn file_uri_open_without_read_uri_drops_recent() {
+    let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), Services::default());
+    let uri = "file://docs/storage/Users/u/Documents/orphan.psd";
+    app.ui.recent_files = vec![uri.into()];
+    app.session.prefs.edit(|p| p.file_handling.recent_files = vec![uri.into()]);
+    let err = app.open_path(uri).unwrap_err();
+    assert!(err.contains("cannot be opened"));
+    assert!(!app.ui.recent_files.iter().any(|p| p == uri));
+}
+
+
 
 /// #4559: a file whose type uses a font that isn't installed opens with a notice naming it, as
 /// Photoshop warns on open (the CLI and automation already did); the file still opens. Type in

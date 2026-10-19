@@ -1,4 +1,4 @@
-//! Ordinary Save targets: local paths or host-authorized picker tokens.
+//! Ordinary Save targets: local paths, persisted file:// URIs, or host-authorized picker tokens.
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
@@ -8,6 +8,17 @@ pub struct Documents {
     pub dir: PathBuf,
     targets: HashMap<u64, String>,
 }
+
+fn is_file_uri(path: &str) -> bool {
+    path.starts_with("file://") && path.len() > "file://".len()
+}
+
+fn is_photoshop(path: &str) -> bool {
+    Path::new(path).extension().is_some_and(|ext| {
+        ext.eq_ignore_ascii_case("psd") || ext.eq_ignore_ascii_case("psb")
+    })
+}
+
 impl Documents {
     pub fn new(directory: &str) -> Self {
         Self {
@@ -29,7 +40,8 @@ impl Documents {
         let picker_target = matches!(parts.as_slice(), ["save-default", request, name]
             if request.parse::<u64>().is_ok_and(|id| id > 0)
                 && !name.is_empty() && *name != "." && *name != ".." && !name.contains('\\'));
-        if !self.owns(path) && !picker_target {
+        // Persisted DocumentViewPicker URIs (FILE_ACCESS_PERSIST) are durable ordinary-save keys.
+        if !self.owns(path) && !picker_target && !is_file_uri(path) {
             return Err("Invalid application document path".into());
         }
         self.targets.insert(id, path.into());
@@ -40,10 +52,7 @@ impl Documents {
             return Some(target);
         }
         let path = source.filter(|path| {
-            self.owns(path)
-                && Path::new(path).extension().is_some_and(|ext| {
-                    ext.eq_ignore_ascii_case("psd") || ext.eq_ignore_ascii_case("psb")
-                })
+            is_photoshop(path) && (self.owns(path) || is_file_uri(path))
         })?;
         self.select(id, path).ok()
     }

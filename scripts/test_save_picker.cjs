@@ -33,6 +33,14 @@ const copy = targets.select(3, 'copy.psd', 'uri-copy', false);
 assert.equal(targets.take(copy), 'uri-copy');
 assert.equal(targets.take(copy), undefined);
 assert.equal(targets.take(first), 'uri-one'); // Save As does not replace ordinary Save.
+const durable = targets.select(4, 'ext.psd', 'file://docs/a/ext.psd', true, 'file://docs/a/ext.psd');
+assert.equal(durable, 'file://docs/a/ext.psd');
+assert.equal(targets.take(durable), 'file://docs/a/ext.psd');
+assert.equal(targets.take(durable), 'file://docs/a/ext.psd'); // ordinary durable URI retained
+const saveAsUri = targets.select(5, 'copy2.psd', 'file://docs/a/copy2.psd', false, 'file://docs/a/copy2.psd');
+assert.equal(targets.take(saveAsUri), 'file://docs/a/copy2.psd');
+assert.equal(targets.take(saveAsUri), undefined); // Save As durable URI is one-shot
 targets.clear();
 assert.equal(targets.take(first), undefined);
-console.log('Passed: full picker defaults to system Download/package URI, names, formats, repeat saves, independent documents, one-shot Save As, lifecycle cleanup.');
+assert.equal(targets.take(durable), undefined);
+console.log('Passed: full picker defaults to system Download/package URI, names, formats, repeat saves, independent documents, one-shot Save As, durable file URIs, lifecycle cleanup.');
