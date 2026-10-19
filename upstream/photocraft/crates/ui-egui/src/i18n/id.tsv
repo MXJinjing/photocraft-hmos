@@ -741,6 +741,10 @@
 	Soft light	Lembut terang
 	Soft Dark Theme	Tema lembut gelap
 	Soft Light Theme	Tema lembut terang
+	ArkUI Light Theme	Tema ArkUI Terang
+	ArkUI Dark Theme	Tema ArkUI Gelap
+	ArkUI Pro Light Theme	Tema ArkUI Pro Terang
+	ArkUI Pro Dark Theme	Tema ArkUI Pro Gelap
 	Next Theme	Tema Berikutnya
 	Actions	Action
 	Brush Settings	Pengaturan Kuas
@@ -3137,6 +3141,7 @@ curves	Smooth	Haluskan
 # HarmonyOS host additions retained during upstream sync
 	Stylus	Stylus
 	Block finger input	Blokir masukan jari
+	Stylus hover preview	Pratinjau saat stylus melayang
 	Double-tap pen body	Ketuk dua kali badan stylus
 	Current tool and Eraser	Alat saat ini dan penghapus
 	Previous tool	Alat sebelumnya
@@ -3148,5 +3153,7 @@ curves	Smooth	Haluskan
 	Right sidebar	Bilah sisi kanan
 	Connected pen	Pena terhubung
 	No pen connected	Tidak ada pena terhubung
-	Battery unavailable	Baterai tidak tersedia
-	Battery: {percent}%	Baterai: {percent}%
+
+# Window full screen (HarmonyOS host)
+	Enter Full Screen	Masuk layar penuh
+	Exit Full Screen	Keluar dari layar penuh

@@ -735,6 +735,10 @@
 	Soft light	소프트 라이트
 	Soft Dark Theme	소프트 다크 테마
 	Soft Light Theme	소프트 라이트 테마
+	ArkUI Light Theme	ArkUI 밝은 테마
+	ArkUI Dark Theme	ArkUI 어두운 테마
+	ArkUI Pro Light Theme	ArkUI Pro 밝은 테마
+	ArkUI Pro Dark Theme	ArkUI Pro 어두운 테마
 	Next Theme	다음 테마
 	Actions	액션
 	Brush Settings	브러시 설정
@@ -3323,6 +3327,7 @@ curves	Smooth	매끄럽게
 # HarmonyOS host additions retained during upstream sync
 	Stylus	스타일러스
 	Block finger input	손가락 입력 차단
+	Stylus hover preview	스타일러스 호버 미리보기
 	Double-tap pen body	펜 몸통 두 번 탭
 	Current tool and Eraser	현재 도구와 지우개
 	Previous tool	이전 도구
@@ -3334,5 +3339,7 @@ curves	Smooth	매끄럽게
 	Right sidebar	오른쪽 사이드바
 	Connected pen	연결된 펜
 	No pen connected	연결된 펜 없음
-	Battery unavailable	배터리 정보 없음
-	Battery: {percent}%	배터리: {percent}%
+
+# Window full screen (HarmonyOS host)
+	Enter Full Screen	전체 화면 시작
+	Exit Full Screen	전체 화면 종료

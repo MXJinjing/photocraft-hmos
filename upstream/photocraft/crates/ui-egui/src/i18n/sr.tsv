@@ -24,9 +24,8 @@
 
 # Guide layout dialog
 # HarmonyOS native controls
-	Battery unavailable	Podaci o bateriji nisu dostupni
-	Battery: {percent}%	Baterija: {percent}%
 	Block finger input	Blokiraj unos prstom
+	Stylus hover preview	Pregled olovke pri lebdenju
 	Choose printer, copies and duplex in the system print dialog.	Izaberite štampač, broj kopija i dvostranu štampu u sistemskom dijalogu za štampanje.
 	Connected pen	Povezana olovka
 	Double-tap pen body	Dvostruki dodir tela olovke
@@ -753,6 +752,10 @@
 	Soft Dark Theme	Meka tamna tema
 	Soft light	Meka svetla
 	Soft Light Theme	Meka svetla tema
+	ArkUI Light Theme	ArkUI svetla tema
+	ArkUI Dark Theme	ArkUI tamna tema
+	ArkUI Pro Light Theme	ArkUI Pro svetla tema
+	ArkUI Pro Dark Theme	ArkUI Pro tamna tema
 	Next Theme	Sledeća tema
 	Actions	Radnje
 	Brush Settings	Podešavanja četkice
@@ -4235,3 +4238,7 @@ shape	Appearance	Izgled
 	Ink Characteristics	Karakteristike mastila
 	Solidity:	Punoća:
 	Redrawing	Ponovno iscrtavanje
+
+# Window full screen (HarmonyOS host)
+	Enter Full Screen	Uđi u pun ekran
+	Exit Full Screen	Izađi iz punog ekrana

@@ -758,6 +758,10 @@
 	Soft light	ソフトライト
 	Soft Dark Theme	ソフトダークテーマ
 	Soft Light Theme	ソフトライトテーマ
+	ArkUI Light Theme	ArkUI ライトテーマ
+	ArkUI Dark Theme	ArkUI ダークテーマ
+	ArkUI Pro Light Theme	ArkUI Pro ライトテーマ
+	ArkUI Pro Dark Theme	ArkUI Pro ダークテーマ
 	Next Theme	次のテーマ
 	Actions	アクション
 	Brush Settings	ブラシ設定
@@ -3825,6 +3829,7 @@ curves	Smooth	スムーズ
 # HarmonyOS host additions retained during upstream sync
 	Stylus	スタイラス
 	Block finger input	指の入力を無効にする
+	Stylus hover preview	スタイラスのホバープレビュー
 	Double-tap pen body	ペン軸をダブルタップ
 	Current tool and Eraser	現在のツールと消しゴム
 	Previous tool	前のツール
@@ -3836,5 +3841,7 @@ curves	Smooth	スムーズ
 	Right sidebar	右サイドバー
 	Connected pen	接続中のペン
 	No pen connected	ペンが接続されていません
-	Battery unavailable	バッテリー情報なし
-	Battery: {percent}%	バッテリー: {percent}%
+
+# Window full screen (HarmonyOS host)
+	Enter Full Screen	フルスクリーンにする
+	Exit Full Screen	フルスクリーンを終了

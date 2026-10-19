@@ -402,7 +402,11 @@ pub(crate) fn browser(
             for &gi in &display {
                 let Some(g) = groups.get(gi) else { continue };
                 let open = group_open(st, panel, gi, &g.name);
-                let (hr, hresp) = ui.allocate_exact_size(vec2(ui.available_width(), 22.0), Sense::click_and_drag());
+                let item = egui::Id::new(("preset-group-row", panel, gi));
+                let sense = crate::list_drag::row_sense(ui.ctx(), pointer, item);
+                let (hr, raw_hresp) = ui.allocate_exact_size(vec2(ui.available_width(), 22.0), sense);
+                let hresp = crate::list_drag::after_row(ui.ctx(), pointer, item, &raw_hresp);
+                let can_drag = !crate::list_drag::prefers_scroll(pointer) || crate::list_drag::is_armed(ui.ctx(), item);
                 if hresp.hovered() || hresp.dragged() {
                     ui.painter().rect_filled(hr, 2.0, t.hover.gamma_multiply(0.5));
                 }
@@ -427,13 +431,15 @@ pub(crate) fn browser(
                         ui.close();
                     }
                 });
-                if hresp.dragged()
+                if can_drag
+                    && hresp.dragged()
                     && let Some(p) = ui.ctx().pointer_interact_pos()
                 {
                     drag = Some((gi, p));
                     ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
                 }
-                if hresp.drag_stopped()
+                if can_drag
+                    && hresp.drag_stopped()
                     && let Some(p) = ui.ctx().pointer_interact_pos()
                 {
                     released = Some((gi, p));

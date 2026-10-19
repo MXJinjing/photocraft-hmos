@@ -1063,7 +1063,7 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                                 if tool == Tool::Eraser {
                                     app.ui.tool_options.eraser_pressure_opacity = !pressure_opacity;
                                 } else {
-                                    b.pressure_opacity = !pressure_opacity;
+                                    b.set_opacity_uses_pen_pressure(!pressure_opacity);
                                 }
                             }
                         });
@@ -1088,7 +1088,7 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                             if tool == Tool::Eraser {
                                 app.ui.tool_options.eraser_pressure_size = !pressure_size;
                             } else {
-                                b.pressure_size = !pressure_size;
+                                b.set_size_uses_pen_pressure(!pressure_size);
                             }
                         }
                     }
@@ -1141,8 +1141,14 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                             widgets::toggle(ui, &mut app.ui.tool_options.eraser_pressure_size, tl!("Pressure for Size"));
                             widgets::toggle(ui, &mut app.ui.tool_options.eraser_pressure_opacity, tl!("Pressure for Opacity"));
                         } else {
-                            widgets::toggle(ui, &mut b.pressure_size, tl!("Pressure for Size"));
-                            widgets::toggle(ui, &mut b.pressure_opacity, tl!("Pressure for Opacity"));
+                            let mut size_on = b.pressure_size;
+                            if widgets::toggle(ui, &mut size_on, tl!("Pressure for Size")).changed() {
+                                b.set_size_uses_pen_pressure(size_on);
+                            }
+                            let mut opacity_on = b.pressure_opacity;
+                            if widgets::toggle(ui, &mut opacity_on, tl!("Pressure for Opacity")).changed() {
+                                b.set_opacity_uses_pen_pressure(opacity_on);
+                            }
                         }
                     }
                     Tool::MixerBrush => {
@@ -2932,10 +2938,13 @@ fn layer_row(
     let (name_right, indicators, fx_toggled) = crate::layer_row_ui::indicators(ui, &painter, rect, x, l, fx_open, actions);
     // Dragging the fx badge drags all the layer's effects, not the layer (Photoshop). Like the eye,
     // it takes the drag from the row; clicks still reach the row.
-    if let Some(&(_, badge)) = indicators.iter().find(|(k, _)| *k == crate::layer_row_ui::Indicator::Fx)
-        && ui.interact(badge, ui.id().with(("fx-badge", l.id.0)), Sense::drag()).drag_started()
-    {
-        start_fx_drag(ctx, l.id, None);
+    if let Some(&(_, badge)) = indicators.iter().find(|(k, _)| *k == crate::layer_row_ui::Indicator::Fx) {
+        // The row gate owns the touch double-press arm. A normal touch drag must remain a
+        // ScrollArea gesture even when it starts on the FX badge.
+        let fx_resp = ui.interact(badge, ui.id().with(("fx-badge", l.id.0)), crate::list_drag::row_sense(ctx, source, item));
+        if crate::list_drag::may_begin_drag(ctx, source, item, &fx_resp) {
+            start_fx_drag(ctx, l.id, None);
+        }
     }
     // Clicking the lock icon unlocks the layer, and makes the Background a normal one (Photoshop,
     // #4723). It takes the click from the row, so the row isn't selected.
@@ -4099,6 +4108,7 @@ fn fx_drop(ctx: &egui::Context, ui: &egui::Ui, l: &Layer, rect: Rect, actions: &
 /// on "Effects" shows or hides them all, the eye on an effect's row just that one (#1622).
 fn effect_rows(app: &mut PhotocraftApp, ui: &mut egui::Ui, l: &Layer, depth: usize, actions: &mut Vec<(String, Value)>) {
     let t = Tokens::get(ui.ctx());
+    let source = app.stylus.feed.source();
     let indent = 30.0 + depth as f32 * 14.0 + 34.0;
     let mut rows: Vec<(String, bool, Option<&'static str>)> = vec![("Effects".into(), l.effects.enabled, None)];
     for e in &l.effects.items {
@@ -4106,9 +4116,13 @@ fn effect_rows(app: &mut PhotocraftApp, ui: &mut egui::Ui, l: &Layer, depth: usi
         rows.push((e.label().to_string(), e.enabled(), kind));
     }
     for (i, (name, on, kind)) in rows.into_iter().enumerate() {
-        let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 22.0), Sense::click_and_drag());
+        let item = ui.id().with(("layer-fx-row", l.id.0, i));
+        let sense = crate::list_drag::row_sense(ui.ctx(), source, item);
+        let (rect, raw_resp) = ui.allocate_exact_size(vec2(ui.available_width(), 22.0), sense);
+        let resp = crate::list_drag::after_row(ui.ctx(), source, item, &raw_resp);
+        let can_drag = !crate::list_drag::prefers_scroll(source) || crate::list_drag::is_armed(ui.ctx(), item);
         // Drag the row onto another layer to move its effects there, ⌥-drag to copy them.
-        if resp.drag_started() {
+        if can_drag && resp.drag_started() {
             start_fx_drag(ui.ctx(), l.id, i.checked_sub(1));
         }
         if !ui.is_rect_visible(rect) {

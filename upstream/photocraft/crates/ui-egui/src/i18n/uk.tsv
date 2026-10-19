@@ -1440,6 +1440,10 @@
 	Soft light	М'яка світла
 	Soft Dark Theme	М'яка темна тема
 	Soft Light Theme	М'яка світла тема
+	ArkUI Light Theme	Світла тема ArkUI
+	ArkUI Dark Theme	Темна тема ArkUI
+	ArkUI Pro Light Theme	Світла тема ArkUI Pro
+	ArkUI Pro Dark Theme	Темна тема ArkUI Pro
 	Adwaita Light Theme	Світла тема Adwaita
 	Adwaita Dark Theme	Темна тема Adwaita
 	Adwaita	Adwaita
@@ -3854,9 +3858,12 @@ curves	Smooth	Згладити
 	System print preview opened	Відкрито системний попередній перегляд друку
 	Stylus	Стилус
 	Block finger input	Блокувати введення пальцем
+	Stylus hover preview	Попередній перегляд стилуса при наведенні
 	Only show canvas	Показати лише полотно
 	Right sidebar	Права бічна панель
 	Connected pen	Підключене перо
 	No pen connected	Перо не підключено
-	Battery unavailable	Заряд батареї недоступний
-	Battery: {percent}%	Заряд батареї: {percent}%
+
+# Window full screen (HarmonyOS host)
+	Enter Full Screen	Повноекранний режим
+	Exit Full Screen	Вийти з повноекранного режиму

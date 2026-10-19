@@ -724,6 +724,10 @@
 	Soft light	Yumuşak açık
 	Soft Dark Theme	Yumuşak koyu tema
 	Soft Light Theme	Yumuşak açık tema
+	ArkUI Light Theme	ArkUI Açık Tema
+	ArkUI Dark Theme	ArkUI Koyu Tema
+	ArkUI Pro Light Theme	ArkUI Pro Açık Tema
+	ArkUI Pro Dark Theme	ArkUI Pro Koyu Tema
 	Adwaita Light Theme	Adwaita Işık Teması
 	Adwaita Dark Theme	Adwaita Karanlık Tema
 	Adwaita	Adwaita
@@ -3878,9 +3882,8 @@ cameraData	Lens	Lens
 	Redrawing	Yeniden çiziliyor
 
 # HarmonyOS native controls
-	Battery unavailable	Pil bilgisi kullanılamıyor
-	Battery: {percent}%	Pil: {percent}%
 	Block finger input	Parmak girişini engelle
+	Stylus hover preview	Kalemle üzerine gelme önizlemesi
 	Choose printer, copies and duplex in the system print dialog.	Sistem yazdırma iletişim kutusunda yazıcıyı, kopya sayısını ve çift taraflı yazdırmayı seçin.
 	Connected pen	Bağlı kalem
 	Double-tap pen body	Kalem gövdesine çift dokunma
@@ -3893,3 +3896,7 @@ cameraData	Lens	Lens
 	Current tool and Eraser	Geçerli araç ve Silgi
 	Previous tool	Önceki araç
 	Show or hide context menu	Bağlam menüsünü göster veya gizle
+
+# Window full screen (HarmonyOS host)
+	Enter Full Screen	Tam ekrana geç
+	Exit Full Screen	Tam ekrandan çık

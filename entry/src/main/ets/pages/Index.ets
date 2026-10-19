@@ -3,7 +3,7 @@ import { applicationDocumentUri } from '../documentDirectory';
 import { LocalDocuments } from '../LocalDocuments';
 import { savePickerOptions, SaveTargets } from '../savePicker';
 import { NativePrintAdapter } from '../NativePrintAdapter';
-import { abilityAccessCtrl, common } from '@kit.AbilityKit';
+import { common } from '@kit.AbilityKit';
 import { fileIo, fileUri, picker } from '@kit.CoreFileKit';
 import { i18n } from '@kit.LocalizationKit';
 import { BusinessError } from '@kit.BasicServicesKit';
@@ -16,8 +16,10 @@ import { StylusPacket } from '../stylus/StylusProtocol';
 import { NativeImeAdapter, NativeImeState } from '../input/NativeImeAdapter';
 import { NativeCursorAdapter } from '../input/NativeCursorAdapter';
 import { IMAGE_DROP_TYPES, NativeDropAdapter } from '../input/NativeDropAdapter';
+import { DropPreview, DropTargetFeedback, localDropPoint } from '../input/DropPreview';
 import { isFiniteHoverPoint, penHoverLeaveMessage, penHoverMoveMessage } from '../input/PenHoverPreview';
 import { moveWindow, toggleWindowMaximize } from '../WindowChrome';
+import { fullscreenAvailable, fullscreenOn, reportFullscreen, requestFullscreen } from '../Fullscreen';
 import { window } from '@kit.ArkUI';
 import { configureDisplayColor } from '../DisplayColor';
 import { SYSTEM_THEME_DARK, SYSTEM_THEME_LIGHT } from '../SystemTheme';
@@ -29,10 +31,13 @@ class NativeConfig {
   language: string;
   displayP3: boolean;
   systemTheme: string;
-  constructor(files: string, documents: string, scale: number, language: string, displayP3: boolean, systemTheme: string) {
+  // Whether the egui status-bar button / Window menu item for full screen are offered (not on 2in1).
+  fullscreen: boolean;
+  constructor(files: string, documents: string, scale: number, language: string, displayP3: boolean, systemTheme: string, fullscreen: boolean) {
     this.files = files; this.documents = documents; this.scale = scale; this.language = language;
     this.displayP3 = displayP3;
     this.systemTheme = systemTheme;
+    this.fullscreen = fullscreen;
   }
 }
 class NativeMessage { kind: string = ''; text: string = ''; }
@@ -61,6 +66,9 @@ struct Index {
   @StorageLink('photocraftChrome') @Watch('onChromeChanged') private chrome: string = LOADING_CHROME;
   @State private failure: string = '';
   @State private initialized: boolean = false;
+  @State private dropPreview: DropPreview = new DropPreview();
+  private editorOriginX: number = 0;
+  private editorOriginY: number = 0;
   @StorageLink('photocraftTitleRight') @Watch('onTitlebarChanged') private titleRight: number = 0;
   @StorageLink('photocraftTitleHeight') @Watch('onTitlebarChanged') private titleHeight: number = 0;
   private context: common.UIAbilityContext = this.getUIContext().getHostContext() as common.UIAbilityContext;
@@ -73,9 +81,6 @@ struct Index {
   private saveTargets: SaveTargets = new SaveTargets();
   private stylus: HarmonyStylusAdapter = new HarmonyStylusAdapter((packet: StylusPacket): void => {
     if (this.alive) { native.input(JSON.stringify(new NativeStylusInput(packet))); }
-  }, async (): Promise<boolean> => {
-    let result = await abilityAccessCtrl.createAtManager().requestPermissionsFromUser(this.context, ['ohos.permission.ACCESS_BLUETOOTH']);
-    return result.authResults.length > 0 && result.authResults[0] === 0;
   });
   private cursor: NativeCursorAdapter = new NativeCursorAdapter(this.getUIContext());
   private dropping: NativeDropAdapter = new NativeDropAdapter(this.context.cacheDir,
@@ -126,8 +131,10 @@ struct Index {
       if (systemTheme !== SYSTEM_THEME_DARK && systemTheme !== SYSTEM_THEME_LIGHT) {
         systemTheme = '';
       }
-      native.init(JSON.stringify(new NativeConfig(this.context.filesDir, documents, scale, i18n.System.getSystemLanguage(), displayP3, systemTheme)),
+      native.init(JSON.stringify(new NativeConfig(this.context.filesDir, documents, scale, i18n.System.getSystemLanguage(), displayP3, systemTheme, fullscreenAvailable())),
         (id: number, message: string, data: ArrayBuffer) => { this.receive(id, message, data); });
+      // A recreated page can start while the window is still full screen: bring Rust in line.
+      if (fullscreenOn()) { reportFullscreen(true); }
       this.initialized = true;
       this.onTitlebarChanged();
       this.failure = '';
@@ -143,6 +150,7 @@ struct Index {
     this.alive = false;
     this.printing.stop();
     this.dropping.stop();
+    this.dropPreview.hide();
     this.generation++;
     this.initialized = false;
     this.saveTargets.clear();
@@ -182,6 +190,9 @@ struct Index {
         return request.kind === 'window_move' ? moveWindow(win) : toggleWindowMaximize(win);
       }).catch((error: BusinessError) => { console.info(`Window action: ${error.code} ${error.message}`); });
     }
+    else if (request.kind === 'drop_target') {
+      this.dropPreview.apply(JSON.parse(request.text) as DropTargetFeedback, this.getUIContext().vp2px(1));
+    }
     else if (request.kind === 'cursor') { this.cursor.update(request.text); }
     else if (request.kind === 'ime') { this.ime.update(JSON.parse(request.text) as NativeImeState); }
     else if (request.kind === 'chrome') {
@@ -189,6 +200,13 @@ struct Index {
       if (color.length > 0 && color !== this.chrome) {
         AppStorage.setOrCreate('photocraftChrome', color);
       }
+    }
+    else if (request.kind === 'fullscreen') {
+      // egui asked to enter ('enter') or leave ('exit') full screen; the result is reported back.
+      let wantOn: boolean = request.text === 'enter';
+      window.getLastWindow(this.context).then((win: window.Window) => {
+        return requestFullscreen(win, wantOn, (): void => { applySystemBars(this.context, this.chrome); });
+      }).catch((error: BusinessError) => { console.info(`Fullscreen request: ${error.code} ${error.message}`); });
     }
     else if (request.kind === 'open') { this.openFile(id); }
     else if (request.kind === 'save_default') { this.selectSave(id, request.text, true); }
@@ -287,14 +305,38 @@ struct Index {
       native.reply(id, false, failure.message, new ArrayBuffer(0));
     }
   }
+  private previewDrop(event: DragEvent): void {
+    if (!this.alive || !this.initialized) { return; }
+    const point = localDropPoint(event.getWindowX(), event.getWindowY(), this.editorOriginX, this.editorOriginY);
+    if (point === null) { this.dropPreview.hide(); return; }
+    event.dragBehavior = DragBehavior.COPY;
+    event.setResult(DragResult.DROP_ENABLED);
+    const input = new NativeInput();
+    input.kind = 'drop_hover';
+    input.code = this.dropPreview.move();
+    input.x = this.getUIContext().vp2px(point.x);
+    input.y = this.getUIContext().vp2px(point.y);
+    native.input(JSON.stringify(input));
+  }
   private async dropImages(event: DragEvent): Promise<void> {
+    // Capture before async loading: DragEvent methods are valid only during the callback.
+    const point = localDropPoint(event.getWindowX(), event.getWindowY(), this.editorOriginX, this.editorOriginY);
+    this.dropPreview.hide();
+    if (point === null) { event.setResult(DragResult.DRAG_FAILED); return; }
+    const x = this.getUIContext().vp2px(point.x);
+    const y = this.getUIContext().vp2px(point.y);
     const generation = this.generation;
     const isCurrent = (): boolean => this.alive && this.initialized && generation === this.generation;
     try {
-      const images = await this.dropping.receive(event, isCurrent);
+      const images = await this.dropping.receive(event, isCurrent, (name: string, fd: number): void => {
+        if (isCurrent()) {
+          native.dropFile(name, fd, x, y);
+          console.info('PhotoCraft drop queued: ' + name);
+        }
+      });
       if (!isCurrent()) { return; }
       for (const image of images) {
-        native.open(image.name, image.bytes);
+        native.drop(image.name, image.bytes, x, y);
         console.info('PhotoCraft drop queued: ' + image.name);
       }
     } catch (error) {
@@ -325,14 +367,15 @@ struct Index {
         .width('100%').height('100%')
         .onLoad(() => { this.restoreEditorFocus(); })
         .onAreaChange((_oldArea: Area, area: Area): void => {
-          this.ime.setOrigin(this.getUIContext().vp2px(Number(area.globalPosition.x)),
-            this.getUIContext().vp2px(Number(area.globalPosition.y)));
+          this.editorOriginX = Number(area.globalPosition.x);
+          this.editorOriginY = Number(area.globalPosition.y);
+          this.ime.setOrigin(this.getUIContext().vp2px(this.editorOriginX),
+            this.getUIContext().vp2px(this.editorOriginY));
         })
         .allowDrop(IMAGE_DROP_TYPES)
-        .onDragMove((event: DragEvent): void => {
-          event.dragBehavior = DragBehavior.COPY;
-          event.setResult(DragResult.DROP_ENABLED);
-        })
+        .onDragEnter((event: DragEvent): void => { this.previewDrop(event); })
+        .onDragMove((event: DragEvent): void => { this.previewDrop(event); })
+        .onDragLeave((): void => { this.dropPreview.hide(); })
         // Required by startDataLoading: avoid the default prefetch consuming UDMF data.
         .onDrop((event: DragEvent): void => { this.dropImages(event); }, { disableDataPrefetch: true })
         .onHoverMove((event: HoverEvent): void => { this.sendPenHoverMove(event); })
@@ -341,6 +384,12 @@ struct Index {
         .onBlur(() => { this.cursor.reset(); let input = new NativeInput(); input.kind = 'blur'; native.input(JSON.stringify(input)); })
       } else {
         Text('正在准备文档目录…').fontSize(18).fontColor('#FFFFFF')
+      }
+      if (this.dropPreview.visible && this.dropPreview.mode === 'place') {
+        Row() {}.width(this.dropPreview.width).height(this.dropPreview.height)
+          .position({ x: this.dropPreview.left, y: this.dropPreview.top })
+          .backgroundColor('#142D64F5').border({ width: 2, color: '#2D64F5' })
+          .hitTestBehavior(HitTestMode.None)
       }
       if (this.failure.length > 0) {
         Column() {

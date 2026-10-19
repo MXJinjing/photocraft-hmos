@@ -764,6 +764,10 @@
 	Soft light	Jemný světlý
 	Soft Dark Theme	Jemné tmavé téma
 	Soft Light Theme	Jemné světlé téma
+	ArkUI Light Theme	Světlý motiv ArkUI
+	ArkUI Dark Theme	Tmavý motiv ArkUI
+	ArkUI Pro Light Theme	Světlý motiv ArkUI Pro
+	ArkUI Pro Dark Theme	Tmavý motiv ArkUI Pro
 	Next Theme	Další motiv
 	Actions	Akce
 	Brush Settings	Nastavení štětce
@@ -3756,6 +3760,7 @@ navigator	Zoom	Zvětšení
 # HarmonyOS host additions retained during upstream sync
 	Stylus	Stylus
 	Block finger input	Blokovat zadávání prstem
+	Stylus hover preview	Náhled při najetí stylusu
 	Double-tap pen body	Dvojité klepnutí na tělo pera
 	Current tool and Eraser	Aktuální nástroj a guma
 	Previous tool	Předchozí nástroj
@@ -3767,5 +3772,7 @@ navigator	Zoom	Zvětšení
 	Right sidebar	Pravý postranní panel
 	Connected pen	Připojené pero
 	No pen connected	Žádné pero není připojeno
-	Battery unavailable	Stav baterie není dostupný
-	Battery: {percent}%	Baterie: {percent}%
+
+# Window full screen (HarmonyOS host)
+	Enter Full Screen	Přejít na celou obrazovku
+	Exit Full Screen	Ukončit celou obrazovku

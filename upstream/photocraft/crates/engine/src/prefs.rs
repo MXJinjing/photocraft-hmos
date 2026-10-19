@@ -55,10 +55,10 @@ choice!(TypeUnit { Points = "points", Pixels = "pixels", Millimeters = "mm" } de
 choice!(PointSize { PostScript = "postScript", Traditional = "traditional" } default PostScript);
 choice!(Interpolation { BicubicAutomatic = "bicubicAutomatic", Nearest = "nearestNeighbor", Bilinear = "bilinear", Bicubic = "bicubic", BicubicSmoother = "bicubicSmoother", BicubicSharper = "bicubicSharper", PreserveDetails = "preserveDetails" } default BicubicAutomatic);
 choice!(ColorPicker { Adobe = "adobe", System = "system" } default Adobe);
-choice!(Theme { Pro = "pro", ProMedium = "proMedium", ProLightGray = "proLightGray", ProLight = "proLight", Studio = "studio", StudioLight = "studioLight", Classic = "classic", SolarizedDark = "solarizedDark", Adwaita = "adwaita", AdwaitaDark = "adwaitaDark", BreezeLight = "breezeLight", BreezeDark = "breezeDark", SoftDark = "softDark", SoftLight = "softLight" } default ProMedium);
+choice!(Theme { Pro = "pro", ProMedium = "proMedium", ProLightGray = "proLightGray", ProLight = "proLight", Studio = "studio", StudioLight = "studioLight", Classic = "classic", SolarizedDark = "solarizedDark", Adwaita = "adwaita", AdwaitaDark = "adwaitaDark", BreezeLight = "breezeLight", BreezeDark = "breezeDark", SoftDark = "softDark", SoftLight = "softLight", ArkuiLight = "arkuiLight", ArkuiDark = "arkuiDark", ArkuiProLight = "arkuiProLight", ArkuiProDark = "arkuiProDark" } default ProMedium);
 choice!(AppearanceMode { Auto = "auto", Dark = "dark", Light = "light" } default Dark);
-choice!(DarkTheme { Pro = "pro", ProMedium = "proMedium", Studio = "studio", SolarizedDark = "solarizedDark", AdwaitaDark = "adwaitaDark", BreezeDark = "breezeDark", SoftDark = "softDark" } default ProMedium);
-choice!(LightTheme { ProLight = "proLight", ProLightGray = "proLightGray", StudioLight = "studioLight", Classic = "classic", Adwaita = "adwaita", BreezeLight = "breezeLight", SoftLight = "softLight" } default ProLight);
+choice!(DarkTheme { Pro = "pro", ProMedium = "proMedium", Studio = "studio", SolarizedDark = "solarizedDark", AdwaitaDark = "adwaitaDark", BreezeDark = "breezeDark", SoftDark = "softDark", ArkuiDark = "arkuiDark", ArkuiProDark = "arkuiProDark" } default ProMedium);
+choice!(LightTheme { ProLight = "proLight", ProLightGray = "proLightGray", StudioLight = "studioLight", Classic = "classic", Adwaita = "adwaita", BreezeLight = "breezeLight", SoftLight = "softLight", ArkuiLight = "arkuiLight", ArkuiProLight = "arkuiProLight" } default ProLight);
 choice!(CanvasColor { Default = "default", Black = "black", DarkGray = "darkGray", MediumGray = "mediumGray", LightGray = "lightGray", Custom = "custom" } default Default);
 choice!(CanvasBorder { DropShadow = "dropShadow", Line = "line", None = "none" } default DropShadow);
 choice!(UiScale { Auto = "auto", P75 = "75", P80 = "80", P85 = "85", P90 = "90", P95 = "95", P100 = "100", P125 = "125", P150 = "150", P175 = "175", P200 = "200", P250 = "250", P300 = "300" } default Auto);
@@ -381,6 +381,11 @@ pub struct Tools {
     pub use_tablet_pressure: bool,
     /// Fingers navigate the canvas while the pen operates the current tool.
     pub block_finger_input: bool,
+    /// Whether the user or first-connection setup has chosen the finger-input policy.
+    /// Kept out of the generic preferences rows; the stylus controls own it.
+    pub block_finger_input_configured: bool,
+    /// Show the tool/cursor preview while a pen is hovering above the surface.
+    pub stylus_hover_preview: bool,
     pub stylus_double_tap: StylusDoubleTap,
     pub stylus_long_press: StylusLongPress,
     /// Pen pressure response: `[input, output]` control points in 0..1 that the pen's pressure
@@ -404,6 +409,8 @@ impl Default for Tools {
             right_click_with_painting_tools: RightClickPaint::BrushPicker,
             use_tablet_pressure: true,
             block_finger_input: false,
+            block_finger_input_configured: false,
+            stylus_hover_preview: false,
             stylus_double_tap: StylusDoubleTap::Eraser,
             stylus_long_press: StylusLongPress::ContextMenu,
             pressure_curve: vec![[0.0, 0.0], [1.0, 1.0]],
@@ -1569,6 +1576,13 @@ impl Session {
     /// defaults and unknown keys are ignored, so files from older and newer versions load.
     pub fn load_prefs_json(&mut self, s: &str) -> std::result::Result<(), String> {
         let mut v: Value = serde_json::from_str(s).map_err(|e| format!("preferences: {e}"))?;
+        // Older settings did not record whether finger blocking was explicitly chosen.
+        // Preserve a saved policy rather than overriding a possible user opt-out.
+        if let Some(tools) = v.get_mut("tools").and_then(Value::as_object_mut)
+            && tools.get("blockFingerInput").is_some_and(Value::is_boolean)
+        {
+            tools.entry("blockFingerInputConfigured").or_insert(json!(true));
+        }
         // Saved preferences before appearance modes had one concrete theme. Preserve its
         // appearance instead of silently switching established users to Auto.
         if let Some(interface) = v.get_mut("interface").and_then(Value::as_object_mut)
@@ -1576,10 +1590,10 @@ impl Session {
             && let Some(theme) = interface.get("theme").and_then(Value::as_str).and_then(Theme::parse)
         {
             let (mode, slot) = match theme {
-                Theme::Pro | Theme::ProMedium | Theme::Studio | Theme::SolarizedDark | Theme::AdwaitaDark | Theme::BreezeDark | Theme::SoftDark => {
+                Theme::Pro | Theme::ProMedium | Theme::Studio | Theme::SolarizedDark | Theme::AdwaitaDark | Theme::BreezeDark | Theme::SoftDark | Theme::ArkuiDark | Theme::ArkuiProDark => {
                     ("dark", "darkTheme")
                 }
-                Theme::StudioLight | Theme::ProLightGray | Theme::ProLight | Theme::Classic | Theme::Adwaita | Theme::BreezeLight | Theme::SoftLight => {
+                Theme::StudioLight | Theme::ProLightGray | Theme::ProLight | Theme::Classic | Theme::Adwaita | Theme::BreezeLight | Theme::SoftLight | Theme::ArkuiLight | Theme::ArkuiProLight => {
                     ("light", "lightTheme")
                 }
             };
@@ -1712,6 +1726,22 @@ impl Session {
                 Theme::SoftLight => {
                     next.interface.light_theme = LightTheme::SoftLight;
                     next.interface.appearance_mode = AppearanceMode::Light;
+                }
+                Theme::ArkuiLight => {
+                    next.interface.light_theme = LightTheme::ArkuiLight;
+                    next.interface.appearance_mode = AppearanceMode::Light;
+                }
+                Theme::ArkuiDark => {
+                    next.interface.dark_theme = DarkTheme::ArkuiDark;
+                    next.interface.appearance_mode = AppearanceMode::Dark;
+                }
+                Theme::ArkuiProLight => {
+                    next.interface.light_theme = LightTheme::ArkuiProLight;
+                    next.interface.appearance_mode = AppearanceMode::Light;
+                }
+                Theme::ArkuiProDark => {
+                    next.interface.dark_theme = DarkTheme::ArkuiProDark;
+                    next.interface.appearance_mode = AppearanceMode::Dark;
                 }
             }
         }

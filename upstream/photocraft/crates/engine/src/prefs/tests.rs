@@ -495,6 +495,8 @@ fn stylus_tools_preferences_persist_validate_and_default_for_old_settings() {
         "prefs.set",
         json!({"values": {
             "tools.blockFingerInput": true,
+            "tools.blockFingerInputConfigured": true,
+            "tools.stylusHoverPreview": true,
             "tools.stylusDoubleTap": "previous",
             "tools.stylusLongPress": "off"
         }}),
@@ -503,6 +505,8 @@ fn stylus_tools_preferences_persist_validate_and_default_for_old_settings() {
     let mut restored = Session::new();
     restored.load_prefs_json(&s.prefs_to_json()).unwrap();
     assert!(restored.prefs().tools.block_finger_input);
+    assert!(restored.prefs().tools.block_finger_input_configured);
+    assert!(restored.prefs().tools.stylus_hover_preview);
     assert_eq!(restored.prefs().tools.stylus_double_tap, StylusDoubleTap::Previous);
     assert_eq!(restored.prefs().tools.stylus_long_press, StylusLongPress::Off);
     let before = s.prefs().clone();
@@ -514,8 +518,15 @@ fn stylus_tools_preferences_persist_validate_and_default_for_old_settings() {
     }
     restored.load_prefs_json(r#"{"tools":{"useTabletPressure":false}}"#).unwrap();
     assert!(!restored.prefs().tools.block_finger_input);
+    assert!(!restored.prefs().tools.block_finger_input_configured);
+    assert!(!restored.prefs().tools.stylus_hover_preview);
     assert_eq!(restored.prefs().tools.stylus_double_tap, StylusDoubleTap::Eraser);
     assert_eq!(restored.prefs().tools.stylus_long_press, StylusLongPress::ContextMenu);
+    for blocked in [false, true] {
+        restored.load_prefs_json(&json!({"tools": {"blockFingerInput": blocked}}).to_string()).unwrap();
+        assert_eq!(restored.prefs().tools.block_finger_input, blocked);
+        assert!(restored.prefs().tools.block_finger_input_configured, "legacy saved choices survive the first connection");
+    }
 }
 
 /// #2022: notices auto-hide after a user-set delay by default; both settings round-trip.
@@ -549,10 +560,20 @@ fn notification_autohide_preferences() {
 }
 
 #[test]
-fn linux_only_preferences_show_only_on_linux() {
-    assert_eq!(is_hidden("performance.linuxDisplayServer"), !cfg!(target_os = "linux"));
+fn linux_only_preferences_show_only_on_desktop_linux() {
+    // OHOS triples still report target_os = "linux"; gate on target_env = "ohos".
+    assert_eq!(
+        is_desktop_linux(),
+        cfg!(all(target_os = "linux", not(target_env = "ohos")))
+    );
+    assert_eq!(is_hidden("performance.linuxDisplayServer"), !is_desktop_linux());
+    // Injected flag: HarmonyOS / non-desktop-Linux hosts keep the preference out of the dialog.
+    assert!(is_hidden_for("performance.linuxDisplayServer", false));
+    assert!(!is_hidden_for("performance.linuxDisplayServer", true));
     assert!(!is_hidden("performance.gpuBackend"));
+    assert!(!is_hidden_for("performance.gpuBackend", false));
     assert!(LINUX_ONLY.iter().all(|p| choices(p).is_some()), "every Linux-only preference is a real one");
+    assert_eq!("performance.linuxDisplayServer", LINUX_ONLY[0]);
 }
 
 #[test]

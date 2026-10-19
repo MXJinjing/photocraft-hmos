@@ -91,6 +91,10 @@ pub const UI_COMMANDS: &[(&str, &str, &[&str], Option<&str>)] = &[
     ("window.theme.breezeDark", "Breeze Dark Theme", &["Window", "Theme"], None),
     ("window.theme.softLight", "Soft Light Theme", &["Window", "Theme"], None),
     ("window.theme.softDark", "Soft Dark Theme", &["Window", "Theme"], None),
+    ("window.theme.arkuiLight", "ArkUI Light Theme", &["Window", "Theme"], None),
+    ("window.theme.arkuiDark", "ArkUI Dark Theme", &["Window", "Theme"], None),
+    ("window.theme.arkuiProLight", "ArkUI Pro Light Theme", &["Window", "Theme"], None),
+    ("window.theme.arkuiProDark", "ArkUI Pro Dark Theme", &["Window", "Theme"], None),
     ("window.theme.system", "Sync with system", &["Window", "Theme"], None),
     ("edit.search", "Search…", &["Edit"], Some("Cmd+F")),
     #[cfg(not(feature = "harmonyos-ui"))]
@@ -375,6 +379,13 @@ pub(crate) fn invoke_unguarded(app: &mut PhotocraftApp, ctx: &egui::Context, id:
             app.ui.windows.push(crate::state::DocWindow { id: wid, document: doc, view, open: true, position: None });
             Ok(json!({"window": wid}))
         }
+        crate::window_fullscreen::COMMAND => {
+            if !crate::window_fullscreen::available(app) {
+                return Err("full screen is not available on this host".into());
+            }
+            crate::window_fullscreen::toggle(app);
+            Ok(Value::Null)
+        }
         "window.theme.toggle" => {
             crate::prefs_ui::cycle_appearance(app, ctx);
             Ok(Value::Null)
@@ -397,7 +408,11 @@ pub(crate) fn invoke_unguarded(app: &mut PhotocraftApp, ctx: &egui::Context, id:
         | "window.theme.breezeLight"
         | "window.theme.breezeDark"
         | "window.theme.softLight"
-        | "window.theme.softDark" => {
+        | "window.theme.softDark"
+        | "window.theme.arkuiLight"
+        | "window.theme.arkuiDark"
+        | "window.theme.arkuiProLight"
+        | "window.theme.arkuiProDark" => {
             let k = crate::theme::ThemeKind::from_name(&id["window.theme.".len()..]).unwrap_or_default();
             app.set_theme(ctx, k);
             Ok(Value::Null)
@@ -755,6 +770,7 @@ pub fn is_enabled(app: &PhotocraftApp, id: &str) -> bool {
         i if i.starts_with(DOCUMENT_ITEM) => true,
         i if crate::links::url_for(i).is_some() => true,
         i if i.starts_with("window.theme.") => true,
+        crate::window_fullscreen::COMMAND => crate::window_fullscreen::available(app),
         "file.save" | "file.saveAs" | "file.export.exportAs" | "file.export.quickExportAsPng" => {
             app.session.active().is_some() && app.services.export.is_some()
         }
@@ -1086,6 +1102,24 @@ pub fn menu_items(app: &PhotocraftApp) -> Vec<MenuItem> {
         items.insert(
             at,
             MenuItem { id: "---".into(), label: "---".into(), path: vec!["Help".into()], shortcut: None, enabled: false, checked: None, color: None },
+        );
+    }
+    // Window › Enter / Exit Full Screen, right below the Theme submenu (HarmonyOS host service).
+    if crate::window_fullscreen::available(app)
+        && let Some(theme_end) = items.iter().rposition(|i| i.path.as_slice() == ["Window", "Theme"])
+    {
+        let on = crate::window_fullscreen::active(app);
+        items.insert(
+            theme_end + 1,
+            MenuItem {
+                id: crate::window_fullscreen::COMMAND.into(),
+                label: crate::window_fullscreen::label(on).into(),
+                path: vec!["Window".into()],
+                shortcut: None,
+                enabled: true,
+                checked: None,
+                color: None,
+            },
         );
     }
     // Window: the open documents in tab order, after a separator, the active one checked.

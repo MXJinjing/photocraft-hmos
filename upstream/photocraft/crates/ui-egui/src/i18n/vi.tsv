@@ -2397,6 +2397,10 @@ shape	Appearance	Diện mạo
 	Soft light	Dịu sáng
 	Soft Dark Theme	Giao diện dịu tối
 	Soft Light Theme	Giao diện dịu sáng
+	ArkUI Light Theme	Chủ đề ArkUI sáng
+	ArkUI Dark Theme	Chủ đề ArkUI tối
+	ArkUI Pro Light Theme	Chủ đề ArkUI Pro sáng
+	ArkUI Pro Dark Theme	Chủ đề ArkUI Pro tối
 	Caps	Đầu nét
 	Center Columns	Căn giữa các cột
 	Change Panel Group	Đổi nhóm bảng
@@ -3633,9 +3637,8 @@ curves	Smooth	Làm mượt
 	ICO is limited to 256 × 256 pixels	ICO giới hạn ở 256 × 256 pixel
 
 # HarmonyOS native controls
-	Battery unavailable	Không có thông tin pin
-	Battery: {percent}%	Pin: {percent}%
 	Block finger input	Chặn thao tác bằng ngón tay
+	Stylus hover preview	Xem trước khi bút di chuột
 	Choose printer, copies and duplex in the system print dialog.	Chọn máy in, số bản sao và in hai mặt trong hộp thoại in của hệ thống.
 	Connected pen	Bút đã kết nối
 	Double-tap pen body	Chạm hai lần vào thân bút
@@ -3648,3 +3651,7 @@ curves	Smooth	Làm mượt
 	Current tool and Eraser	Công cụ hiện tại và Tẩy
 	Previous tool	Công cụ trước
 	Show or hide context menu	Hiện hoặc ẩn trình đơn ngữ cảnh
+
+# Window full screen (HarmonyOS host)
+	Enter Full Screen	Vào chế độ toàn màn hình
+	Exit Full Screen	Thoát chế độ toàn màn hình

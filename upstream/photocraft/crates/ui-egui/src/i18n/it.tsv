@@ -755,6 +755,10 @@
 	Soft light	Morbido chiaro
 	Soft Dark Theme	Tema morbido scuro
 	Soft Light Theme	Tema morbido chiaro
+	ArkUI Light Theme	Tema ArkUI chiaro
+	ArkUI Dark Theme	Tema ArkUI scuro
+	ArkUI Pro Light Theme	Tema ArkUI Pro chiaro
+	ArkUI Pro Dark Theme	Tema ArkUI Pro scuro
 	Next Theme	Tema successivo
 	Actions	Azioni
 	Brush Settings	Impostazioni pennello
@@ -4111,6 +4115,7 @@ navigator	Zoom	Zoom
 # HarmonyOS host additions retained during upstream sync
 	Stylus	Stilo
 	Block finger input	Blocca input dito
+	Stylus hover preview	Anteprima stilo al passaggio
 	Double-tap pen body	Doppio tocco sul corpo della penna
 	Current tool and Eraser	Strumento attuale e gomma
 	Previous tool	Strumento precedente
@@ -4122,5 +4127,7 @@ navigator	Zoom	Zoom
 	Right sidebar	Barra laterale destra
 	Connected pen	Penna connessa
 	No pen connected	Nessuna penna connessa
-	Battery unavailable	Batteria non disponibile
-	Battery: {percent}%	Batteria: {percent}%
+
+# Window full screen (HarmonyOS host)
+	Enter Full Screen	Attiva schermo intero
+	Exit Full Screen	Esci da schermo intero
