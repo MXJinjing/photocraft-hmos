@@ -29,8 +29,7 @@ use std::collections::HashMap;
 use std::num::NonZeroU64;
 use std::sync::atomic::Ordering;
 
-use eframe::egui_wgpu::{self, CallbackResources, CallbackTrait, RenderState, ScreenDescriptor};
-use eframe::wgpu;
+use egui_wgpu::{self, CallbackResources, CallbackTrait, RenderState, ScreenDescriptor};
 
 pub use photocraft_gpu::{DeviceHealth, Fault};
 
