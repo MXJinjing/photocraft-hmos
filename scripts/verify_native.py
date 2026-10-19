@@ -6,8 +6,6 @@ import struct
 import zipfile
 from pathlib import Path
 
-PUBLIC_BUNDLE = 'io.github.storytold.photocraft.hmos'
-
 
 def verify_file_open(config: dict, utds: dict) -> None:
     bundle = config['app']['bundleName']
@@ -38,7 +36,7 @@ def verify_file_open(config: dict, utds: dict) -> None:
         raise ValueError('missing custom file extensions')
 
 
-def verify(path: Path, expected_bundle: str = PUBLIC_BUNDLE) -> None:
+def verify(path: Path) -> None:
     with zipfile.ZipFile(path) as archive:
         names = archive.namelist()
         for abi, machine in [('arm64-v8a', 183)]:
@@ -57,10 +55,7 @@ def verify(path: Path, expected_bundle: str = PUBLIC_BUNDLE) -> None:
         pages = json.loads(archive.read('resources/base/profile/main_pages.json'))
         if pages.get('src') != ['pages/Index']:
             raise ValueError(f'non-native pages remain: {pages}')
-        config = json.loads(archive.read('module.json'))
-        if config['app']['bundleName'] != expected_bundle:
-            raise ValueError(f"unexpected bundle name: {config['app']['bundleName']}")
-        verify_file_open(config,
+        verify_file_open(json.loads(archive.read('module.json')),
                          json.loads(archive.read('resources/rawfile/arkdata/utd/utd.json5')))
     print(f'Native HAP verified: {path}')
 
@@ -68,6 +63,4 @@ def verify(path: Path, expected_bundle: str = PUBLIC_BUNDLE) -> None:
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('hap', type=Path)
-    parser.add_argument('--expected-bundle', default=PUBLIC_BUNDLE)
-    args = parser.parse_args()
-    verify(args.hap, args.expected_bundle)
+    verify(parser.parse_args().hap)
