@@ -2827,11 +2827,7 @@ fn layer_row(
     let t = Tokens::get(ctx);
     // Photoshop's default (medium) thumbnails: 32 pt rows.
     let row_h = if t.pro { 32.0 } else { 46.0 };
-    let source = app.stylus.feed.source();
-    let item = egui::Id::new(("layer-row", l.id.0));
-    let sense = crate::list_drag::row_sense(ctx, source, item);
-    let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), row_h), sense);
-    let resp = crate::list_drag::after_row(ctx, source, item, &resp);
+    let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), row_h), Sense::click_and_drag());
     // A drag from a mask's thumbnail drags that mask, not the layer (#3113, #3119).
     let mask_drag = starts_mask_drag(ctx, l, &resp);
     if let Some(kind) = mask_drag {
@@ -2841,7 +2837,7 @@ fn layer_row(
     layer_drag_and_drop(app, ctx, ui, l, rect, &resp, actions);
     fx_drop(ctx, ui, l, rect, actions);
     crate::smart_ui::drop_on_row(ctx, ui, l, rect, actions);
-    if crate::list_drag::may_begin_drag(ctx, source, item, &resp) && !mask_drag {
+    if resp.drag_started() && !mask_drag {
         crate::layer_transfer::begin_from_panel(app, ctx, l.id);
     }
     // Rows are painted: name them for screen readers and UI tests.
@@ -2884,8 +2880,7 @@ fn layer_row(
     let eye = Rect::from_min_size(pos2(x, rect.center().y - 11.0), vec2(22.0, 22.0));
     // The eye takes drags too (so a drag starting on it never reorders the row): dragging down
     // the eyes gives every row swept over the visibility the first eye toggled to.
-    let eye_sense = if crate::list_drag::prefers_scroll(app.stylus.feed.source()) { Sense::click() } else { Sense::click_and_drag() };
-    let eye_resp = ui.interact(eye, ui.id().with(("eye", l.id.0)), eye_sense);
+    let eye_resp = ui.interact(eye, ui.id().with(("eye", l.id.0)), Sense::click_and_drag());
     // A hidden layer's eye box is left empty (still clickable).
     if l.visible {
         // Centre the drawing in the column while preserving the visibility hit area.
@@ -4017,9 +4012,7 @@ fn layer_drag_and_drop(
     let key = egui::Id::new("layer-drag");
     // A drag from the mask thumbnail (`starts_mask_drag`) moves the mask, not the layer.
     let mask_drag = ctx.data(|d| d.get_temp::<MaskDrag>(mask_drag_key())).is_some_and(|(id, _)| id == l.id.0);
-    let source = app.stylus.feed.source();
-    let item = egui::Id::new(("layer-row", l.id.0));
-    if crate::list_drag::may_begin_drag(ctx, source, item, resp) && !mask_drag {
+    if resp.drag_started() && !mask_drag {
         ctx.data_mut(|d| d.insert_temp(key, l.id.0));
     }
     let Some(dragged) = ctx.data(|d| d.get_temp::<u64>(key)) else { return };
