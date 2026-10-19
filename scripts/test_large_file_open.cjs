@@ -7,6 +7,8 @@ const handles = new Map();
 const calls = [];
 let nextFd = 10, failNative = false, changeGeneration = false;
 let selected = ['file:///Download/large.bmp'];
+const choice = { source: 'files' };
+let gallerySelected = ['file:///Download/gallery.png'];
 let host;
 const io = {
   OpenMode: { READ_ONLY: 0 },
@@ -34,6 +36,11 @@ class FileUri {
 const picker = {
   DocumentSelectOptions: class {},
   DocumentViewPicker: class { async select() { return selected; } }
+};
+const photoAccessHelper = {
+  PhotoSelectOptions: class {},
+  PhotoViewMIMETypes: { IMAGE_TYPE: 'image' },
+  PhotoViewPicker: class { async select() { return { photoUris: gallerySelected }; } }
 };
 const native = {
   openFile(name, fd) {
@@ -64,10 +71,12 @@ const drain = page.slice(page.indexOf('  private drainOpens()'), page.indexOf(' 
 const open = page.slice(page.indexOf('  private async openFile('), page.indexOf('  private async selectSave('));
 const { Harness } = compile(`export class Harness {
   alive = true; generation = 1; context = {}; failure = ''; focused = 0;
+  ime = { stop() {} }; cursor = { reset() {} };
   documents = { owns: (path: string) => path.startsWith('/Download/owned/') };
   restoreEditorFocus() { this.focused++; }
   ${drain} ${open}
-}`, { fileIo: io, fileUri: { FileUri }, picker, native, takeOpens: inbox.takeOpens });
+  chooseOpenSource() { return Promise.resolve(choice.source); }
+}`, { fileIo: io, fileUri: { FileUri }, picker, photoAccessHelper, choice, native, takeOpens: inbox.takeOpens });
 
 (async () => {
   host = new Harness();
@@ -110,6 +119,13 @@ const { Harness } = compile(`export class Harness {
   inbox.acceptOpenWant({ uri: 'file:///Download/failure.bmp' });
   assert.equal(host.failure, 'native failure');
   assert.equal(handles.size, 0);
-  assert.equal(host.focused, 5);
+  failNative = false;
+  choice.source = 'gallery';
+  await host.openFile(47);
+  assert.deepEqual(calls.at(-1).slice(0, 3), ['replyFile', 47, 'gallery.png']);
+  choice.source = '';
+  await host.openFile(48);
+  assert.deepEqual(calls.at(-1), ['reply', 48, false, 'cancelled']);
+  assert.equal(host.focused, 7);
   console.log('PASS: large file descriptor handoff, cold/warm Wants, source names, cancellation, errors and handle cleanup.');
 })().catch(error => { console.error(error); process.exitCode = 1; });
