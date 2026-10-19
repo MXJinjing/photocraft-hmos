@@ -10,6 +10,8 @@ workspace = true
 [features]
 # Real-file corpus tests (opt-in; `cargo xtask test-corpus`). Fail when the corpus is missing.
 corpus = []
+# Forwarded from ui-egui: hide ArtCraft Discord / website help entries on HarmonyOS.
+harmonyos-ui = []
 
 [dependencies]
 photocraft-geom = { workspace = true }
@@ -42,6 +44,10 @@ roxmltree = "0.20"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 tempfile = "3"
+
+# Printing on Unix: an IPP client for CUPS (pure Rust); the web build cannot print.
+[target.'cfg(all(not(target_arch = "wasm32"), not(target_os = "windows")))'.dependencies]
+photocraft-ipp = { workspace = true }
 
 [dev-dependencies]
 photocraft-affinity = { workspace = true, features = ["synth"] }

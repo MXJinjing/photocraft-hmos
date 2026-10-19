@@ -332,6 +332,28 @@ fn set_opacity_uses_pen_pressure_off_clears_transfer_control() {
 }
 
 #[test]
+fn each_dynamic_responds_through_its_own_curve() {
+    // A hard size curve (half pressure gives a fifth of the size range) and a linear opacity.
+    let curve = crate::ResponseCurve::new(&[[0.0, 0.0], [0.5, 0.2], [1.0, 1.0]]);
+    let b = BrushSettings {
+        size: 40.0,
+        shape_dynamics: ShapeDynamics { enabled: true, size: Dynamic { curve, ..Dynamic::controlled(Control::PenPressure) }, ..Default::default() },
+        transfer: Transfer { enabled: true, opacity: Dynamic::controlled(Control::PenPressure), ..Default::default() },
+        ..brush()
+    };
+    let d = dabs_of(&b, &[StrokePoint::new(0.0, 0.0, 0.5), StrokePoint::new(1.0, 0.0, 0.5)]);
+    assert!((d[0].radius - 4.0).abs() < 1e-3, "20 % of a 40 px diameter → r 4, got {}", d[0].radius);
+    assert!((d[0].opacity - 0.5).abs() < 1e-3, "opacity keeps its linear response: {}", d[0].opacity);
+    // The curve is part of the brush's JSON.
+    let json = serde_json::to_value(&b).unwrap();
+    let stored: Vec<[f32; 2]> = serde_json::from_value(json["shapeDynamics"]["size"]["curve"].clone()).unwrap();
+    assert_eq!(stored, vec![[0.0, 0.0], [0.5, 0.2], [1.0, 1.0]]);
+    assert_eq!(json["transfer"]["opacity"]["curve"], serde_json::json!([[0.0, 0.0], [1.0, 1.0]]));
+    let back: BrushSettings = serde_json::from_value(json).unwrap();
+    assert_eq!(back.shape_dynamics.size.curve, curve);
+}
+
+#[test]
 fn fade_ramps_over_steps() {
     let b = BrushSettings {
         size: 20.0,

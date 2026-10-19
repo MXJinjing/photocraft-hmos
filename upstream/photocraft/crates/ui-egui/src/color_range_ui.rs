@@ -649,9 +649,6 @@ pub fn pick_top(app: &mut PhotocraftApp, at: [f64; 2], mods: egui::Modifiers) ->
     if !at[0].is_finite() || !at[1].is_finite() || at[0] < 0.0 || at[1] < 0.0 || at[0] >= f64::from(doc.size.width) || at[1] >= f64::from(doc.size.height) {
         return false;
     }
-    if doc.selection.as_ref().is_some_and(|selection| selection.sample_channel(at[0].floor() as i32, at[1].floor() as i32, 0) <= 0.0) {
-        return false;
-    }
     pick(app, &mut f, at, mods);
     match app.ui.dialogs.last_mut() {
         Some(d) => {
@@ -708,9 +705,6 @@ pub fn pick(app: &PhotocraftApp, f: &mut Map<String, Value>, at: [f64; 2], mods:
     let (w, h) = (f64::from(st.doc.size.width.max(1)), f64::from(st.doc.size.height.max(1)));
     let [x, y] = at;
     let at = [x.floor().clamp(0.0, w - 1.0), y.floor().clamp(0.0, h - 1.0)];
-    if st.doc.selection.as_ref().is_some_and(|selection| selection.sample_channel(at[0] as i32, at[1] as i32, 0) <= 0.0) {
-        return;
-    }
     let tool = if mods.shift {
         "add"
     } else if mods.alt {
@@ -831,10 +825,12 @@ mod tests {
             assert_eq!(mask[5 * 40 + 25], 0.0, "even inverted previews stay within the selection");
         }
 
+        // As in Photoshop, the eyedropper samples anywhere; only the result is scoped (#5244).
         open(&mut app);
-        assert!(!pick_top(&mut app, [25.0, 5.0], egui::Modifiers::NONE));
-        let fields = &app.ui.dialogs.last().unwrap().fields;
-        assert!(points(fields, "points").is_empty(), "a click outside the selection is ignored");
+        assert!(pick_top(&mut app, [25.0, 5.0], egui::Modifiers::NONE));
+        assert_eq!(points(&app.ui.dialogs.last().unwrap().fields, "points"), vec![[25.0, 5.0]], "a colour outside the selection is sampled");
+        let mask = proxy_mask(&app, &doc, 1, &json!({"select": "sampledColors", "points": [[25, 5]], "fuzziness": 0})).unwrap();
+        assert_eq!(mask[5 * 40 + 25], 0.0, "but the preview stays within the selection");
         assert!(pick_top(&mut app, [5.0, 5.0], egui::Modifiers::NONE));
         assert_eq!(points(&app.ui.dialogs.last().unwrap().fields, "points"), vec![[5.0, 5.0]]);
     }

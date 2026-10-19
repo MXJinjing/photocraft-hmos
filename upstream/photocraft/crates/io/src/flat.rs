@@ -16,13 +16,15 @@ const BAND_BYTES: usize = 32 << 20;
 /// Decodes a flat image into a single-layer document; a TIFF with Photoshop layer data opens
 /// layered (see [`crate::tiff_layers`]).
 pub fn import_flat(name: &str, bytes: &[u8]) -> Result<ImportResult, IoError> {
-    if codecs::detect(bytes) == Some(Format::Tiff) {
+    // Detected once; every step below branches on it.
+    let format = codecs::detect(bytes);
+    if format == Some(Format::Tiff) {
         return import_tiff_page(name, bytes, None);
     }
-    let img = codecs::decode(bytes)?;
+    let img = codecs::decode_as(format.ok_or(codecs::CodecError::UnknownFormat)?, bytes)?;
     // A palette BMP or PNG opens in Indexed Color mode with its colour table, as in Photoshop
     // (#3802, #4804).
-    let palette = match codecs::detect(bytes) {
+    let palette = match format {
         Some(Format::Bmp) => codecs::bmp_palette(bytes).ok().flatten().map(|c| (c, None)),
         Some(Format::Png) => codecs::png_palette(bytes).ok().flatten().map(|p| (p.colors, p.transparent)),
         _ => None,
@@ -34,15 +36,15 @@ pub fn import_flat(name: &str, bytes: &[u8]) -> Result<ImportResult, IoError> {
         r.document.mode = ColorMode::Indexed;
         r.document.color_table = Some(photocraft_doc::ColorTable { colors, transparent });
     }
-    r.document.file_encoding = file_encoding(bytes);
-    if codecs::detect(bytes) == Some(Format::Tga) && img.layout() == ChannelLayout::Rgba {
+    r.document.file_encoding = file_encoding_as(format, bytes);
+    if format == Some(Format::Tga) && img.layout() == ChannelLayout::Rgba {
         tga_alpha_to_channel(&mut r.document)?;
     }
     // OpenEXR and Radiance HDR hold linear, scene-referred values (Rec. 709 primaries unless
     // stated otherwise, and an OpenEXR `Y` is linear luminance): tag them linear sRGB or linear
     // gray so they display and convert correctly.
     let d = &mut r.document;
-    if d.icc_profile.is_none() && matches!(codecs::detect(bytes), Some(Format::OpenExr | Format::Hdr)) {
+    if d.icc_profile.is_none() && matches!(format, Some(Format::OpenExr | Format::Hdr)) {
         d.icc_profile = match d.mode {
             ColorMode::Rgb => Some(photocraft_cms::Builtin::LinearSrgb.profile().to_bytes()),
             ColorMode::Grayscale => Some(photocraft_cms::builtin::linear_gray().to_bytes()),
@@ -68,8 +70,13 @@ pub fn import_gif_frames(name: &str, bytes: &[u8], each: &mut dyn FnMut(Document
 /// (estimated from its quantisation tables) and a WebP's lossless or lossy encoding with its
 /// quality. A lossy WebP whose quality can't be read gets [`DEFAULT_LOSSY_WEBP_QUALITY`].
 pub fn file_encoding(bytes: &[u8]) -> photocraft_doc::FileEncoding {
+    file_encoding_as(codecs::detect(bytes), bytes)
+}
+
+/// [`file_encoding`] for `bytes` already detected as `format`.
+fn file_encoding_as(format: Option<Format>, bytes: &[u8]) -> photocraft_doc::FileEncoding {
     let mut e = photocraft_doc::FileEncoding::default();
-    match codecs::detect(bytes) {
+    match format {
         Some(Format::Jpeg) => e.jpeg_quality = codecs::jpeg_quality(bytes),
         Some(Format::WebP) => match codecs::webp_encoding(bytes) {
             Some(codecs::WebpEncoding::Lossless) => e.webp_lossless = Some(true),
@@ -199,6 +206,7 @@ pub(crate) fn image_to_document(name: &str, img: &Image) -> Result<ImportResult,
         ChannelLayout::Gray | ChannelLayout::GrayA => (ColorMode::Grayscale, ChannelLayout::GrayA),
         ChannelLayout::Rgb | ChannelLayout::Rgba => (ColorMode::Rgb, ChannelLayout::Rgba),
         ChannelLayout::Cmyk | ChannelLayout::CmykA => (ColorMode::Cmyk, ChannelLayout::CmykA),
+        ChannelLayout::Lab | ChannelLayout::LabA => (ColorMode::Lab, ChannelLayout::LabA),
     };
     let (depth, csample) = match img.sample_type() {
         CSample::U8 => (SampleType::U8, CSample::U8),
@@ -242,6 +250,7 @@ pub(crate) fn image_surface(img: &Image, target_layout: ChannelLayout, csample: 
     let mode = match target_layout {
         ChannelLayout::Gray | ChannelLayout::GrayA => ColorMode::Grayscale,
         ChannelLayout::Cmyk | ChannelLayout::CmykA => ColorMode::Cmyk,
+        ChannelLayout::Lab | ChannelLayout::LabA => ColorMode::Lab,
         _ => ColorMode::Rgb,
     };
     let depth = match csample {
@@ -294,6 +303,8 @@ pub(crate) fn layout_for(mode: ColorMode, alpha: bool) -> ChannelLayout {
         (ColorMode::Grayscale, true) => ChannelLayout::GrayA,
         (ColorMode::Cmyk, false) => ChannelLayout::Cmyk,
         (ColorMode::Cmyk, true) => ChannelLayout::CmykA,
+        (ColorMode::Lab, false) => ChannelLayout::Lab,
+        (ColorMode::Lab, true) => ChannelLayout::LabA,
         (_, false) => ChannelLayout::Rgb,
         (_, true) => ChannelLayout::Rgba,
     }
@@ -309,18 +320,19 @@ pub(crate) fn csample(s: SampleType) -> CSample {
 
 /// Renders the document to a flat codec image (native pixels when possible).
 pub fn document_to_image(doc: &Document, warnings: &mut Vec<String>) -> Result<Image, IoError> {
-    document_to_image_for(doc, warnings, true)
+    document_to_image_for(doc, warnings, true, false)
 }
 
-fn document_to_image_for(doc: &Document, warnings: &mut Vec<String>, cmyk_target: bool) -> Result<Image, IoError> {
+/// `cmyk_target` / `lab_target`: the format stores CMYK / Lab pixels.
+fn document_to_image_for(doc: &Document, warnings: &mut Vec<String>, cmyk_target: bool, lab_target: bool) -> Result<Image, IoError> {
     let (w, h) = (doc.size.width, doc.size.height);
     let canvas = doc.bounds();
     let fmt = doc.pixel_format();
     let n = (w as usize) * (h as usize);
-    // Lab has no flat-format layout here: Lab documents always go through the composite, which
-    // flattens nothing when there is a single plain layer.
+    // A Lab document keeps its pixels only for a format that stores Lab (TIFF); for the others it
+    // goes through the sRGB composite, which flattens nothing when there is a single plain layer.
     let single = single_layer(doc);
-    let native = single.filter(|_| fmt.mode != ColorMode::Lab);
+    let native = single.filter(|_| fmt.mode != ColorMode::Lab || lab_target);
     let mut icc = doc.icc_profile.as_ref().map(|i| i.to_vec());
     let img = if let Some(s) = native {
         // Native path: keep model and depth. The surface's encoded samples are the codec's raw
@@ -519,7 +531,8 @@ pub(crate) fn export_flat_with(doc: &Document, format: Format, opts: &ExportOpti
     }
     let mut warnings = Vec::new();
     let cmyk_target = format.caps().layouts.iter().any(|layout| layout.is_cmyk());
-    let mut img = document_to_image_for(doc, &mut warnings, cmyk_target)?;
+    let lab_target = format.caps().layouts.iter().any(|layout| layout.is_lab());
+    let mut img = document_to_image_for(doc, &mut warnings, cmyk_target, lab_target)?;
     ctl.check().map_err(|_| IoError::Cancelled)?;
     ctl.progress(composite_share(format));
     if opts.xmp == XmpEmbed::None {
@@ -546,9 +559,10 @@ pub(crate) fn export_flat_with(doc: &Document, format: Format, opts: &ExportOpti
         } else if let Some(linear) = convert_gray(&img, photocraft_cms::builtin::linear_gray(), CSample::F32)? {
             img = linear;
         }
-    } else if !format.caps().icc {
-        // Untagged files read back as sRGB/sGray: convert to it (as Quick Export does) rather than
-        // write values that only mean something under the dropped profile.
+    } else if !format.caps().icc || (img.layout().is_gray() && !format.caps().layouts.iter().any(|l| l.is_gray())) {
+        // Untagged files read back as sRGB/sGray. Even an ICC-capable format like WebP loses a
+        // gray profile when the codec expands gray to RGB. Convert first (as Quick Export does)
+        // rather than write values that only mean something under the dropped profile.
         if let Some(srgb) = convert_rgb(&img, Builtin::Srgb.profile(), Intent::Perceptual, true, img.sample_type())? {
             img = srgb;
             warnings.push(format!("colours converted to sRGB; {format:?} can't embed the document's colour profile"));

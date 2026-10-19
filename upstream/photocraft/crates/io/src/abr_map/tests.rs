@@ -178,6 +178,29 @@ fn v6_settings_map_onto_brush_sections() {
 }
 
 #[test]
+fn dual_brush_tip_spacing_takes_precedence_over_wrapper_spacing() {
+    let preset = Descriptor::new("brushPreset")
+        .with("Nm  ", t("Close-spaced dual brush"))
+        .with("Brsh", Value::Descriptor(Descriptor::new("computedBrush").with("Dmtr", u(b"#Pxl", 40.0))))
+        .with(
+            "dualBrush",
+            Value::Descriptor(
+                Descriptor::new("dualBrush")
+                    .with("useDualBrush", Value::Boolean(true))
+                    .with("Spcn", prc(100.0))
+                    .with("Brsh", Value::Descriptor(Descriptor::new("computedBrush").with("Dmtr", u(b"#Pxl", 12.0)).with("Spcn", prc(5.0)))),
+            ),
+        );
+    let bytes = write_v6(2, &[], &[], &[preset], false).unwrap();
+    let imported = read_abr(&bytes, "Dual").unwrap();
+    assert_eq!(imported.presets.len(), 1);
+    let brush = &imported.presets[0].brush;
+    assert!(brush.dual_brush.enabled);
+    assert!((brush.dual_brush.spacing - 0.05).abs() < 1e-6, "the tip's 5% spacing must not be replaced with the wrapper's 100%");
+    assert!((brush.spacing - 0.25).abs() < 1e-6, "main brush spacing is independent");
+}
+
+#[test]
 fn missing_pattern_and_tip_are_reported() {
     let orphan = Descriptor::new("brushPreset").with("Nm  ", t("Orphan")).with("Brsh", Value::Descriptor(sampled_tip("$nowhere")));
     let bytes = write_v6(2, &[sample("$tip-1", 4, 4, 16), sample("$tip-2", 4, 4, 8)], &[], &[full_preset(), orphan], false).unwrap();
