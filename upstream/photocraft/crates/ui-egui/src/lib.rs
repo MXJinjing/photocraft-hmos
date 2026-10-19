@@ -630,6 +630,10 @@ pub struct PhotocraftApp {
     /// Native 2-in-1 title-bar geometry in egui points: right-side caption-button width and
     /// title-bar height. Zero means the host has no integrated system title bar.
     pub host_titlebar: egui::Vec2,
+    /// A host that renders each immediate viewport into its own native window (HarmonyOS
+    /// sub-windows) sets this so floating document windows leave egui's in-app `Window`
+    /// embedding (`canvas::extra_windows`); other viewports (Camera Raw) stay embedded.
+    pub native_doc_windows: bool,
     /// Windows and Linux: the window has no OS decorations and the app's top bar is the title bar
     /// (caption buttons, window dragging and edge resizing, `titlebar`).
     pub custom_titlebar: bool,
@@ -848,6 +852,7 @@ impl PhotocraftApp {
             styled: false,
             integrated_titlebar: false,
             host_titlebar: egui::Vec2::ZERO,
+            native_doc_windows: false,
             custom_titlebar: false,
             last_window_title: String::new(),
             fonts_ready: false,
