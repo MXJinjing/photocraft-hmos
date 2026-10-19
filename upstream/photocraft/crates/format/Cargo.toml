@@ -22,7 +22,7 @@ flate2 = { workspace = true }
 # Same IEEE CRC-32 the ZIP container needs; already in Cargo.lock through flate2.
 crc32fast = "1.5"
 blake3 = { version = "1.8", default-features = false, features = ["pure"] }
-ruzstd = "0.9"
+ruzstd = "0.9.1"
 
 # Unix directory cleanup uses no-follow descriptor-relative operations; the same
 # dependency provides the plain-fsync fallback on Apple file systems.

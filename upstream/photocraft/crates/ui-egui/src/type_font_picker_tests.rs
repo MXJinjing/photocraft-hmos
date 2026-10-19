@@ -490,3 +490,43 @@ fn wheel_family_index_clamps_to_the_ends() {
     assert_eq!(super::wheel_family_index(1, 3, 0.0), None);
     assert_eq!(super::wheel_family_index(0, 0, -1.0), None);
 }
+
+/// #5152: in the full app the Properties panel's Character section draws a second font picker
+/// after the options bar; hovering a font in the options bar still previews it on the canvas.
+#[test]
+fn options_bar_hover_previews_with_the_character_picker_also_shown() {
+    use crate::{PhotocraftApp, Services};
+    use photocraft_doc::LayerContent;
+    use serde_json::json;
+
+    let theme = crate::theme::ThemeKind::Pro;
+    let mut h = Harness::builder().with_size(vec2(1600.0, 1000.0)).with_max_steps(64).build_eframe(move |cc| {
+        PhotocraftApp::setup_context(&cc.egui_ctx, theme);
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), Services::default());
+        app.ui.theme = theme;
+        app.run("file.new", json!({"width": 200, "height": 100})).unwrap();
+        app.run("type.create", json!({"text": "Sample", "font": "Inter", "size": 18})).unwrap();
+        app.ui.tool = crate::state::Tool::Type;
+        app.sync_views();
+        app
+    });
+    h.run_steps(8);
+    let layer = h.state().session.active().unwrap().active_layer.unwrap();
+    let font = |h: &mut Harness<'static, PhotocraftApp>| {
+        let (shown, _) = crate::canvas::display_doc(h.state_mut(), 0);
+        let LayerContent::Text(t) = &shown.layer(layer).unwrap().content else { panic!("type layer") };
+        t.char_runs()[0].style.font_family.clone()
+    };
+    let pickers: Vec<_> = h.query_all_by_role(Role::ComboBox).filter(|n| n.value().as_deref() == Some("Inter")).collect();
+    assert_eq!(pickers.len(), 2, "options bar and Character section both show the font picker");
+    pickers[0].click();
+    h.run();
+    h.query_all_by_role(Role::TextInput).find(|n| n.is_focused()).expect("search field focused").type_text("JetBrains Mono");
+    h.run();
+    h.get_by_label("JetBrains Mono").hover();
+    h.run();
+    assert_eq!(font(&mut h), "JetBrains Mono");
+    h.query_all_by_role(Role::TextInput).find(|n| n.is_focused()).expect("search field focused").hover();
+    h.run();
+    assert_eq!(font(&mut h), "Inter", "leaving the row restores the committed font");
+}

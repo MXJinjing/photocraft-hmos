@@ -244,14 +244,20 @@ mod tests {
     fn a_system_arabic_face_renders_both_samples() {
         let mut engine = photocraft_text::TextEngine::new();
         engine.fonts.load_system_fonts();
-        let both = engine.fonts.families().into_iter().find(|f| sample_texts(&engine.fonts.charmap(f, 400, false)).1.is_some());
-        let Some(family) = both else {
-            eprintln!("skipped: no installed family covers both Latin and Arabic");
+        let candidates: Vec<String> = engine.fonts.families().into_iter().filter(|f| sample_texts(&engine.fonts.charmap(f, 400, false)).1.is_some()).collect();
+        // A face can map the Arabic characters to blank glyphs (#5259): `render` then rightly gives
+        // no sample, so every candidate is rendered and the first one with an Arabic sample is checked.
+        let mut rendered = None;
+        for family in &candidates {
+            if let Some(arabic) = images(&mut engine, family, 1, MEDIUM).and_then(|i| i.arabic) {
+                rendered.get_or_insert((family.clone(), arabic));
+            }
+        }
+        let Some((family, arabic)) = rendered else {
+            eprintln!("skipped: no installed family renders both Latin and Arabic ({} claim both)", candidates.len());
             return;
         };
-        let images = images(&mut engine, &family, 1, MEDIUM).expect(&family);
-        let arabic = images.arabic.expect("Arabic sample");
-        assert_eq!(arabic.size, [ARABIC_WIDTH as usize, HEIGHT as usize]);
+        assert_eq!(arabic.size, [ARABIC_WIDTH as usize, HEIGHT as usize], "{family}");
         assert!(arabic.pixels.iter().any(|p| p.a() > 0), "{family}");
     }
 }

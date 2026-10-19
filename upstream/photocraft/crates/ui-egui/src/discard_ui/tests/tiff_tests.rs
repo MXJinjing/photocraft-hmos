@@ -7,6 +7,7 @@ use std::{cell::RefCell, rc::Rc};
 type Writes = Rc<RefCell<Vec<(String, Vec<u8>)>>>;
 
 fn tiff_prompt(command: &str) -> (Prompted, Writes, DocId, DocId) {
+    let _gpu = photocraft_testkit::gpu_lock();
     let mut app = app_with_docs(2);
     make_dirty(&mut app, 0);
     let (saved, other) = (doc_id(&app, 0), doc_id(&app, 1));

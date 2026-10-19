@@ -280,7 +280,8 @@ fn parse_gradient_map(d: &[u8]) -> Option<Adjustment> {
         3 => (Some(d.get(4..8)?), 8),
         _ => return None,
     };
-    at += 4 + be32(d, at)? as usize * 2;
+    // The gradient's name (UTF-16 units); checked, as `len * 2` overflows a 32-bit `usize`.
+    at = (be32(d, at)? as usize).checked_mul(2)?.checked_add(at + 4)?;
     let n = usize::from(be16(d, at)?);
     at += 2;
     let mut stops = Vec::with_capacity(n);

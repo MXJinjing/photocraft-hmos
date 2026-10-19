@@ -4,8 +4,10 @@
 //! The source rectangle is subdivided into a fine grid whose vertices are mapped forward; each
 //! cell's two triangles are rasterized in destination space with the source position
 //! interpolated barycentrically, then the source is sampled there (premultiplied, nearest /
-//! bilinear / Photoshop's Keys bicubic, like Free Transform). Cells are a few source pixels across, so
-//! the piecewise-affine inverse is within a small fraction of a pixel of the true one; affine
+//! bilinear / Photoshop's Keys bicubic, like Free Transform). Cells are a few pixels across in
+//! both the source and the destination (a thin layer stretched far gets as many cells as its
+//! warped size needs), so the piecewise-affine inverse is within a small fraction of a pixel of
+//! the true one; affine
 //! maps (the identity included) are reproduced exactly. Where the warp shrinks the source, each
 //! pixel instead averages a grid of bilinear subsamples over its source footprint (about one per
 //! source pixel), so thin lines don't alias. Where the warp folds over itself the
@@ -77,8 +79,11 @@ pub fn warp_mesh_surface(src: &Surface, src_rect: Rect, f: &(dyn Fn(f64, f64) ->
         return Surface::new(PixelFormat::new(fmt.mode, fmt.sample, true));
     }
     let (sw, sh) = (f64::from(src_rect.width()), f64::from(src_rect.height()));
-    let nx = ((sw / CELL).ceil() as usize).clamp(1, MAX_CELLS);
-    let ny = ((sh / CELL).ceil() as usize).clamp(1, MAX_CELLS);
+    // Cells are a few pixels across on both sides of the map: a thin source stretched far (a
+    // 3 px column scaled into a wide band, then bent) needs many cells, or it comes out straight.
+    let (lu, lv) = mapped_lengths(src_rect, f);
+    let cells = |s: f64, d: f64| ((s.max(d) / CELL).ceil() as usize).clamp(1, MAX_CELLS);
+    let (nx, ny) = (cells(sw, lu), cells(sh, lv));
     // Forward-mapped vertices (and their source positions).
     let mut verts = Vec::with_capacity((nx + 1) * (ny + 1));
     for j in 0..=ny {
@@ -99,6 +104,43 @@ pub fn warp_mesh_surface(src: &Surface, src_rect: Rect, f: &(dyn Fn(f64, f64) ->
         }
     }
     warp_triangles(src, src_rect, &verts, &tris, interp)
+}
+
+/// Probe lines per axis [`mapped_lengths`] follows through the map.
+const PROBE: usize = 16;
+
+/// The longest destination length of a source row and of a source column under `f`, measured
+/// along polylines through a [`PROBE`]-step grid. Non-finite steps count as zero.
+fn mapped_lengths(src_rect: Rect, f: &(dyn Fn(f64, f64) -> (f64, f64) + Sync)) -> (f64, f64) {
+    let (x0, y0) = (f64::from(src_rect.x0), f64::from(src_rect.y0));
+    let (sw, sh) = (f64::from(src_rect.width()), f64::from(src_rect.height()));
+    let n = PROBE + 1;
+    let mut pts = Vec::with_capacity(n * n);
+    for j in 0..n {
+        for i in 0..n {
+            let (dx, dy) = f(x0 + sw * i as f64 / PROBE as f64, y0 + sh * j as f64 / PROBE as f64);
+            pts.push([dx, dy]);
+        }
+    }
+    let step = |a: [f64; 2], b: [f64; 2]| {
+        let d = (b[0] - a[0]).hypot(b[1] - a[1]);
+        if d.is_finite() { d } else { 0.0 }
+    };
+    let (mut lu, mut lv) = (0.0f64, 0.0f64);
+    for k in 0..n {
+        let (mut row, mut col) = (0.0, 0.0);
+        for m in 1..n {
+            if let (Some(&a), Some(&b)) = (pts.get(k * n + m - 1), pts.get(k * n + m)) {
+                row += step(a, b);
+            }
+            if let (Some(&a), Some(&b)) = (pts.get((m - 1) * n + k), pts.get(m * n + k)) {
+                col += step(a, b);
+            }
+        }
+        lu = lu.max(row);
+        lv = lv.max(col);
+    }
+    (lu, lv)
 }
 
 /// Rasterizes textured triangles: each vertex is `(destination, source)` in document pixels and
@@ -397,6 +439,28 @@ mod tests {
             }
         }
         surf
+    }
+
+    #[test]
+    fn a_thin_layer_stretched_into_a_curve_keeps_the_curve() {
+        // #5793: a 3 px wide column stretched 100x and bent into an arch. The grid was sized in
+        // source pixels (one cell across), so the arch came out as a straight band.
+        let mut src = Surface::new(PixelFormat::new(ColorMode::Rgb, SampleType::U8, true));
+        src.fill_rect(Rect::new(0, 0, 3, 40), &[1.0, 0.0, 0.0, 1.0]);
+        let arch = |x: f64, y: f64| {
+            let dx = x * 100.0;
+            let t = (dx - 150.0) / 150.0;
+            (dx, y + 40.0 * (1.0 - t * t))
+        };
+        let out = warp_mesh_surface(&src, Rect::new(0, 0, 3, 40), &arch, Interp::Bilinear);
+        let alpha = |x: i32, y: i32| {
+            let mut p = [0.0f32; 4];
+            out.read_pixel(x, y, &mut p);
+            p[3]
+        };
+        // The band follows the arch: 40 px lower in the middle, about 36 px a third of the way in.
+        assert!(alpha(150, 60) > 0.99 && alpha(150, 20) < 0.01, "mid {} {}", alpha(150, 60), alpha(150, 20));
+        assert!(alpha(100, 55) > 0.99 && alpha(100, 20) < 0.01, "third {} {}", alpha(100, 55), alpha(100, 20));
     }
 
     #[test]
