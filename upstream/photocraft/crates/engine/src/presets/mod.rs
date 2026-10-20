@@ -66,6 +66,15 @@ impl Named for String {
     }
 }
 
+impl Named for photocraft_paint::BrushPreset {
+    fn name(&self) -> &str {
+        &self.name
+    }
+    fn set_name(&mut self, n: String) {
+        self.name = n;
+    }
+}
+
 /// All preset sets plus the panel state the engine needs.
 #[derive(Clone, Debug)]
 pub struct PresetState {
@@ -350,9 +359,124 @@ pub(crate) fn edit_groups<T: Named>(groups: &mut Vec<Group<T>>, action: &str, p:
 /// Params doc for the generic group commands.
 pub(crate) const GROUP_EDIT_PARAMS: &str = r##"{"action":"rename|delete|move|newGroup|renameGroup|deleteGroup","preset":name|[names] (rename/delete/move),"group":name? (narrows the lookup; the group for renameGroup/deleteGroup),"name":str (rename: new name; newGroup/renameGroup: group name),"to":group (move),"index":n? (move)}"##;
 
+fn restore_flat<T: Named>(items: &mut Vec<T>, builtin: Vec<T>) -> usize {
+    let mut restored = 0;
+    for item in builtin {
+        let name = item.name().to_ascii_lowercase();
+        if items.iter().any(|x| x.name().eq_ignore_ascii_case(&name)) {
+            continue;
+        }
+        items.push(item);
+        restored += 1;
+    }
+    restored
+}
+
+fn restore_groups<T: Named>(groups: &mut Vec<Group<T>>, builtin: Vec<Group<T>>) -> usize {
+    let mut restored = 0;
+    for group in builtin {
+        let gi = match groups.iter().position(|g| g.name == group.name) {
+            Some(i) => i,
+            None => {
+                groups.push(Group::new(&group.name, Vec::new()));
+                groups.len() - 1
+            }
+        };
+        for item in group.items {
+            if groups.iter().any(|g| g.items.iter().any(|x| x.name().eq_ignore_ascii_case(item.name()))) {
+                continue;
+            }
+            groups[gi].items.push(item);
+            restored += 1;
+        }
+    }
+    restored
+}
+
+fn restore_patterns(s: &mut Session) -> usize {
+    let mut restored = 0;
+    for pat in crate::pattern_cmds::builtin() {
+        if s.patterns.items.iter().any(|p| p.id == pat.id) {
+            continue;
+        }
+        s.patterns.items.push(pat);
+        restored += 1;
+    }
+    for group in patterns::builtin_groups() {
+        let gi = match s.presets.pattern_groups.iter().position(|g| g.name == group.name) {
+            Some(i) => i,
+            None => {
+                s.presets.pattern_groups.push(Group::new(&group.name, Vec::new()));
+                s.presets.pattern_groups.len() - 1
+            }
+        };
+        for id in group.items {
+            if s.patterns.items.iter().any(|p| p.id == id) && !s.presets.pattern_groups.iter().any(|g| g.items.contains(&id)) {
+                s.presets.pattern_groups[gi].items.push(id);
+            }
+        }
+    }
+    patterns::sync(s);
+    restored
+}
+
+fn restore_defaults(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "presets.restoreDefaults";
+    let kind = req_str(p, "kind", cmd)?;
+    let restored = match kind {
+        "brushes" => {
+            let n = restore_flat(&mut s.tools.presets, photocraft_paint::presets::builtin());
+            s.brush_presets_changed();
+            n
+        }
+        "gradients" => {
+            let n = restore_groups(&mut s.presets.gradients, gradients::builtin());
+            s.presets_changed();
+            n
+        }
+        "patterns" => {
+            let n = restore_patterns(s);
+            s.presets_changed();
+            n
+        }
+        "styles" => {
+            let n = restore_groups(&mut s.presets.styles, styles::builtin());
+            s.presets_changed();
+            n
+        }
+        "shapes" => {
+            let n = restore_groups(&mut s.presets.shapes, shapes::builtin());
+            s.presets_changed();
+            n
+        }
+        "swatches" => {
+            let n = restore_groups(&mut s.presets.swatches, swatches::builtin());
+            s.presets_changed();
+            n
+        }
+        "toolPresets" => {
+            let n = restore_flat(&mut s.presets.tool_presets, tools::builtin());
+            s.presets_changed();
+            n
+        }
+        _ => return Err(bad(cmd, format!("unknown preset kind `{kind}`"))),
+    };
+    Ok(json!({"kind": kind, "restored": restored}))
+}
+
 /// Every preset-panel command.
 pub fn specs() -> Vec<CommandSpec> {
-    let mut v = gradients::specs();
+    let mut v = vec![CommandSpec {
+        id: "presets.restoreDefaults",
+        label: "Restore Defaults",
+        menu: &[],
+        shortcut: None,
+        params: r#"{"kind":"brushes|gradients|patterns|styles|shapes|swatches|toolPresets"} → {kind, restored}"#,
+        enabled: always,
+        run: restore_defaults,
+        journal: true,
+    }];
+    v.extend(gradients::specs());
     v.extend(patterns::specs());
     v.extend(styles::specs());
     v.extend(shapes::specs());

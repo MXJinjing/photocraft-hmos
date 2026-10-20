@@ -29,7 +29,7 @@ export class HarmonyStylusAdapter implements StylusAdapter {
   };
   private readonly onSqueeze = (_event: stylusInteraction.SqueezeEvent): void => {
     if (this.active) {
-      this.emit(StylusPacket.action(StylusAction.LongPress, Date.now()));
+      this.emit(StylusPacket.action(StylusAction.Squeeze, Date.now()));
     }
   };
   private readonly onDeviceChange = (_event: inputDevice.DeviceListener): void => {

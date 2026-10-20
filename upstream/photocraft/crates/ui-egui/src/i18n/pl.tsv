@@ -3751,7 +3751,34 @@ curves	Smooth	Wygładź
 	Double-tap pen body	Dwukrotne stuknięcie w korpus pióra
 	Current tool and Eraser	Bieżące narzędzie i Gumka
 	Previous tool	Poprzednie narzędzie
-	Long-press pen body	Przytrzymanie korpusu pióra
+	Squeeze pen body	Ściśnięcie korpusu pióra
+
+# Stylus diagnostics
+	Hovering	Pióro w powietrzu
+	Stylus Debug…	Diagnostyka pióra…
+	Stylus Debug	Diagnostyka pióra
+	Use a real Pad and a pen that supports tilt, double-tap and squeeze.	Użyj prawdziwego tabletu i pióra z obsługą pochylenia, podwójnego stuknięcia i ściskania.
+	No connection reported	Nie zgłoszono połączenia
+	Latest pen sample	Ostatni odczyt pióra
+	Tilt from vertical	Pochylenie od pionu
+	Screen bearing	Kierunek na ekranie
+	Waiting for pen input	Oczekiwanie na pióro
+	Samples	Próbki
+	Pen contact	Kontakt pióra
+	No pen contact — values are retained	Brak kontaktu — wartości zachowane
+	Arrow: screen-projected tilt direction, not barrel rotation. Upright: no direction.	Strzałka: rzut pochylenia na ekran, nie obrót pióra. Pionowo: bez kierunku.
+	Zero tilt may mean an upright pen or unavailable hardware data.	Zerowe pochylenie może oznaczać pionowe pióro lub brak danych sprzętowych.
+	HarmonyOS contact input does not currently report barrel rotation.	Wejście kontaktowe HarmonyOS obecnie nie zgłasza obrotu pióra.
+	Received	Odebrano
+	Test gestures only (do not run shortcuts)	Testuj tylko gesty (bez wykonywania skrótów)
+	No indicator means no event received, not necessarily unsupported hardware.	Brak wskaźnika oznacza brak odebranego zdarzenia, niekoniecznie brak obsługi sprzętowej.
+	Test area — does not change the document	Obszar testowy — nie zmienia dokumentu
+	Draw here with the pen	Rysuj tutaj piórem
+	Reset test	Zresetuj test
+	Readings are before the pressure curve and remain available with tablet pressure off.	Odczyty przed krzywą nacisku, dostępne także przy wyłączonym nacisku tabletu.
+	Eraser end	Końcówka gumki
+	Pen tip	Końcówka pióra
+	Connected	Połączono
 	Show or hide context menu	Pokaż lub ukryj menu kontekstowe
 	Choose printer, copies and duplex in the system print dialog.	Wybierz drukarkę, liczbę kopii i druk dwustronny w systemowym oknie drukowania.
 	System print preview opened	Otwarto systemowy podgląd wydruku

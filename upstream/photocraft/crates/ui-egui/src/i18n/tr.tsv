@@ -3887,7 +3887,34 @@ cameraData	Lens	Lens
 	Choose printer, copies and duplex in the system print dialog.	Sistem yazdırma iletişim kutusunda yazıcıyı, kopya sayısını ve çift taraflı yazdırmayı seçin.
 	Connected pen	Bağlı kalem
 	Double-tap pen body	Kalem gövdesine çift dokunma
-	Long-press pen body	Kalem gövdesine uzun basma
+	Squeeze pen body	Kalem gövdesini sıkma
+
+# Stylus diagnostics
+	Hovering	Havada
+	Stylus Debug…	Kalem tanılama…
+	Stylus Debug	Kalem tanılama
+	Use a real Pad and a pen that supports tilt, double-tap and squeeze.	Eğim, çift dokunma ve sıkma destekli kalem ile gerçek bir tablet kullanın.
+	No connection reported	Bağlantı bildirilmedi
+	Latest pen sample	Son kalem örneği
+	Tilt from vertical	Dikeyden eğim
+	Screen bearing	Ekran yönü
+	Waiting for pen input	Kalem girişi bekleniyor
+	Samples	Örnekler
+	Pen contact	Kalem teması
+	No pen contact — values are retained	Temas yok — değerler korunur
+	Arrow: screen-projected tilt direction, not barrel rotation. Upright: no direction.	Ok: ekrana yansıtılan eğim yönü, kalem dönüşü değil. Dikeyken yön yoktur.
+	Zero tilt may mean an upright pen or unavailable hardware data.	Sıfır eğim, dikey kalem veya kullanılamayan donanım verisi anlamına gelebilir.
+	HarmonyOS contact input does not currently report barrel rotation.	HarmonyOS temas girişi şu anda kalem dönüşünü bildirmiyor.
+	Received	Alındı
+	Test gestures only (do not run shortcuts)	Yalnızca hareketleri test et (kısayolları çalıştırma)
+	No indicator means no event received, not necessarily unsupported hardware.	Gösterge yoksa olay alınmamıştır; bu, donanımın desteklenmediği anlamına gelmez.
+	Test area — does not change the document	Test alanı — belgeyi değiştirmez
+	Draw here with the pen	Kalemle buraya çizin
+	Reset test	Testi sıfırla
+	Readings are before the pressure curve and remain available with tablet pressure off.	Basınç eğrisinden önceki değerler; tablet basıncı kapalıyken de kullanılabilir.
+	Eraser end	Silgi ucu
+	Pen tip	Kalem ucu
+	Connected	Bağlı
 	No pen connected	Bağlı kalem yok
 	Only show canvas	Yalnızca tuvali göster
 	Right sidebar	Sağ kenar çubuğu

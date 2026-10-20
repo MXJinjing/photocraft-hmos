@@ -4119,7 +4119,34 @@ navigator	Zoom	Zoom
 	Double-tap pen body	Doppio tocco sul corpo della penna
 	Current tool and Eraser	Strumento attuale e gomma
 	Previous tool	Strumento precedente
-	Long-press pen body	Pressione prolungata sul corpo della penna
+	Squeeze pen body	Stringi il corpo della penna
+
+# Stylus diagnostics
+	Hovering	Puntatore sospeso
+	Stylus Debug…	Diagnostica penna…
+	Stylus Debug	Diagnostica penna
+	Use a real Pad and a pen that supports tilt, double-tap and squeeze.	Usa un tablet reale e una penna che supporti inclinazione, doppio tocco e pressione del corpo.
+	No connection reported	Nessuna connessione segnalata
+	Latest pen sample	Ultimo campione della penna
+	Tilt from vertical	Inclinazione dalla verticale
+	Screen bearing	Direzione sullo schermo
+	Waiting for pen input	In attesa della penna
+	Samples	Campioni
+	Pen contact	Penna a contatto
+	No pen contact — values are retained	Nessun contatto — valori conservati
+	Arrow: screen-projected tilt direction, not barrel rotation. Upright: no direction.	Freccia: inclinazione proiettata sullo schermo, non rotazione della penna. Verticale: nessuna direzione.
+	Zero tilt may mean an upright pen or unavailable hardware data.	Un’inclinazione nulla può indicare una penna verticale o dati hardware non disponibili.
+	HarmonyOS contact input does not currently report barrel rotation.	L’input di contatto HarmonyOS non segnala attualmente la rotazione della penna.
+	Received	Ricevuto
+	Test gestures only (do not run shortcuts)	Prova solo i gesti (senza eseguire scorciatoie)
+	No indicator means no event received, not necessarily unsupported hardware.	Nessun indicatore significa nessun evento ricevuto, non necessariamente hardware non supportato.
+	Test area — does not change the document	Area di prova — non modifica il documento
+	Draw here with the pen	Disegna qui con la penna
+	Reset test	Reimposta prova
+	Readings are before the pressure curve and remain available with tablet pressure off.	Valori precedenti alla curva di pressione, disponibili anche con la pressione del tablet disattivata.
+	Eraser end	Estremità gomma
+	Pen tip	Punta della penna
+	Connected	Connesso
 	Show or hide context menu	Mostra o nascondi il menu contestuale
 	Choose printer, copies and duplex in the system print dialog.	Scegli stampante, copie e fronte-retro nella finestra di stampa del sistema.
 	System print preview opened	Anteprima di stampa del sistema aperta

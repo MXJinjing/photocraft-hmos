@@ -196,6 +196,7 @@ pub mod stroke_trace;
 pub mod stroke_trail;
 pub mod stroke_ui;
 pub mod stylus;
+pub mod stylus_debug;
 pub mod stylus_protocol;
 pub mod swap_arrow;
 pub mod swatches_ui;
@@ -1938,6 +1939,7 @@ impl PhotocraftApp {
         });
         // Finish this frame's pen release before placing a queued squeeze menu.
         chrome_ui::drain_stylus_gestures(self, &ctx);
+        stylus_debug::window(self, &ctx);
         panels::properties_window(self, &ctx);
         brush_panel::window(self, &ctx);
         preset_panels::windows(self, &ctx);

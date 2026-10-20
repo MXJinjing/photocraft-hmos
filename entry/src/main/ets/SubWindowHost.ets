@@ -66,6 +66,19 @@ export function subWindowOptions(title: string, maximizeSupported: boolean): win
   return options;
 }
 
+export class WindowOrigin {
+  x: number = 0;
+  y: number = 0;
+}
+
+/// Center a new sub-window inside the main window, keeping it on-screen when it is larger.
+export function centeredSubWindowOrigin(main: window.Rect, width: number, height: number): WindowOrigin {
+  const origin = new WindowOrigin();
+  origin.x = Math.max(main.left, Math.round(main.left + (main.width - width) / 2));
+  origin.y = Math.max(main.top, Math.round(main.top + (main.height - height) / 2));
+  return origin;
+}
+
 // The system maximize button only does something when the app's main window is a free
 // window (2in1, or a tablet in freeform). On a full-screen / split-screen tablet the button
 // is dead, and apps cannot intercept it, so it is hidden there instead.
@@ -145,8 +158,10 @@ export class SubWindowHost {
     if (stage === undefined) { throw new Error('window stage unavailable'); }
     this.closed.delete(key);
     let canMaximize: boolean = true;
+    let mainRect: window.Rect | undefined = undefined;
     try {
       const main: window.Window = await stage.getMainWindow();
+      mainRect = main.getWindowProperties().windowRect;
       canMaximize = systemMaximizeUsable(main.getWindowStatus());
     } catch (error) {
       console.info(`Sub-window main status: ${(error as BusinessError).code} ${(error as BusinessError).message}`);
@@ -178,9 +193,18 @@ export class SubWindowHost {
     this.statusHandlers.set(key, onStatus);
     win.on('windowStatusChange', onStatus);
     await this.applyLimits(key, win);
-    await win.resize(Math.max(request.width, minWindowWidthPx()), Math.max(request.height, minWindowHeightPx()));
-    if (request.x !== null && request.y !== null) {
-      await win.moveWindowTo(request.x, request.y);
+    const width = Math.max(request.width, minWindowWidthPx());
+    const height = Math.max(request.height, minWindowHeightPx());
+    await win.resize(width, height);
+    let x = request.x;
+    let y = request.y;
+    if (x === null && y === null && mainRect !== undefined) {
+      const centered = centeredSubWindowOrigin(mainRect, width, height);
+      x = centered.x;
+      y = centered.y;
+    }
+    if (x !== null && y !== null) {
+      await win.moveWindowTo(x, y);
     }
     try {
       win.setWindowDecorVisible(true);

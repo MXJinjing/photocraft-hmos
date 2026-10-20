@@ -106,6 +106,14 @@ pub const UI_COMMANDS: &[(&str, &str, &[&str], Option<&str>)] = &[
     ("help.github", "PhotoCraft on GitHub", &["Help"], None),
     ("help.reportIssue", "Report an Issue…", &["Help"], None),
     ("help.systemInfo", "System Info…", &["Help"], None),
+    ("help.stylusDebug", "Stylus Debug…", &["Help"], None),
+    ("help.restore.brushes", "Brushes", &["Help", "Restore Defaults"], None),
+    ("help.restore.swatches", "Swatches", &["Help", "Restore Defaults"], None),
+    ("help.restore.patterns", "Patterns", &["Help", "Restore Defaults"], None),
+    ("help.restore.gradients", "Gradients", &["Help", "Restore Defaults"], None),
+    ("help.restore.styles", "Styles", &["Help", "Restore Defaults"], None),
+    ("help.restore.shapes", "Shapes", &["Help", "Restore Defaults"], None),
+    ("help.restore.toolPresets", "Tool Presets", &["Help", "Restore Defaults"], None),
     ("help.about", "About PhotoCraft", &["Help"], None),
 ];
 
@@ -430,6 +438,18 @@ pub(crate) fn invoke_unguarded(app: &mut PhotocraftApp, ctx: &egui::Context, id:
             Ok(Value::Null)
         }
         "help.about" => Ok(json!({"dialog": app.ui.open_dialog(DialogKind::About, Default::default())})),
+        "help.stylusDebug" => {
+            let show = match params.get("show") {
+                None => true,
+                Some(value) => value.as_bool().ok_or("show must be a boolean")?,
+            };
+            app.ui.stylus_debug.set_open(show, &app.stylus.feed.diagnostics());
+            Ok(json!({"visible": app.ui.stylus_debug.open, "input": app.stylus.feed.diagnostics()}))
+        }
+        id if id.starts_with("help.restore.") => {
+            let kind = id.trim_start_matches("help.restore.");
+            app.run("presets.restoreDefaults", json!({"kind": kind}))
+        }
         "help.systemInfo" => {
             let mut fields = serde_json::Map::new();
             fields.insert("systemInfo".into(), json!(true));
@@ -765,7 +785,8 @@ pub fn is_enabled(app: &PhotocraftApp, id: &str) -> bool {
     match id {
         "window.panel.activate" | "window.panel.layout" => true,
         "window.panel.group" | "window.panel.move" | "window.panel.float" | "window.panel.dock" | "window.panel.close" => !app.session.prefs().workspace_locked,
-        "file.open" | "file.exit" | "file.clearRecent" | "file.removeRecent" | "help.about" | "help.systemInfo" | "edit.search" => true,
+        "file.open" | "file.exit" | "file.clearRecent" | "file.removeRecent" | "help.about" | "help.systemInfo" | "help.stylusDebug" | "edit.search" => true,
+        i if i.starts_with("help.restore.") => true,
         i if i.starts_with("file.openRecent.") => true,
         i if i.starts_with(DOCUMENT_ITEM) => true,
         i if crate::links::url_for(i).is_some() => true,

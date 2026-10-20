@@ -58,6 +58,12 @@ pub struct Input {
     pub source: PointerSource,
     #[serde(default)]
     pub sample: Option<PenSample>,
+    /// Quarter turns clockwise of the display (0..=3), sent when the system rotation changes.
+    #[serde(default)]
+    pub rotation: u8,
+    /// Current display is wider than it is tall.
+    #[serde(default)]
+    pub landscape: bool,
     #[serde(default)]
     pub packet: Option<StylusPacket>,
     #[serde(default)]
@@ -132,6 +138,8 @@ pub struct State {
     axis_zoom: Option<f32>,
     pub modifiers: Modifiers,
     pub feed: StylusFeed,
+    /// Input belongs to this viewport; diagnostic hover positions use its local points.
+    pub viewport: egui::ViewportId,
 }
 impl State {
     fn finger_owns_pointer(&self) -> bool {
@@ -265,6 +273,8 @@ impl State {
     }
 
     pub fn cancel(&mut self, pos: Pos2, events: &mut Vec<Event>) {
+        self.feed.clear_hover(self.viewport);
+        self.feed.clear_contact(self.viewport);
         self.clear_touches(events);
         self.pen_down = false;
         self.hover_origin = None;
@@ -532,6 +542,7 @@ impl State {
                         });
                     }
                     self.pen_down = true;
+                    self.feed.clear_hover(self.viewport);
                     self.contact_origin = Some(pos);
                     self.preview_resume = None;
                     self.preview_hidden = false;
@@ -542,7 +553,11 @@ impl State {
                 if self.pen_down && is_hover_move {
                     return;
                 }
+                if input.source == PointerSource::Pen && !is_hover_move && input.action != 1 {
+                    self.feed.report_contact(self.viewport, [pos.x, pos.y]);
+                }
                 if input.source == PointerSource::Pen && is_hover_move {
+                    self.feed.report_hover(self.viewport, [pos.x, pos.y]);
                     if !self.pen_hover_preview.0 {
                         self.feed.report(input.source, input.sample);
                         self.last_pen = Some(pos);
@@ -580,6 +595,8 @@ impl State {
                 let pen_up = input.source == PointerSource::Pen && input.action == 1;
                 if pen_up {
                     self.pen_down = false;
+                    self.feed.clear_hover(self.viewport);
+                    self.feed.clear_contact(self.viewport);
                     self.hide_pen_preview();
                 }
                 self.feed.report(input.source, input.sample);
@@ -620,11 +637,14 @@ impl State {
                 if self.pen_down {
                     return;
                 }
+                self.feed.clear_hover(self.viewport);
+                self.feed.clear_contact(self.viewport);
                 if self.feed.source() == PointerSource::Pen {
                     self.hide_pen_preview();
                 }
                 events.push(Event::PointerGone);
             }
+            "display_rotation" => self.feed.set_display_rotation(input.rotation, input.landscape),
             "blur" => self.cancel(pos, events),
             "wheel" => events.push(Event::MouseWheel {
                 unit: egui::MouseWheelUnit::Point,

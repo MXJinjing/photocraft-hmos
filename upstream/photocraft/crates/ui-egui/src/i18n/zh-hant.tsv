@@ -2753,7 +2753,7 @@ curves	Smooth	平滑
 	Double-tap pen body	雙擊筆身
 	Current tool and Eraser	目前工具與橡皮擦
 	Previous tool	上一個工具
-	Long-press pen body	輕捏筆身
+	Squeeze pen body	輕捏筆身
 	Show or hide context menu	顯示或隱藏右鍵選單
 	Choose printer, copies and duplex in the system print dialog.	在系統列印面板中選擇印表機、份數和雙面。
 	System print preview opened	已開啟系統列印預覽
@@ -2765,3 +2765,30 @@ curves	Smooth	平滑
 # Window full screen (HarmonyOS host)
 	Enter Full Screen	進入全螢幕
 	Exit Full Screen	結束全螢幕
+
+# Stylus diagnostics
+	Hovering	正在懸停
+	Connected	已連線
+	Stylus Debug…	手寫筆偵錯…
+	Stylus Debug	手寫筆偵錯
+	Use a real Pad and a pen that supports tilt, double-tap and squeeze.	請使用真實平板及支援傾斜、雙擊與輕捏的手寫筆。
+	No connection reported	系統未報告連線
+	Latest pen sample	最近一次手寫筆資料
+	Tilt from vertical	偏離垂直角度
+	Screen bearing	螢幕朝向
+	Waiting for pen input	等待手寫筆輸入
+	Samples	取樣次數
+	Pen contact	正在落筆
+	No pen contact — values are retained	未落筆（保留最近讀數）
+	Arrow: screen-projected tilt direction, not barrel rotation. Upright: no direction.	箭頭表示傾斜在螢幕上的投影方向，並非筆桿旋轉；垂直握筆時無方向。
+	Zero tilt may mean an upright pen or unavailable hardware data.	傾斜為零可能表示垂直握筆，也可能是硬體未提供資料。
+	HarmonyOS contact input does not currently report barrel rotation.	目前鴻蒙觸點輸入未上報筆桿旋轉。
+	Received	已觸發
+	Test gestures only (do not run shortcuts)	僅測試手勢（不執行快捷動作）
+	No indicator means no event received, not necessarily unsupported hardware.	未亮燈表示未收到事件，不代表硬體一定不支援。
+	Test area — does not change the document	試寫區（不會修改文件）
+	Draw here with the pen	請用手寫筆在此試寫
+	Reset test	重設測試
+	Readings are before the pressure curve and remain available with tablet pressure off.	顯示套用壓感曲線之前的資料；關閉數位板壓感仍可查看。
+	Eraser end	橡皮端
+	Pen tip	筆尖
