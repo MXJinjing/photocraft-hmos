@@ -48,7 +48,9 @@ homepage Open, Ctrl+O / Cmd+O, Open As). Those flows keep the centered source ch
 Every other single-file pick goes through `Services::pick_import` (bridge kind
 `import`): File › Import › Notes / Variable Data Sets, Edit › Presets › Import,
 scripts, actions (`.atn`), keyboard shortcuts (`.kys`), swatches, gradients,
-Color Lookup / Displace path fields, Install Plug-in, Place Embedded/Linked,
-Replace Contents, and the sandboxed path_pick "Choose…" for a file. Those skip
+Color Lookup / Displace path fields, Install Plug-in, and the sandboxed path_pick "Choose…" for a file. Those skip
 the chooser and open `DocumentViewPicker` directly (`Index.importFile`).
+
+Place Embedded / Place Linked and Smart Object › Replace Contents may take a photo, so
+they keep `pick_open` and the files-vs-gallery chooser (`PhotocraftApp::pick_image_bytes`).
 

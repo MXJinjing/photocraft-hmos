@@ -93,7 +93,7 @@ document folder or a granted folder are refused before they run.
 
 - **File › Open** (and Open As / homepage Open): bridge kind `open` → files-vs-gallery
   chooser, then DocumentViewPicker or PhotoViewPicker (see `open-source-picker.md`).
-- **Import / path_pick / presets / scripts / Place…**: bridge kind `import` →
+- **Import / path_pick / presets / scripts**: bridge kind `import` →
   DocumentViewPicker only (`Services::pick_import`). No "从哪里导入" chooser.
 - Save: DocumentViewPicker + fd + save tokens. DOWNLOAD failure falls back to
   `filesDir/Documents`. DOWNLOAD failure falls back to
@@ -114,4 +114,5 @@ These never show a typed-path dialog on HarmonyOS; they call `pick_file_bytes` �
 - File › Import › Variable Data Sets… (CSV)
 - File › Import › Video Frames to Layers… (folder picker)
 - Edit › Presets › Export/Import Presets… (import action)
-- Scripts / Actions load, keyboard-shortcut `.kys`, swatches, gradients, Place Embedded/Linked
+- Scripts / Actions load, keyboard-shortcut `.kys`, swatches, gradients
+- Place Embedded/Linked and Replace Contents keep `pick_open` (files-vs-gallery chooser), since photos can be placed

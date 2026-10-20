@@ -1213,7 +1213,7 @@ fn front(app: &mut PhotocraftApp, id: &str, params: &Value) -> Option<Result<Val
                 Err(e) => return Some(Err(e)),
             };
             let linked = id == "file.placeLinked";
-            Some(app.pick_file_bytes(move |app, name, bytes| {
+            Some(app.pick_image_bytes(move |app, name, bytes| {
                 app.refocus(doc)?;
                 let linked = linked.then(|| name.clone());
                 app.place_bytes(&name, bytes, linked)
@@ -1235,7 +1235,7 @@ fn front(app: &mut PhotocraftApp, id: &str, params: &Value) -> Option<Result<Val
         "layer.smartObjects.replaceContents" => {
             let st = app.session.active()?;
             let (doc, layer) = (st.doc.id, st.active_layer?);
-            Some(app.pick_file_bytes(move |app, name, bytes| {
+            Some(app.pick_image_bytes(move |app, name, bytes| {
                 app.with_document(doc, |app| {
                     let r = photocraft_engine::smart_cmds::replace_contents_bytes(&mut app.session, layer, &name, bytes).map_err(|e| e.to_string());
                     app.sync_views();

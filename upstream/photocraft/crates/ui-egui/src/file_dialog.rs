@@ -89,6 +89,9 @@ pub(crate) struct Pending {
 thread_local! {
     /// The next folder request is for output (see [`PhotocraftApp::ask_output_folder`]).
     static FOLDER_FOR_OUTPUT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// The next single-file open may be a photo (Place, Replace Contents): keep `pick_open`
+    /// (files-vs-gallery chooser on HarmonyOS) instead of `pick_import`.
+    static OPEN_ALLOWS_GALLERY: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 /// The error of a cancelled dialog: not reported, since backing out is the user's choice.
@@ -119,7 +122,9 @@ impl PhotocraftApp {
                 // Single-file imports (notes, presets, scripts, path_pick staging, …) prefer
                 // `pick_import` so HarmonyOS can open the file manager without the document
                 // "从哪里导入" source chooser that File › Open uses.
-                FileDialogRequest::Open { multiple: false, .. } if self.services.pick_import.is_some() => {
+                FileDialogRequest::Open { multiple: false, .. }
+                    if self.services.pick_import.is_some() && !OPEN_ALLOWS_GALLERY.with(|g| g.replace(false)) =>
+                {
                     match self.services.pick_import.as_mut().and_then(|pick| pick()) {
                         Some((name, bytes)) => Some(FileDialogAnswer::Contents(name, bytes?)),
                         None => None,
@@ -142,6 +147,7 @@ impl PhotocraftApp {
             return then(self, answer.ok_or(CANCELLED)?);
         }
         FOLDER_FOR_OUTPUT.with(|o| o.set(false));
+        OPEN_ALLOWS_GALLERY.with(|g| g.set(false));
         if self.file_dialog.is_some() {
             return Err("a file dialog is already open".into());
         }
@@ -254,6 +260,15 @@ impl PhotocraftApp {
             let (name, bytes) = read_picked(answer)?;
             then(app, name, bytes)
         })
+    }
+
+    /// Like [`Self::pick_file_bytes`], for picks that may be photos (Place Embedded/Linked,
+    /// Replace Contents): uses `pick_open` so HarmonyOS still offers the gallery.
+    pub(crate) fn pick_image_bytes(&mut self, then: impl FnOnce(&mut Self, String, Vec<u8>) -> Result<Value, String> + 'static) -> Result<Value, String> {
+        OPEN_ALLOWS_GALLERY.with(|g| g.set(true));
+        let r = self.pick_file_bytes(then);
+        OPEN_ALLOWS_GALLERY.with(|g| g.set(false));
+        r
     }
 
     /// File › Open: opens every chosen file, reporting each failure (see [`Self::open_paths`]).

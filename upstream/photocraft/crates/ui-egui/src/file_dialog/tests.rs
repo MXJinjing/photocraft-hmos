@@ -26,6 +26,13 @@ fn pick_file_bytes_prefers_pick_import_over_pick_open() {
     let result = app.pick_file_bytes(|_, name, bytes| Ok(json!({"name": name, "bytes": bytes}))).unwrap();
     assert_eq!(result, json!({"name": "from-import", "bytes": b"import"}));
 
+    // Place / Replace Contents may pick a photo: keep pick_open (gallery chooser).
+    let placed = app.pick_image_bytes(|_, name, _| Ok(json!(name))).unwrap();
+    assert_eq!(placed, json!("from-open"));
+    // ...and the flag does not leak into the next import.
+    let next = app.pick_file_bytes(|_, name, _| Ok(json!(name))).unwrap();
+    assert_eq!(next, json!("from-import"));
+
     // Document Open (multiple: true, no pick_open_paths) still uses pick_open.
     app.services.pick_import = Some(Box::new(|| panic!("import must not run for File › Open")));
     app.services.pick_open = Some(Box::new(|| Some(("doc.png".into(), Ok(b"png".to_vec())))));
