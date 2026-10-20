@@ -25,7 +25,7 @@ import { subWindowHost, WindowRequest } from '../SubWindowHost';
 import { window } from '@kit.ArkUI';
 import { configureDisplayColor } from '../DisplayColor';
 import { SYSTEM_THEME_DARK, SYSTEM_THEME_LIGHT } from '../SystemTheme';
-import { pickFolder, sandboxDocumentDirectory } from '../folderPicker';
+import { pickFolder, sandboxDocumentDirectory, ensureOutputSubdirs } from '../folderPicker';
 
 class NativeConfig {
   files: string;
@@ -169,6 +169,8 @@ struct Index {
       }
       if (!this.alive || generation !== this.generation) { return; }
       this.documents = new LocalDocuments(documents, this.context.filesDir);
+      // ~/Downloads/<bundle>/{processed,batch,exports,...} for batch/export defaults.
+      ensureOutputSubdirs(documents);
       this.documentUri = uri;
       let scale: number = this.getUIContext().vp2px(1);
       const displayP3 = await configureDisplayColor(this.context);
@@ -360,10 +362,12 @@ struct Index {
   }
   private async selectFolder(id: number, output: boolean): Promise<void> {
     // Native path fields (batch input/output, plug-in folder, export folders) ask for a folder.
+    // 2in1: DocumentSelectMode.FOLDER. Tablet: input stages multi-selected files; output uses
+    // the DOWNLOAD document directory (never a single-file picker for folder fields).
     this.ime.stop(); this.cursor.reset();
     let generation = this.generation;
     try {
-      let path = await pickFolder(this.context, output, this.documents?.root() ?? '');
+      let path = await pickFolder(this.context, output, this.documents?.root() ?? '', '');
       if (!this.alive || generation !== this.generation || path.length === 0) {
         native.reply(id, false, 'cancelled', new ArrayBuffer(0)); return;
       }

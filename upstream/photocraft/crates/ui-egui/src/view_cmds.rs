@@ -1153,10 +1153,21 @@ fn camera_data(ui: &mut egui::Ui, f: &Map<String, Value>) {
     });
 }
 
-/// Folder the batch dialogs start from: next to the active document, else the working directory.
+/// Folder dialogs start from: the host's DOWNLOAD document directory on HarmonyOS, else next to
+/// the active document, else the working directory.
 fn default_dir(app: &PhotocraftApp) -> String {
-    app.session.active().and_then(|d| d.path.as_deref()).and_then(|p| p.rfind(['/', '\\']).map(|i| p[..i].to_string())).unwrap_or_else(|| ".".into())
+    crate::path_pick::documents_output_dir(app, "")
 }
+
+/// Empty on sandboxed hosts (user must Choose…); otherwise [`default_dir`].
+fn default_input_dir(app: &PhotocraftApp) -> String {
+    if app.services.path_pickers_only {
+        String::new()
+    } else {
+        default_dir(app)
+    }
+}
+
 
 fn front(app: &mut PhotocraftApp, id: &str, params: &Value) -> Option<Result<Value, String>> {
     if id == "file.closeAll" || id == "file.closeOthers" {
@@ -1188,7 +1199,7 @@ fn front(app: &mut PhotocraftApp, id: &str, params: &Value) -> Option<Result<Val
         return None;
     }
     let doc = app.session.active().map(|d| (d.doc.size.width, d.doc.size.height, d.doc.name.clone()));
-    let dir = default_dir(app);
+    let input_dir = default_input_dir(app);
     let label = photocraft_engine::commands::find(id).map_or(id, |c| c.label);
     let dialog = |app: &mut PhotocraftApp, fields: Value, choices: Value| Some(Ok(json!({"dialog": form(app, id, label, fields, choices)})));
     match id {
@@ -1252,26 +1263,29 @@ fn front(app: &mut PhotocraftApp, id: &str, params: &Value) -> Option<Result<Val
         "type.warpText" => Some(Ok(json!({"dialog": crate::dialogs::open_command_dialog(app, id, label)}))),
         "file.export.layersToFiles" => {
             let (_, _, name) = doc?;
+            let out = crate::path_pick::documents_output_dir(app, "exports");
             dialog(
                 app,
-                json!({"dir": dir, "prefix": name.rsplit_once('.').map_or(name.as_str(), |(a, _)| a), "format": "png", "visibleOnly": true}),
+                json!({"dir": out, "prefix": name.rsplit_once('.').map_or(name.as_str(), |(a, _)| a), "format": "png", "visibleOnly": true}),
                 json!({"format": ["png", "jpg", "psd", "tiff", "webp", "bmp"]}),
             )
         }
         "file.export.layerCompsToFiles" | "file.export.artboardsToFiles" => {
             let (_, _, name) = doc?;
             let prefix = name.rsplit_once('.').map_or(name.as_str(), |(a, _)| a).to_string();
+            let out = crate::path_pick::documents_output_dir(app, "exports");
             let fields = if id == "file.export.layerCompsToFiles" {
-                json!({"dir": dir, "prefix": prefix, "format": "png", "selectedOnly": false})
+                json!({"dir": out, "prefix": prefix, "format": "png", "selectedOnly": false})
             } else {
-                json!({"dir": dir, "prefix": prefix, "format": "png"})
+                json!({"dir": out, "prefix": prefix, "format": "png"})
             };
             dialog(app, fields, json!({"format": ["png", "jpg", "psd", "tiff", "webp", "bmp"]}))
         }
         "file.export.artboardsToPdf" => {
             let (_, _, name) = doc?;
             let stem = name.rsplit_once('.').map_or(name.as_str(), |(a, _)| a).to_string();
-            dialog(app, json!({"path": format!("{dir}/{stem}.pdf"), "quality": 10}), json!({}))
+            let out = crate::path_pick::documents_output_dir(app, "exports");
+            dialog(app, json!({"path": format!("{out}/{stem}.pdf"), "quality": 10}), json!({}))
         }
         "layer.new.artboard" => {
             let (w, h, _) = doc?;
@@ -1296,39 +1310,47 @@ fn front(app: &mut PhotocraftApp, id: &str, params: &Value) -> Option<Result<Val
                     })
             });
             let scope = if selected_adjustments { "selected" } else { "all" };
-            dialog(app, json!({"path": format!("{dir}/{stem}.cube"), "size": 33, "title": stem, "scope": scope}), json!({"scope": ["all", "selected"]}))
+            let out = crate::path_pick::documents_output_dir(app, "exports");
+            dialog(app, json!({"path": format!("{out}/{stem}.cube"), "size": 33, "title": stem, "scope": scope}), json!({"scope": ["all", "selected"]}))
         }
         "file.scripts.loadFilesIntoStack" => Some(Ok(json!({"dialog": crate::stack_dialog::open(app)}))),
         // Photography automation (photo_cmds / lens_cmds): a folder (or the open documents).
         "file.automate.photomerge" => dialog(
             app,
-            json!({"paths": dir, "useOpenDocuments": false, "layout": "auto", "blend": true, "vignetteRemoval": false, "geometricCorrection": false, "contentAwareFill": false}),
+            json!({"paths": input_dir, "useOpenDocuments": false, "layout": "auto", "blend": true, "vignetteRemoval": false, "geometricCorrection": false, "contentAwareFill": false}),
             json!({"layout": ["auto", "perspective", "cylindrical", "spherical", "collage", "reposition"]}),
         ),
         "file.automate.mergeToHdrPro" => dialog(
             app,
-            json!({"paths": dir, "useOpenDocuments": false, "align": true, "removeGhosts": false, "mode": "32", "method": "localAdaptation", "radius": 7.0, "strength": 0.52, "gamma": 1.0, "exposure": 0.0, "detail": 30.0, "saturation": 20.0}),
+            json!({"paths": input_dir, "useOpenDocuments": false, "align": true, "removeGhosts": false, "mode": "32", "method": "localAdaptation", "radius": 7.0, "strength": 0.52, "gamma": 1.0, "exposure": 0.0, "detail": 30.0, "saturation": 20.0}),
             json!({"mode": ["32", "16", "8"], "method": ["localAdaptation", "exposureGamma", "highlightCompression", "equalizeHistogram"]}),
         ),
-        "file.automate.lensCorrection" => dialog(
-            app,
-            json!({"input": dir, "output": format!("{dir}/corrected"), "format": "same", "profile": "auto", "correctDistortion": true, "correctVignette": true, "correctCA": true, "autoScale": true, "edge": "transparency"}),
-            json!({"format": ["same", "png", "jpg", "psd", "tiff"], "profile": ["auto", "generic", "none"], "edge": ["transparency", "edgeExtension", "black", "white"]}),
-        ),
-        "file.scripts.imageProcessor" => dialog(
-            app,
-            json!({"input": dir, "output": format!("{dir}/processed"), "format": "jpg", "quality": 8, "width": 0, "height": 0, "convertToSrgb": true}),
-            json!({"format": ["jpg", "png", "psd", "tiff", "webp"]}),
-        ),
+        "file.automate.lensCorrection" => {
+            let out = crate::path_pick::documents_output_dir(app, "corrected");
+            dialog(
+                app,
+                json!({"input": input_dir, "output": out, "format": "same", "profile": "auto", "correctDistortion": true, "correctVignette": true, "correctCA": true, "autoScale": true, "edge": "transparency"}),
+                json!({"format": ["same", "png", "jpg", "psd", "tiff"], "profile": ["auto", "generic", "none"], "edge": ["transparency", "edgeExtension", "black", "white"]}),
+            )
+        },
+        "file.scripts.imageProcessor" => {
+            let out = crate::path_pick::documents_output_dir(app, "processed");
+            dialog(
+                app,
+                json!({"input": input_dir, "output": out, "format": "jpg", "quality": 8, "width": 0, "height": 0, "convertToSrgb": true}),
+                json!({"format": ["jpg", "png", "psd", "tiff", "webp"]}),
+            )
+        },
         "file.automate.batch" => {
             let Some(action) = crate::actions::selected_action(app) else {
                 return Some(Err("record an action in the Actions panel first".into()));
             };
             let steps = crate::actions::action_steps(action);
             let name = action.name.clone();
+            let out = crate::path_pick::documents_output_dir(app, "batch");
             dialog(
                 app,
-                json!({"action": name, "steps": steps, "input": dir, "output": format!("{dir}/batch"), "format": "same", "quality": null, "__batchQuality": 8, "naming": "", "startingSerial": 1}),
+                json!({"action": name, "steps": steps, "input": input_dir, "output": out, "format": "same", "quality": null, "__batchQuality": 8, "naming": "", "startingSerial": 1}),
                 json!({"format": ["same", "png", "jpg", "psd", "tiff", "webp"]}),
             )
         }

@@ -19,12 +19,16 @@ fn no_params(p: &Value) -> bool {
 }
 
 fn default_dir(app: &PhotocraftApp) -> String {
-    app.session.active().and_then(|d| d.path.as_deref()).and_then(|p| p.rfind(['/', '\\']).map(|i| p[..i].to_string())).unwrap_or_else(|| ".".into())
+    crate::path_pick::documents_output_dir(app, "")
 }
 
 /// A packaged macOS app does not start in a useful writable working directory. A saved
-/// document keeps its own folder; otherwise prefer the user's Documents folder.
+/// document keeps its own folder; otherwise prefer the user's Documents folder. On HarmonyOS
+/// the DOWNLOAD document directory is used (same as [`default_dir`]).
 fn droplet_default_dir(app: &PhotocraftApp) -> String {
+    if crate::path_pick::documents_root(app).is_some() {
+        return crate::path_pick::documents_output_dir(app, "");
+    }
     let dir = default_dir(app);
     if dir != "." {
         return dir;
@@ -37,6 +41,7 @@ fn droplet_default_dir(app: &PhotocraftApp) -> String {
     }
     dir
 }
+
 
 fn doc_stem(app: &PhotocraftApp) -> String {
     app.session.active().map(|d| d.doc.name.rsplit_once('.').map_or(d.doc.name.clone(), |(a, _)| a.to_string())).unwrap_or_else(|| tl!("Untitled").into())
@@ -79,28 +84,39 @@ pub fn invoke(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str, params: &V
             json!({"dialog": open_print(app)})
         }
         "file.export.exportPreferences" => return crate::prefs_ui::invoke(app, ctx, "edit.preferences.export", &json!({})),
-        "file.automate.contactSheetII" => form(
-            app,
-            id,
-            tl!("Contact Sheet II"),
-            json!({"input": dir, "units": "inches", "width": 8.0, "height": 10.0, "resolution": 300.0, "mode": "rgb", "depth": 8, "columns": 5, "rows": 6, "placeAcrossFirst": true, "autoSpacing": true, "rotateForBestFit": false, "caption": true, "font": photocraft_text::fonts::DEFAULT_FAMILY, "fontSize": 12.0, "flatten": false}),
-            json!({"units": ["inches", "cm", "pixels"], "mode": ["rgb", "gray", "cmyk", "lab"]}),
-        ),
+        "file.automate.contactSheetII" => {
+            let input = if app.services.path_pickers_only { String::new() } else { dir.clone() };
+            form(
+                app,
+                id,
+                tl!("Contact Sheet II"),
+                json!({"input": input, "units": "inches", "width": 8.0, "height": 10.0, "resolution": 300.0, "mode": "rgb", "depth": 8, "columns": 5, "rows": 6, "placeAcrossFirst": true, "autoSpacing": true, "rotateForBestFit": false, "caption": true, "font": photocraft_text::fonts::DEFAULT_FAMILY, "fontSize": 12.0, "flatten": false}),
+                json!({"units": ["inches", "cm", "pixels"], "mode": ["rgb", "gray", "cmyk", "lab"]}),
+            )
+        },
         "file.automate.createDroplet" => {
-            let dir = droplet_default_dir(app);
             let Some(action) = crate::actions::selected_action(app) else {
                 return Some(Err("record an action in the Actions panel first".into()));
             };
             let steps = crate::actions::action_steps(action);
             let name = action.name.clone();
+            let (exports, out) = if crate::path_pick::documents_root(app).is_some() {
+                (
+                    crate::path_pick::documents_output_dir(app, "exports"),
+                    crate::path_pick::documents_output_dir(app, "droplet-output"),
+                )
+            } else {
+                let base = droplet_default_dir(app);
+                (base.clone(), format!("{base}/droplet-output"))
+            };
             form(
                 app,
                 id,
                 tl!("Create Droplet"),
-                json!({"path": format!("{dir}/{name}.pcdroplet"), "name": name, "steps": steps, "output": format!("{dir}/droplet-output"), "format": "same"}),
+                json!({"path": format!("{exports}/{name}.pcdroplet"), "name": name, "steps": steps, "output": out, "format": "same"}),
                 json!({"format": ["same", "png", "jpg", "psd", "tiff"]}),
             )
-        }
+        },
         "file.scripts.statistics" => json!({"dialog": crate::stack_dialog::open_statistics(app)}),
         "file.scripts.browse" => {
             return Some(app.pick_file_bytes_filtered(SCRIPT_EXTENSIONS, |app, name, bytes| {
@@ -117,7 +133,10 @@ pub fn invoke(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str, params: &V
             let events: Vec<&str> = photocraft_engine::automate_cmds::EVENTS.iter().map(|e| e.0).collect();
             form(app, id, "Script Events Manager", json!({"enabled": enabled, "event": "openDocument", "script": "", "name": ""}), json!({"event": events}))
         }
-        "file.package" => form(app, id, "Package", json!({"dir": dir}), json!({})),
+        "file.package" => {
+            let out = crate::path_pick::documents_output_dir(app, "package");
+            form(app, id, "Package", json!({"dir": out}), json!({}))
+        },
         "file.export.pathsToIllustrator" => {
             let mut names = vec!["all".to_string()];
             if let Some(d) = app.session.active() {
@@ -126,7 +145,8 @@ pub fn invoke(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str, params: &V
                 }
                 names.extend(d.doc.paths.iter().map(|p| p.name.clone()));
             }
-            form(app, id, "Export Paths to File", json!({"path": format!("{dir}/{stem}.ai"), "paths": "all"}), json!({"paths": names}))
+            let out = crate::path_pick::documents_output_dir(app, "exports");
+            form(app, id, "Export Paths to File", json!({"path": format!("{out}/{stem}.ai"), "paths": "all"}), json!({"paths": names}))
         }
         _ => return None,
     }))

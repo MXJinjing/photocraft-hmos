@@ -100,6 +100,7 @@ fn send(message: Message) {
 #[cfg(target_env = "ohos")]
 fn services(
     files: &str,
+    documents_dir: &str,
     documents: std::sync::Arc<std::sync::Mutex<documents::Documents>>,
     appearance: &appearance::Appearance,
 ) -> Services {
@@ -175,6 +176,8 @@ fn services(
         // A sandboxed app has no paths to the user's files: path fields use the pickers.
         path_pickers_only: true,
         sandbox_dir: Some(files.to_string()),
+        // DOWNLOAD document folder (`~/Downloads/<bundle>`), or filesDir/Documents fallback.
+        documents_dir: Some(documents_dir.to_string()),
         // History Log text file: only inside the sandbox or a granted folder.
         append_text: Some(Box::new(|path, text| {
             use std::io::Write;
@@ -500,6 +503,8 @@ fn worker(config: Config, rx: mpsc::Receiver<Message>) {
     )));
     // Sandbox: the app's files and document folder, plus folders granted by the file manager.
     sandbox_paths::init(&[config.files.as_str(), document_files.as_str()]);
+    // Default batch/export output: ~/Downloads/<bundle>/{processed,batch,...}.
+    photocraft_ui_egui::path_pick::ensure_output_subdirs(std::path::Path::new(document_files));
     let profiles = std::path::Path::new(&config.files).join("icc");
     if let Err(error) = std::fs::create_dir_all(&profiles) {
         let message = format!("ICC folder {}: {error}", profiles.display());
@@ -512,7 +517,7 @@ fn worker(config: Config, rx: mpsc::Receiver<Message>) {
     let appearance = appearance::Appearance::from_token(&config.system_theme);
     let mut app = PhotocraftApp::new(
         photocraft_engine::Session::new(),
-        services(&config.files, documents.clone(), &appearance),
+        services(&config.files, document_files, documents.clone(), &appearance),
     );
     let host_fullscreen = fullscreen::Fullscreen::default();
     if config.fullscreen {

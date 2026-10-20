@@ -133,13 +133,73 @@ pub fn kind_for(command: &str, key: &str) -> Option<PickKind> {
         ("filter.distort.displace", "mapPath") => file(&["psd", "psb"], Stage::Imports),
         (c, "file") if c.ends_with(".colorLookup") => file(&["cube", "3dl", "look"], Stage::Imports),
         ("image.variables", "pixelReplacement") => file(IMAGE_EXTENSIONS, Stage::Imports),
-        ("file.automate.batch" | "file.scripts.imageProcessor" | "file.automate.lensCorrection", "input") => Some(PickKind::InputFolder),
-        ("file.automate.batch" | "file.scripts.imageProcessor" | "file.automate.lensCorrection", "output") => Some(PickKind::OutputFolder),
+        // Input folders (batch / photography / contact sheet).
+        (
+            "file.automate.batch"
+                | "file.scripts.imageProcessor"
+                | "file.automate.lensCorrection"
+                | "file.automate.contactSheetII",
+            "input",
+        ) => Some(PickKind::InputFolder),
         ("file.automate.photomerge" | "file.automate.mergeToHdrPro", "paths") => Some(PickKind::InputFolder),
-        ("file.export.layersToFiles" | "file.export.layerCompsToFiles" | "file.export.artboardsToFiles", "dir") => Some(PickKind::OutputFolder),
+        // Output folders (batch / export / package / droplet).
+        (
+            "file.automate.batch"
+                | "file.scripts.imageProcessor"
+                | "file.automate.lensCorrection"
+                | "file.automate.createDroplet",
+            "output",
+        ) => Some(PickKind::OutputFolder),
+        (
+            "file.export.layersToFiles"
+                | "file.export.layerCompsToFiles"
+                | "file.export.artboardsToFiles"
+                | "file.export.dataSetsAsFiles"
+                | "file.package",
+            "dir",
+        ) => Some(PickKind::OutputFolder),
+        // Output files kept under a chosen folder.
         ("file.export.artboardsToPdf", "path") => Some(PickKind::OutputFile { default_name: "Artboards.pdf".into() }),
         ("file.export.colorLookupTables", "path") => Some(PickKind::OutputFile { default_name: "Color Lookup.cube".into() }),
+        ("file.export.pathsToIllustrator", "path") => Some(PickKind::OutputFile { default_name: "Paths.ai".into() }),
+        ("file.automate.createDroplet", "path") => Some(PickKind::OutputFile { default_name: "Action.pcdroplet".into() }),
         _ => None,
+    }
+}
+
+/// Standard subfolders under the app's DOWNLOAD document directory (`~/Downloads/<bundle>`).
+pub const OUTPUT_SUBDIRS: &[&str] = &["processed", "batch", "corrected", "exports", "droplet-output", "package"];
+
+/// The host's system-visible document folder (HarmonyOS DOWNLOAD), when set.
+pub fn documents_root(app: &PhotocraftApp) -> Option<&str> {
+    app.services.documents_dir.as_deref().filter(|s| !s.is_empty())
+}
+
+/// Ensures `documents_dir/<sub>` exists and returns it. Falls back to the active document's
+/// folder (desktop) or `"."` when the host has no document directory.
+pub fn documents_output_dir(app: &PhotocraftApp, sub: &str) -> String {
+    let root = documents_root(app).map(str::to_string).unwrap_or_else(|| {
+        app.session
+            .active()
+            .and_then(|d| d.path.as_deref())
+            .and_then(|p| p.rfind(['/', '\\']).map(|i| p[..i].to_string()))
+            .unwrap_or_else(|| ".".into())
+    });
+    if sub.is_empty() {
+        return root;
+    }
+    let dir = Path::new(&root).join(sub);
+    if let Err(e) = std::fs::create_dir_all(&dir) {
+        // Still return the intended path so the field shows where output should go.
+        let _ = e;
+    }
+    dir.to_string_lossy().into_owned()
+}
+
+/// Creates every [`OUTPUT_SUBDIRS`] entry under `root` (startup on HarmonyOS).
+pub fn ensure_output_subdirs(root: &Path) {
+    for sub in OUTPUT_SUBDIRS {
+        let _ = std::fs::create_dir_all(root.join(sub));
     }
 }
 

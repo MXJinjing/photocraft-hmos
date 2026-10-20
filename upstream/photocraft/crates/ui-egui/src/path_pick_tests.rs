@@ -22,7 +22,11 @@ fn path_fields_are_known_by_command_and_key() {
     assert_eq!(kind_for("file.automate.batch", "input"), Some(PickKind::InputFolder));
     assert_eq!(kind_for("file.automate.batch", "output"), Some(PickKind::OutputFolder));
     assert_eq!(kind_for("file.export.layersToFiles", "dir"), Some(PickKind::OutputFolder));
+    assert_eq!(kind_for("file.package", "dir"), Some(PickKind::OutputFolder));
+    assert_eq!(kind_for("file.automate.contactSheetII", "input"), Some(PickKind::InputFolder));
+    assert_eq!(kind_for("file.automate.createDroplet", "output"), Some(PickKind::OutputFolder));
     assert!(matches!(kind_for("file.export.artboardsToPdf", "path"), Some(PickKind::OutputFile { .. })));
+    assert!(matches!(kind_for("file.export.pathsToIllustrator", "path"), Some(PickKind::OutputFile { .. })));
     assert!(matches!(kind_for("image.adjustments.colorLookup", "file"), Some(PickKind::File { .. })));
     // Not paths: names, prefixes, ordinary text.
     assert_eq!(kind_for("file.automate.batch", "naming"), None);
@@ -145,4 +149,18 @@ fn a_plugin_folder_is_copied_into_the_sandbox() {
     // A folder without plug-ins says so.
     let empty = temp("plugin-folder-empty");
     assert!(stage_plugins(&sandbox, &empty).unwrap_err().contains("no .wasm"));
+}
+
+#[test]
+fn documents_output_dir_uses_host_documents_root() {
+    let root = temp("docs-root");
+    let mut app = sandboxed(&temp("unused-sandbox"), Services { documents_dir: Some(root.to_string_lossy().into_owned()), ..Default::default() });
+    let processed = documents_output_dir(&app, "processed");
+    assert_eq!(processed, root.join("processed").to_string_lossy());
+    assert!(root.join("processed").is_dir());
+    ensure_output_subdirs(&root);
+    for sub in OUTPUT_SUBDIRS {
+        assert!(root.join(sub).is_dir(), "{sub}");
+    }
+    let _ = &mut app;
 }

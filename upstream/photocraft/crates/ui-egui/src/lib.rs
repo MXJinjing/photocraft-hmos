@@ -439,6 +439,10 @@ pub struct Services {
     /// copied under it (`imports/`, `plugins/`, `icc/`), since a sandboxed app has no paths to
     /// the user's files.
     pub sandbox_dir: Option<String>,
+    /// System-visible application document folder (HarmonyOS `DocumentPickerMode.DOWNLOAD`,
+    /// i.e. `~/Downloads/<bundle>`). Batch/export defaults write under subfolders here
+    /// (`processed`, `exports`, …). Absent on desktop hosts.
+    pub documents_dir: Option<String>,
     /// Always choose a target, even for Save of a named document. Hosts with
     /// opaque storage URIs use the picker to associate the display name with
     /// write authority. They also export through these services instead of
