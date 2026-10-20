@@ -1217,6 +1217,12 @@ impl PhotocraftApp {
     /// the preferences (`fileHandling.recentFiles`), so it survives a restart; `ui.recent_files`
     /// mirrors it for the menus and the Home screen.
     pub fn push_recent(&mut self, path: &str) {
+        // HarmonyOS (and similar hosts) record ordinary Save as `save-default/…` tokens that only
+        // resolve while the page keeps the matching URI. Listing them in Recent makes Home › Recent
+        // open fail after restart; skip them (real download-dir paths still list).
+        if file_open::is_ephemeral_save_token(path) {
+            return;
+        }
         let cap = self.recent_cap();
         let mut r = self.session.prefs().file_handling.recent_files.clone();
         r.retain(|p| p != path);
@@ -1249,6 +1255,16 @@ impl PhotocraftApp {
     /// run every frame: a slice comparison of at most 100 paths, no allocation unless it changed.
     pub fn sync_recent(&mut self) {
         let cap = self.recent_cap();
+        let stored = &self.session.prefs().file_handling.recent_files;
+        // Drop leftover picker tokens from older builds so Home › Recent cannot offer them.
+        if stored.iter().any(|p| file_open::is_ephemeral_save_token(p)) {
+            let cleaned: Vec<String> = stored
+                .iter()
+                .filter(|p| !file_open::is_ephemeral_save_token(p))
+                .cloned()
+                .collect();
+            self.session.prefs.edit(|p| p.file_handling.recent_files = cleaned);
+        }
         let stored = &self.session.prefs().file_handling.recent_files;
         let want = stored.get(..cap.min(stored.len())).unwrap_or_default();
         if self.ui.recent_files.as_slice() != want {
@@ -3182,6 +3198,7 @@ mod native_host_tests {
         app.services.default_save = Some(Box::new(|_, _| Ok("save-default/1/untitled.psd".into())));
         menus::invoke_unguarded(&mut app, &ctx, "file.save", serde_json::json!({})).unwrap();
         assert_eq!(*written.lock().unwrap(), ["save-as/15/untitled.psd", "save-default/1/untitled.psd", "save-default/1/untitled.psd"]);
+        assert!(app.ui.recent_files.is_empty(), "picker tokens must not enter Open Recent");
     }
     /// Without `default_save`, a document whose path is a consumed `save-as/…` token must not
     /// be treated as an in-place Save destination.

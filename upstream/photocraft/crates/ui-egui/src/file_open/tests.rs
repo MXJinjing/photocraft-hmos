@@ -841,6 +841,25 @@ fn saving_a_new_document_lists_it_in_recent_files() {
     assert_eq!(app.ui.recent_files, ["/pics/new.psd"], "a copy isn't the document's file");
 }
 
+/// Host `save-default/…` tokens must not be reopenable from Recent; attempting to open one drops
+/// the stale entry so Home › Recent cannot keep offering it.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn ephemeral_save_token_recent_is_dropped_on_open() {
+    let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), Services::default());
+    // Simulate a leftover entry from an older build that listed the save token.
+    app.session.prefs.edit(|p| p.file_handling.recent_files = vec!["save-default/3/pad.psd".into()]);
+    app.sync_recent();
+    // sync_recent already scrubs tokens; re-inject to exercise open_path.
+    app.ui.recent_files = vec!["save-default/3/pad.psd".into()];
+    app.session.prefs.edit(|p| p.file_handling.recent_files = vec!["save-default/3/pad.psd".into()]);
+    let err = app.open_path("save-default/3/pad.psd").unwrap_err();
+    assert!(err.contains("no longer available"), "{err}");
+    assert!(app.ui.recent_files.is_empty(), "stale token removed from Recent");
+    assert!(app.session.prefs().file_handling.recent_files.is_empty());
+}
+
+
 /// #4559: a file whose type uses a font that isn't installed opens with a notice naming it, as
 /// Photoshop warns on open (the CLI and automation already did); the file still opens. Type in
 /// an installed face adds nothing, and a font the importer already warned about isn't repeated.
