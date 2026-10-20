@@ -61,6 +61,32 @@ fn gradient_builtins_and_listing() {
 }
 
 #[test]
+fn restore_defaults_restores_deleted_builtins_without_removing_user_presets() {
+    let mut s = session(8);
+    s.execute("brush.presets.save", json!({"name": "My Brush"})).unwrap();
+    s.execute("edit.definePattern", json!({"name": "My Pattern"})).unwrap();
+    let brush = s.tools.presets[0].name.clone();
+    s.execute("brush.presets.delete", json!({"name": brush})).unwrap();
+    s.execute("swatches.delete", json!({"swatch": "Black"})).unwrap();
+    s.execute("pattern.presets.edit", json!({"action": "delete", "preset": "Checkerboard"})).unwrap();
+    s.execute("swatches.add", json!({"name": "My Swatch"})).unwrap();
+
+    for (kind, restored) in [("brushes", brush.as_str()), ("swatches", "Black"), ("patterns", "Checkerboard")] {
+        let r = s.execute("presets.restoreDefaults", json!({"kind": kind})).unwrap();
+        assert!(r["restored"].as_u64().unwrap() >= 1, "{kind}");
+        let present = match kind {
+            "brushes" => s.tools.presets.iter().any(|p| p.name == restored),
+            "swatches" => s.presets.swatches.iter().any(|g| g.items.iter().any(|p| p.name == restored)),
+            _ => crate::pattern_cmds::resolve(&s, restored).is_some(),
+        };
+        assert!(present, "{kind}: {restored}");
+    }
+    assert!(s.tools.presets.iter().any(|p| p.name == "My Brush"), "restore keeps user brushes");
+    assert!(s.presets.swatches.iter().any(|g| g.items.iter().any(|p| p.name == "My Swatch")), "restore keeps user swatches");
+    assert!(crate::pattern_cmds::resolve(&s, "My Pattern").is_some(), "restore keeps user patterns");
+}
+
+#[test]
 fn rainbow_gradient_presets() {
     let mut s = session(8);
     let v = s.execute("gradient.presets.list", json!({})).unwrap();

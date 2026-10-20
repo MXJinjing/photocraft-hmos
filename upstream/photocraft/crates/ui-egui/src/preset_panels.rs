@@ -688,7 +688,12 @@ pub fn gradients_panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         &mut st,
         "gradients",
         &groups,
-        Place { canvas, max_h, new_tip: tl!("Create new gradient"), pointer: app.stylus.feed.source() },
+        Place {
+            canvas,
+            max_h,
+            new_tip: tl!("Create new gradient"),
+            pointer: app.stylus.feed.source(),
+        },
         &mut |ui, r, gi, ii| {
             let stops = groups_src[gi].items[ii].resolve(fg, bg);
             paint_gradient(ui, r, &stops);
@@ -743,7 +748,12 @@ pub fn patterns_panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         &mut st,
         "patterns",
         &groups,
-        Place { canvas, max_h, new_tip: tl!("Create new pattern from the selection"), pointer: app.stylus.feed.source() },
+        Place {
+            canvas,
+            max_h,
+            new_tip: tl!("Create new pattern from the selection"),
+            pointer: app.stylus.feed.source(),
+        },
         &mut |ui, r, gi, ii| {
             let tex = pattern_texture(&ctx, &pats[gi][ii]);
             ui.painter().image(tex.id(), r, Rect::from_min_max(Pos2::ZERO, pos2(1.0, 1.0)), Color32::WHITE);
@@ -849,7 +859,12 @@ pub fn styles_panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         &mut st,
         "styles",
         &groups,
-        Place { canvas, max_h: 300.0, new_tip: tl!("Create new style from the selected layer"), pointer: app.stylus.feed.source() },
+        Place {
+            canvas,
+            max_h: 300.0,
+            new_tip: tl!("Create new style from the selected layer"),
+            pointer: app.stylus.feed.source(),
+        },
         &mut |ui, r, gi, ii| {
             ui.painter().rect_filled(r, 2.0, t.field);
             ui.painter().image(texes[gi][ii].id(), r, Rect::from_min_max(Pos2::ZERO, pos2(1.0, 1.0)), Color32::WHITE);
@@ -893,7 +908,12 @@ pub fn shapes_panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         &mut st,
         "shapes",
         &groups,
-        Place { canvas, max_h: 300.0, new_tip: tl!("Create new shape from the current path"), pointer: app.stylus.feed.source() },
+        Place {
+            canvas,
+            max_h: 300.0,
+            new_tip: tl!("Create new shape from the current path"),
+            pointer: app.stylus.feed.source(),
+        },
         &mut |ui, r, gi, ii| {
             let tex = shape_texture(&ctx, &src[gi].items[ii]);
             ui.painter().image(tex.id(), r.shrink(2.0), Rect::from_min_max(Pos2::ZERO, pos2(1.0, 1.0)), t.text);
@@ -1306,7 +1326,12 @@ mod tests {
                     st,
                     panel,
                     &groups,
-                    Place { canvas: Rect::from_min_max(pos2(300.0, 0.0), pos2(600.0, 300.0)), max_h: 200.0, new_tip: "New", pointer },
+                    Place {
+                        canvas: Rect::from_min_max(pos2(300.0, 0.0), pos2(600.0, 300.0)),
+                        max_h: 200.0,
+                        new_tip: "New",
+                        pointer,
+                    },
                     &mut |_, r, gi, ii| {
                         if gi == 0 && ii == 0 {
                             cell = r;

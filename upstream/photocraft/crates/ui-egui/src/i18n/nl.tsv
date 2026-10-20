@@ -3913,7 +3913,34 @@ curves	Smooth	Vloeiend maken
 	Double-tap pen body	Dubbeltik op de pen
 	Current tool and Eraser	Huidig gereedschap en Gum
 	Previous tool	Vorig gereedschap
-	Long-press pen body	Lang indrukken op de pen
+	Squeeze pen body	Knijp in de pen
+
+# Stylus diagnostics
+	Hovering	Zwevend
+	Stylus Debug…	Pendiagnose…
+	Stylus Debug	Pendiagnose
+	Use a real Pad and a pen that supports tilt, double-tap and squeeze.	Gebruik een echte tablet en een pen met kanteling, dubbeltikken en knijpen.
+	No connection reported	Geen verbinding gemeld
+	Latest pen sample	Laatste penmeting
+	Tilt from vertical	Kanteling vanaf verticaal
+	Screen bearing	Schermrichting
+	Waiting for pen input	Wachten op peninvoer
+	Samples	Metingen
+	Pen contact	Pencontact
+	No pen contact — values are retained	Geen pencontact — waarden behouden
+	Arrow: screen-projected tilt direction, not barrel rotation. Upright: no direction.	Pijl: op het scherm geprojecteerde kanteling, geen penrotatie. Rechtop: geen richting.
+	Zero tilt may mean an upright pen or unavailable hardware data.	Nul kanteling kan een rechtopstaande pen of ontbrekende hardwaregegevens betekenen.
+	HarmonyOS contact input does not currently report barrel rotation.	HarmonyOS-contactinvoer meldt momenteel geen penrotatie.
+	Received	Ontvangen
+	Test gestures only (do not run shortcuts)	Alleen gebaren testen (geen snelacties uitvoeren)
+	No indicator means no event received, not necessarily unsupported hardware.	Geen indicator betekent geen ontvangen gebeurtenis, niet noodzakelijk ongeschikte hardware.
+	Test area — does not change the document	Testgebied — wijzigt het document niet
+	Draw here with the pen	Teken hier met de pen
+	Reset test	Test resetten
+	Readings are before the pressure curve and remain available with tablet pressure off.	Metingen vóór de drukcurve, ook beschikbaar als tabletdruk uitstaat.
+	Eraser end	Gumuiteinde
+	Pen tip	Penpunt
+	Connected	Verbonden
 	Show or hide context menu	Contextmenu tonen of verbergen
 	Choose printer, copies and duplex in the system print dialog.	Kies printer, aantal exemplaren en dubbelzijdig afdrukken in het systeemvenster voor afdrukken.
 	System print preview opened	Afdrukvoorbeeld van het systeem geopend

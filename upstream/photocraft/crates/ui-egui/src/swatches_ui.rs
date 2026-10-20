@@ -74,7 +74,12 @@ pub fn panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         &mut st,
         PANEL,
         &groups,
-        Place { canvas, max_h, new_tip: tl!("Create new swatch"), pointer: app.stylus.feed.source() },
+        Place {
+            canvas,
+            max_h,
+            new_tip: tl!("Create new swatch"),
+            pointer: app.stylus.feed.source(),
+        },
         &mut |ui, r: Rect, gi, ii| {
             let c = table.get(gi).and_then(|g| g.get(ii)).copied().unwrap_or(Color32::GRAY);
             ui.painter().rect_filled(r, CornerRadius::same(2), c);

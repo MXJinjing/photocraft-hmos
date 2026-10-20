@@ -34,7 +34,7 @@ const factoryPackets = [
   protocol.StylusPacket.barrelButton(true, 500),
   protocol.StylusPacket.barrelButton(false, 550),
   protocol.StylusPacket.action(protocol.StylusAction.DoubleTap, 1000),
-  protocol.StylusPacket.action(protocol.StylusAction.LongPress, 2000),
+  protocol.StylusPacket.action(protocol.StylusAction.Squeeze, 2000),
   protocol.StylusPacket.pointer(protocol.StylusPointerSource.Touch, null)
 ];
 const fixture = JSON.parse(fs.readFileSync(path.join(root,
@@ -101,7 +101,7 @@ async function main() {
   s.gestures.get('squeeze')({ timestamp: 8 });
   assert.deepEqual(s.packets.splice(0), [
     { version: 1, type: 'gesture', gesture: 'doubleTap', timestampMs: 1234567890000 },
-    { version: 1, type: 'gesture', gesture: 'longPress', timestampMs: 1234567890000 }
+    { version: 1, type: 'gesture', gesture: 'squeeze', timestampMs: 1234567890000 }
   ], 'SDK-specific names/timestamp units must be normalised');
 
   s.adapter.publishState();

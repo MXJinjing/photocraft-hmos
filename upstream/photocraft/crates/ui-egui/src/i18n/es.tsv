@@ -2841,7 +2841,34 @@ curves	Smooth	Suavizar
 	Double-tap pen body	Doble toque en el cuerpo del lápiz
 	Current tool and Eraser	Herramienta actual y borrador
 	Previous tool	Herramienta anterior
-	Long-press pen body	Mantener pulsado el cuerpo del lápiz
+	Squeeze pen body	Apretar el cuerpo del lápiz
+
+# Stylus diagnostics
+	Hovering	Flotando
+	Stylus Debug…	Diagnóstico del lápiz…
+	Stylus Debug	Diagnóstico del lápiz
+	Use a real Pad and a pen that supports tilt, double-tap and squeeze.	Usa una tableta real y un lápiz compatible con inclinación, doble toque y presión del cuerpo.
+	No connection reported	No se ha notificado conexión
+	Latest pen sample	Última muestra del lápiz
+	Tilt from vertical	Inclinación desde la vertical
+	Screen bearing	Dirección en pantalla
+	Waiting for pen input	Esperando entrada del lápiz
+	Samples	Muestras
+	Pen contact	Lápiz en contacto
+	No pen contact — values are retained	Sin contacto — se conservan los valores
+	Arrow: screen-projected tilt direction, not barrel rotation. Upright: no direction.	Flecha: dirección de inclinación proyectada en pantalla, no rotación del lápiz. Vertical: sin dirección.
+	Zero tilt may mean an upright pen or unavailable hardware data.	Una inclinación cero puede indicar un lápiz vertical o datos de hardware no disponibles.
+	HarmonyOS contact input does not currently report barrel rotation.	La entrada de contacto de HarmonyOS no informa actualmente de la rotación del lápiz.
+	Received	Recibido
+	Test gestures only (do not run shortcuts)	Probar solo gestos (sin ejecutar atajos)
+	No indicator means no event received, not necessarily unsupported hardware.	Sin indicador significa que no se recibió un evento, no necesariamente que el hardware no sea compatible.
+	Test area — does not change the document	Área de prueba — no modifica el documento
+	Draw here with the pen	Dibuja aquí con el lápiz
+	Reset test	Restablecer prueba
+	Readings are before the pressure curve and remain available with tablet pressure off.	Lecturas previas a la curva de presión, disponibles incluso con la presión de la tableta desactivada.
+	Eraser end	Extremo de borrador
+	Pen tip	Punta del lápiz
+	Connected	Conectado
 	Show or hide context menu	Mostrar u ocultar el menú contextual
 	Choose printer, copies and duplex in the system print dialog.	Elija impresora, copias y dúplex en el diálogo de impresión del sistema.
 	System print preview opened	Vista previa de impresión del sistema abierta

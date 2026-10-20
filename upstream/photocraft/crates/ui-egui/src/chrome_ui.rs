@@ -254,7 +254,7 @@ pub fn stylus_menu(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
             }
         }
         ui.separator();
-        ui.label(RichText::new(tl!("Long-press pen body")).color(t.text_dim));
+        ui.label(RichText::new(tl!("Squeeze pen body")).color(t.text_dim));
         for &(mode, label) in STYLUS_LONG_PRESS_OPTIONS {
             if ui.add(egui::Button::selectable(app.session.prefs().tools.stylus_long_press == mode, tl!(label))).clicked() {
                 app.session.edit_prefs(|p| p.tools.stylus_long_press = mode);
@@ -273,6 +273,11 @@ pub fn drain_stylus_gestures(app: &mut PhotocraftApp, ctx: &egui::Context) {
     }
     app.stylus.note_tool(app.ui.tool);
     let gestures = app.stylus.feed.take_gestures();
+    // Diagnostics observes counters in the feed, not this action queue. Testing must not
+    // accidentally change tools or open a canvas popup; closing the window resumes shortcuts.
+    if app.ui.stylus_debug.open && app.ui.stylus_debug.suppress_actions {
+        return;
+    }
     if gestures.is_empty() {
         return;
     }
@@ -315,7 +320,7 @@ fn apply_pen_gesture(app: &mut PhotocraftApp, ctx: &egui::Context, gesture: crat
             StylusDoubleTap::Eraser => app.stylus.toggle_eraser_tool(&mut app.ui.tool),
             StylusDoubleTap::Previous => app.stylus.switch_previous_tool(&mut app.ui.tool),
         },
-        crate::stylus::PenGesture::LongPress => {
+        crate::stylus::PenGesture::Squeeze => {
             if app.session.prefs().tools.stylus_long_press == StylusLongPress::ContextMenu {
                 toggle_canvas_context_menu(app, ctx, at);
             }
@@ -702,7 +707,7 @@ mod tests {
         assert_eq!(crate::i18n::tr(zh, "No pen connected"), "未连接笔");
         assert_eq!(crate::i18n::tr(zh, "Stylus hover preview"), "手写笔悬停预览");
         assert_eq!(crate::i18n::tr(zh, "Double-tap pen body"), "双击笔身");
-        assert_eq!(crate::i18n::tr(zh, "Long-press pen body"), "轻捏笔身");
+        assert_eq!(crate::i18n::tr(zh, "Squeeze pen body"), "轻捏笔身");
 
         let app = crate::PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
         let mut status = Harness::builder().with_size(egui::vec2(1400.0, 80.0)).build_ui_state(
@@ -786,7 +791,7 @@ mod tests {
         assert!(app.ui.brush_picker.is_none());
 
         app.session.edit_prefs(|p| p.tools.stylus_long_press = StylusLongPress::Off);
-        super::apply_pen_gesture(&mut app, &egui::Context::default(), crate::stylus::PenGesture::LongPress, [8.0, 8.0]);
+        super::apply_pen_gesture(&mut app, &egui::Context::default(), crate::stylus::PenGesture::Squeeze, [8.0, 8.0]);
         assert!(app.ui.brush_picker.is_none());
 
         app.session.edit_prefs(|p| p.tools.stylus_double_tap = StylusDoubleTap::Off);
@@ -819,7 +824,7 @@ mod tests {
         tool_event(&mut app, ToolEvent::Down { x: 90.0, y: 80.0, pressure: 1.0 }, egui::Modifiers::NONE);
         tool_event(&mut app, ToolEvent::Up { x: 90.0, y: 80.0 }, egui::Modifiers::NONE);
         let expected = ViewXform::active(&app).unwrap().to_screen(48.0, 36.0);
-        app.stylus.feed.push_gesture(PenGesture::LongPress, 1_000.0);
+        app.stylus.feed.push_gesture(PenGesture::Squeeze, 1_000.0);
         super::drain_stylus_gestures(&mut app, &egui::Context::default());
         assert_eq!(app.ui.brush_picker, Some([expected.x, expected.y]), "menu top-left is the last pen lift, not the pen press or later mouse click");
     }

@@ -4,6 +4,6 @@
   {"version":1,"type":"barrelButton","timestampMs":500,"pressed":true},
   {"version":1,"type":"barrelButton","timestampMs":550,"pressed":false},
   {"version":1,"type":"gesture","gesture":"doubleTap","timestampMs":1000},
-  {"version":1,"type":"gesture","gesture":"longPress","timestampMs":2000},
+  {"version":1,"type":"gesture","gesture":"squeeze","timestampMs":2000},
   {"version":1,"type":"pointer","source":"touch","sample":null}
 ]

@@ -3145,7 +3145,34 @@ curves	Smooth	Haluskan
 	Double-tap pen body	Ketuk dua kali badan stylus
 	Current tool and Eraser	Alat saat ini dan penghapus
 	Previous tool	Alat sebelumnya
-	Long-press pen body	Tekan lama badan stylus
+	Squeeze pen body	Remas badan stylus
+
+# Stylus diagnostics
+	Hovering	Melayang
+	Stylus Debug…	Diagnostik stylus…
+	Stylus Debug	Diagnostik stylus
+	Use a real Pad and a pen that supports tilt, double-tap and squeeze.	Gunakan tablet nyata dan pena yang mendukung kemiringan, ketuk dua kali, dan remasan.
+	No connection reported	Tidak ada koneksi yang dilaporkan
+	Latest pen sample	Sampel pena terbaru
+	Tilt from vertical	Kemiringan dari vertikal
+	Screen bearing	Arah pada layar
+	Waiting for pen input	Menunggu masukan pena
+	Samples	Sampel
+	Pen contact	Pena menyentuh
+	No pen contact — values are retained	Tidak menyentuh — nilai dipertahankan
+	Arrow: screen-projected tilt direction, not barrel rotation. Upright: no direction.	Panah: proyeksi arah kemiringan pada layar, bukan putaran pena. Tegak: tanpa arah.
+	Zero tilt may mean an upright pen or unavailable hardware data.	Kemiringan nol dapat berarti pena tegak atau data perangkat keras tidak tersedia.
+	HarmonyOS contact input does not currently report barrel rotation.	Masukan sentuh HarmonyOS saat ini tidak melaporkan putaran pena.
+	Received	Diterima
+	Test gestures only (do not run shortcuts)	Uji gestur saja (jangan jalankan pintasan)
+	No indicator means no event received, not necessarily unsupported hardware.	Tanpa indikator berarti tidak ada peristiwa diterima, bukan berarti perangkat keras pasti tidak didukung.
+	Test area — does not change the document	Area uji — tidak mengubah dokumen
+	Draw here with the pen	Gambar di sini dengan pena
+	Reset test	Atur ulang pengujian
+	Readings are before the pressure curve and remain available with tablet pressure off.	Nilai sebelum kurva tekanan, tetap tersedia saat tekanan tablet dimatikan.
+	Eraser end	Ujung penghapus
+	Pen tip	Ujung pena
+	Connected	Terhubung
 	Show or hide context menu	Tampilkan atau sembunyikan menu konteks
 	Choose printer, copies and duplex in the system print dialog.	Pilih printer, jumlah salinan dan dupleks di dialog cetak sistem.
 	System print preview opened	Pratinjau cetak sistem dibuka
