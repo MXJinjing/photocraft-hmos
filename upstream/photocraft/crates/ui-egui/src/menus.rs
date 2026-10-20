@@ -1253,6 +1253,12 @@ pub fn menu_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui, budget: f32) -> f32 
         v.widgets.inactive.bg_stroke = egui::Stroke::NONE;
         v.widgets.inactive.fg_stroke = egui::Stroke::new(1.0, t.text_dim);
         v.widgets.hovered.bg_stroke = egui::Stroke::NONE;
+        if matches!(t.kind, crate::theme::ThemeKind::ArkuiLight | crate::theme::ThemeKind::ArkuiProLight) {
+            for widget in [&mut v.widgets.hovered, &mut v.widgets.open, &mut v.widgets.active] {
+                widget.bg_fill = t.menu_hover();
+                widget.weak_bg_fill = t.menu_hover();
+            }
+        }
         egui::MenuBar::new().ui(ui, |ui| {
             // egui lays the bar out left to right; a right-to-left UI starts it at the right.
             let mut mirrored = rtl.then(|| ui.new_child(egui::UiBuilder::new().layout(crate::direction::row())));
