@@ -12,6 +12,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <set>
 #include <string>
 #include <vector>
 #include "display_color.h"
@@ -64,6 +65,7 @@ struct WinState {
     std::atomic<int32_t> touchId{-1};
     std::atomic<bool> penContact{false};
     std::atomic<bool> fingerContact{false};
+    std::set<int32_t> palmIds;
 };
 std::mutex winMutex;
 std::map<OH_NativeXComponent*,std::shared_ptr<WinState>> windows;
@@ -169,11 +171,12 @@ void SurfaceChanged(OH_NativeXComponent* c,void* window) {
 void SurfaceDestroyed(OH_NativeXComponent* c,void*) {
     auto* state=Enter(c);
     if(!state)return;
-    state->touchId=-1;state->penContact=false;state->fingerContact=false;
+    state->touchId=-1;state->penContact=false;state->fingerContact=false;state->palmIds.clear();
     if(state->key!=0){pc_win_detach(state->key);return;}
     attached=false;pc_detach();
 }
 void Touch(OH_NativeXComponent* c,void* window) {
+    constexpr double palmAreaThreshold=0.65;
     auto* state=Enter(c);
     if(!state)return;
     auto& touchId=state->touchId;auto& penContact=state->penContact;auto& fingerContact=state->fingerContact;
@@ -190,10 +193,12 @@ void Touch(OH_NativeXComponent* c,void* window) {
     if(!pen) {
         if(e.type==OH_NATIVEXCOMPONENT_CANCEL) {
             fingerContact=false;
+            state->palmIds.clear();
             if(!penContact)Json("{\"kind\":\"blur\"}");
             return;
         }
         std::string points;
+        std::set<int32_t> activeFingers;
         for(uint32_t i=0;i<e.numPoints && i<OH_NATIVE_XCOMPONENT_MAX_TOUCH_POINTS_NUMBER;++i) {
             const auto& point=e.touchPoints[i];
             OH_NativeXComponent_TouchPointToolType pointTool=OH_NATIVEXCOMPONENT_TOOL_TYPE_FINGER;
@@ -203,10 +208,26 @@ void Touch(OH_NativeXComponent* c,void* window) {
                point.type==OH_NATIVEXCOMPONENT_UP || point.type==OH_NATIVEXCOMPONENT_CANCEL ||
                (point.id==e.id && e.type==OH_NATIVEXCOMPONENT_UP) ||
                !std::isfinite(point.x) || !std::isfinite(point.y))continue;
+            activeFingers.insert(point.id);
+            // XComponent supplies a contact-area value. Some devices report zero or an
+            // unnormalized scale; leave those contacts alone until calibrated on hardware.
+            // Once a large contact is rejected, keep its ID rejected until lift: its area
+            // can shrink while the hand rolls, which must not turn it into a sidebar tap.
+            // Classify at DOWN. Removing an already accepted finger on MOVE would
+            // synthesize a release in the Rust adapter and could click the panel.
+            if(point.id==e.id && e.type==OH_NATIVEXCOMPONENT_DOWN &&
+               std::isfinite(point.size) && point.size>=palmAreaThreshold && point.size<=1.0)
+                state->palmIds.insert(point.id);
+            if(state->palmIds.count(point.id))continue;
             if(!points.empty())points+=",";
             points+="{\"id\":"+std::to_string(static_cast<uint32_t>(point.id))+",\"x\":"+std::to_string(point.x)+",\"y\":"+std::to_string(point.y)+"}";
         }
-        fingerContact=!points.empty();
+        for(auto it=state->palmIds.begin();it!=state->palmIds.end();) {
+            if(!activeFingers.count(*it))it=state->palmIds.erase(it);
+            else ++it;
+        }
+        // Keep compatibility mouse events from a resting palm out of the editor.
+        fingerContact=!activeFingers.empty();
         Json("{\"kind\":\"touch\",\"points\":["+points+"]}");
         return;
     }
@@ -300,7 +321,7 @@ void Axis(OH_NativeXComponent* c,ArkUI_UIInputEvent* event,ArkUI_UIInputEvent_Ty
 void Blur(OH_NativeXComponent* c,void*) {
     auto* state=Enter(c);
     if(!state)return;
-    state->touchId=-1;state->penContact=false;state->fingerContact=false;Json("{\"kind\":\"blur\"}");
+    state->touchId=-1;state->penContact=false;state->fingerContact=false;state->palmIds.clear();Json("{\"kind\":\"blur\"}");
 }
 void Hover(OH_NativeXComponent* c,bool isHover) {
     auto* state=Enter(c);
