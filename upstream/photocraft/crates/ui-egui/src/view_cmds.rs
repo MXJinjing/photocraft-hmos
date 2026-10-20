@@ -574,6 +574,7 @@ fn wraps(id: &str) -> bool {
             | "file.saveACopy"
             | "file.placeEmbedded"
             | "file.placeLinked"
+            | "file.import.variableDataSets"
             | "layer.smartObjects.replaceContents"
             | "layer.smartObjects.exportContents"
             | "layer.smartObjects.convertToLinked"
@@ -1216,6 +1217,19 @@ fn front(app: &mut PhotocraftApp, id: &str, params: &Value) -> Option<Result<Val
                 app.refocus(doc)?;
                 let linked = linked.then(|| name.clone());
                 app.place_bytes(&name, bytes, linked)
+            }))
+        }
+        // File › Import › Variable Data Sets…: pick a CSV (system file manager on HarmonyOS).
+        "file.import.variableDataSets" => {
+            let doc = match app.active_doc_id() {
+                Ok(doc) => doc,
+                Err(e) => return Some(Err(e)),
+            };
+            Some(app.pick_file_bytes_filtered(&["csv", "txt"], move |app, name, bytes| {
+                app.refocus(doc)?;
+                let text = String::from_utf8(bytes).map_err(|_| format!("{name} is not a CSV"))?;
+                photocraft_engine::import_data_sets_text(&mut app.session, &text, &json!({}))
+                    .map_err(|e| e.to_string())
             }))
         }
         "layer.smartObjects.replaceContents" => {

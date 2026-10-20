@@ -423,8 +423,14 @@ pub struct Services {
     pub import: Option<ImportFn>,
     /// Encode a document for a file name (format chosen by extension).
     pub export: Option<ExportFn>,
-    /// Show a single-file picker for commands that import one file (Open As, presets, scripts).
+    /// File › Open / Open As: document picker. On HarmonyOS this shows the files-vs-gallery
+    /// source chooser before the system picker.
     pub pick_open: Option<PickOpenFn>,
+    /// Import one file into an existing flow (notes, presets, scripts, plug-ins, LUTs, …).
+    /// When set, [`PhotocraftApp::pick_file_bytes`] uses this instead of [`Self::pick_open`], so
+    /// sandboxed hosts can skip the document-open source chooser and go straight to the file
+    /// manager. Absent on desktop (everything shares `pick_open`).
+    pub pick_import: Option<PickOpenFn>,
     /// Show File › Open's multi-file picker; returns the selected paths.
     pub pick_open_paths: Option<PickOpenPathsFn>,
     /// Show a "save file" dialog; returns a path/name to write.

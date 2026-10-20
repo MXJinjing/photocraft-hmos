@@ -11,7 +11,7 @@ the host capability `Services::path_pickers_only`, which only the HarmonyOS host
 
 | Field takes | Picker | Field gets |
 |---|---|---|
-| A file the command reads | `DocumentViewPicker.select` (existing `open` request, fd → bytes) | The bytes are copied into the sandbox, `filesDir/imports/`, `filesDir/plugins/` or `filesDir/icc/`; the field shows that copy's path |
+| A file the command reads | `DocumentViewPicker.select` (`import` request — no files/gallery chooser; fd → bytes) | The bytes are copied into the sandbox, `filesDir/imports/`, `filesDir/plugins/` or `filesDir/icc/`; the field shows that copy's path |
 | A folder the command reads | `folder` request (`input`) | 2in1/PC: the granted folder's path. Tablet: see below |
 | A folder the command writes | `folder` request (`output`) | 2in1/PC: the granted folder's path. Tablet: DOWNLOAD document folder (or a named subfolder) |
 | A file the command writes | `folder` request (`output`) | chosen folder + the field's current file name |
@@ -89,9 +89,14 @@ When DOWNLOAD authorization fails at startup, the same layout is created under
 The host sets `Session::authorize = sandbox_paths::gate`. Absolute paths outside `filesDir`, the
 document folder or a granted folder are refused before they run.
 
-### Open / Save
+### Open / Save / Import
 
-Unchanged: DocumentViewPicker + fd + save tokens. DOWNLOAD failure falls back to
+- **File › Open** (and Open As / homepage Open): bridge kind `open` → files-vs-gallery
+  chooser, then DocumentViewPicker or PhotoViewPicker (see `open-source-picker.md`).
+- **Import / path_pick / presets / scripts / Place…**: bridge kind `import` →
+  DocumentViewPicker only (`Services::pick_import`). No "从哪里导入" chooser.
+- Save: DocumentViewPicker + fd + save tokens. DOWNLOAD failure falls back to
+  `filesDir/Documents`. DOWNLOAD failure falls back to
 `filesDir/Documents`.
 
 ## Not covered / risks
@@ -99,3 +104,14 @@ Unchanged: DocumentViewPicker + fd + save tokens. DOWNLOAD failure falls back to
 - Rust reads/writes a granted folder by path; not yet verified on-device for FOLDER-picker grants.
 - Atomic temp+rename into DOWNLOAD may be refused (open/create only).
 - Upstream UI edits are behind `path_pickers_only`, not `cfg(ohos)`.
+
+### File › Import (and related one-shot imports)
+
+These never show a typed-path dialog on HarmonyOS; they call `pick_file_bytes` →
+`pick_import` → system file manager:
+
+- File › Import › Notes…
+- File › Import › Variable Data Sets… (CSV)
+- File › Import › Video Frames to Layers… (folder picker)
+- Edit › Presets › Export/Import Presets… (import action)
+- Scripts / Actions load, keyboard-shortcut `.kys`, swatches, gradients, Place Embedded/Linked

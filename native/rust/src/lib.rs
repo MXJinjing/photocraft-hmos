@@ -130,6 +130,13 @@ fn services(
             Err(e) if e == "cancelled" => None,
             Err(e) => Some(("file".into(), Err(e))),
         })),
+        // File › Import / presets / scripts / path_pick staging: skip the files-vs-gallery
+        // chooser and open DocumentViewPicker directly (see Index.importFile).
+        pick_import: Some(Box::new(move || match bridge::request("import", "", &[]) {
+            Ok((name, bytes)) => Some((name, Ok(bytes))),
+            Err(e) if e == "cancelled" => None,
+            Err(e) => Some(("file".into(), Err(e))),
+        })),
         always_pick_save: true,
         default_save: Some(Box::new(move |doc, source| {
             if let Some(path) = documents

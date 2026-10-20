@@ -116,6 +116,15 @@ impl PhotocraftApp {
                 FileDialogRequest::Open { multiple: true, .. } if self.services.pick_open_paths.is_some() => {
                     self.services.pick_open_paths.as_mut().and_then(|pick| pick()).map(FileDialogAnswer::Paths)
                 }
+                // Single-file imports (notes, presets, scripts, path_pick staging, …) prefer
+                // `pick_import` so HarmonyOS can open the file manager without the document
+                // "从哪里导入" source chooser that File › Open uses.
+                FileDialogRequest::Open { multiple: false, .. } if self.services.pick_import.is_some() => {
+                    match self.services.pick_import.as_mut().and_then(|pick| pick()) {
+                        Some((name, bytes)) => Some(FileDialogAnswer::Contents(name, bytes?)),
+                        None => None,
+                    }
+                }
                 FileDialogRequest::Open { .. } => match self.services.pick_open.as_mut().and_then(|pick| pick()) {
                     Some((name, bytes)) => Some(FileDialogAnswer::Contents(name, bytes?)),
                     None => None,

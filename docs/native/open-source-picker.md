@@ -39,3 +39,16 @@ Then trigger Open three ways (menu, homepage, Ctrl+O) and confirm the centered d
 appears before either system picker. Check both choices, Cancel, mask dismissal,
 and that tapping an option does not crash. Gallery path needs no extra permission
 (Picker temporary URI).
+
+## Import vs Open
+
+`pick_open` (bridge kind `open`) is only for **opening a document** (File › Open,
+homepage Open, Ctrl+O / Cmd+O, Open As). Those flows keep the centered source chooser.
+
+Every other single-file pick goes through `Services::pick_import` (bridge kind
+`import`): File › Import › Notes / Variable Data Sets, Edit › Presets › Import,
+scripts, actions (`.atn`), keyboard shortcuts (`.kys`), swatches, gradients,
+Color Lookup / Displace path fields, Install Plug-in, Place Embedded/Linked,
+Replace Contents, and the sandboxed path_pick "Choose…" for a file. Those skip
+the chooser and open `DocumentViewPicker` directly (`Index.importFile`).
+

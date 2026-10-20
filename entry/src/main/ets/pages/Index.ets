@@ -259,6 +259,7 @@ struct Index {
       }).catch((error: BusinessError) => { console.info(`Fullscreen request: ${error.code} ${error.message}`); });
     }
     else if (request.kind === 'open') { this.openFile(id); }
+    else if (request.kind === 'import') { this.importFile(id); }
     else if (request.kind === 'folder') { this.selectFolder(id, request.text === 'output'); }
     else if (request.kind === 'save_default') { this.selectSave(id, request.text, true); }
     else if (request.kind === 'save_select') { this.selectSave(id, request.text); }
@@ -315,7 +316,32 @@ struct Index {
       this.restoreEditorFocus();
     }
   }
-  private chooseOpenSource(): Promise<string> {
+  private async importFile(id: number): Promise<void> {
+    // File › Import / presets / scripts / path_pick: go straight to the file manager.
+    // Document Open keeps chooseOpenSource (files vs gallery) via openFile.
+    this.ime.stop(); this.cursor.reset();
+    let generation = this.generation;
+    try {
+      let uris = await this.selectDocumentUris();
+      if (!this.alive || generation !== this.generation || uris.length === 0) {
+        native.reply(id, false, 'cancelled', new ArrayBuffer(0)); return;
+      }
+      let file = await fileIo.open(uris[0], fileIo.OpenMode.READ_ONLY);
+      try {
+        if (!this.alive || generation !== this.generation) {
+          native.reply(id, false, 'cancelled', new ArrayBuffer(0)); return;
+        }
+        let opened = new fileUri.FileUri(uris[0]);
+        native.replyFile(id, this.documents?.owns(opened.path) ? opened.path : opened.name, file.fd);
+      } finally { await fileIo.close(file); }
+    } catch (error) {
+      let failure = error as Error;
+      native.reply(id, false, failure.message, new ArrayBuffer(0));
+    } finally {
+      this.restoreEditorFocus();
+    }
+  }
+    private chooseOpenSource(): Promise<string> {
     return new Promise<string>((resolve: (value: string) => void, reject: (reason: Error) => void) => {
       const prompt = this.getUIContext().getPromptAction();
       let source: string = '';
