@@ -2887,8 +2887,15 @@ fn start_screen(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     ui.scope_builder(egui::UiBuilder::new().max_rect(card), |ui| {
         ui.vertical_centered(|ui| {
             ui.horizontal(|ui| {
-                let title = ui.painter().layout_no_wrap(crate::brand::APP_NAME.into(), crate::theme::semibold(38.0), t.text);
+                let mut title = ui.painter().layout_no_wrap(crate::brand::APP_NAME.into(), crate::theme::semibold(38.0), t.text);
                 let by = ui.painter().layout_no_wrap(tl!("open source").into(), egui::FontId::proportional(13.0), t.text_faint);
+                // The HarmonyOS brand is longer; keep the heading from widening the card and
+                // pushing its centered buttons outside a narrow canvas.
+                let title_width = (card.width() - by.size().x - 10.0).max(1.0);
+                if title.size().x > title_width {
+                    let size = 38.0 * title_width / title.size().x;
+                    title = ui.painter().layout_no_wrap(crate::brand::APP_NAME.into(), crate::theme::semibold(size), t.text);
+                }
                 let total = title.size().x + by.size().x + 10.0;
                 ui.add_space(((card.width() - total) / 2.0).max(0.0));
                 let (r, _) = ui.allocate_exact_size(title.size(), Sense::hover());

@@ -184,7 +184,7 @@ pub fn option_keys(tool: Tool) -> &'static [&'static str] {
         Tool::Eyedropper => reset!(eyedropper_size, eyedropper_sample, eyedropper_ring),
         Tool::Brush => reset!(brush_clear),
         Tool::Pencil => reset!(pencil_auto_erase, pencil_clear),
-        Tool::Eraser => reset!(eraser_mode),
+        Tool::Eraser => reset!(eraser_mode, eraser_pressure_size, eraser_pressure_opacity),
         Tool::Remove => reset!(remove_new_layer, remove_after_each_stroke),
         Tool::BackgroundEraser => reset!(bg_sampling, bg_limits, bg_tolerance, bg_protect_fg),
         Tool::ColorReplacement => reset!(cr_mode, cr_sampling, cr_limits, cr_tolerance, cr_anti_alias),
@@ -254,6 +254,15 @@ mod tests {
         for k in listed {
             assert!(all.contains_key(k), "{k} is not a ToolOptions field");
         }
+    }
+
+    #[test]
+    fn eraser_reset_restores_its_pressure_options_without_resetting_other_tools() {
+        let mut options = ToolOptions { eraser_pressure_size: false, eraser_pressure_opacity: true, feather: 12.0, ..Default::default() };
+        reset_options(&mut options, Tool::Eraser);
+        assert!(options.eraser_pressure_size);
+        assert!(!options.eraser_pressure_opacity);
+        assert_eq!(options.feather, 12.0);
     }
 
     /// Reset Tool resets only the current tool's options; Reset All Tools asks, then resets all.
