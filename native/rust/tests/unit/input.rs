@@ -10,11 +10,16 @@ fn brush_outline(ctx: &egui::Context, output: &egui::FullOutput, pos: egui::Pos2
     if cfg!(target_env = "ohos") {
         assert!(output.platform_output.cursor_image.is_none());
     }
-    let painted = output.shapes.iter().any(|s| matches!(&s.shape,
-        egui::epaint::Shape::Circle(c) if c.center == pos && c.stroke.width > 0.));
+    let painted = output.shapes.iter().any(|s| {
+        matches!(&s.shape,
+        egui::epaint::Shape::Circle(c) if c.center == pos && c.stroke.width > 0.)
+    });
     let bitmap = ctx.input(|i| i.pointer.hover_pos() == Some(pos))
-        && output.platform_output.cursor_image.as_ref().is_some_and(|image|
-            image.rgba.chunks_exact(4).any(|pixel| pixel[3] > 0));
+        && output
+            .platform_output
+            .cursor_image
+            .as_ref()
+            .is_some_and(|image| image.rgba.chunks_exact(4).any(|pixel| pixel[3] > 0));
     painted || bitmap
 }
 
@@ -885,28 +890,28 @@ fn pen_hover_move_sets_hover_pos_without_pressing() {
 }
 
 #[test]
-fn disabled_pen_hover_hides_the_preview_until_it_is_enabled_again() {
+fn pen_hover_always_reaches_the_ui_for_tooltips() {
     let mut state = super::State::default();
     let mut events = vec![];
-    state.set_pen_hover_preview(false, &mut events);
     push_mouse(&mut state, 80., 40., &mut events);
     events.clear();
 
     push_pen(&mut state, 2, 200., 100., 0., &mut events);
-    assert!(matches!(events.as_slice(), [egui::Event::PointerGone]));
+    assert!(
+        matches!(events.as_slice(), [egui::Event::PointerMoved(p)] if *p == egui::pos2(100., 50.))
+    );
     assert_eq!(state.feed.source(), super::PointerSource::Pen);
     assert_eq!(
         state.cursor_icon(egui::CursorIcon::Crosshair),
-        egui::CursorIcon::None
+        egui::CursorIcon::Crosshair
     );
     events.clear();
 
     push_pen(&mut state, 2, 240., 120., 0., &mut events);
     assert!(
-        events.is_empty(),
-        "disabled hover must not move the egui pointer"
+        matches!(events.as_slice(), [egui::Event::PointerMoved(p)] if *p == egui::pos2(120., 60.))
     );
-    assert!(!state.set_pen_hover_preview(true, &mut events));
+    events.clear();
     push_pen(&mut state, 2, 260., 140., 0., &mut events);
     assert!(
         matches!(events.as_slice(), [egui::Event::PointerMoved(p)] if *p == egui::pos2(130., 70.))
@@ -914,14 +919,12 @@ fn disabled_pen_hover_hides_the_preview_until_it_is_enabled_again() {
 }
 
 #[test]
-fn disabling_a_visible_pen_preview_still_allows_pen_contact() {
+fn pen_hover_preserves_pen_contact() {
     let mut state = super::State::default();
     let mut events = vec![];
     push_pen(&mut state, 2, 200., 100., 0., &mut events);
     events.clear();
-    assert!(state.set_pen_hover_preview(false, &mut events));
-    assert!(matches!(events.as_slice(), [egui::Event::PointerGone]));
-    events.clear();
+
     push_pen(&mut state, 0, 200., 100., 0.7, &mut events);
     assert!(
         events
@@ -1327,9 +1330,7 @@ fn rendered_brush_outline_hides_on_lift_or_leave_and_returns_on_next_hover_or_mo
         output.textures_delta.clear();
         output
     };
-    let outline = |output: &egui::FullOutput, pos: egui::Pos2| {
-        brush_outline(&ctx, output, pos)
-    };
+    let outline = |output: &egui::FullOutput, pos: egui::Pos2| brush_outline(&ctx, output, pos);
     for _ in 0..4 {
         render(&mut app, vec![]);
     }
@@ -1799,4 +1800,38 @@ fn native_staggered_pinch_aborts_provisional_ink_and_commits_owned_ink() {
             "lifting navigation must not commit again"
         );
     }
+}
+
+#[test]
+fn pen_hover_is_forwarded_across_canvas_and_chrome() {
+    let mut state = super::State::default();
+    let mut events = vec![];
+    state.set_pen_hover_canvas(egui::Rect::from_min_max(
+        egui::pos2(50., 50.),
+        egui::pos2(500., 400.),
+    ));
+    push_pen(&mut state, 2, 40., 40., 0., &mut events);
+    assert!(
+        matches!(events.as_slice(), [egui::Event::PointerMoved(p)] if *p == egui::pos2(20., 20.))
+    );
+    events.clear();
+    push_pen(&mut state, 2, 240., 240., 0., &mut events);
+    assert!(
+        matches!(events.as_slice(), [egui::Event::PointerMoved(p)] if *p == egui::pos2(120., 120.))
+    );
+    events.clear();
+    push_pen(&mut state, 2, 42., 40., 0., &mut events);
+    assert!(
+        matches!(events.as_slice(), [egui::Event::PointerMoved(p)] if *p == egui::pos2(21., 20.))
+    );
+    events.clear();
+    push_pen(&mut state, 0, 240., 240., 0.7, &mut events);
+    push_pen(&mut state, 1, 240., 240., 0., &mut events);
+    events.clear();
+    push_pen(&mut state, 2, 44., 40., 0., &mut events);
+    assert!(
+        matches!(events.as_slice(), [egui::Event::PointerMoved(p)] if *p == egui::pos2(22., 20.)),
+        "toolbar hover must resume on the first new pen sample after lift"
+    );
+    assert_eq!(state.feed.source(), super::PointerSource::Pen);
 }

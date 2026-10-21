@@ -4381,3 +4381,8 @@ shape	Appearance	Aspetto
 # Window full screen (HarmonyOS host)
 	Enter Full Screen	Attiva schermo intero
 	Exit Full Screen	Esci da schermo intero
+
+# Icon-only toolbar controls
+	Show tools in one column	Mostra strumenti in una colonna
+	Show tools in two columns	Mostra strumenti in due colonne
+	Open the Color Picker	Apri il selettore colore

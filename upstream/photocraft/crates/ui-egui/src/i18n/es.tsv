@@ -4224,3 +4224,8 @@ navigator	Zoom	Zoom
 	Exit Full Screen	Salir de pantalla completa
 	Choose…	Elegir…
 	Import…	Importar…
+
+# Icon-only toolbar controls
+	Show tools in one column	Mostrar herramientas en una columna
+	Show tools in two columns	Mostrar herramientas en dos columnas
+	Open the Color Picker	Abrir el selector de color

@@ -3937,3 +3937,8 @@ curves	Smooth	スムーズ
 # Window full screen (HarmonyOS host)
 	Enter Full Screen	フルスクリーンにする
 	Exit Full Screen	フルスクリーンを終了
+
+# Icon-only toolbar controls
+	Show tools in one column	ツールを1列で表示
+	Show tools in two columns	ツールを2列で表示
+	Open the Color Picker	カラーピッカーを開く

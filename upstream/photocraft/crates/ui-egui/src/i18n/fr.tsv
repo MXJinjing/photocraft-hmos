@@ -3266,3 +3266,8 @@ curves	Smooth	Lisser
 # Window full screen (HarmonyOS host)
 	Enter Full Screen	Passer en plein écran
 	Exit Full Screen	Quitter le plein écran
+
+# Icon-only toolbar controls
+	Show tools in one column	Afficher les outils sur une colonne
+	Show tools in two columns	Afficher les outils sur deux colonnes
+	Open the Color Picker	Ouvrir le sélecteur de couleurs

@@ -412,7 +412,20 @@ fn sync_display_scale(app: &PhotocraftApp, ctx: &egui::Context) {
 /// rebuilds the style; that's one style read, and a write only when it differs.
 fn sync_tooltips(app: &PhotocraftApp, ctx: &egui::Context) {
     let p = app.session.prefs();
-    let delay = if p.interface.show_tooltips && p.tools.show_tooltips { crate::theme::TOOLTIP_DELAY } else { f32::INFINITY };
+    let enabled = p.interface.show_tooltips && p.tools.show_tooltips;
+    let source = app.stylus.feed.source();
+    crate::tooltips::sync(ctx, source, enabled);
+    let delay = if !enabled {
+        f32::INFINITY
+    } else if source == crate::stylus::PointerSource::Pen {
+        0.0
+    } else {
+        crate::theme::TOOLTIP_DELAY
+    };
+    let show_only_when_still = source != crate::stylus::PointerSource::Pen;
+    if ctx.global_style().interaction.show_tooltips_only_when_still != show_only_when_still {
+        ctx.global_style_mut(|style| style.interaction.show_tooltips_only_when_still = show_only_when_still);
+    }
     if ctx.global_style().interaction.tooltip_delay != delay {
         ctx.global_style_mut(|s| s.interaction.tooltip_delay = delay);
     }

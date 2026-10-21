@@ -4020,3 +4020,8 @@ curves	Smooth	Vloeiend maken
 # Window full screen (HarmonyOS host)
 	Enter Full Screen	Volledig scherm inschakelen
 	Exit Full Screen	Volledig scherm verlaten
+
+# Icon-only toolbar controls
+	Show tools in one column	Gereedschappen in één kolom tonen
+	Show tools in two columns	Gereedschappen in twee kolommen tonen
+	Open the Color Picker	Kleurkiezer openen

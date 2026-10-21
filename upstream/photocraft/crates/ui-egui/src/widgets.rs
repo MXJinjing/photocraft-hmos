@@ -217,7 +217,8 @@ fn pro_panel(
     // Panel menu (hamburger); the tabs stay left of it, eliding or overflowing (#151).
     let menu = Rect::from_center_size(pos2(strip.right() - 14.0, strip.center().y), vec2(20.0, 18.0));
     let tabs_out = crate::tab_strip::pro_tabs(ui, ui.id().with((id, "tabs")), strip, menu.left(), tabs, selected, collapsed, reorderable);
-    let mresp = ui.interact(menu, ui.id().with((id, "menu")), Sense::click());
+    let mresp = crate::tooltips::label(ui.interact(menu, ui.id().with((id, "menu")), Sense::click()), tl!("Panel menu"), true);
+    mresp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tl!("Panel menu")));
     let c = if mresp.hovered() { t.text } else { t.text_faint };
     for k in 0..3 {
         let y = menu.center().y - 3.5 + k as f32 * 3.5;
@@ -250,7 +251,7 @@ pub fn panel_menu_button(ui: &mut Ui) -> Response {
     }
     let tip = tl!("Panel menu");
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tip));
-    resp.on_hover_text(tip)
+    crate::tooltips::label(resp, tip, true)
 }
 
 pub fn pill_tab(ui: &mut Ui, label: &str, selected: bool) -> Response {
@@ -2591,10 +2592,10 @@ pub fn color_swatch_button(ui: &mut Ui, color: Color32, label: &str) -> Response
     checker_rounded(ui.painter(), rect, 4.0, t.radius_sm);
     ui.painter().rect_filled(rect.shrink(1.0), t.radius_sm, color);
     ui.painter().rect_stroke(rect, t.radius_sm, Stroke::new(1.0, t.field_border), StrokeKind::Inside);
-    response.on_hover_text(label)
+    crate::tooltips::label(response, label, true)
 }
 fn color_edit_button(ui: &mut Ui, color: &mut Color32, alpha: egui::color_picker::Alpha) -> Response {
-    let mut response = color_swatch(ui, *color);
+    let mut response = crate::tooltips::label(color_swatch(ui, *color), tl!("Open the Color Picker"), true);
     let id = response.id.with("screen-color");
     if let Some(rgb) = crate::screen_picker::take(ui.ctx(), id) {
         *color = sampled_color(rgb, *color, alpha);
@@ -2633,7 +2634,8 @@ pub fn color_edit_button_srgb(ui: &mut Ui, rgb: &mut [u8; 3]) -> Response {
 }
 /// Like egui's float RGB widget, this entry point stores linear RGB (not encoded hex values).
 pub fn color_edit_button_rgb(ui: &mut Ui, rgb: &mut [f32; 3]) -> Response {
-    let mut response = color_swatch(ui, Color32::from(egui::Rgba::from_rgb(rgb[0], rgb[1], rgb[2])));
+    let mut response =
+        crate::tooltips::label(color_swatch(ui, Color32::from(egui::Rgba::from_rgb(rgb[0], rgb[1], rgb[2]))), tl!("Open the Color Picker"), true);
     let id = response.id.with("screen-color");
     let to_linear = |color: [f32; 3]| color.map(egui::ecolor::linear_from_gamma);
     if let Some(color) = crate::screen_picker::take(ui.ctx(), id) {

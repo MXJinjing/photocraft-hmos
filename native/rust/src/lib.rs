@@ -595,7 +595,6 @@ fn worker(config: Config, rx: mpsc::Receiver<Message>) {
     let mut events = vec![];
     let mut input = input::State::default();
     input.feed = app.stylus.feed.clone();
-    input.set_pen_hover_preview(app.session.prefs().tools.stylus_hover_preview, &mut events);
     let mut ime = ime::ImeSync::default();
     let mut close = false;
     let mut chrome = chrome::ChromeSync::default();
@@ -926,12 +925,7 @@ fn worker(config: Config, rx: mpsc::Receiver<Message>) {
                         ui_pass_in_progress.set(true);
                         let mut output = editor_frame(&ctx, &mut app, raw);
                         ui_pass_in_progress.set(false);
-                        if input.set_pen_hover_preview(
-                            app.session.prefs().tools.stylus_hover_preview,
-                            &mut events,
-                        ) {
-                            deadline = Some(Instant::now());
-                        }
+                        input.set_pen_hover_canvas(app.last_canvas_rect);
                         // Child passes ran inside the root pass: collect their results, close
                         // windows the app stopped showing, and tell ArkTS.
                         let finished = registry.borrow_mut().finish_frame(&output.viewport_output);

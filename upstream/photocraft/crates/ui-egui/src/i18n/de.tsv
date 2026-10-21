@@ -3264,3 +3264,8 @@ curves	Smooth	Glätten
 	Exit Full Screen	Vollbild beenden
 	Choose…	Auswählen…
 	Import…	Importieren…
+
+# Icon-only toolbar controls
+	Show tools in one column	Werkzeuge in einer Spalte anzeigen
+	Show tools in two columns	Werkzeuge in zwei Spalten anzeigen
+	Open the Color Picker	Farbwähler öffnen

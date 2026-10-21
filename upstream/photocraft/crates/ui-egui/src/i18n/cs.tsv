@@ -3870,3 +3870,8 @@ navigator	Zoom	Zvětšení
 	Exit Full Screen	Ukončit celou obrazovku
 	Choose…	Vybrat…
 	Import…	Importovat…
+
+# Icon-only toolbar controls
+	Show tools in one column	Zobrazit nástroje v jednom sloupci
+	Show tools in two columns	Zobrazit nástroje ve dvou sloupcích
+	Open the Color Picker	Otevřít výběr barvy
