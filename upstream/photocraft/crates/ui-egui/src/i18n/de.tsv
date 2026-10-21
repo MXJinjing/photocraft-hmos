@@ -2675,6 +2675,24 @@ cameraData	Lens	Objektiv
 	Snap to Origin	An Ursprung ausrichten
 	Search settings…	Einstellungen durchsuchen…
 	No matching settings	Keine passenden Einstellungen
+# Edit › Content-Aware Fill workspace
+	Sampling Brush Tool	Aufnahmepinsel-Werkzeug
+	Sampling Area Overlay	Überlagerung des Aufnahmebereichs
+	Show Sampling Area	Aufnahmebereich einblenden
+	Indicates	Kennzeichnet
+	Sampling Area	Aufnahmebereich
+	Excluded Area	Ausgeschlossener Bereich
+	Sampling Area Options	Optionen für Aufnahmebereich
+	Rectangular	Rechteckig
+	Fill Settings	Füllungseinstellungen
+	Rotation Adaptation	Drehungsanpassung
+	Very High	Sehr hoch
+	Full	Voll
+	Mirror	Spiegeln
+	Output Settings	Ausgabeeinstellungen
+	Output To	Ausgabe in
+	Duplicate Layer	Ebene duplizieren
+	Contract	Verkleinern
 	Loading fonts…	Schriften werden geladen…
 	Response curve	Reaktionskurve
 	Tool	Werkzeug
@@ -3176,6 +3194,10 @@ curves	Smooth	Glätten
 # View › Guides › right-click a guide
 	Edit Selected Guides	Ausgewählte Hilfslinien bearbeiten
 	Clear Selected Guides	Ausgewählte Hilfslinien löschen
+	Pasting from other apps is unavailable	Einfügen aus anderen Apps ist nicht verfügbar
+	PhotoCraft can't reach the system clipboard in this session. On Wayland, a Flatpak sandbox hides the protocol that images from other apps are read through.	PhotoCraft kann in dieser Sitzung nicht auf die Systemzwischenablage zugreifen. Unter Wayland verbirgt eine Flatpak-Sandbox das Protokoll, über das Bilder aus anderen Apps gelesen werden.
+	To paste from other apps, start PhotoCraft under XWayland: `{command}`	Um aus anderen Apps einzufügen, starte PhotoCraft unter XWayland: `{command}`
+	Nothing to paste: PhotoCraft can't read the system clipboard here	Nichts einzufügen: PhotoCraft kann die Systemzwischenablage hier nicht lesen
 	Delete this set	Diesen Satz löschen
 	New Set…	Neuer Satz…
 	PhotoCraft Defaults	PhotoCraft-Standard
@@ -3190,6 +3212,7 @@ curves	Smooth	Glätten
 	There are too many sets: delete one first.	Zu viele Sätze: Löschen Sie zuerst einen.
 	set name	Name des Satzes
 	{set} (modified)	{set} (geändert)
+	Show file name in title	Dateiname im Titel anzeigen
 	Accept and Go to Conflict	Übernehmen und zum Konflikt
 	Changes undone.	Änderungen rückgängig gemacht.
 	Choose a new shortcut for this command, or leave it without one.	Wählen Sie einen neuen Kurzbefehl für diesen Befehl oder lassen Sie ihn ohne.
@@ -3212,6 +3235,16 @@ curves	Smooth	Glätten
 	GPU Memory (MB, 0 = Automatic)	GPU-Speicher (MB, 0 = Automatisch)
 	{name} was changed by another app after it was opened or saved here.	{name} wurde von einer anderen App geändert, nachdem es hier geöffnet oder gespeichert wurde.
 	Replace it with this document, or cancel and use File › Save As to keep both.	Ersetze die Datei durch dieses Dokument oder brich ab und nutze Datei › Speichern unter, um beide zu behalten.
+	Memory Usage	Speichernutzung
+	Per-document RAM limit (MB)	RAM-Limit pro Dokument (MB)
+	Installed RAM: {ram} MB; this limit: {percent}%	Installierter RAM: {ram} MB; dieses Limit: {percent}%
+	Limits each open document's pixels plus History. Oldest undo states are discarded when the limit is exceeded.	Begrenzt Pixel plus Verlauf jedes offenen Dokuments. Die ältesten Widerrufsschritte werden verworfen, wenn das Limit überschritten wird.
+	Applies immediately when saved. Memory is not reserved in advance.	Gilt sofort nach dem Speichern. Speicher wird nicht im Voraus reserviert.
+	With GPU Memory set to Automatic, this also limits the GPU layer budget. That budget is capped at one quarter of installed RAM and, when known, three eighths of the graphics card's memory, with a 512 MB minimum. Raising this limit beyond those caps does not increase the GPU budget.	Bei GPU-Speicher = Automatisch begrenzt dies auch das GPU-Ebenenbudget. Das Budget ist auf ein Viertel des RAM und, wenn bekannt, drei Achtel des Grafikspeichers begrenzt, mindestens 512 MB. Ein höheres Limit erhöht das GPU-Budget nicht.
+	Use	Verwenden
+	In Front	Davor
+	Behind	Dahinter
+	Blend	Mischen
 # HarmonyOS host additions retained during upstream sync
 	Stylus	Stift
 	Block finger input	Fingereingabe blockieren

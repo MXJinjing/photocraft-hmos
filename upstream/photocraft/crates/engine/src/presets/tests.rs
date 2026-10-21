@@ -318,6 +318,23 @@ fn gradient_new_rename_move_delete_groups() {
 }
 
 #[test]
+fn gradient_rename_group_refuses_a_name_another_group_has() {
+    let mut s = Session::new();
+    s.execute("gradient.presets.edit", json!({"action": "newGroup", "name": "Pastels"})).unwrap();
+    let names = |s: &mut Session| -> Vec<Value> {
+        s.execute("gradient.presets.list", json!({})).unwrap()["groups"].as_array().unwrap().iter().map(|g| g["name"].clone()).collect()
+    };
+    let before = names(&mut s);
+    assert!(before.contains(&json!("Blues")));
+    let err = s.execute("gradient.presets.edit", json!({"action": "renameGroup", "group": "Pastels", "name": "Blues"})).unwrap_err();
+    assert!(err.to_string().contains("already exists"), "{err}");
+    assert_eq!(names(&mut s), before, "a refused rename leaves the groups unchanged");
+    // Renaming a group to its own name is fine.
+    s.execute("gradient.presets.edit", json!({"action": "renameGroup", "group": "Pastels", "name": "Pastels"})).unwrap();
+    assert_eq!(names(&mut s), before);
+}
+
+#[test]
 fn presets_persist_through_preferences_json() {
     let mut s = Session::new();
     s.execute("gradient.presets.new", json!({"name": "Saved", "stops": [[0, "#ff0000"], [1, "#0000ff"]]})).unwrap();
@@ -773,4 +790,22 @@ fn a_damaged_preset_set_keeps_the_other_sets() {
     assert_eq!(next.presets.tool_presets.len(), Session::new().presets.tool_presets.len());
     assert_eq!(next.presets.gradients.len(), Session::new().presets.gradients.len());
     assert_eq!(next.presets.documents, s.presets.documents);
+}
+
+// ------------------------------------------------------------------ export presets
+
+#[test]
+fn export_presets_survive_a_presets_json_round_trip() {
+    let mut s = Session::new();
+    s.execute("file.export.presets.save", json!({"name": "Web", "settings": {"format": "jpg", "quality": 70}})).unwrap();
+    assert_eq!(s.presets.export_presets.len(), 1);
+
+    let saved = s.presets.to_json(&s);
+    assert_eq!(saved["export_presets"].as_array().map(Vec::len), Some(1));
+
+    let mut restored = Session::new();
+    restored.load_presets_json(saved);
+    assert_eq!(restored.presets.export_presets.len(), 1);
+    assert_eq!(restored.presets.export_presets[0].name, "Web");
+    assert_eq!(restored.presets.export_presets[0].settings.format, "jpg");
 }

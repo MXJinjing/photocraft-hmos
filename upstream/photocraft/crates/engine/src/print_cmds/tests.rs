@@ -226,6 +226,48 @@ fn printer_profile_can_be_an_installed_icc_file() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// #7410: the settings of the last print survive a relaunch, as Photoshop's do. They are kept in
+/// the preferences (without the output, dry-run and send choices), and a new session with those
+/// preferences, before printing anything, repeats them with Print One Copy.
+#[test]
+fn the_last_print_settings_survive_a_relaunch() {
+    let mut s = session("rgb", 8);
+    assert!(last_print(&s).is_none());
+    s.execute("file.print", json!({"dryRun": true, "copies": 3, "paper": "a5", "scale": 50, "intent": "perceptual"})).unwrap();
+    let kept = s.prefs().dialogs.get(REMEMBERED).cloned().expect("kept in the preferences");
+    assert_eq!((&kept["paper"], &kept["scale"], &kept["intent"]), (&json!("a5"), &json!(50), &json!("perceptual")));
+    assert!(kept.get("dryRun").is_none() && kept.get("output").is_none() && kept.get("send").is_none(), "{kept}");
+    // A relaunch: a new session with these preferences, nothing printed in it yet.
+    let mut t = session("rgb", 8);
+    t.prefs.edit(|p| {
+        p.dialogs.insert(REMEMBERED.into(), kept.clone());
+    });
+    assert_eq!(last_print(&t), Some(kept));
+    let r = t.execute("file.printOneCopy", json!({"dryRun": true})).unwrap();
+    assert_eq!(r["copies"], 1);
+    assert_eq!(r["paper"], json!([419.53, 595.28]));
+    assert_eq!(r["scale"], 50.0);
+}
+
+/// #7410: a printer remembered from an earlier session that the print server no longer lists is
+/// dropped before Print One Copy repeats the settings (with its driver settings), so the default
+/// printer takes the job; a listed one (in any case) stays, and an empty list can't tell.
+#[test]
+fn a_vanished_remembered_printer_falls_back_to_the_default() {
+    let settings = || json!({"printer": "Office", "printerSettings": "00ff", "paper": "a5"});
+    let mut q = settings();
+    drop_vanished_printer(&mut q, &["Studio", "Lab"]);
+    assert_eq!(q, json!({"paper": "a5"}), "gone: the default printer takes it");
+    for listed in [&["Studio", "office"][..], &[][..]] {
+        let mut q = settings();
+        drop_vanished_printer(&mut q, listed);
+        assert_eq!(q, settings(), "{listed:?}");
+    }
+    let mut q = json!({"printer": "", "paper": "a5"});
+    drop_vanished_printer(&mut q, &["Studio"]);
+    assert_eq!(q, json!({"printer": "", "paper": "a5"}), "the default printer stays the default");
+}
+
 #[test]
 fn print_one_copy_repeats_the_last_settings() {
     let mut s = session("rgb", 8);

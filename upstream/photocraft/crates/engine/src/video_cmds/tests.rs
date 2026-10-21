@@ -151,6 +151,39 @@ fn a_fully_transparent_animated_gif_frame_encodes() {
     assert!(f.indices.iter().all(|&i| Some(i) == f.transparent));
 }
 
+/// The GIF frame delays (centiseconds, from each Graphic Control Extension) of a Render Video.
+fn rendered_gif_delays(s: &Session) -> Vec<u16> {
+    let mut gif = Vec::new();
+    render_video_with(
+        s,
+        &json!({"format": "gif"}),
+        |_, bytes| {
+            gif = bytes.to_vec();
+            Ok(())
+        },
+        |_, _| true,
+    )
+    .unwrap();
+    gif.windows(6).filter(|w| w[..3] == [0x21, 0xF9, 0x04]).map(|w| u16::from_le_bytes([w[4], w[5]])).collect()
+}
+
+#[test]
+fn animated_gif_delay_follows_timelines_under_one_fps() {
+    // 0.5 fps is a valid timeline rate; its frames last 2 s, not the 1 s a 1 fps floor gave.
+    let mut s = session();
+    s.execute("timeline.create", json!({"duration": 2, "fps": 0.5})).unwrap();
+    assert_eq!(rendered_gif_delays(&s), [200, 200]);
+    // A loaded timeline with an unusable rate falls back to 30 fps (3 cs), as with no timeline.
+    let mut doc = (*s.active().unwrap().doc).clone();
+    doc.timeline = Some(Timeline::new(2, f32::NAN));
+    {
+        let st = s.active_mut().unwrap();
+        st.doc = std::sync::Arc::new(doc);
+        st.revision += 1;
+    }
+    assert_eq!(rendered_gif_delays(&s), [3, 3]);
+}
+
 #[test]
 fn inspect_reports_video_layer() {
     let dir = tmpdir("vinsp");
@@ -328,6 +361,32 @@ fn a_still_gif_is_one_frame_at_the_default_rate() {
     // A 0 delay is shown at 100 ms, so 10 fps.
     let id = LayerId(r["layer"].as_u64().unwrap());
     assert_eq!(s.active().unwrap().doc.layer(id).unwrap().video.as_ref().unwrap().fps, 10.0);
+}
+
+/// Interpret Footage and New Video Layer from File reject an fps that isn't a finite number in
+/// `(0, MAX_FPS]` and keep the layer as it was (#5657). 1e39 used to become an infinite rate the
+/// next `.pcraft` save refused.
+#[test]
+fn an_invalid_frame_rate_is_an_error_and_changes_nothing() {
+    let mut s = session();
+    let id = LayerId(s.execute("layer.videoLayers.newBlankVideoLayer", json!({})).unwrap()["layer"].as_u64().unwrap());
+    let fps = |s: &Session| s.active().unwrap().doc.layer(id).unwrap().video.as_ref().unwrap().fps;
+    assert_eq!(fps(&s), 30.0);
+    for bad in [json!(0), json!(-1), json!(1e39), json!("x")] {
+        assert!(s.execute("layer.videoLayers.interpretFootage", json!({"fps": bad})).is_err(), "fps {bad}");
+        assert_eq!(fps(&s), 30.0, "fps {bad}");
+    }
+    s.execute("layer.videoLayers.interpretFootage", json!({"fps": 24})).unwrap();
+    assert_eq!(fps(&s), 24.0);
+
+    let dir = tmpdir("gifin-badfps");
+    let path = format!("{dir}/anim.gif");
+    write_gif(&path, 8, 8, &[([255, 0, 0], 10), ([0, 255, 0], 10)]);
+    let layers = s.active().unwrap().doc.layer_count();
+    for bad in [json!(0), json!(-1), json!(1e39), json!("x")] {
+        assert!(s.execute("layer.videoLayers.newVideoLayerFromFile", json!({"path": path, "fps": bad})).is_err(), "fps {bad}");
+        assert_eq!(s.active().unwrap().doc.layer_count(), layers, "fps {bad}");
+    }
 }
 
 #[test]

@@ -3648,6 +3648,22 @@ cameraData	Lens	Obiektyw
 	Snap to Origin	Przyciągnij do początku
 	Search settings…	Szukaj ustawień…
 	No matching settings	Brak pasujących ustawień
+# Edit › Content-Aware Fill workspace
+	Sampling Brush Tool	Narzędzie Pędzel próbkowania
+	Sampling Area Overlay	Nakładka obszaru próbkowania
+	Show Sampling Area	Pokaż obszar próbkowania
+	Indicates	Wskazuje
+	Sampling Area	Obszar próbkowania
+	Excluded Area	Obszar wykluczony
+	Sampling Area Options	Opcje obszaru próbkowania
+	Rectangular	Prostokątny
+	Fill Settings	Ustawienia wypełnienia
+	Rotation Adaptation	Dopasowanie obrotu
+	Very High	Bardzo wysoka
+	Full	Pełna
+	Mirror	Odbicie lustrzane
+	Output Settings	Ustawienia wyjścia
+	Output To	Wyjście do
 	Loading fonts…	Wczytywanie czcionek…
 	Response curve	Krzywa odpowiedzi
 	Simulate Pressure	Symuluj nacisk
@@ -3772,6 +3788,10 @@ curves	Smooth	Wygładź
 # View › Guides › right-click a guide
 	Edit Selected Guides	Edytuj zaznaczone prowadnice
 	Clear Selected Guides	Usuń zaznaczone prowadnice
+	Pasting from other apps is unavailable	Wklejanie z innych aplikacji jest niedostępne
+	PhotoCraft can't reach the system clipboard in this session. On Wayland, a Flatpak sandbox hides the protocol that images from other apps are read through.	PhotoCraft nie ma w tej sesji dostępu do schowka systemowego. W Waylandzie piaskownica Flatpaka ukrywa protokół, przez który odczytywane są obrazy z innych aplikacji.
+	To paste from other apps, start PhotoCraft under XWayland: `{command}`	Aby wklejać z innych aplikacji, uruchom PhotoCraft pod XWaylandem: `{command}`
+	Nothing to paste: PhotoCraft can't read the system clipboard here	Nie ma czego wkleić: PhotoCraft nie może tutaj odczytać schowka systemowego
 	Delete this set	Usuń ten zestaw
 	New Set…	Nowy zestaw…
 	PhotoCraft Defaults	Domyślne PhotoCraft
@@ -3786,6 +3806,7 @@ curves	Smooth	Wygładź
 	There are too many sets: delete one first.	Zestawów jest za dużo: najpierw usuń jeden.
 	set name	nazwa zestawu
 	{set} (modified)	{set} (zmieniony)
+	Show file name in title	Pokaż nazwę pliku w tytule
 	Accept and Go to Conflict	Akceptuj i przejdź do konfliktu
 	Changes undone.	Zmiany cofnięte.
 	Choose a new shortcut for this command, or leave it without one.	Wybierz nowy skrót dla tego polecenia lub zostaw je bez skrótu.
@@ -3809,6 +3830,19 @@ curves	Smooth	Wygładź
 	Replace	Zastąp
 	{name} was changed by another app after it was opened or saved here.	Plik {name} został zmieniony przez inną aplikację po otwarciu lub zapisaniu go tutaj.
 	Replace it with this document, or cancel and use File › Save As to keep both.	Zastąp go tym dokumentem albo anuluj i użyj Plik › Zapisz jako, aby zachować oba.
+	Decrease Brush Size	Zmniejsz rozmiar pędzla
+	Increase Brush Size	Zwiększ rozmiar pędzla
+	Decrease Brush Hardness	Zmniejsz twardość pędzla
+	Increase Brush Hardness	Zwiększ twardość pędzla
+	Memory Usage	Użycie pamięci
+	Per-document RAM limit (MB)	Limit RAM na dokument (MB)
+	Installed RAM: {ram} MB; this limit: {percent}%	Zainstalowany RAM: {ram} MB; ten limit: {percent}%
+	Limits each open document's pixels plus History. Oldest undo states are discarded when the limit is exceeded.	Ogranicza piksele plus Historię każdego otwartego dokumentu. Najstarsze stany cofania są usuwane po przekroczeniu limitu.
+	Applies immediately when saved. Memory is not reserved in advance.	Obowiązuje zaraz po zapisaniu. Pamięć nie jest rezerwowana z góry.
+	With GPU Memory set to Automatic, this also limits the GPU layer budget. That budget is capped at one quarter of installed RAM and, when known, three eighths of the graphics card's memory, with a 512 MB minimum. Raising this limit beyond those caps does not increase the GPU budget.	Przy pamięci GPU = Automatycznie ogranicza też budżet GPU. Limit to 1/4 RAM i, jeśli znane, 3/8 pamięci karty, minimum 512 MB. Wyższy limit nie zwiększa budżetu GPU.
+	Use	Użyj
+	In Front	Z przodu
+	Behind	Z tyłu
 # HarmonyOS host additions retained during upstream sync
 	Double-tap pen body	Dwukrotne stuknięcie w korpus pióra
 	Current tool and Eraser	Bieżące narzędzie i Gumka

@@ -43,6 +43,11 @@ roxmltree = "0.20"
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 tempfile = "3"
 
+# `file_cmds::same_file` on Windows: the volume serial number and file index, so a hard link to a
+# file is that file (std's `MetadataExt::file_index` is unstable).
+[target.'cfg(windows)'.dependencies]
+same-file = "1"
+
 # Printing on Unix: an IPP client for CUPS (pure Rust); the web build cannot print.
 [target.'cfg(all(not(target_arch = "wasm32"), not(target_os = "windows")))'.dependencies]
 photocraft-ipp = { workspace = true }

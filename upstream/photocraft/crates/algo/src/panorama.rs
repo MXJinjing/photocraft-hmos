@@ -1170,10 +1170,28 @@ fn band_row(band: &PyramidBand, l: usize, ch: usize, py: usize) -> Option<(usize
     })
 }
 
+/// Estimated bytes of band construction [`multiband`] keeps in flight at once. Images are built
+/// and accumulated in batches under it, so its peak memory doesn't grow with the image count
+/// (#7758). Four 24 MP RGB sources (~1.2 GB each) fit in one batch: building bands side by side
+/// uses a many-core machine better than one band's row-parallel work, and one at a time made the
+/// usual 2–4 image Photomerge 12–36% slower on a 32-thread desktop.
+#[cfg(not(target_arch = "wasm32"))]
+const BAND_BUDGET: usize = 5 << 30;
+/// Without threads the bands of a batch are built one after another anyway, so each is added as
+/// soon as it is built (the browser's address space is 4 GB).
+#[cfg(target_arch = "wasm32")]
+const BAND_BUDGET: usize = 0;
+
 /// Multi-band blend of `imgs` into a `w × h` panorama (origin 0,0) with one weight map per image
 /// over the same grid as its ROI (`weights[i]` has `w_i × h_i` entries). Returns the colour
 /// channels (`ch` per pixel) and the total coverage.
 pub fn multiband(w: usize, h: usize, imgs: &[RoiImage], weights: &[Vec<f32>], levels: usize) -> (Vec<f32>, Vec<f32>) {
+    multiband_batched(w, h, imgs, weights, levels, BAND_BUDGET)
+}
+
+/// [`multiband`], building at most `budget` estimated bytes of bands at a time (at least one
+/// image). Each pixel still adds the bands in image order, so the result doesn't depend on it.
+fn multiband_batched(w: usize, h: usize, imgs: &[RoiImage], weights: &[Vec<f32>], levels: usize, budget: usize) -> (Vec<f32>, Vec<f32>) {
     let ch = imgs.first().map_or(1, |i| i.ch);
     let levels = levels.max(1);
     let align = 1i32 << (levels - 1);
@@ -1187,13 +1205,22 @@ pub fn multiband(w: usize, h: usize, imgs: &[RoiImage], weights: &[Vec<f32>], le
     let mut wsum: Vec<Vec<f32>> = sizes.iter().map(|&(lw, lh)| vec![0.0; lw * lh]).collect();
     let margin = align * 4;
     // Each image on its ROI grown by a margin and aligned to the coarsest level's grid.
-    let bands = par_map(imgs.len(), |k| {
-        let im = &imgs[k];
+    let grid = |im: &RoiImage| {
         let gx0 = ((im.x0 - margin).max(0) / align) * align;
         let gy0 = ((im.y0 - margin).max(0) / align) * align;
         let gx1 = (im.x0 + im.w as i32 + margin).min(w as i32);
         let gy1 = (im.y0 + im.h as i32 + margin).min(h as i32);
-        let (gw, gh) = ((gx1 - gx0).max(1) as usize, (gy1 - gy0).max(1) as usize);
+        (gx0, gy0, (gx1 - gx0).max(1) as usize, (gy1 - gy0).max(1) as usize)
+    };
+    // Building one band holds its grid's colour and weight planes about three times over: the
+    // pyramids are 4/3 of a plane, and the grid copy, coverage and `expand` scratch come on top.
+    let cost = |im: &RoiImage| {
+        let (_, _, gw, gh) = grid(im);
+        gw.saturating_mul(gh).saturating_mul(ch + 1).saturating_mul(4 * 3)
+    };
+    let band = |k: usize| -> PyramidBand {
+        let im = &imgs[k];
+        let (gx0, gy0, gw, gh) = grid(im);
         // Each grid pixel takes the image pixel that lands on it (every image pixel lands on at
         // most one), so rows of the grid are independent and fill in parallel.
         let src_of = |gx: usize, gy: usize| -> Option<usize> {
@@ -1225,68 +1252,85 @@ pub fn multiband(w: usize, h: usize, imgs: &[RoiImage], weights: &[Vec<f32>], le
             }
         });
         let bin: Vec<f32> = par_map1(&cov, |a| if a > 0.5 { 1.0 } else { 0.0 });
+        drop(cov);
         push_pull(gw, gh, ch, &mut px, &bin);
-        // Laplacian of the colours, Gaussian of the weights.
+        drop(bin);
+        // Laplacian of the colours, Gaussian of the weights. Planes move into the pyramids rather
+        // than being copied: with one image built at a time, a copy is a serial pass over it.
         let mut lap: Vec<(usize, usize, Vec<f32>)> = Vec::new();
         let mut gau: Vec<Vec<f32>> = Vec::new();
         let (mut cw, mut chh, mut cur, mut cwt) = (gw, gh, px, wt);
         for l in 0..levels {
             if l + 1 == levels {
-                lap.push((cw, chh, cur.clone()));
-                gau.push(cwt.clone());
+                lap.push((cw, chh, cur));
+                gau.push(cwt);
                 break;
             }
             let (nw, nh, down) = reduce(cw, chh, ch, &cur);
             let up = expand(nw, nh, ch, &down, cw, chh);
             lap.push((cw, chh, par_zip(&cur, &up, |a, b| a - b)));
-            gau.push(cwt.clone());
             let (_, _, wdown) = reduce(cw, chh, 1, &cwt);
+            gau.push(cwt);
             cw = nw;
             chh = nh;
             cur = down;
             cwt = wdown;
         }
         (gx0, gy0, lap, gau)
-    });
-    // Accumulate the bands. Each pixel adds the bands in the same order as the serial loop (per
-    // level, bands one after another), but rows of a level are independent, so they run in
-    // parallel: every row walks the bands itself.
-    for l in 0..levels {
-        let pw = sizes[l].0;
-        par_rows(&mut wsum[l], pw, 1, |py, row| {
-            for b in &bands {
-                let Some((ox, lw, g, _)) = band_row(b, l, ch, py) else { continue };
-                for x in 0..lw {
-                    let px = ox + x;
-                    if px >= pw {
-                        break;
-                    }
-                    let k = g[x];
-                    if k <= 0.0 {
-                        continue;
-                    }
-                    row[px] += k;
-                }
-            }
-        });
-        par_rows(&mut acc[l], pw, ch, |py, row| {
-            for b in &bands {
-                let Some((ox, lw, g, band)) = band_row(b, l, ch, py) else { continue };
-                for x in 0..lw {
-                    let px = ox + x;
-                    if px >= pw {
-                        break;
-                    }
-                    let k = g[x];
-                    if k <= 0.0 {
-                        continue;
-                    }
-                    for c in 0..ch {
-                        row[px * ch + c] += k * band[x * ch + c];
+    };
+    // Build the bands a batch at a time and add each batch before building the next. Each pixel
+    // adds the bands in the same order as the serial loop (per level, bands one after another;
+    // batches follow each other in image order), but rows of a level are independent, so they
+    // run in parallel: every row walks the batch's bands itself.
+    let mut start = 0;
+    while start < imgs.len() {
+        let mut end = start + 1;
+        let mut bytes = cost(&imgs[start]);
+        while let Some(im) = imgs.get(end)
+            && bytes.saturating_add(cost(im)) <= budget
+        {
+            bytes = bytes.saturating_add(cost(im));
+            end += 1;
+        }
+        let bands = par_map(end - start, |j| band(start + j));
+        for l in 0..levels {
+            let pw = sizes[l].0;
+            par_rows(&mut wsum[l], pw, 1, |py, row| {
+                for b in &bands {
+                    let Some((ox, lw, g, _)) = band_row(b, l, ch, py) else { continue };
+                    for x in 0..lw {
+                        let px = ox + x;
+                        if px >= pw {
+                            break;
+                        }
+                        let k = g[x];
+                        if k <= 0.0 {
+                            continue;
+                        }
+                        row[px] += k;
                     }
                 }
-            }
-        });
+            });
+            par_rows(&mut acc[l], pw, ch, |py, row| {
+                for b in &bands {
+                    let Some((ox, lw, g, band)) = band_row(b, l, ch, py) else { continue };
+                    for x in 0..lw {
+                        let px = ox + x;
+                        if px >= pw {
+                            break;
+                        }
+                        let k = g[x];
+                        if k <= 0.0 {
+                            continue;
+                        }
+                        for c in 0..ch {
+                            row[px * ch + c] += k * band[x * ch + c];
+                        }
+                    }
+                }
+            });
+        }
+        start = end;
     }
     for l in 0..levels {
         let pw = sizes[l].0;
@@ -1908,6 +1952,28 @@ mod parallel_tests {
         }
         // No images at all, and zero levels.
         assert_eq!(multiband(9, 7, &[], &[], 3).0.len(), ref_multiband(9, 7, &[], &[], 3).0.len());
+    }
+
+    /// Batching the bands (#7758) changes when they are built, not the result. Budgets from none
+    /// (one image per batch) up to everything in steps of a fifth pass through every split of the
+    /// three images.
+    #[test]
+    fn multiband_batches_match_the_serial_code() {
+        let budgets: Vec<usize> =
+            std::iter::successors(Some(1024.0f64), |b| Some(b * 1.2)).take_while(|b| *b < 4e6).map(|b| b as usize).chain([0, usize::MAX]).collect();
+        for (n, &(w, h)) in [(40usize, 30usize), (97, 61), (201, 129)].iter().enumerate() {
+            for ch in [1usize, 3] {
+                let (imgs, wts) = rois(w, h, ch, n as u64 * 17 + ch as u64);
+                for levels in [1usize, 3, 5] {
+                    let want = ref_multiband(w, h, &imgs, &wts, levels);
+                    for &budget in &budgets {
+                        let got = multiband_batched(w, h, &imgs, &wts, levels, budget);
+                        assert_eq!(bits(&got.0), bits(&want.0), "colours {w}x{h}x{ch} levels {levels} budget {budget}");
+                        assert_eq!(bits(&got.1), bits(&want.1), "coverage {w}x{h}x{ch} levels {levels} budget {budget}");
+                    }
+                }
+            }
+        }
     }
 
     /// Hashes recorded from the code before it was made parallel (plain f32 arithmetic only, so

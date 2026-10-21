@@ -443,7 +443,7 @@ fn options_editor(app: &mut PhotocraftApp, ui: &mut egui::Ui, paragraph: bool, s
                 (tl!("Indent Right"), "end_indent_pt", "pt"),
                 (tl!("Space Before"), "space_before_pt", "pt"),
                 (tl!("Space After"), "space_after_pt", "pt"),
-                (tl!("Hyphenate"), "hyphenate", "bool"),
+                // Hyphenate is stored and round-trips to PSD, but layout never hyphenates (#6710).
             ];
             for &(label, key, kind) in rows {
                 let mut on = defined(&para_attrs, key);
@@ -968,5 +968,26 @@ mod tests {
         h.run_steps(2);
         assert!(h.state().ui.type_panels.spell.is_none(), "the × closed Check Spelling");
         assert_eq!(h.state().session.active().unwrap().revision, revision, "and changed nothing");
+    }
+
+    #[test]
+    fn hyphenate_is_not_shown_in_paragraph_style_options() {
+        // #6710: layout never hyphenates; the style editor must not advertise it.
+        use egui_kittest::kittest::Queryable;
+        let mut app = app_with_text("Hi");
+        app.ui.type_panels.styles = true;
+        app.ui.type_panels.styles_tab = 1;
+        app.ui.type_panels.options = Some((true, 0));
+        let mut h = egui_kittest::Harness::builder().with_size(vec2(1000.0, 700.0)).build_ui_state(
+            |ui, app| {
+                if ui.ctx().fonts(|f| f.families().contains(&egui::FontFamily::Name("medium".into()))) {
+                    windows(app, ui.ctx());
+                }
+            },
+            app,
+        );
+        PhotocraftApp::setup_context(&h.ctx, Default::default());
+        h.run_steps(4);
+        assert!(h.query_by_label("Hyphenate").is_none());
     }
 }

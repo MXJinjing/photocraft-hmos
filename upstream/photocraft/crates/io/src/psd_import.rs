@@ -686,7 +686,7 @@ fn write_rgba8(s: &mut Surface, canvas: Rect, data: &[u8]) {
     }
 }
 
-fn parse_guides(data: &[u8], doc: &mut Document) {
+pub(crate) fn parse_guides(data: &[u8], doc: &mut Document) {
     let rd = |at: usize| data.get(at..at + 4).map(|b| u32::from_be_bytes([b[0], b[1], b[2], b[3]]));
     let Some(count) = rd(12) else { return };
     for i in 0..count as usize {
@@ -836,6 +836,7 @@ pub(crate) fn psd_to_document_decoded(
             id => doc.metadata.psd_resources.push((id, String::from_utf8_lossy(&r.name).into_owned(), Arc::new(r.data.clone()))),
         }
     }
+    crate::guides_map::apply_colors(&mut doc);
     for b in &file.global_blocks {
         doc.metadata.psd_global_blocks.push((b.signature, b.key, Arc::new(b.data.clone())));
     }

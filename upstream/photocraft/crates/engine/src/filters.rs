@@ -292,6 +292,11 @@ pub(crate) fn run_filter(s: &mut Session, id: &str, p: &Value) -> Result<Value> 
             let surf = match &mut l.content {
                 LayerContent::Raster(surf) => surf,
                 LayerContent::Smart(_) => {
+                    // A smart filter re-renders from its params alone, without the document's
+                    // channels, so Lens Blur's alpha-channel depth would be lost (#7400).
+                    if matches!(fp, FilterParams::LensBlur { depth: algo::DepthSource::Channel, .. }) {
+                        return Err(EngineError::Other("Lens Blur can't read an alpha channel as depth on a Smart Object: rasterize the layer first".into()));
+                    }
                     // Non-destructive: record the filter and re-render the smart object from its source.
                     let sf =
                         SmartFilter { command: id.clone(), params: params.clone(), blend: photocraft_color::BlendMode::Normal, opacity: 1.0, visible: true };
@@ -313,7 +318,7 @@ pub(crate) fn run_filter(s: &mut Session, id: &str, p: &Value) -> Result<Value> 
 }
 
 /// Lock transparency: put the layer's alpha back after a filter, in the tiles it changed.
-fn keep_alpha(old: &photocraft_raster::Surface, new: &mut photocraft_raster::Surface) {
+pub(crate) fn keep_alpha(old: &photocraft_raster::Surface, new: &mut photocraft_raster::Surface) {
     if old.format() != new.format() || !new.format().alpha {
         return;
     }

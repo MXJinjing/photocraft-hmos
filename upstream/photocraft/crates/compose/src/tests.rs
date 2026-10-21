@@ -1082,6 +1082,34 @@ fn glow_gradient_follows_the_shape() {
     assert!(edge[0] > 0.8 && edge[2] < 0.2, "{edge:?}");
 }
 
+// A Gradient Overlay spans the layer's frame: growing the layer repaints all of it, not just the
+// new pixels (#4053). Effects that don't depend on the frame repaint only what changed.
+#[test]
+fn relayout_damage_covers_a_layer_whose_gradient_frame_moved() {
+    let overlay = Effect::GradientOverlay { common: FxCommon::new(photocraft_color::BlendMode::Normal, 1.0), gradient: Gradient::default(), dither: false };
+    let grown = |a: &Document, rect: Rect, rgba: [f32; 4]| {
+        let mut b = a.clone();
+        let old = b.layers.last().unwrap().clone();
+        let mut l = solid_layer("sq", rect, rgba);
+        (l.id, l.effects) = (old.id, old.effects);
+        *b.layers.last_mut().unwrap() = l;
+        b
+    };
+    let a = fx_doc(vec![overlay.clone()]);
+    let b = grown(&a, Rect::new(10, 10, 36, 34), [1.0, 0.0, 0.0, 1.0]);
+    let d = crate::relayout_damage(&a, &b);
+    assert!(d.contains_rect(&Rect::new(10, 10, 36, 34)), "{d:?}");
+    // Same bounds, other pixels: the frame stays, the pixels' own damage is enough.
+    assert_eq!(crate::relayout_damage(&a, &grown(&a, Rect::new(10, 10, 30, 30), [0.0, 1.0, 0.0, 1.0])), Rect::EMPTY);
+    // A Color Overlay doesn't depend on the frame.
+    let c = fx_doc(vec![Effect::ColorOverlay { common: FxCommon::new(photocraft_color::BlendMode::Normal, 1.0), color: Color::BLACK }]);
+    assert_eq!(crate::relayout_damage(&c, &grown(&c, Rect::new(10, 10, 36, 34), [1.0, 0.0, 0.0, 1.0])), Rect::EMPTY);
+    // Nor does a disabled overlay.
+    let mut off = a.clone();
+    off.layers.last_mut().unwrap().effects.enabled = false;
+    assert_eq!(crate::relayout_damage(&off, &grown(&off, Rect::new(10, 10, 36, 34), [1.0, 0.0, 0.0, 1.0])), Rect::EMPTY);
+}
+
 #[test]
 fn gradient_overlay_follows_angle_and_reverse() {
     let g = Gradient { stops: vec![(0.0, Color::BLACK), (1.0, Color::WHITE)], angle: 0.0, ..Gradient::default() };

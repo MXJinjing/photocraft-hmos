@@ -42,6 +42,7 @@ mod fx;
 pub mod health;
 pub mod plan;
 mod prefix;
+pub mod timing;
 
 use std::collections::HashMap;
 use std::num::NonZeroU64;
@@ -55,6 +56,7 @@ use photocraft_raster::{Surface, Tile};
 
 pub use health::{DeviceHealth, Fault};
 pub use plan::{Kernel, Plan, Role, Unsupported, plan};
+pub use timing::{GpuTimer, GpuTiming};
 
 /// Accumulator format for intermediate buffers. Full float: discontinuous operations
 /// (Posterize, Threshold, Hard Mix, Dissolve) must land on the same side of their thresholds as
@@ -107,6 +109,12 @@ pub struct ChunkOut<'a> {
 /// What a render did (for profiling and tests).
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Stats {
+    /// How long the GPU spent executing a composite, once its timestamps came back. Because the
+    /// readback is asynchronous this belongs to an *earlier* render than the one returning it
+    /// (it carries that render's own pixel count, so the two are never confused), and it is
+    /// `None` unless [`Compositor::measure_gpu_time`] is on and a measurement has landed.
+    /// Always `None` from [`Compositor::encode`], which submits nothing of its own.
+    pub gpu_time: Option<timing::GpuTiming>,
     pub passes: usize,
     pub chunks: usize,
     pub slots: u32,
@@ -143,7 +151,9 @@ enum TexKind {
     Rgba16F,
     /// GRAY8 masks copied verbatim.
     R8Direct,
-    /// Other masks as R32F.
+    /// 16-bit masks as R16F (the precision 16-bit pixels get as RGBA16F).
+    R16F,
+    /// 32-bit masks as R32F.
     R32F,
 }
 
@@ -154,7 +164,8 @@ impl TexKind {
             Role::Content | Role::Stroke if f.sample == SampleType::U8 => TexKind::Rgba8,
             Role::Content | Role::Stroke => TexKind::Rgba16F,
             Role::Mask if f == PixelFormat::GRAY8 => TexKind::R8Direct,
-            Role::Mask => TexKind::R32F,
+            Role::Mask if f.sample == SampleType::F32 => TexKind::R32F,
+            Role::Mask => TexKind::R16F,
         }
     }
     fn format(self) -> wgpu::TextureFormat {
@@ -162,6 +173,7 @@ impl TexKind {
             TexKind::Rgba8Direct | TexKind::Rgba8 => wgpu::TextureFormat::Rgba8Unorm,
             TexKind::Rgba16F => wgpu::TextureFormat::Rgba16Float,
             TexKind::R8Direct => wgpu::TextureFormat::R8Unorm,
+            TexKind::R16F => wgpu::TextureFormat::R16Float,
             TexKind::R32F => wgpu::TextureFormat::R32Float,
         }
     }
@@ -170,6 +182,7 @@ impl TexKind {
             TexKind::Rgba8Direct | TexKind::Rgba8 => 4,
             TexKind::Rgba16F => 8,
             TexKind::R8Direct => 1,
+            TexKind::R16F => 2,
             TexKind::R32F => 4,
         }
     }
@@ -469,6 +482,9 @@ pub struct Compositor {
     cmyk: u64,
     /// The device's health (see [`Compositor::set_health`]); `None` = assumed healthy.
     health: Option<DeviceHealth>,
+    /// Timestamp queries measuring how long the GPU spends on a refresh (see
+    /// [`Compositor::measure_gpu_time`]); `None` = not measured.
+    timer: Option<timing::GpuTimer>,
 }
 
 fn tex_entry(binding: u32) -> wgpu::BindGroupLayoutEntry {
@@ -704,6 +720,7 @@ impl Compositor {
             effect_maps: map_error.is_none(),
             cmyk: 0,
             health: None,
+            timer: None,
         }
         .with_texture_limit(device.limits().max_texture_dimension_2d)
     }
@@ -956,6 +973,41 @@ impl Compositor {
         self.health.as_ref().and_then(DeviceHealth::fault)
     }
 
+    /// Measure how long the GPU spends executing each [`Compositor::render`], with timestamp
+    /// queries read back asynchronously (nothing waits for the GPU). Returns whether the device
+    /// supports it: without [`timing::FEATURES`] there is no measurement at all, and callers
+    /// report no GPU time rather than the encode-and-submit cost `composite_ms` already is.
+    ///
+    /// A measurement arrives a frame or two after the refresh it belongs to, so it carries that
+    /// refresh's own pixel count; take it with [`Compositor::take_gpu_timing`].
+    pub fn measure_gpu_time(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) -> bool {
+        // `PHOTOCRAFT_NO_GPU_TIMING` turns it off: a kill switch for a driver whose timestamp
+        // queries misbehave, and the control arm for measuring what the queries themselves
+        // cost — the device is identical either way, so only the instrumentation varies.
+        if std::env::var_os("PHOTOCRAFT_NO_GPU_TIMING").is_some() {
+            return false;
+        }
+        if self.timer.is_none() {
+            self.timer = timing::GpuTimer::new(device, queue);
+        }
+        self.timer.is_some()
+    }
+
+    /// Whether [`Compositor::measure_gpu_time`] is on for this compositor.
+    pub fn measures_gpu_time(&self) -> bool {
+        self.timer.is_some()
+    }
+
+    /// The most recent finished GPU measurement, leaving none behind (a stale number is never
+    /// reported twice as new). `None` while unmeasured, unsupported, or still in flight.
+    ///
+    /// [`Compositor::render`] already drains this into [`Stats::gpu_time`], so the app never
+    /// calls it; it is how a bench or a test collects a measurement without issuing another
+    /// render to carry it.
+    pub fn take_gpu_timing(&mut self) -> Option<timing::GpuTiming> {
+        self.timer.as_mut().and_then(timing::GpuTimer::take)
+    }
+
     /// Composite `region` of `doc`. Each finished chunk is passed to `sink` while its encoder is
     /// still open; the chunk texture is reused afterwards, so the sink must record any copies
     /// or passes that read it into the given encoder. Submits the work before returning; a
@@ -971,8 +1023,47 @@ impl Compositor {
     ) -> Result<Stats, Unsupported> {
         let result = scoped_work(device, self.health.is_some(), || {
             let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("pc_compose") });
-            let stats = self.encode_inner(device, queue, &mut encoder, doc, region, &mut sink, true)?;
+            if self.timer.as_ref().is_some_and(timing::GpuTimer::busy) {
+                // The readback map completes on a poll. The app polls every frame, but a
+                // non-blocking poll here keeps the measurements coming whatever the caller does.
+                match &self.health {
+                    Some(h) => h.poll(device),
+                    None => {
+                        let _ = device.poll(wgpu::PollType::Poll);
+                    }
+                }
+            }
+            // Whatever came back since the last render travels out with this one's stats, so
+            // nothing has to reach back into the compositor for it afterwards.
+            let landed = self.timer.as_mut().and_then(timing::GpuTimer::take);
+            if let Some(t) = &mut self.timer {
+                let r = region.intersect(&doc.bounds());
+                t.start(&mut encoder, r.width() as u64 * r.height() as u64);
+            }
+            let mut stats = self.encode_inner(device, queue, &mut encoder, doc, region, &mut sink, true);
+            if let Ok(s) = &mut stats {
+                s.gpu_time = landed;
+            }
+            if let Some(t) = &mut self.timer {
+                // A refresh that failed part way measures nothing: its spans describe work the
+                // caller is about to redo on the CPU.
+                match stats {
+                    Ok(_) => t.finish(&mut encoder),
+                    Err(_) => {
+                        t.cancel();
+                        // The refresh is lost, but a measurement that came back with it is not:
+                        // hand it to the next render rather than drop it on the fallback path.
+                        if let Some(landed) = landed {
+                            t.restore(landed);
+                        }
+                    }
+                }
+            }
+            let stats = stats?;
             queue.submit([encoder.finish()]);
+            if let Some(t) = &mut self.timer {
+                t.submitted();
+            }
             Ok(stats)
         });
         if result.is_err() {
@@ -1078,7 +1169,7 @@ impl Compositor {
         let aprons: Vec<i32> = plan.fx.iter().zip(&paged).map(|(f, &pg)| if pg { Self::fx_apron(doc, f) } else { 0 }).collect();
         for (f, &pg) in plan.fx.iter().zip(&paged) {
             if !pg {
-                self.sync_fx(device, queue, encoder, doc, f, (f.layer.id, None), f.region, &mut stats);
+                self.sync_fx(device, queue, encoder, doc, f, (f.layer.id, None), f.region, &mut stats)?;
             }
         }
         let fr = self.frame_res(device, queue, canvas, &plan);
@@ -1109,7 +1200,7 @@ impl Compositor {
                     continue;
                 }
                 let window = pf.inflate(aprons.get(i).copied().unwrap_or(0)).intersect(&f.region);
-                self.sync_fx(device, queue, encoder, doc, f, (f.layer.id, Some(cell)), window, &mut stats);
+                self.sync_fx(device, queue, encoder, doc, f, (f.layer.id, Some(cell)), window, &mut stats)?;
             }
             let chunks = grid_rects(part, self.chunk);
             stats.chunks += chunks.len();
@@ -1124,7 +1215,7 @@ impl Compositor {
             stats.evicted += evicted;
             freed += bytes;
             if flush && (self.staged >= flush_bytes || work >= FLUSH_WORK || freed >= flush_bytes || self.recorded >= FLUSH_OPS) {
-                submit_batch(device, queue, encoder, self.health.as_ref(), &mut last_submit);
+                submit_batch(device, queue, encoder, self.health.as_ref(), self.timer.as_mut(), &mut last_submit);
                 self.staged = 0;
                 self.recorded = 0;
                 work = 0;
@@ -1399,7 +1490,7 @@ impl Compositor {
                 if self.recorded >= FLUSH_OPS
                     && let Some(last) = batch.as_deref_mut()
                 {
-                    submit_batch(device, queue, encoder, self.health.as_ref(), last);
+                    submit_batch(device, queue, encoder, self.health.as_ref(), self.timer.as_mut(), last);
                     self.staged = 0;
                     self.recorded = 0;
                     stats.flushes += 1;
@@ -1720,7 +1811,7 @@ impl Compositor {
         key: FxKey,
         region: Rect,
         stats: &mut Stats,
-    ) {
+    ) -> Result<(), Unsupported> {
         let layer = f.layer;
         let canvas = doc.bounds();
         let is_group = matches!(layer.content, LayerContent::Group(_));
@@ -1791,13 +1882,13 @@ impl Compositor {
         }
         // Present: kept or (re)inserted above.
         let stamp = self.stamp;
-        let Some(e) = self.fx.get_mut(&key) else { return };
+        let Some(e) = self.fx.get_mut(&key) else { return Ok(()) };
         e.last_used = frame;
         e.stamp = stamp;
         e.doc = doc.id;
         e.tiles = [content_src.map(fx::snapshot), mask_src.map(fx::snapshot)];
         if region.is_empty() {
-            return;
+            return Ok(());
         }
 
         let t_trace = web_time_now();
@@ -1819,27 +1910,41 @@ impl Compositor {
             layer.effects.items.iter().filter(|e| e.enabled()).map(|e| fx::program_with(e, &doc.global_light, vector_shape, &doc.patterns, anchor)).collect();
         let want = field_reaches(&progs);
         e.fields.retain(|k, _| want.contains_key(k));
-        for (&kind, &reach) in &want {
-            let have = e.fields.get(&kind).map(|(r, _)| *r);
-            let out = match have {
-                Some(r) if r >= reach => {
-                    if damage.is_empty() {
-                        continue;
-                    }
-                    damage.inflate(fx::field_radius(kind, r)).intersect(&region)
+        // Each field to recompute: over which rectangle, exact up to which reach.
+        let jobs: Vec<(FieldKind, Rect, i32)> = want
+            .iter()
+            .filter_map(|(&kind, &reach)| match e.fields.get(&kind).map(|(r, _)| *r) {
+                Some(r) if r >= reach => (!damage.is_empty()).then(|| (kind, damage.inflate(fx::field_radius(kind, r)).intersect(&region), r)),
+                _ => Some((kind, region, reach)),
+            })
+            .collect();
+        // A chiselled bevel's two fields are asked for and kept together (`fx::bevel_fields`), so they
+        // are recomputed together, over one rectangle at one reach.
+        let job = |k: FieldKind| jobs.iter().find(|j| j.0 == k).map(|j| (j.1, j.2));
+        let (bevel_in, bevel_out) = (job(FieldKind::BevelInside), job(FieldKind::BevelOutside));
+        if bevel_in != bevel_out {
+            return Err(Unsupported(format!("bevel fields of `{}` out of step: inside {bevel_in:?}, outside {bevel_out:?}", layer.name)));
+        }
+        for (kind, out, reach) in jobs {
+            let fields = match kind {
+                FieldKind::BevelInside => {
+                    let [inside, outside] = fx::bevel_fields(reach, &e.shape_cpu, region, out);
+                    vec![(FieldKind::BevelInside, inside), (FieldKind::BevelOutside, outside)]
                 }
-                _ => region,
+                // Computed with BevelInside, over the same rectangle at the same reach (checked above).
+                FieldKind::BevelOutside => continue,
+                _ => vec![(kind, fx::field(kind, reach, &e.shape_cpu, region, out))],
             };
-            let reach = have.filter(|r| *r >= reach).unwrap_or(reach);
-            let v = fx::field(kind, reach, &e.shape_cpu, region, out);
-            if have.is_none_or(|r| r < reach) {
-                e.fields.insert(kind, (reach, Tex::map(device, "pc_fx_field", region, MAP32)));
+            for (kind, v) in fields {
+                if e.fields.get(&kind).is_none_or(|(r, _)| *r < reach) {
+                    e.fields.insert(kind, (reach, Tex::map(device, "pc_fx_field", region, MAP32)));
+                }
+                if let Some((_, t)) = e.fields.get(&kind) {
+                    t.write_r32(queue, region, out, &v);
+                }
+                staged += v.len() as u64 * 4;
+                stats.fx_pixels += out.width() as u64 * out.height() as u64;
             }
-            if let Some((_, t)) = e.fields.get(&kind) {
-                t.write_r32(queue, region, out, &v);
-            }
-            staged += v.len() as u64 * 4;
-            stats.fx_pixels += out.width() as u64 * out.height() as u64;
         }
 
         if let Some(t) = t_trace.filter(|_| !damage.is_empty()) {
@@ -1854,7 +1959,7 @@ impl Compositor {
             if prog.maps == 0 {
                 continue;
             }
-            let Some(e) = self.fx.get_mut(&key) else { return };
+            let Some(e) = self.fx.get_mut(&key) else { return Ok(()) };
             let same = e.progs[i].key == prog.key && e.progs[i].maps.len() == prog.maps;
             let d = if same { damage } else { region };
             if d.is_empty() {
@@ -1869,6 +1974,7 @@ impl Compositor {
             stats.fx_programs += 1;
             self.run_program(device, queue, encoder, key, i, prog, d, stats);
         }
+        Ok(())
     }
 
     /// Record the passes of `prog` (maps of item `item` of `layer`) recomputing damage `d`.
@@ -2034,9 +2140,14 @@ fn submit_batch(
     queue: &wgpu::Queue,
     encoder: &mut wgpu::CommandEncoder,
     health: Option<&DeviceHealth>,
+    timer: Option<&mut timing::GpuTimer>,
     last: &mut Option<wgpu::SubmissionIndex>,
 ) {
-    let done = std::mem::replace(encoder, device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("pc_compose") }));
+    let mut done = std::mem::replace(encoder, device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("pc_compose") }));
+    if let Some(t) = timer {
+        // One refresh, several command buffers: the measurement spans all of them.
+        t.split(&mut done, encoder);
+    }
     let prev = last.replace(queue.submit([done.finish()]));
     #[cfg(not(target_arch = "wasm32"))]
     if let Some(prev) = prev {
@@ -2203,6 +2314,7 @@ fn convert_tile(surface: &Surface, tile: Option<&Arc<Tile>>, kind: TexKind, c: T
                 }
             }
             TexKind::R8Direct => out.push((px[0].clamp(0.0, 1.0) * 255.0 + 0.5) as u8),
+            TexKind::R16F => out.extend(f32_to_f16(px[0]).to_le_bytes()),
             TexKind::R32F => out.extend(px[0].to_le_bytes()),
         }
     }
@@ -2532,6 +2644,28 @@ mod tests {
         assert_eq!(op_words(&p, None, None, None).len() as u64, OP_UNIFORM);
     }
 
+    /// #6534: a 16-bit mask (16-bit documents, feathered or vector combined masks) costs two
+    /// bytes per pixel on the GPU, twice an 8-bit mask, not four; 32-bit masks stay R32Float.
+    #[test]
+    fn sixteen_bit_masks_upload_at_two_bytes_per_pixel() {
+        let gray = |sample| PixelFormat { sample, ..PixelFormat::GRAY8 };
+        assert_eq!(TexKind::for_surface(Role::Mask, PixelFormat::GRAY8).bytes_per_pixel(), 1);
+        let k16 = TexKind::for_surface(Role::Mask, gray(SampleType::U16));
+        assert_eq!(k16.bytes_per_pixel(), 2, "{k16:?}");
+        assert_eq!(k16.format().block_copy_size(None), Some(2), "{k16:?}");
+        let k32 = TexKind::for_surface(Role::Mask, gray(SampleType::F32));
+        assert_eq!(k32.format(), wgpu::TextureFormat::R32Float);
+        // The texels hold the mask values (a half each), the default pixel included.
+        let mut s = Surface::with_default(gray(SampleType::U16), &[1.0]);
+        s.fill_rect(Rect::new(0, 0, 4, 1), &[0.25]);
+        let c = TileCoord::new(0, 0);
+        let bytes = convert_tile(&s, s.tile(c), k16, c);
+        assert_eq!(bytes.len(), (TILE_SIZE * TILE_SIZE) as usize * 2);
+        assert_eq!(bytes.get(..2), Some(f32_to_f16(0.25).to_le_bytes().as_slice()));
+        assert_eq!(bytes.get(8..10), Some(f32_to_f16(1.0).to_le_bytes().as_slice()));
+        assert_eq!(convert_tile(&s, None, k16, c).get(..2), Some(f32_to_f16(1.0).to_le_bytes().as_slice()));
+    }
+
     /// #1774: a solid fill shares one tile across every coordinate; it is converted once, and
     /// every coordinate (shared or not) still gets exactly the bytes `convert_tile` gives it, at
     /// every depth and texture kind.
@@ -2544,7 +2678,8 @@ mod tests {
             (PixelFormat::RGBA16, TexKind::Rgba16F),
             (PixelFormat::RGBA32F, TexKind::Rgba16F),
             (PixelFormat::GRAY8, TexKind::R8Direct),
-            (PixelFormat { sample: SampleType::U16, ..PixelFormat::GRAY8 }, TexKind::R32F),
+            (PixelFormat { sample: SampleType::U16, ..PixelFormat::GRAY8 }, TexKind::R16F),
+            (PixelFormat { sample: SampleType::F32, ..PixelFormat::GRAY8 }, TexKind::R32F),
         ] {
             let mut s = Surface::new(fmt);
             let px = [0.2, 0.4, 0.6, 1.0];

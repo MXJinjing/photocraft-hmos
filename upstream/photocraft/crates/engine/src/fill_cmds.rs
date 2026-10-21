@@ -106,7 +106,7 @@ pub fn fill(s: &mut Session, p: &Value) -> Result<Value> {
     let source = match contents {
         "foreground" => color_source(s, s.tools.foreground),
         "background" => color_source(s, s.tools.background),
-        "color" => color_source(s, color_param(p, "color", s.tools.foreground)),
+        "color" => color_source(s, color_param(CMD, p, "color", s.tools.foreground)?),
         "black" => Source::Color([0.0, 0.0, 0.0, 1.0]),
         "gray" => Source::Color([128.0 / 255.0, 128.0 / 255.0, 128.0 / 255.0, 1.0]),
         "white" => Source::Color([1.0; 4]),
@@ -329,30 +329,6 @@ pub(crate) fn read_window(surf: &Surface, r: Rect, cancelled: &(dyn Fn() -> bool
         surf.read_region_into(band, buf);
         if buf.len() == chunk.len() {
             chunk.copy_from_slice(buf);
-        }
-    });
-    if cancelled() { None } else { Some(out) }
-}
-
-/// Which pixels of `r` a selection (or mask) covers at all: channel 0 above zero, read in
-/// parallel bands as [`read_window`] does, without holding the coverage itself.
-pub(crate) fn read_window_cover(surf: &Surface, r: Rect, cancelled: &(dyn Fn() -> bool + Sync)) -> Option<Vec<bool>> {
-    use rayon::prelude::*;
-    const BAND: usize = 64;
-    let n = surf.channels().max(1);
-    let (w, h) = (r.width() as usize, r.height() as usize);
-    let mut out = vec![false; w * h];
-    if out.is_empty() {
-        return Some(out);
-    }
-    out.par_chunks_mut(BAND * w).enumerate().for_each_init(Vec::new, |buf, (i, chunk)| {
-        if cancelled() {
-            return;
-        }
-        let y0 = r.y0 + (i * BAND) as i32;
-        surf.read_region_into(Rect::new(r.x0, y0, r.x1, y0 + (chunk.len() / w) as i32), buf);
-        for (o, px) in chunk.iter_mut().zip(buf.chunks_exact(n)) {
-            *o = px[0] > 0.0;
         }
     });
     if cancelled() { None } else { Some(out) }

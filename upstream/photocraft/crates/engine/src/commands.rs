@@ -117,7 +117,10 @@ fn has_selection(s: &Session) -> std::result::Result<(), String> {
 fn turn(s: &mut Session, label: &str, t: crate::canvas_geom::Turn) -> Result<Value> {
     if let Some(d) = s.active() {
         let a = t.affine(f64::from(d.doc.size.width), f64::from(d.doc.size.height));
-        s.set_sampler_map(a);
+        // Sampler points are pixel indices, not pixel edges: map the pixel's centre, so the point
+        // lands on the same pixel `Turn::pixel_map` moves the pixels to (`w - 1 - x`).
+        let half = photocraft_geom::Affine::translate(0.5, 0.5);
+        s.set_sampler_map(half.then(&a).then(&photocraft_geom::Affine::translate(-0.5, -0.5)));
     }
     s.edit(label, |doc, _| {
         crate::canvas_geom::turn_canvas(doc, t);
@@ -232,15 +235,53 @@ pub(crate) fn u32_id_param(cmd: &str, p: &Value, key: &str) -> Result<Option<u32
 fn f32_or(p: &Value, key: &str, default: f32) -> f32 {
     p.get(key).and_then(Value::as_f64).map(|v| v as f32).unwrap_or(default)
 }
-pub(crate) fn color_param(p: &Value, key: &str, default: [f32; 4]) -> [f32; 4] {
-    match p.get(key) {
+/// JSON numbers may be finite f64 values but overflow when stored in a document's f32 field.
+pub(crate) fn finite_f32(cmd: &str, key: &str, value: f64) -> Result<f32> {
+    let narrowed = value as f32;
+    if narrowed.is_finite() { Ok(narrowed) } else { Err(bad(cmd, format!("`{key}` must fit a finite 32-bit number"))) }
+}
+
+/// Effect/type parameters contain nested colour arrays and snapshots as well as scalars.
+/// Validate before parsing or editing, including numbers hidden in an effect snapshot.
+pub(crate) fn check_f32_values(cmd: &str, value: &Value) -> Result<()> {
+    // Bound the call stack, without allocating a work list proportional to an input array.
+    fn check(cmd: &str, value: &Value, depth: usize) -> Result<()> {
+        if depth > 64 {
+            return Err(bad(cmd, "parameters nested deeper than 64 levels"));
+        }
+        match value {
+            Value::Number(n) => {
+                finite_f32(cmd, "number", n.as_f64().ok_or_else(|| bad(cmd, "invalid number"))?)?;
+            }
+            Value::Array(a) => {
+                for v in a {
+                    check(cmd, v, depth + 1)?;
+                }
+            }
+            Value::Object(o) => {
+                for v in o.values() {
+                    check(cmd, v, depth + 1)?;
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+    check(cmd, value, 0)
+}
+
+pub(crate) fn color_param(cmd: &str, p: &Value, key: &str, default: [f32; 4]) -> Result<[f32; 4]> {
+    Ok(match p.get(key) {
         Some(Value::Array(a)) if a.len() >= 3 => {
-            let v: Vec<f32> = a.iter().map(|x| x.as_f64().unwrap_or(0.0) as f32).collect();
-            [v[0], v[1], v[2], v.get(3).copied().unwrap_or(1.0)]
+            let mut out = [0.0, 0.0, 0.0, 1.0];
+            for (slot, value) in out.iter_mut().zip(a) {
+                *slot = finite_f32(cmd, key, value.as_f64().unwrap_or(0.0))?;
+            }
+            out
         }
         Some(Value::String(s)) => parse_hex(s).unwrap_or(default),
         _ => default,
-    }
+    })
 }
 pub(crate) fn parse_hex(s: &str) -> Option<[f32; 4]> {
     let s = s.trim_start_matches('#');
@@ -713,7 +754,6 @@ fn build() -> Vec<CommandSpec> {
                     return crate::layer_multi_cmds::duplicate_selected(s, in_place, "Duplicate Layers");
                 }
                 let id = layer_param(s, p)?;
-                let before = s.active().ok_or(EngineError::NoDocument)?.doc.clone();
                 let nid = s.edit("Duplicate Layer", |doc, active| {
                     let mut dup = layer_copy(doc, id)?;
                     if let Some(name) = &name {
@@ -726,7 +766,6 @@ fn build() -> Vec<CommandSpec> {
                     *active = Some(nid);
                     Ok(nid)
                 })?;
-                crate::layer_multi_cmds::note_insert(s, &before);
                 Ok(json!({ "layer": nid.0 }))
             }
         ),
@@ -991,7 +1030,7 @@ fn build() -> Vec<CommandSpec> {
             r##"{"color":"#rrggbb"=foreground,"path":"work"|saved path name|{…path}? (the active path: becomes the vector mask, making a shape; else the selection is the layer mask)}"##,
             has_doc,
             |s, p| {
-                let c = color_param(p, "color", s.tools.foreground);
+                let c = color_param("layer.newFillLayer.solidColor", p, "color", s.tools.foreground)?;
                 let id = s.edit("New Color Fill Layer", |doc, active| {
                     let fill = Fill::Solid(Color::rgba(c[0], c[1], c[2], c[3])).in_mode(doc.mode);
                     let mut l = Layer::new(doc.next_layer_name("Color Fill"), LayerContent::Fill(fill));
@@ -1011,8 +1050,8 @@ fn build() -> Vec<CommandSpec> {
             r##"{"from":"#rrggbb","to":"#rrggbb","angle":deg=90,"style":"linear|radial|angle|reflected|diamond","reverse":bool,"path":"work"|saved path name|{…path}? (the active path: becomes the vector mask; else the selection is the layer mask)}"##,
             has_doc,
             |s, p| {
-                let a = color_param(p, "from", s.tools.foreground);
-                let b = color_param(p, "to", s.tools.background);
+                let a = color_param("layer.newFillLayer.gradient", p, "from", s.tools.foreground)?;
+                let b = color_param("layer.newFillLayer.gradient", p, "to", s.tools.background)?;
                 let angle = f32_or(p, "angle", 90.0);
                 let style = crate::layer_style::gradient_style(p.get("style").and_then(Value::as_str).unwrap_or("linear"));
                 let reverse = p.get("reverse").and_then(Value::as_bool).unwrap_or(false);
@@ -1143,8 +1182,10 @@ fn build() -> Vec<CommandSpec> {
                     }
                 };
                 let (fg_cmyk, bg_cmyk) = (cmyk("foregroundCmyk")?, cmyk("backgroundCmyk")?);
-                s.tools.foreground = color_param(p, "foreground", s.tools.foreground);
-                s.tools.background = color_param(p, "background", s.tools.background);
+                let foreground = color_param("tools.setColors", p, "foreground", s.tools.foreground)?;
+                let background = color_param("tools.setColors", p, "background", s.tools.background)?;
+                s.tools.foreground = foreground;
+                s.tools.background = background;
                 if let Some(k) = fg_cmyk {
                     let [r, g, b, _] = s.tools.foreground;
                     s.tools.remember_cmyk([r, g, b], k);

@@ -3597,6 +3597,22 @@ curves	Smooth	Làm mượt
 	Remove after each stroke	Xóa sau mỗi nét vẽ
 	Apply the removal ({key})	Áp dụng việc xóa ({key})
 	Strokes to remove: {n} (Enter applies, Esc cancels)	Nét vẽ cần xóa: {n} (Enter áp dụng, Esc hủy)
+# Edit › Content-Aware Fill workspace
+	Excluded Area	Vùng loại trừ
+	Fill Settings	Cài đặt tô
+	Full	Toàn phần
+	Indicates	Biểu thị
+	Mirror	Phản chiếu
+	Output Settings	Cài đặt đầu ra
+	Output To	Đầu ra tới
+	Rectangular	Chữ nhật
+	Rotation Adaptation	Thích ứng xoay
+	Sampling Area	Vùng lấy mẫu
+	Sampling Area Options	Tùy chọn vùng lấy mẫu
+	Sampling Area Overlay	Lớp phủ vùng lấy mẫu
+	Sampling Brush Tool	Công cụ Cọ lấy mẫu
+	Show Sampling Area	Hiện vùng lấy mẫu
+	Very High	Rất cao
 	Show home recent files	Hiện tệp gần đây trên màn hình chính
 	Clear Brush Controls	Xóa điều khiển cọ
 	Reset All Locked Settings	Đặt lại tất cả cài đặt đã khóa
@@ -3660,6 +3676,10 @@ curves	Smooth	Làm mượt
 # View › Guides › right-click a guide
 	Edit Selected Guides	Sửa đường căn đã chọn
 	Clear Selected Guides	Xóa đường căn đã chọn
+	Pasting from other apps is unavailable	Không thể dán từ ứng dụng khác
+	PhotoCraft can't reach the system clipboard in this session. On Wayland, a Flatpak sandbox hides the protocol that images from other apps are read through.	PhotoCraft không truy cập được bộ nhớ tạm của hệ thống trong phiên này. Trên Wayland, sandbox của Flatpak ẩn giao thức dùng để đọc hình ảnh từ ứng dụng khác.
+	To paste from other apps, start PhotoCraft under XWayland: `{command}`	Để dán từ ứng dụng khác, hãy khởi động PhotoCraft dưới XWayland: `{command}`
+	Nothing to paste: PhotoCraft can't read the system clipboard here	Không có gì để dán: PhotoCraft không thể đọc bộ nhớ tạm của hệ thống ở đây
 	Delete this set	Xóa bộ này
 	New Set…	Bộ mới…
 	PhotoCraft Defaults	Mặc định của PhotoCraft
@@ -3674,6 +3694,7 @@ curves	Smooth	Làm mượt
 	There are too many sets: delete one first.	Có quá nhiều bộ: hãy xóa một bộ trước.
 	set name	tên bộ
 	{set} (modified)	{set} (đã sửa đổi)
+	Show file name in title	Hiển thị tên tệp trong tiêu đề
 	Accept and Go to Conflict	Chấp nhận và đến xung đột
 	Changes undone.	Đã hoàn tác thay đổi.
 	Choose a new shortcut for this command, or leave it without one.	Chọn phím tắt mới cho lệnh này, hoặc để lệnh không có phím tắt.
@@ -3697,3 +3718,16 @@ curves	Smooth	Làm mượt
 	Replace	Thay thế
 	{name} was changed by another app after it was opened or saved here.	{name} đã bị một ứng dụng khác thay đổi sau khi được mở hoặc lưu ở đây.
 	Replace it with this document, or cancel and use File › Save As to keep both.	Thay thế bằng tài liệu này, hoặc hủy và dùng Tệp › Lưu thành để giữ cả hai.
+	Decrease Brush Size	Giảm kích thước cọ
+	Increase Brush Size	Tăng kích thước cọ
+	Decrease Brush Hardness	Giảm độ cứng của cọ
+	Increase Brush Hardness	Tăng độ cứng của cọ
+	Memory Usage	Sử dụng bộ nhớ
+	Per-document RAM limit (MB)	Giới hạn RAM mỗi tài liệu (MB)
+	Installed RAM: {ram} MB; this limit: {percent}%	RAM đã cài: {ram} MB; giới hạn này: {percent}%
+	Limits each open document's pixels plus History. Oldest undo states are discarded when the limit is exceeded.	Giới hạn pixel cộng Lịch sử của mỗi tài liệu đang mở. Các trạng thái hoàn tác cũ nhất bị bỏ khi vượt giới hạn.
+	Applies immediately when saved. Memory is not reserved in advance.	Áp dụng ngay khi lưu. Bộ nhớ không được dành trước.
+	With GPU Memory set to Automatic, this also limits the GPU layer budget. That budget is capped at one quarter of installed RAM and, when known, three eighths of the graphics card's memory, with a 512 MB minimum. Raising this limit beyond those caps does not increase the GPU budget.	Khi Bộ nhớ GPU là Tự động, cũng giới hạn ngân sách GPU. Trần là 1/4 RAM và, nếu biết, 3/8 bộ nhớ card, tối thiểu 512 MB. Tăng giới hạn không làm tăng ngân sách GPU.
+	Use	Dùng
+	In Front	Phía trước
+	Behind	Phía sau

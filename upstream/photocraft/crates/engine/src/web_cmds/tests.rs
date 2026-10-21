@@ -476,11 +476,8 @@ fn same_file_sees_through_other_names_for_one_file() {
     assert!(crate::file_cmds::same_file(&a, &format!("{dir}/./a.png")));
     assert!(!crate::file_cmds::same_file(&a, &c));
     assert!(!crate::file_cmds::same_file(&a, &b), "a missing file is not the same file");
-    #[cfg(unix)]
-    {
-        std::fs::hard_link(&a, &b).unwrap();
-        assert!(crate::file_cmds::same_file(&a, &b), "a hard link is the same file");
-    }
+    std::fs::hard_link(&a, &b).unwrap();
+    assert!(crate::file_cmds::same_file(&a, &b), "a hard link is the same file");
     #[cfg(windows)]
     assert!(crate::file_cmds::same_file(&a, &format!("{dir}/A.PNG")), "NTFS names ignore case");
 }
@@ -530,6 +527,20 @@ fn webp_export_preferences_select_lossless_or_lossy_output() {
     for quality in [0, 101] {
         assert!(s.execute("file.export.exportPreferences", json!({"webpQuality": quality})).is_err());
         assert_eq!(s.prefs().export.webp_quality, before);
+    }
+}
+
+#[test]
+fn generator_spaced_size_keeps_only_the_file_name() {
+    for (name, w, h, file) in [
+        ("2 x 2 2 icon.png", 2.0, 2.0, "2 icon.png"),
+        ("1in x 1in in.png", 72.0, 72.0, "in.png"),
+        ("2px x 1px x.png", 2.0, 1.0, "x.png"),
+        ("2in  x  1in   label name.png", 144.0, 72.0, "label name.png"),
+    ] {
+        let a = parse_asset_name(name, 72.0);
+        assert_eq!(a.len(), 1, "{name}");
+        assert_eq!((a[0].width, a[0].height, a[0].file.as_str()), (Some(w), Some(h), file), "{name}");
     }
 }
 
@@ -724,7 +735,7 @@ fn previews_show_the_optimised_pixels() {
     let buf = photocraft_compose::flatten(&wd);
     for f in ["jpeg", "gif", "png8", "png24", "wbmp"] {
         let st = WebSettings::from_params(&json!({"format": f, "quality": 90, "transparency": false}), "x").unwrap();
-        let o = optimize(&buf.px, 64, wd.bounds(), &st, None, None, 72.0, true).unwrap();
+        let o = optimize(&buf.px, 64, wd.bounds(), &st, None, None, None, 72.0, true).unwrap();
         assert_eq!(o.preview.len(), 64 * 48 * 4, "{f}");
         // Red square centre stays red (WBMP: dark).
         let i = (16 * 64 + 16) * 4;
@@ -734,7 +745,7 @@ fn previews_show_the_optimised_pixels() {
         } else {
             assert!(px[0] > 200 && px[1] < 60 && px[2] < 60, "{f}: {px:?}");
         }
-        let none = optimize(&buf.px, 64, wd.bounds(), &st, None, None, 72.0, false).unwrap();
+        let none = optimize(&buf.px, 64, wd.bounds(), &st, None, None, None, 72.0, false).unwrap();
         assert!(none.preview.is_empty());
         assert_eq!(none.bytes, o.bytes);
     }
@@ -745,7 +756,7 @@ fn jpeg_preview_at_odd_sizes() {
     for (w, h, q) in [(640usize, 431usize, 90), (640, 430, 60), (333, 222, 30)] {
         let px: Vec<[f32; 4]> = (0..w * h).map(|i| [((i % w) as f32 / w as f32), 0.3, ((i / w) as f32 / h as f32), 1.0]).collect();
         let st = WebSettings::from_params(&json!({"format": "jpeg", "quality": q}), "x").unwrap();
-        let o = optimize(&px, w, Rect::new(0, 0, w as i32, h as i32), &st, None, None, 72.0, true).unwrap();
+        let o = optimize(&px, w, Rect::new(0, 0, w as i32, h as i32), &st, None, None, None, 72.0, true).unwrap();
         for &(x, y) in &[(10usize, 10usize), (w - 10, h / 2), (w / 2, h - 5)] {
             let i = (y * w + x) * 4;
             let want = [(x as f32 / w as f32 * 255.0) as i32, 76, (y as f32 / h as f32 * 255.0) as i32];
@@ -803,3 +814,166 @@ fn overlapping_slices_keep_the_later_slice_in_html() {
 
 #[path = "color_table_tests.rs"]
 mod color_table_tests;
+
+/// A little-endian camera EXIF: IFD0 with Make, Orientation 6, 300 ppi and pointers to an Exif
+/// IFD (DateTimeOriginal) and a GPS IFD (GPSLatitudeRef); IFD0 links to an IFD1 thumbnail.
+fn camera_exif() -> Vec<u8> {
+    let entry = |v: &mut Vec<u8>, tag: u16, ty: u16, count: u32, value: u32| {
+        v.extend_from_slice(&tag.to_le_bytes());
+        v.extend_from_slice(&ty.to_le_bytes());
+        v.extend_from_slice(&count.to_le_bytes());
+        v.extend_from_slice(&value.to_le_bytes());
+    };
+    let (ifd0, data0) = (8u32, 8 + 2 + 7 * 12 + 4);
+    let (make, xres, yres) = (data0, data0 + 10, data0 + 18);
+    let exif_ifd = data0 + 26;
+    let date = exif_ifd + 2 + 12 + 4;
+    let gps_ifd = date + 20;
+    let ifd1 = gps_ifd + 2 + 12 + 4;
+    let mut v = b"II*\0".to_vec();
+    v.extend_from_slice(&ifd0.to_le_bytes());
+    v.extend_from_slice(&7u16.to_le_bytes());
+    entry(&mut v, 0x010F, 2, 9, make);
+    entry(&mut v, 0x0112, 3, 1, 6);
+    entry(&mut v, 282, 5, 1, xres);
+    entry(&mut v, 283, 5, 1, yres);
+    entry(&mut v, 296, 3, 1, 2);
+    entry(&mut v, 0x8769, 4, 1, exif_ifd);
+    entry(&mut v, 0x8825, 4, 1, gps_ifd);
+    v.extend_from_slice(&ifd1.to_le_bytes());
+    v.extend_from_slice(b"TestMake\0\0");
+    for _ in 0..2 {
+        v.extend_from_slice(&300u32.to_le_bytes());
+        v.extend_from_slice(&1u32.to_le_bytes());
+    }
+    v.extend_from_slice(&1u16.to_le_bytes());
+    entry(&mut v, 0x9003, 2, 20, date);
+    v.extend_from_slice(&0u32.to_le_bytes());
+    v.extend_from_slice(b"2024:05:01 10:30:00\0");
+    v.extend_from_slice(&1u16.to_le_bytes());
+    entry(&mut v, 0x0001, 2, 2, u32::from_le_bytes(*b"N\0\0\0"));
+    v.extend_from_slice(&0u32.to_le_bytes());
+    v.extend_from_slice(&1u16.to_le_bytes());
+    entry(&mut v, 0x0103, 3, 1, 6);
+    v.extend_from_slice(&0u32.to_le_bytes());
+    assert_eq!(v.len(), ifd1 as usize + 18);
+    v
+}
+
+/// The payload (after `Exif\0\0`) of the file's EXIF APP1 segment, read from the markers.
+fn exif_app1(bytes: &[u8]) -> Option<Vec<u8>> {
+    let mut i = 2;
+    while i + 4 <= bytes.len() && bytes[i] == 0xFF && bytes[i + 1] != 0xDA {
+        let len = u16::from_be_bytes([bytes[i + 2], bytes[i + 3]]) as usize;
+        let body = &bytes[i + 4..i + 2 + len];
+        if bytes[i + 1] == 0xE1 && body.starts_with(b"Exif\0\0") {
+            return Some(body[6..].to_vec());
+        }
+        i += 2 + len;
+    }
+    None
+}
+
+/// IFD0's entries (tag → inline value) and its link to the next IFD, little-endian only.
+fn ifd0(tiff: &[u8]) -> (std::collections::HashMap<u16, u32>, u32) {
+    let u16_at = |o: usize| u16::from_le_bytes([tiff[o], tiff[o + 1]]);
+    let u32_at = |o: usize| u32::from_le_bytes([tiff[o], tiff[o + 1], tiff[o + 2], tiff[o + 3]]);
+    assert_eq!(&tiff[..4], b"II*\0");
+    let at = u32_at(4) as usize;
+    let n = u16_at(at) as usize;
+    let tags = (0..n)
+        .map(|k| {
+            let e = at + 2 + k * 12;
+            let value = if u16_at(e + 2) == 3 { u32::from(u16_at(e + 8)) } else { u32_at(e + 8) };
+            (u16_at(e), value)
+        })
+        .collect();
+    (tags, u32_at(at + 2 + n * 12))
+}
+
+fn photo_session(exif: Vec<u8>) -> Session {
+    let mut s = session(8);
+    s.execute("file.fileInfo", json!({"copyright": "© Example"})).unwrap();
+    s.edit("exif", |doc, _| {
+        doc.metadata.exif = Some(std::sync::Arc::new(exif));
+        Ok(())
+    })
+    .unwrap();
+    s
+}
+
+/// #7436: Save for Web's "All" writes the photo's EXIF, as Save a Copy does: upright
+/// (Orientation 1), without the source's thumbnail and at the exported resolution. Every other
+/// choice, "All Except Camera Info" included, leaves the camera data (and GPS) out.
+#[test]
+fn save_for_web_all_writes_the_photos_exif() {
+    let dir = tmp("exif");
+    let mut s = photo_session(camera_exif());
+    let export = |s: &mut Session, metadata: &str| {
+        let path = format!("{dir}/{metadata}.jpg");
+        let r = s.execute("file.export.saveForWebLegacy", json!({"format": "jpeg", "metadata": metadata, "path": path})).unwrap();
+        (std::fs::read(&path).unwrap(), r)
+    };
+    let (all, r) = export(&mut s, "all");
+    let exif = exif_app1(&all).expect("an EXIF APP1 segment");
+    let camera = photocraft_algo::exif::read(&exif);
+    assert_eq!(camera.make.as_deref(), Some("TestMake"));
+    assert_eq!(camera.date_taken.as_deref(), Some("2024:05:01 10:30:00"));
+    let (tags, next) = ifd0(&exif);
+    assert_eq!(tags.get(&0x0112), Some(&1), "the exported pixels are already upright");
+    assert!(tags.contains_key(&0x8825), "GPS kept");
+    assert_eq!(next, 0, "the source's thumbnail is not linked");
+    assert_eq!(photocraft_codecs::exif_resolution(&exif), Some((72.0, 72.0)), "the document's resolution, not the source's 300");
+    assert!(decode(&format!("{dir}/all.jpg")).meta.xmp.unwrap_or_default().contains("Example"));
+    for m in ["none", "copyright", "copyrightAndContact", "allExceptCameraInfo"] {
+        let (bytes, r) = export(&mut s, m);
+        assert_eq!(exif_app1(&bytes), None, "{m}");
+        assert_eq!(r["warnings"], json!([]), "{m}");
+    }
+    assert_eq!(r["warnings"], json!([]), "it fits");
+    let xmp = decode(&format!("{dir}/allExceptCameraInfo.jpg")).meta.xmp.unwrap_or_default();
+    assert!(xmp.contains("Example"), "all the XMP");
+    assert_eq!(WebSettings::from_params(&json!({"metadata": "allExceptCameraInfo"}), "x").unwrap().to_params()["metadata"], "allExceptCameraInfo");
+}
+
+#[test]
+fn quick_export_all_writes_the_photos_exif() {
+    let dir = tmp("quick_exif");
+    let mut s = photo_session(camera_exif());
+    let export = |s: &mut Session, metadata: &str| {
+        s.execute("file.export.exportPreferences", json!({"quickExportFormat": "jpg", "metadata": metadata})).unwrap();
+        let path = format!("{dir}/{metadata}.jpg");
+        let r = s.execute("file.export.quickExport", json!({"path": path})).unwrap();
+        (std::fs::read(&path).unwrap(), r)
+    };
+    let (all, r) = export(&mut s, "all");
+    assert_eq!(photocraft_algo::exif::read(&exif_app1(&all).expect("EXIF")).make.as_deref(), Some("TestMake"));
+    assert_eq!(r["warnings"], json!([]));
+    assert_eq!(exif_app1(&export(&mut s, "copyright").0), None);
+    assert_eq!(exif_app1(&export(&mut s, "none").0), None);
+    s.execute("prefs.reset", json!({"path": "export"})).unwrap();
+}
+
+/// EXIF too large for its one segment is left out and said so; a truncated one doesn't panic.
+#[test]
+fn web_exif_that_does_not_fit_is_reported_and_bad_exif_is_harmless() {
+    let dir = tmp("exif_bad");
+    let mut big = camera_exif();
+    big.resize(70_000, 0);
+    let mut s = photo_session(big);
+    let path = format!("{dir}/big.jpg");
+    let r = s.execute("file.export.saveForWebLegacy", json!({"format": "jpeg", "metadata": "all", "path": path})).unwrap();
+    assert_eq!(exif_app1(&std::fs::read(&path).unwrap()), None);
+    assert!(r["warnings"][0].as_str().is_some_and(|w| w.contains("EXIF (70000 bytes)")), "{r}");
+    s.execute("file.export.exportPreferences", json!({"quickExportFormat": "jpg", "metadata": "all"})).unwrap();
+    let r = s.execute("file.export.quickExport", json!({"path": format!("{dir}/quick.jpg")})).unwrap();
+    assert!(r["warnings"][0].as_str().is_some_and(|w| w.contains("EXIF")), "{r}");
+    s.execute("prefs.reset", json!({"path": "export"})).unwrap();
+
+    for cut in [3, 9, 40, 100] {
+        let mut s = photo_session(camera_exif()[..cut].to_vec());
+        let path = format!("{dir}/cut{cut}.jpg");
+        s.execute("file.export.saveForWebLegacy", json!({"format": "jpeg", "metadata": "all", "path": path})).unwrap();
+        assert_eq!(decode(&path).dimensions(), (64, 48));
+    }
+}

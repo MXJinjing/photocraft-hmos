@@ -76,7 +76,7 @@ pub fn invoke(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str, params: &V
             app.session.active()?;
             json!({"dialog": open_print(app)})
         }
-        "file.printOneCopy" if app.session.file_menu.last_print.is_none() => {
+        "file.printOneCopy" if photocraft_engine::print_cmds::last_print(&app.session).is_none() => {
             app.session.active()?;
             json!({"dialog": open_print(app)})
         }
@@ -168,11 +168,12 @@ pub fn ok_label(f: &Map<String, Value>) -> Option<&'static str> {
     }
 }
 
-pub fn body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Value>) {
+/// The body of Save for Web or Print (dialog `id`).
+pub fn body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Value>, id: u64) {
     if f.contains_key("__web") {
         web_body(app, ui, f);
     } else {
-        print_body(app, ui, f);
+        print_body(app, ui, f, id);
     }
 }
 
@@ -729,7 +730,8 @@ pub fn open_print(app: &mut PhotocraftApp) -> u64 {
     // Asked once per opening: the Printer menu lists what the spooler knows now.
     let printers = app.session.execute("file.printers", json!({})).unwrap_or_default();
     f.insert("__systemPrinters".into(), printers["printers"].clone());
-    if let Some(Value::Object(m)) = app.session.file_menu.last_print.clone() {
+    // The settings of the last print, also from an earlier session (#7410).
+    if let Some(Value::Object(m)) = photocraft_engine::print_cmds::last_print(&app.session) {
         f.extend(m);
     }
     for (k, v) in [
@@ -871,7 +873,22 @@ fn print_paper_controls(ui: &mut egui::Ui, f: &mut Map<String, Value>) {
     }
 }
 
-fn print_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Value>) {
+/// Save as PDF › Browse…: where to write the PDF, into Print dialog `id` once the file dialog
+/// answers. Without it the only way to save a PDF was to type a full path (#5328).
+fn browse_pdf(app: &mut PhotocraftApp, id: u64, suggested: &str) {
+    let r = app.pick_save(suggested, move |app, path| {
+        let d = app.ui.dialog_mut(id).ok_or("the dialog was closed")?;
+        d.fields.insert("output".into(), json!(path));
+        Ok(Value::Null)
+    });
+    if let Err(e) = r
+        && e != crate::file_dialog::CANCELLED
+    {
+        app.ui.status = e;
+    }
+}
+
+fn print_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Value>, id: u64) {
     let t = Tokens::get(ui.ctx());
     let Some(doc) = app.session.active().map(|d| d.doc.clone()) else { return };
     // PDF exports and previews retain editable paper on Windows too. Only a real native
@@ -891,6 +908,7 @@ fn print_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Va
         f.remove("__driverPageInitialized");
     }
     let p = params(f);
+    let mut browse = false;
     ui.horizontal_top(|ui| {
         // Page preview.
         ui.vertical(|ui| {
@@ -1146,13 +1164,21 @@ fn print_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Va
                 check(ui, f, "__save_pdf", tl!("Save as PDF"), false);
             } else {
                 head(ui, tl!("Save as PDF"));
-                let mut out = s(f, "output", "");
-                if ui.add(egui::TextEdit::singleline(&mut out).hint_text(tl!("(print to the printer)")).desired_width(300.0)).changed() {
-                    f.insert("output".into(), json!(out));
-                }
+                ui.horizontal(|ui| {
+                    let mut out = s(f, "output", "");
+                    if ui.add(egui::TextEdit::singleline(&mut out).hint_text(tl!("(print to the printer)")).desired_width(240.0)).changed() {
+                        f.insert("output".into(), json!(out));
+                    }
+                    browse = ui.button(tl!("Browse…")).clicked();
+                });
             }
         });
     });
+    if browse {
+        let current = s(f, "output", "");
+        let suggested = if current.is_empty() { std::path::Path::new(&doc.name).with_extension("pdf").to_string_lossy().into_owned() } else { current };
+        browse_pdf(app, id, &suggested);
+    }
 }
 
 fn print_confirm(app: &mut PhotocraftApp, f: &Map<String, Value>) -> Result<Value, String> {
@@ -1506,6 +1532,45 @@ mod tests {
         assert!(params(f).get("__printers").is_none());
     }
 
+    /// #7410: File › Print opens with the settings of the last print, also those remembered from
+    /// an earlier session (the preferences), before anything was printed in this one.
+    #[test]
+    fn print_dialog_opens_with_the_settings_remembered_from_an_earlier_session() {
+        let (mut app, _) = app();
+        app.session.prefs.edit(|p| {
+            p.dialogs.insert(
+                photocraft_engine::print_cmds::REMEMBERED.into(),
+                json!({"paper": "a5", "scale": 50, "orientation": "landscape", "intent": "perceptual"}),
+            );
+        });
+        let id = open_print(&mut app);
+        let f = &app.ui.dialog_mut(id).unwrap().fields;
+        assert_eq!((&f["paper"], &f["scale"], &f["orientation"], &f["intent"]), (&json!("a5"), &json!(50), &json!("landscape"), &json!("perceptual")));
+        assert_eq!(f["copies"], 1, "what wasn't remembered keeps its default");
+    }
+
+    /// #5328: Save as PDF has Browse…, which fills the field from a Save dialog (suggesting the
+    /// document's name as a PDF) rather than needing a typed path.
+    #[test]
+    fn save_as_pdf_browse_fills_the_output_from_a_save_dialog() {
+        use crate::file_dialog::{FileDialogAnswer, FileDialogRequest};
+        use egui_kittest::{Harness, kittest::Queryable};
+        let out = std::env::temp_dir().join(format!("pc-printui-browse-{}", std::process::id())).to_string_lossy().into_owned();
+        let (show, asked) = crate::file_dialog::fake(vec![Some(FileDialogAnswer::SaveTo(out.clone()))]);
+        let mut h = Harness::builder().with_size(egui::vec2(1440.0, 900.0)).with_max_steps(64).build_eframe(move |cc| {
+            PhotocraftApp::setup_context(&cc.egui_ctx, Default::default());
+            PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services { file_dialog: Some(show), ..Default::default() })
+        });
+        h.state_mut().run("file.new", json!({"width": 120, "height": 80, "name": "poster"})).unwrap();
+        let id = open_print(h.state_mut());
+        h.run_steps(3);
+        h.get_by_label("Browse…").click();
+        h.run_steps(4);
+        assert!(matches!(asked.borrow().as_slice(), [FileDialogRequest::Save { suggested }] if suggested.ends_with("poster.pdf")), "{:?}", asked.borrow());
+        // A name chosen without an extension gets the suggested one.
+        assert_eq!(h.state_mut().ui.dialog_mut(id).unwrap().fields["output"], json!(format!("{out}.pdf")));
+    }
+
     #[test]
     fn print_dialog_does_not_inherit_scripted_send_override() {
         for send in [false, true] {
@@ -1710,7 +1775,7 @@ mod web_playback_tests {
                 let doc = web_frame_document(&app.session.active().unwrap().doc, Some(frame)).unwrap();
                 let (proxy, _, _) = web_cmds::web_document(&doc, &json!({"width":16,"height":12}), &settings).unwrap();
                 let pixels = photocraft_compose::flatten(&proxy);
-                let optimized = web_cmds::optimize(&pixels.px, 16, photocraft_geom::Rect::new(0, 0, 16, 12), &settings, None, None, 72.0, true).unwrap();
+                let optimized = web_cmds::optimize(&pixels.px, 16, photocraft_geom::Rect::new(0, 0, 16, 12), &settings, None, None, None, 72.0, true).unwrap();
                 assert_eq!(&optimized.preview[..4], expected, "depth={depth} frame={frame}");
             }
         }
