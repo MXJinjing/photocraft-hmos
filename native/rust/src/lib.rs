@@ -32,6 +32,8 @@ mod ime;
 mod input;
 #[cfg(any(target_env = "ohos", test))]
 mod recovery;
+#[cfg(any(target_env = "ohos", test))]
+mod startup;
 #[cfg(target_env = "ohos")]
 mod render;
 #[cfg(any(target_env = "ohos", test))]
@@ -597,6 +599,7 @@ fn worker(config: Config, rx: mpsc::Receiver<Message>) {
     let mut ime = ime::ImeSync::default();
     let mut close = false;
     let mut chrome = chrome::ChromeSync::default();
+    let mut first_frame = startup::FirstFrame::default();
     let mut titlebar_pixels = egui::Vec2::ZERO;
     // 输入、窗口生命周期和帧消息共用一个队列，编辑器状态仅在 worker 上修改。
     let mut cursor = cursor::CursorSync::default();
@@ -635,6 +638,7 @@ fn worker(config: Config, rx: mpsc::Receiver<Message>) {
                             return Ok(());
                         }
                         chrome.invalidate();
+                        first_frame.invalidate();
                         cursor.invalidate();
                         bridge::notify(0, "stage", "creating native GPU surface", &[]);
                         visible = w > 0 && h > 0;
@@ -995,6 +999,9 @@ fn worker(config: Config, rx: mpsc::Receiver<Message>) {
                             .min()
                             .unwrap_or(Duration::MAX);
                         let painted = render.paint(&ctx, output, finished.frames)?;
+                        if first_frame.update(painted) {
+                            bridge::notify(0, "first_frame", "Native UI presented", &[]);
+                        }
                         // A sub-window whose surface failed is asked to close; the root keeps going.
                         let failed = render.take_failed_children();
                         if !failed.is_empty() {

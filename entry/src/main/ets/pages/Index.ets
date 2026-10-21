@@ -108,6 +108,10 @@ struct Index {
   @StorageLink('photocraftChrome') @Watch('onChromeChanged') private chrome: string = LOADING_CHROME;
   @State private failure: string = '';
   @State private initialized: boolean = false;
+  @State private startupVisible: boolean = true;
+  @State private startupOpacity: number = 1;
+  @State private startupScale: number = 1;
+  private startupFading: boolean = false;
   @State private dropPreview: DropPreview = new DropPreview();
   private editorOriginX: number = 0;
   private editorOriginY: number = 0;
@@ -155,6 +159,10 @@ struct Index {
     this.alive = true;
     this.printing.start();
     this.generation++;
+    this.startupVisible = true;
+    this.startupOpacity = 1;
+    this.startupScale = 1;
+    this.startupFading = false;
     this.getUIContext().setKeyboardAvoidMode(KeyboardAvoidMode.RESIZE);
     this.initializeHost(this.generation);
     applySystemBars(this.context, this.chrome);
@@ -277,6 +285,7 @@ struct Index {
     if (!this.alive) { if (id > 0) native.reply(id, false, 'cancelled', new ArrayBuffer(0)); return; }
     if (request.kind === 'error') { this.failure = request.text; }
     else if (request.kind === 'ready') { this.failure = ''; this.onTitlebarChanged(); }
+    else if (request.kind === 'first_frame') { this.revealEditor(); }
     else if (request.kind === 'window_move' || request.kind === 'window_maximize') {
       window.getLastWindow(this.context).then((win: window.Window) => {
         return request.kind === 'window_move' ? moveWindow(win) : toggleWindowMaximize(win);
@@ -560,6 +569,25 @@ struct Index {
     if (isHover || !this.alive || !this.initialized) { return; }
     native.input(penHoverLeaveMessage());
   }
+  private revealEditor(): void {
+    if (!this.startupVisible || this.startupFading) { return; }
+    this.startupFading = true;
+    const generation = this.generation;
+    // init/onLoad/ready all precede presentation. Fade only after a real root frame.
+    this.getUIContext().animateTo({
+      duration: 320,
+      curve: Curve.EaseOut,
+      onFinish: (): void => {
+        if (!this.alive || generation !== this.generation) { return; }
+        this.startupVisible = false;
+        this.restoreEditorFocus();
+        console.info('PhotoCraft startup reveal complete');
+      }
+    }, (): void => {
+      this.startupOpacity = 0;
+      this.startupScale = 0.98;
+    });
+  }
   build() {
     Stack() {
       if (this.initialized) {
@@ -582,8 +610,23 @@ struct Index {
         .onHover((isHover: boolean): void => { this.sendPenHoverLeave(isHover); })
         .id('photocraft-editor').focusable(true).defaultFocus(true).focusOnTouch(true)
         .onBlur(() => { this.cursor.reset(); let input = new NativeInput(); input.kind = 'blur'; native.input(JSON.stringify(input)); })
-      } else {
-        Text('正在准备文档目录…').fontSize(18).fontColor('#FFFFFF')
+      }
+      if (this.startupVisible) {
+        Column() {
+          Column({ space: 18 }) {
+            Image($r('app.media.app_icon')).width(76).height(76).borderRadius(18)
+            Text('PhotoCraft').fontSize(30).fontWeight(FontWeight.Medium).fontColor('#F4F4F5')
+            Row({ space: 10 }) {
+              LoadingProgress().width(18).height(18).color('#A5BFFF')
+              Text(this.initialized ? '正在启动编辑器…' : '正在准备文档目录…')
+                .fontSize(14).fontColor('#B8BAC2')
+            }
+          }.scale({ x: this.startupScale, y: this.startupScale })
+        }
+        .width('100%').height('100%').justifyContent(FlexAlign.Center)
+        .backgroundColor(LOADING_CHROME).opacity(this.startupOpacity)
+        .hitTestBehavior(HitTestMode.Block)
+        .accessibilityText('PhotoCraft 正在启动')
       }
       if (this.dropPreview.visible && this.dropPreview.mode === 'place') {
         Row() {}.width(this.dropPreview.width).height(this.dropPreview.height)
