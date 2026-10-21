@@ -118,6 +118,51 @@ pub fn mnemonic_text(ui: &Ui, prefix: &str, label: &str, mnemonic: Option<char>,
     job.into()
 }
 
+/// The checkmark menu rows draw in their gutter.
+pub const CHECK_MARK: &str = "✔ ";
+
+/// Width of the checkmark column every menu row reserves (#5705): the width of [`CHECK_MARK`] in
+/// the button font, so checked, unchecked and plain rows (and submenu headers) all start their
+/// label at the same x, whatever the script of the label.
+pub fn check_gutter(ui: &Ui) -> f32 {
+    let font = egui::TextStyle::Button.resolve(ui.style());
+    ui.painter().layout_no_wrap(CHECK_MARK.to_owned(), font, Color32::PLACEHOLDER).size().x
+}
+
+/// A menu row's text (#5705): the label behind a fixed-width checkmark column ([`check_gutter`]),
+/// with ✔ in the column when `checked`, and the mnemonic underlined when given (as
+/// [`mnemonic_text`]).
+pub fn menu_row_text(ui: &Ui, checked: bool, label: &str, mnemonic: Option<char>) -> egui::WidgetText {
+    let font = egui::TextStyle::Button.resolve(ui.style());
+    let plain = egui::TextFormat { font_id: font, color: Color32::PLACEHOLDER, ..Default::default() };
+    let mut job = egui::text::LayoutJob::default();
+    job.wrap.max_width = f32::INFINITY;
+    // The label starts after the column: a checked row draws the mark in it, the others leave it
+    // empty (a leading space of the same width, not padding characters whose width varies).
+    let mut lead = check_gutter(ui);
+    if checked {
+        job.append(CHECK_MARK, 0.0, plain.clone());
+        lead = 0.0;
+    }
+    let at = mnemonic.and_then(|m| label.char_indices().find(|(_, c)| c.to_ascii_uppercase() == m).map(|(i, c)| (i, c.len_utf8())));
+    let parts = match at {
+        Some((i, len)) => [label.get(..i), label.get(i..i + len), label.get(i + len..)],
+        None => [Some(label), None, None],
+    };
+    for (k, part) in parts.into_iter().enumerate() {
+        let Some(part) = part.filter(|p| !p.is_empty()) else { continue };
+        let format =
+            if k == 1 && at.is_some() { egui::TextFormat { underline: Stroke::new(1.0, Color32::PLACEHOLDER), ..plain.clone() } } else { plain.clone() };
+        job.append(part, lead, format);
+        lead = 0.0;
+    }
+    if job.sections.is_empty() {
+        // An empty label still keeps the row as wide as its column.
+        job.append("", lead, plain);
+    }
+    job.into()
+}
+
 impl Keys {
     /// Last frame's state.
     pub fn load(ctx: &egui::Context) -> Keys {
@@ -173,7 +218,12 @@ impl Keys {
                     self.alt_down = false;
                     tap |= std::mem::take(&mut self.alt_tap);
                 }
-                Event::Key { pressed: true, .. } | Event::Text(_) | Event::PointerButton { pressed: true, .. } => self.alt_tap = false,
+                // Alt+wheel (zoom, brush size…) or Alt going to the desktop is no tap either.
+                Event::Key { pressed: true, .. }
+                | Event::Text(_)
+                | Event::PointerButton { pressed: true, .. }
+                | Event::MouseWheel { .. }
+                | Event::WindowFocused(false) => self.alt_tap = false,
                 _ => {}
             }
         }
@@ -207,8 +257,10 @@ impl Keys {
             return;
         }
         if open {
-            // A letter runs the row with that mnemonic in the level the arrows are in.
-            let letter = events.iter().find_map(|e| match e {
+            // A letter runs the row with that mnemonic in the level the arrows are in, unless it is
+            // typed into a field in the menu: Help › Search took "S" for System Info (#5996).
+            let typing = ctx.text_edit_focused();
+            let letter = events.iter().filter(|_| !typing).find_map(|e| match e {
                 Event::Key { key, pressed: true, modifiers, .. } if !modifiers.command && !modifiers.ctrl && !modifiers.alt => {
                     key_char(*key).map(|c| (*key, c))
                 }

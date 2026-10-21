@@ -38,6 +38,7 @@ pub mod brush_preview;
 pub mod brush_resize;
 pub mod brush_sections;
 pub mod brushes_tab;
+pub mod caf_ui;
 pub(crate) mod cam_preview;
 mod cam_transform;
 mod camera_raw_detail_ui;
@@ -384,6 +385,13 @@ pub type FileStampFn = Box<dyn Fn(&str) -> Option<FileStamp>>;
 /// [`jobs_ui::SaveCtl::commit`] right before replacing the file, and write nothing if that fails.
 pub type SaveFileFn = std::sync::Arc<dyn Fn(&Document, &str, &ExportSettings, &jobs_ui::SaveCtl) -> Result<Vec<String>, String> + Send + Sync>;
 
+/// The revision a document counts as saved at after `written` went to its writer: that one when
+/// the writer confirms the bytes were stored, else still `previous`, so the document stays
+/// unsaved. A browser download is only a request the user can cancel (#4962).
+pub(crate) fn saved_revision_after_write(confirmed: bool, written: u64, previous: u64) -> u64 {
+    if confirmed { written } else { previous }
+}
+
 /// Who a finished save serves.
 #[derive(Clone, Copy)]
 pub(crate) enum SaveKind {
@@ -409,6 +417,8 @@ pub type EncodePngFn = Box<dyn Fn(u32, u32, &[u8]) -> Result<Vec<u8>, String>>;
 pub type ClipboardSetFn = Box<dyn FnMut(u32, u32, &[u8]) -> Result<(), String>>;
 /// Read an RGBA8 image from the OS clipboard.
 pub type ClipboardGetFn = Box<dyn FnMut() -> Option<(u32, u32, Vec<u8>)>>;
+/// Whether the last clipboard read found no way to reach the OS clipboard at all.
+pub type ClipboardUnreadableFn = Box<dyn Fn() -> bool>;
 /// Shared queue of (file name, bytes) delivered asynchronously.
 pub type Inbox = std::sync::Arc<std::sync::Mutex<Vec<(String, Vec<u8>)>>>;
 /// Read the saved preferences text (`None` when there is none yet).
@@ -496,6 +506,10 @@ pub struct Services {
     /// Size and modification time of a file (native); `None` on the web, where Save never
     /// writes back to a file.
     pub file_stamp: Option<FileStampFn>,
+    /// `write` only asks for the bytes to be kept (a browser download, which the user can
+    /// cancel and which reports nothing back), so a save through it names the document but
+    /// leaves its changes unsaved and the leave-page guard armed (#4962).
+    pub write_unconfirmed: bool,
     /// Encode and write in one step on a worker thread, so a large save doesn't freeze the
     /// window (#2017). With background jobs on, saves use it instead of `export` and `write`.
     pub save_file: Option<SaveFileFn>,
@@ -526,6 +540,9 @@ pub struct Services {
     /// OS clipboard images: copies go out, screenshots and images from other apps come in.
     pub clipboard_set_image: Option<ClipboardSetFn>,
     pub clipboard_get_image: Option<ClipboardGetFn>,
+    /// True when the last `clipboard_get_image` read had no clipboard to read, as in a Flatpak on
+    /// Wayland (#5031), rather than a clipboard that holds no image. `None` where that can't happen.
+    pub clipboard_unreadable: Option<ClipboardUnreadableFn>,
     /// Preferences persistence: the platform config directory on native, browser storage on
     /// the web (see `prefs_ui`).
     pub load_prefs: Option<LoadTextFn>,
@@ -622,9 +639,9 @@ pub struct PhotocraftApp {
     /// Footprint trail of a retouching drag (see `stroke_trail`).
     trail: Option<stroke_trail::Trail>,
     /// Remove tool strokes waiting to be applied together (Remove after each stroke off), the
-    /// document they belong to, and their tint on the canvas (`retouch_ui`).
+    /// document, layer and channel they belong to, and their tint on the canvas (`retouch_ui`).
     pub(crate) remove_pending: Vec<Vec<[f64; 3]>>,
-    pub(crate) remove_pending_doc: Option<photocraft_doc::DocId>,
+    pub(crate) remove_pending_target: Option<retouch_ui::RemoveTarget>,
     pub(crate) remove_trail: Option<stroke_trail::Trail>,
     /// The open menus' items, reused between frames (`menus::ItemCache`).
     pub(crate) menu_cache: Option<menus::ItemCache>,
@@ -699,6 +716,9 @@ pub struct PhotocraftApp {
     fonts_ready: bool,
     /// Screen rect of the main canvas last frame (for overlays and the navigator).
     pub last_canvas_rect: egui::Rect,
+    /// Window › Arrange: the first document of the shown run of tiles, when there are more
+    /// documents than tiles (`canvas::arranged_cells`).
+    pub(crate) arrange_start: usize,
     /// Physical pixels per egui point of the canvas last frame (`ctx.pixels_per_point`, which
     /// folds in both the display scale and Interface › UI Scale). The canvas maps document pixels
     /// to physical pixels, so point-space geometry divides the view zoom by this (see
@@ -741,6 +761,9 @@ pub struct PhotocraftApp {
     pub(crate) color_range: Option<color_range_ui::Preview>,
     /// Image › Adjustments dialog preview through a temporary clipped adjustment layer.
     pub(crate) adjust_preview: Option<adjust_preview::AdjustPreview>,
+    /// The Properties panel's live adjustment-layer drag: its damage region and coverage
+    /// (`adjust_preview::live_key`).
+    pub(crate) live_adjust_preview: Option<adjust_preview::LiveAdjust>,
     /// Synthetic input events queued by automation (`ui.click`, `ui.key`, …), injected next frame.
     pub(crate) synthetic: Vec<egui::Event>,
     /// True only while a frame is processing synthetic automation input. It
@@ -892,7 +915,7 @@ impl PhotocraftApp {
             committed_stroke: None,
             trail: None,
             remove_pending: Vec::new(),
-            remove_pending_doc: None,
+            remove_pending_target: None,
             remove_trail: None,
             menu_cache: None,
             move_preview: None,
@@ -927,6 +950,7 @@ impl PhotocraftApp {
             last_window_title: String::new(),
             fonts_ready: false,
             last_canvas_rect: egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0)),
+            arrange_start: 0,
             ppp: 1.0,
             drop_canvas_rect: None,
             tab_strip: None,
@@ -948,6 +972,7 @@ impl PhotocraftApp {
             redraws: HashMap::new(),
             color_range: None,
             adjust_preview: None,
+            live_adjust_preview: None,
             synthetic: Vec::new(),
             automation_input: false,
             channel_thumbs: None,
@@ -1148,6 +1173,11 @@ impl PhotocraftApp {
                 self.import_os_clipboard();
             }
             if self.session.clipboard.is_none() && self.services.clipboard_get_image.is_some() {
+                if self.services.clipboard_unreadable.as_ref().is_some_and(|unreadable| unreadable()) {
+                    // The clipboard may well hold an image that can't be reached: say why.
+                    notices::clipboard_unreadable(self);
+                    return Ok(serde_json::json!({"pasted": false}));
+                }
                 // Enabled on the strength of the OS clipboard, which held no image: a quiet no-op.
                 let message = "Nothing to paste: the clipboard holds no image";
                 self.ui.status = tl!(message).into();
@@ -1666,11 +1696,12 @@ impl PhotocraftApp {
             return jobs_ui::start_save(self, path, settings.clone(), copy, save, false);
         }
         let st = self.session.active().ok_or("no document")?;
-        let (doc, revision) = (st.doc.id, st.revision);
+        let (doc, written, previous) = (st.doc.id, st.revision, st.saved_revision);
         let export = self.services.export.as_ref().ok_or("no exporter configured")?;
         let (bytes, warnings) = export(&st.doc, &path, settings)?;
         let write = self.services.write.as_mut().ok_or("no writer configured")?;
         write(&path, &bytes)?;
+        let revision = saved_revision_after_write(!self.services.write_unconfirmed, written, previous);
         self.saved(doc, revision, &path, &warnings, copy);
         Ok(Some((path, warnings)))
     }
@@ -2145,6 +2176,18 @@ impl PhotocraftApp {
             ctx.set_cursor_icon(egui::CursorIcon::Wait);
         }
         let ui_ms = gpu_canvas::now_ms() - t0;
+        // A GPU measurement lands a frame or two after the refresh it belongs to. Refreshes
+        // carry them out, but the last refresh before the app settles has none following it, so
+        // drain the timer here too or its number is never reported. Drain it either way: a
+        // measurement left sitting would surface later against an unrelated refresh. Report it
+        // only while the canvas is still on the GPU, since a CPU refresh clears `gpu_ms`
+        // precisely so a GPU number is never shown as that refresh's.
+        if let Some(gpu) = &self.gpu
+            && let Some(t) = gpu.take_gpu_timing()
+            && self.perf.last_refresh.starts_with("gpu")
+        {
+            self.perf.record_gpu(t);
+        }
         self.perf.frame(ui_ms);
         if self.stroke_trace.enabled() {
             self.stroke_trace.canvas(self.perf.frame_refresh_ms);
@@ -2841,6 +2884,9 @@ mod dropdown_press_tests;
 
 #[cfg(test)]
 mod marquee_tests;
+
+#[cfg(test)]
+mod guide_cursor_tests;
 
 #[cfg(test)]
 mod canvas_menu_tests;

@@ -3722,6 +3722,22 @@ cameraData	Lens	Об'єктив
 	Search settings…	Пошук налаштувань…
 	No matching settings	Немає відповідних налаштувань
 	PhotoCraft — Screen Color Picker	PhotoCraft — Піпетка кольору екрана
+# Edit › Content-Aware Fill workspace
+	Sampling Brush Tool	Пензель області вибірки
+	Sampling Area Overlay	Накладання області вибірки
+	Show Sampling Area	Показати область вибірки
+	Indicates	Позначає
+	Sampling Area	Область вибірки
+	Excluded Area	Виключена область
+	Sampling Area Options	Параметри області вибірки
+	Rectangular	Прямокутна
+	Fill Settings	Параметри заливки
+	Rotation Adaptation	Адаптація повороту
+	Very High	Дуже висока
+	Full	Повна
+	Mirror	Віддзеркалення
+	Output Settings	Параметри виводу
+	Output To	Вивести в
 	Loading fonts…	Завантаження шрифтів…
 	Response curve	Крива відгуку
 	Simulate Pressure	Імітувати натиск
@@ -3873,6 +3889,10 @@ curves	Smooth	Згладити
 # View › Guides › right-click a guide
 	Edit Selected Guides	Редагувати вибрані напрямні
 	Clear Selected Guides	Очистити вибрані напрямні
+	Pasting from other apps is unavailable	Вставлення з інших застосунків недоступне
+	PhotoCraft can't reach the system clipboard in this session. On Wayland, a Flatpak sandbox hides the protocol that images from other apps are read through.	У цьому сеансі PhotoCraft не має доступу до системного буфера обміну. У Wayland пісочниця Flatpak приховує протокол, через який читаються зображення з інших застосунків.
+	To paste from other apps, start PhotoCraft under XWayland: `{command}`	Щоб вставляти з інших застосунків, запустіть PhotoCraft під XWayland: `{command}`
+	Nothing to paste: PhotoCraft can't read the system clipboard here	Нічого вставити: тут PhotoCraft не може прочитати системний буфер обміну
 	Delete this set	Видалити цей набір
 	New Set…	Новий набір…
 	PhotoCraft Defaults	Стандартні PhotoCraft
@@ -3887,6 +3907,7 @@ curves	Smooth	Згладити
 	There are too many sets: delete one first.	Забагато наборів: спершу видаліть один.
 	set name	назва набору
 	{set} (modified)	{set} (змінено)
+	Show file name in title	Показувати ім’я файла в заголовку
 	Accept and Go to Conflict	Прийняти й перейти до конфлікту
 	Changes undone.	Зміни скасовано.
 	Choose a new shortcut for this command, or leave it without one.	Виберіть нове клавіатурне скорочення для цієї команди або залиште її без нього.
@@ -3910,6 +3931,27 @@ curves	Smooth	Згладити
 	Replace	Замінити
 	{name} was changed by another app after it was opened or saved here.	Файл {name} змінила інша програма після того, як його тут відкрили або зберегли.
 	Replace it with this document, or cancel and use File › Save As to keep both.	Замініть його цим документом або скасуйте й скористайтеся Файл › Зберегти як, щоб зберегти обидва.
+	Decrease Brush Size	Зменшити розмір пензля
+	Increase Brush Size	Збільшити розмір пензля
+	Decrease Brush Hardness	Зменшити жорсткість пензля
+	Increase Brush Hardness	Збільшити жорсткість пензля
+# Dynamic color-picker titles and warnings about losing editable layer content.
+	Color Picker (Background Color)	Вибір кольору (колір тла)
+	Color Picker (Foreground Color)	Вибір кольору (основний колір)
+	Color Picker (Custom Canvas Color)	Вибір кольору (власний колір полотна)
+	This type layer must be rasterized before proceeding. Its text will no longer be editable. Rasterize the type?	Щоб продовжити, потрібно растеризувати цей текстовий шар. Після цього його текст більше не можна буде редагувати. Растеризувати текст?
+	This shape layer must be rasterized before proceeding. It will no longer be editable as a shape. Rasterize the shape?	Щоб продовжити, потрібно растеризувати цей шар фігури. Після цього його більше не можна буде редагувати як фігуру. Растеризувати фігуру?
+	This Smart Object must be rasterized before proceeding. Its contents will no longer be editable. Rasterize the Smart Object?	Щоб продовжити, потрібно растеризувати цей смартоб’єкт. Після цього його вміст більше не можна буде редагувати. Растеризувати смартоб’єкт?
+	This fill layer must be rasterized before proceeding. Its fill content will no longer be editable. Rasterize the layer?	Щоб продовжити, потрібно растеризувати цей шар заливки. Після цього його заливку більше не можна буде редагувати. Растеризувати шар?
+	Memory Usage	Використання пам’яті
+	Per-document RAM limit (MB)	Ліміт RAM на документ (МБ)
+	Installed RAM: {ram} MB; this limit: {percent}%	Встановлено RAM: {ram} МБ; цей ліміт: {percent}%
+	Limits each open document's pixels plus History. Oldest undo states are discarded when the limit is exceeded.	Обмежує пікселі плюс Історію кожного відкритого документа. Найстаріші стани скасування відкидаються після перевищення ліміту.
+	Applies immediately when saved. Memory is not reserved in advance.	Застосовується одразу після збереження. Пам’ять заздалегідь не резервується.
+	With GPU Memory set to Automatic, this also limits the GPU layer budget. That budget is capped at one quarter of installed RAM and, when known, three eighths of the graphics card's memory, with a 512 MB minimum. Raising this limit beyond those caps does not increase the GPU budget.	Якщо пам’ять GPU — Авто, це також обмежує бюджет GPU. Стеля — чверть RAM і, якщо відомо, три восьмих пам’яті карти, мінімум 512 МБ. Більший ліміт бюджет GPU не збільшує.
+	Use	Використати
+	In Front	Спереду
+	Behind	Ззаду
 # HarmonyOS host additions retained during upstream sync
 	Double-tap pen body	Подвійне торкання корпусу пера
 	Current tool and Eraser	Поточний інструмент і Гумка

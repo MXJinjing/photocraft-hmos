@@ -420,6 +420,7 @@ mod tests {
 
     #[test]
     fn rotation_keeps_the_previous_logs_and_starts_an_empty_file() {
+        let _spawns = crate::no_child_spawns();
         let dir = temp_dir("rotate");
         for run in 1..=4 {
             let LogFile { path, file: _file, owner: _owner } = rotate(&dir).expect("rotate");
@@ -438,6 +439,7 @@ mod tests {
     /// `.2.log`, and a fourth deleted it.
     #[test]
     fn a_second_start_leaves_the_running_instance_log_alone() {
+        let _spawns = crate::no_child_spawns();
         let dir = temp_dir("second");
         let mut first = rotate(&dir).expect("first start");
         assert_eq!(first.path, dir.join(LOG_FILE));
@@ -461,6 +463,7 @@ mod tests {
 
     #[test]
     fn instance_logs_are_pruned_only_when_no_one_holds_them() {
+        let _spawns = crate::no_child_spawns();
         let dir = temp_dir("prune");
         let first = rotate(&dir).expect("first start");
         // Earlier side-by-side runs that have exited, oldest first; the oldest has no lock file

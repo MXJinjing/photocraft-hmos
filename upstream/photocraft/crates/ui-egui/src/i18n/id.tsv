@@ -3038,6 +3038,24 @@ cameraData	Lens	Lensa
 	Snap to Origin	Jepret ke Titik Asal
 	Search settings…	Cari pengaturan…
 	No matching settings	Tidak ada pengaturan yang cocok
+# Edit › Content-Aware Fill workspace
+	Sampling Brush Tool	Alat Kuas Pengambilan Sampel
+	Sampling Area Overlay	Hamparan Area Pengambilan Sampel
+	Show Sampling Area	Tampilkan Area Pengambilan Sampel
+	Indicates	Menandai
+	Sampling Area	Area Pengambilan Sampel
+	Excluded Area	Area yang Dikecualikan
+	Sampling Area Options	Opsi Area Pengambilan Sampel
+	Rectangular	Persegi Panjang
+	Fill Settings	Pengaturan Isian
+	Rotation Adaptation	Adaptasi Rotasi
+	Very High	Sangat Tinggi
+	Full	Penuh
+	Mirror	Cermin
+	Output Settings	Pengaturan Keluaran
+	Output To	Keluaran Ke
+	Duplicate Layer	Duplikat Layer
+	Contract	Ciutkan
 	Loading fonts…	Memuat font…
 	Response curve	Kurva respons
 	Tool	Alat
@@ -3165,6 +3183,10 @@ curves	Smooth	Haluskan
 # View › Guides › right-click a guide
 	Edit Selected Guides	Edit Panduan Terpilih
 	Clear Selected Guides	Hapus Panduan Terpilih
+	Pasting from other apps is unavailable	Menempel dari aplikasi lain tidak tersedia
+	PhotoCraft can't reach the system clipboard in this session. On Wayland, a Flatpak sandbox hides the protocol that images from other apps are read through.	PhotoCraft tidak dapat mengakses papan klip sistem dalam sesi ini. Di Wayland, sandbox Flatpak menyembunyikan protokol yang digunakan untuk membaca gambar dari aplikasi lain.
+	To paste from other apps, start PhotoCraft under XWayland: `{command}`	Untuk menempel dari aplikasi lain, jalankan PhotoCraft di bawah XWayland: `{command}`
+	Nothing to paste: PhotoCraft can't read the system clipboard here	Tidak ada yang ditempel: PhotoCraft tidak dapat membaca papan klip sistem di sini
 	Delete this set	Hapus set ini
 	New Set…	Set Baru…
 	PhotoCraft Defaults	Bawaan PhotoCraft
@@ -3180,6 +3202,7 @@ curves	Smooth	Haluskan
 	set name	nama set
 	{set} (modified)	{set} (diubah)
 	Random	Acak
+	Show file name in title	Tampilkan nama file di judul
 	Accept and Go to Conflict	Terima dan Buka Konflik
 	Changes undone.	Perubahan dibatalkan.
 	Choose a new shortcut for this command, or leave it without one.	Pilih pintasan baru untuk perintah ini, atau biarkan tanpa pintasan.
@@ -3203,6 +3226,19 @@ curves	Smooth	Haluskan
 	Replace	Ganti
 	{name} was changed by another app after it was opened or saved here.	{name} diubah oleh aplikasi lain setelah dibuka atau disimpan di sini.
 	Replace it with this document, or cancel and use File › Save As to keep both.	Ganti dengan dokumen ini, atau batalkan dan gunakan Berkas › Simpan Sebagai untuk menyimpan keduanya.
+	Decrease Brush Size	Perkecil ukuran kuas
+	Increase Brush Size	Perbesar ukuran kuas
+	Decrease Brush Hardness	Kurangi kekerasan kuas
+	Increase Brush Hardness	Tambah kekerasan kuas
+	Memory Usage	Penggunaan memori
+	Per-document RAM limit (MB)	Batas RAM per dokumen (MB)
+	Installed RAM: {ram} MB; this limit: {percent}%	RAM terpasang: {ram} MB; batas ini: {percent}%
+	Limits each open document's pixels plus History. Oldest undo states are discarded when the limit is exceeded.	Membatasi piksel plus Riwayat setiap dokumen terbuka. Status urungkan tertua dibuang jika batas terlampaui.
+	Applies immediately when saved. Memory is not reserved in advance.	Berlaku segera setelah disimpan. Memori tidak dipesan di muka.
+	With GPU Memory set to Automatic, this also limits the GPU layer budget. That budget is capped at one quarter of installed RAM and, when known, three eighths of the graphics card's memory, with a 512 MB minimum. Raising this limit beyond those caps does not increase the GPU budget.	Jika Memori GPU Otomatis, ini juga membatasi anggaran GPU. Plafon seperempat RAM dan, jika diketahui, tiga per delapan memori kartu, minimum 512 MB. Menaikkan batas tidak menambah anggaran GPU.
+	Use	Gunakan
+	In Front	Di Depan
+	Behind	Di Belakang
 # HarmonyOS host additions retained during upstream sync
 	Stylus	Stylus
 	Block finger input	Blokir masukan jari

@@ -594,6 +594,9 @@ fn overlay_gradient(g: &mut Gradient, p: &Value) {
 /// a dialog round trip never touches what it doesn't model: an imported
 /// gradient stroke keeps its gradient while its opacity is edited.
 pub fn overlay_effect(fx: &mut Effect, p: &Value) {
+    if crate::commands::check_f32_values("layer.layerStyle", p).is_err() {
+        return;
+    }
     fn set_color(p: &Value, k: &str, c: &mut Color) {
         if let Some(x) = color_of(p, k) {
             *c = x;
@@ -821,6 +824,7 @@ pub fn overlay_effect(fx: &mut Effect, p: &Value) {
 /// Builds an effect of `kind` from JSON params (Photoshop units: opacity,
 /// spread, range in percent; sizes in px; angles in degrees).
 pub fn effect_from_params(kind: &str, p: &Value) -> Option<Effect> {
+    crate::commands::check_f32_values("layer.layerStyle", p).ok()?;
     let mut fx = fresh_effect(kind)?;
     overlay_effect(&mut fx, p);
     Some(fx)
@@ -856,6 +860,7 @@ const MAX_EFFECTS: usize = 256;
 /// mismatches and malformed snapshots are errors, never panics.
 fn replace_effects(s: &mut Session, p: &Value) -> Result<Value> {
     const CMD: &str = "layer.layerStyle.replace";
+    crate::commands::check_f32_values(CMD, p)?;
     let id = crate::commands::layer_param(s, p)?;
     let entries = p.get("effects").and_then(Value::as_array).ok_or_else(|| bad(CMD, "need `effects`: [{kind, params, fx?}]"))?;
     if entries.len() > MAX_EFFECTS {
@@ -905,6 +910,7 @@ fn replace_effects(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn set_effect(s: &mut Session, p: &Value, kind: &str) -> Result<Value> {
+    crate::commands::check_f32_values(&format!("layer.layerStyle.{kind}"), p)?;
     let fx = effect_from_params(kind, p).ok_or_else(|| EngineError::Other(format!("unknown effect {kind}")))?;
     let (fx, pattern) = crate::pattern_cmds::resolve_effect(s, fx)?;
     let label = format!("Layer Style: {}", fx.label());
@@ -936,6 +942,7 @@ fn make_default(s: &mut Session, p: &Value) -> Result<Value> {
         Some(v) if v.is_object() => v.clone(),
         _ => return Err(bad(CMD, "`params` must be an object")),
     };
+    crate::commands::check_f32_values(CMD, &params)?;
     s.presets.layer_defaults.insert(kind.to_string(), params);
     s.presets_changed();
     Ok(json!({"kind": kind}))
@@ -1152,17 +1159,25 @@ mod tests {
     /// blur kernel of 2^62 taps ("capacity overflow"), or ran for minutes at 1e6. The blur width
     /// is capped at the effect reach, so the document still renders, quickly.
     #[test]
-    fn oversized_satin_and_bevel_sizes_render() {
-        for (cmd, p) in [
-            ("satin", json!({"size": 1e308})),
-            ("satin", json!({"size": 1_000_000})),
-            ("bevelEmboss", json!({"size": 1e308})),
-            ("bevelEmboss", json!({"soften": 1e308})),
-            ("bevelEmboss", json!({"size": 1_000_000, "soften": 1_000_000})),
+    fn oversized_satin_and_bevel_sizes_stay_saveable_and_render() {
+        for (cmd, p, accepted) in [
+            ("satin", json!({"size": 1e308}), false),
+            ("satin", json!({"size": 1e30}), true),
+            ("satin", json!({"size": 1_000_000}), true),
+            ("bevelEmboss", json!({"size": 1e308}), false),
+            ("bevelEmboss", json!({"soften": 1e308}), false),
+            ("bevelEmboss", json!({"size": 1e30, "soften": 1e30}), true),
+            ("bevelEmboss", json!({"size": 1_000_000, "soften": 1_000_000}), true),
         ] {
             let mut s = session();
             s.execute("edit.fill", json!({"color": "#ff0000"})).unwrap();
-            s.execute(&format!("layer.layerStyle.{cmd}"), p.clone()).unwrap();
+            let result = s.execute(&format!("layer.layerStyle.{cmd}"), p.clone());
+            if accepted {
+                result.unwrap();
+            } else {
+                assert!(matches!(result, Err(EngineError::BadParams { .. })));
+            }
+            photocraft_format::save_to_bytes(&s.active().unwrap().doc, &Default::default()).unwrap();
             let start = std::time::Instant::now();
             s.execute("document.pixel", json!({"x": 0, "y": 0})).unwrap_or_else(|e| panic!("{cmd} {p}: {e}"));
             assert!(start.elapsed().as_secs() < 20, "{cmd} {p}: {:?}", start.elapsed());

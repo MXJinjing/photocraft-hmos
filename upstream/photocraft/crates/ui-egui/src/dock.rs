@@ -521,10 +521,7 @@ pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui, shown: &[Group], mut bod
                 ui.set_min_height(inner);
                 body(app, ui, g, tab);
             } else {
-                // The pro Color field stretches to the group's height instead of a fixed 120 pt.
-                if t.pro && g == Group::Color && tab == 0 {
-                    ui.data_mut(|d| d.insert_temp(crate::panels::color_field_fill_id(), inner));
-                }
+                crate::panels::offer_color_field_fill(ui, t.pro, g, tab);
                 // No scroll fade: it darkens real colours, swatches and previews at the edge
                 // (#2726); the scroll bar already shows there is more.
                 ui.spacing_mut().scroll.fade.strength = 0.0;

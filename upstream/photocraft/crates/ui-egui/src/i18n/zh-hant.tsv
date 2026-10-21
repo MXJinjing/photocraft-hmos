@@ -777,6 +777,7 @@
 	Brush Settings	筆刷設定
 	Brushes	筆刷
 	Channels	色版
+	Channel	色版
 	Character	字元
 	Character Styles	字元樣式
 	Clone Source	仿製來源
@@ -1246,6 +1247,7 @@
 	Levels	色階
 	Lighten	變亮
 	Lightness	明亮
+	Result	結果
 	Lights	燈光
 	Limits:	限制：
 	Linear Gradient	線性漸層
@@ -2617,6 +2619,26 @@ cameraData	Lens	鏡頭
 	Snap to Origin	靠齊原點
 	Search settings…	搜尋設定…
 	No matching settings	沒有符合的設定
+# Edit › Content-Aware Fill workspace
+	Sampling Brush Tool	取樣筆刷工具
+	Sampling Area Overlay	取樣區域覆蓋
+	Show Sampling Area	顯示取樣區域
+	Indicates	指示
+	Sampling Area	取樣區域
+	Excluded Area	排除區域
+	Sampling Area Options	取樣區域選項
+	Rectangular	矩形
+	Fill Settings	填色設定
+	Rotation Adaptation	旋轉調整
+	Very High	非常高
+	High	高
+	Low	低
+	Full	完全
+	Mirror	鏡像
+	Output Settings	輸出設定
+	Output To	輸出至
+	Duplicate Layer	複製圖層
+	Contract	縮減
 	Loading fonts…	正在載入字體…
 	Response curve	回應曲線
 	Tool	工具
@@ -2774,6 +2796,10 @@ curves	Smooth	平滑
 # View › Guides › right-click a guide
 	Edit Selected Guides	編輯所選參考線
 	Clear Selected Guides	清除所選參考線
+	Pasting from other apps is unavailable	無法從其他應用程式貼上
+	PhotoCraft can't reach the system clipboard in this session. On Wayland, a Flatpak sandbox hides the protocol that images from other apps are read through.	PhotoCraft 在此工作階段中無法存取系統剪貼簿。在 Wayland 上，Flatpak 沙盒會隱藏讀取其他應用程式影像所用的協定。
+	To paste from other apps, start PhotoCraft under XWayland: `{command}`	若要從其他應用程式貼上，請在 XWayland 下啟動 PhotoCraft：`{command}`
+	Nothing to paste: PhotoCraft can't read the system clipboard here	沒有可貼上的內容：PhotoCraft 在此無法讀取系統剪貼簿
 	Delete this set	刪除此組合
 	New Set…	新增組合…
 	PhotoCraft Defaults	PhotoCraft 預設值
@@ -2789,6 +2815,7 @@ curves	Smooth	平滑
 	set name	組合名稱
 	{set} (modified)	{set}（已修改）
 	Random	隨機
+	Show file name in title	標題中顯示檔案名稱
 	Accept and Go to Conflict	接受並前往衝突
 	Changes undone.	已還原變更。
 	Choose a new shortcut for this command, or leave it without one.	為此指令選擇新的快速鍵，或保持沒有快速鍵。
@@ -2812,6 +2839,20 @@ curves	Smooth	平滑
 	Replace	取代
 	{name} was changed by another app after it was opened or saved here.	{name} 在此處開啟或儲存後已被其他 App 更改。
 	Replace it with this document, or cancel and use File › Save As to keep both.	以此文件取代它，或取消並使用「檔案 › 另存新檔」以保留兩者。
+	Decrease Brush Size	縮小筆刷大小
+	Increase Brush Size	放大筆刷大小
+	Decrease Brush Hardness	降低筆刷硬度
+	Increase Brush Hardness	提高筆刷硬度
+	Memory Usage	記憶體使用量
+	Per-document RAM limit (MB)	每個文件的 RAM 上限 (MB)
+	Installed RAM: {ram} MB; this limit: {percent}%	已安裝 RAM：{ram} MB；此上限：{percent}%
+	Limits each open document's pixels plus History. Oldest undo states are discarded when the limit is exceeded.	限制每個開啟文件的像素加歷史記錄。超出上限時會捨棄最舊的復原狀態。
+	Applies immediately when saved. Memory is not reserved in advance.	儲存後立即套用。不會預先保留記憶體。
+	With GPU Memory set to Automatic, this also limits the GPU layer budget. That budget is capped at one quarter of installed RAM and, when known, three eighths of the graphics card's memory, with a 512 MB minimum. Raising this limit beyond those caps does not increase the GPU budget.	當 GPU 記憶體為自動時，這也會限制 GPU 圖層預算。上限為安裝 RAM 的四分之一，以及（若已知）顯示卡記憶體的八分之三，最低 512 MB。超過這些上限不會增加 GPU 預算。
+	Use	使用
+	In Front	前面
+	Behind	後面
+	Blend	混合
 # HarmonyOS host additions retained during upstream sync
 	Stylus	手寫筆
 	Block finger input	停用手指輸入

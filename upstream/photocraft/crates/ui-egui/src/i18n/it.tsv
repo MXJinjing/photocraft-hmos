@@ -2705,6 +2705,22 @@ cameraData	Lens	Obiettivo
 	Snap to Origin	Aggancia all'origine
 	Search settings…	Cerca impostazioni…
 	No matching settings	Nessuna impostazione corrispondente
+# Edit › Content-Aware Fill workspace
+	Sampling Brush Tool	Strumento Pennello di campionamento
+	Sampling Area Overlay	Sovrapposizione area di campionamento
+	Show Sampling Area	Mostra area di campionamento
+	Indicates	Indica
+	Sampling Area	Area di campionamento
+	Excluded Area	Area esclusa
+	Sampling Area Options	Opzioni area di campionamento
+	Rectangular	Rettangolare
+	Fill Settings	Impostazioni di riempimento
+	Rotation Adaptation	Adattamento rotazione
+	Very High	Molto alta
+	Full	Completa
+	Mirror	Rifletti
+	Output Settings	Impostazioni di output
+	Output To	Output in
 	Loading fonts…	Caricamento font…
 	Response curve	Curva di risposta
 	Tool	Strumento
@@ -4295,6 +4311,10 @@ shape	Appearance	Aspetto
 # View › Guides › right-click a guide
 	Edit Selected Guides	Modifica guide selezionate
 	Clear Selected Guides	Cancella guide selezionate
+	Pasting from other apps is unavailable	Incollare da altre app non è disponibile
+	PhotoCraft can't reach the system clipboard in this session. On Wayland, a Flatpak sandbox hides the protocol that images from other apps are read through.	PhotoCraft non può accedere agli appunti di sistema in questa sessione. Su Wayland, la sandbox di Flatpak nasconde il protocollo con cui vengono lette le immagini delle altre app.
+	To paste from other apps, start PhotoCraft under XWayland: `{command}`	Per incollare da altre app, avvia PhotoCraft in XWayland: `{command}`
+	Nothing to paste: PhotoCraft can't read the system clipboard here	Niente da incollare: qui PhotoCraft non può leggere gli appunti di sistema
 	Delete this set	Elimina questo set
 	New Set…	Nuovo set…
 	PhotoCraft Defaults	Predefiniti di PhotoCraft
@@ -4309,6 +4329,7 @@ shape	Appearance	Aspetto
 	There are too many sets: delete one first.	Ci sono troppi set: eliminane prima uno.
 	set name	nome del set
 	{set} (modified)	{set} (modificato)
+	Show file name in title	Mostra nome file nel titolo
 	Accept and Go to Conflict	Accetta e vai al conflitto
 	Changes undone.	Modifiche annullate.
 	Choose a new shortcut for this command, or leave it without one.	Scegli una nuova scorciatoia per questo comando o lascialo senza.
@@ -4331,6 +4352,15 @@ shape	Appearance	Aspetto
 	GPU Memory (MB, 0 = Automatic)	Memoria GPU (MB, 0 = Automatico)
 	{name} was changed by another app after it was opened or saved here.	{name} è stato modificato da un'altra app dopo essere stato aperto o salvato qui.
 	Replace it with this document, or cancel and use File › Save As to keep both.	Sostituiscilo con questo documento, oppure annulla e usa File › Salva con nome per tenerli entrambi.
+	Memory Usage	Utilizzo memoria
+	Per-document RAM limit (MB)	Limite RAM per documento (MB)
+	Installed RAM: {ram} MB; this limit: {percent}%	RAM installata: {ram} MB; questo limite: {percent}%
+	Limits each open document's pixels plus History. Oldest undo states are discarded when the limit is exceeded.	Limita i pixel più la Cronologia di ogni documento aperto. Gli stati Annulla più vecchi vengono scartati oltre il limite.
+	Applies immediately when saved. Memory is not reserved in advance.	Si applica al salvataggio. La memoria non è riservata in anticipo.
+	With GPU Memory set to Automatic, this also limits the GPU layer budget. That budget is capped at one quarter of installed RAM and, when known, three eighths of the graphics card's memory, with a 512 MB minimum. Raising this limit beyond those caps does not increase the GPU budget.	Con Memoria GPU Automatica limita anche il budget GPU. È limitato a un quarto della RAM e, se nota, a tre ottavi della memoria della scheda, minimo 512 MB. Alzare il limite non aumenta il budget GPU.
+	Use	Usa
+	In Front	Davanti
+	Behind	Dietro
 # HarmonyOS host additions retained during upstream sync
 	Stylus	Stilo
 	Block finger input	Blocca input dito

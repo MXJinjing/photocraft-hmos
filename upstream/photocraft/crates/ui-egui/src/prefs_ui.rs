@@ -233,11 +233,15 @@ pub fn load(app: &mut PhotocraftApp) {
         return;
     }
     app.prefs_rt.loaded = true;
-    if let Some(text) = app.services.load_prefs.as_mut().and_then(|f| f())
-        && let Err(e) = app.session.load_prefs_json(&text)
-    {
-        let template = "Preferences were reset: {error}";
-        app.ui.status = crate::i18n::fmt(tl!(template), &[("error", &e)]);
+    let mut invalid = Vec::new();
+    if let Some(text) = app.services.load_prefs.as_mut().and_then(|f| f()) {
+        match app.session.load_prefs_json(&text) {
+            Ok(found) => invalid = found,
+            Err(e) => {
+                let template = "Preferences were reset: {error}";
+                app.ui.status = crate::i18n::fmt(tl!(template), &[("error", &e)]);
+            }
+        }
     }
     crate::dock::restore(app);
     crate::brush_picker::restore(app);
@@ -248,6 +252,37 @@ pub fn load(app: &mut PhotocraftApp) {
     app.sync_recent();
     app.prefs_rt.saved_rev = app.session.prefs.rev();
     app.prefs_rt.saved_value = Some(app.session.prefs_value());
+    if !invalid.is_empty() {
+        repair_invalid(app, &invalid);
+    }
+}
+
+/// Some saved values couldn't be read and took their defaults (#6611): say which, and write
+/// the defaults over them on the next save so the next launch reads a clean file. The save
+/// base holds the unreadable values, so the three-way merge sees them as changed here and
+/// replaces (or removes) exactly those, keeping everything else in the stored file.
+fn repair_invalid(app: &mut PhotocraftApp, invalid: &[prefs::InvalidPref]) {
+    if let Some(base) = app.prefs_rt.saved_value.as_mut() {
+        for bad in invalid {
+            let Some((key, parent)) = bad.keys.split_last() else {
+                continue;
+            };
+            if let Some(obj) = parent.iter().try_fold(&mut *base, |cur, k| cur.get_mut(k.as_str())).and_then(Value::as_object_mut) {
+                obj.insert(key.clone(), bad.value.clone());
+            }
+        }
+    }
+    app.session.prefs.edit(|_| ());
+    let paths = invalid.iter().map(prefs::InvalidPref::path).collect::<Vec<_>>().join(", ");
+    let (title, line) = (
+        "Some preferences were reset",
+        "The preferences file held values PhotoCraft can't read for {paths}. Those settings are back to their defaults; the rest of your preferences loaded.",
+    );
+    // Notices keep their English source and are translated when drawn.
+    let id = crate::notices::post(app, title, vec![line.into()], false, None);
+    if let Some(notice) = app.ui.notices.iter_mut().find(|n| n.id == id) {
+        notice.args.push(("paths".into(), paths));
+    }
 }
 
 /// Discover recovery entries after construction, then decode one at a time without blocking
@@ -907,26 +942,16 @@ pub fn invoke(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str, params: &V
             }
             dialog(d)
         }
-        "edit.contentAwareFill" => {
-            if !app.session.is_enabled(id) {
-                return Some(Err("Content-Aware Fill needs a selection on a pixel layer".into()));
-            }
-            let d = crate::filter_dialog::open(app, id);
-            if let Some(dm) = d.and_then(|d| app.ui.dialog_mut(d)) {
-                dm.fields.insert("__preview".into(), json!(true));
-                for k in ["margin", "seed", "channel"] {
-                    dm.fields.remove(k);
-                }
-            }
-            dialog(d)
-        }
+        // Photoshop's Content-Aware Fill workspace (caf_ui); the engine command with params
+        // still runs directly.
+        "edit.contentAwareFill" => Some(crate::caf_ui::open(app).map(|_| json!({"contentAwareFill": app.distort.describe()["contentAwareFill"]}))),
         // Photoshop has no dialog: the menu opens the scale box (with params: the engine).
         crate::cas_transform::COMMAND => Some(crate::cas_transform::begin(app, ctx)),
         "edit.presets.presetManager" => {
             Some(Ok(json!({"dialog": open_kind(app, "presets", "Preset Manager", json!({"kind": "brushes", "selected": 0, "newName": ""}))})))
         }
         "edit.presets.exportImportPresets" => Some(Ok(
-            json!({"dialog": open_kind(app, "presetsIO", "Export/Import Presets", json!({"action": "export", "brushes": true, "customShapes": true}))}),
+            json!({"dialog": open_kind(app, "presetsIO", "Export/Import Presets", json!({"action": "export", "brushes": true, "customShapes": true, "tools": true}))}),
         )),
         _ => None,
     }
@@ -978,10 +1003,22 @@ pub fn apply(app: &mut PhotocraftApp, id: u64) -> Result<Value, String> {
     Ok(result)
 }
 
-/// Max dialog width for our dialogs.
+/// The size Preferences opens at: room for the widest section and about 30 settings rows. The
+/// dialog's resize grip changes it, and its contents follow (#7420).
+pub const PREFERENCES_SIZE: egui::Vec2 = egui::vec2(1040.0, 800.0);
+
+/// The height of the settings area (section list and fields) when `available` is left below the
+/// search field: everything but the dialog's button row (`item_spacing` + 8 pt + the buttons) and
+/// a little slack, never less than a few rows.
+fn settings_height(available: f32, item_spacing: f32, button_height: f32) -> f32 {
+    (available - (item_spacing + 8.0 + button_height + 4.0)).max(160.0)
+}
+
+/// Max dialog width for our dialogs. Preferences fills the width it is given (`available`, its
+/// resizable area).
 pub fn width(fields: &Map<String, Value>, available: f32) -> Option<f32> {
     match fields.get("__prefsui").and_then(Value::as_str)? {
-        "prefs" => Some(available.clamp(380.0, 1040.0)),
+        "prefs" => Some(available.max(380.0)),
         "shortcuts" => Some(720.0),
         _ => Some(460.0),
     }
@@ -1266,7 +1303,10 @@ fn prefs_body(ui: &mut egui::Ui, f: &mut Map<String, Value>, system: Option<egui
                 }
             }
         });
-        let content_height = (ui.ctx().content_rect().height() - 240.0).clamp(240.0, 680.0);
+        // The settings fill the dialog's resizable area down to the button row (#7420). Sizing them
+        // from the window instead left a resized dialog with empty space and the buttons mid-way.
+        // The area grows to fit its content, so this must never ask for more than it was given.
+        let content_height = settings_height(ui.available_height(), ui.spacing().item_spacing.y, crate::widgets::button_height(ui.ctx()));
         crate::widgets::vline(ui, content_height);
         ui.vertical(|ui| {
             ui.set_width((ui.available_width() - 12.0).max(340.0));
@@ -1574,7 +1614,7 @@ fn field_visible(section: &str, obj: &Map<String, Value>, k: &str, query: &str) 
     let drawn_elsewhere = (section == "interface" && matches!(k, "theme" | "appearanceMode" | "darkTheme" | "lightTheme" | "favoriteThemes"))
         // View › Rulers (⌘R) sets it, as in Photoshop.
         || path == "unitsAndRulers.showRulers"
-        || (section == "performance" && matches!(k, "useGpu" | "gpuBackend" | "renderingMode"))
+        || (section == "performance" && matches!(k, "useGpu" | "gpuBackend" | "renderingMode" | "memoryUsageMb"))
         // The browser presents frames itself: Low-Latency Drawing does nothing there.
         || (cfg!(target_arch = "wasm32") && path == "performance.lowLatencyDrawing")
         || (section == "export" && !export_field_visible(obj, k))
@@ -1606,6 +1646,9 @@ fn section_fields(
     if section == "performance" && (query.is_empty() || preference_matches(section, "renderingMode", &query)) {
         rendering_mode_row(ui, obj);
     }
+    if section == "performance" && (query.is_empty() || preference_matches(section, "memoryUsageMb", &query)) {
+        memory_usage_row(ui, obj);
+    }
     keys.retain(|k| field_visible(section, obj, k, &query));
     if section == "tools" {
         keys.retain(|k| !matches!(k.as_str(), "blockFingerInput" | "stylusDoubleTap" | "stylusLongPress"));
@@ -1614,6 +1657,30 @@ fn section_fields(
     if section == "tools" {
         stylus_fields(ui, obj);
     }
+}
+
+/// Explain the per-document RAM limit separately from the graphics-memory preference.
+fn memory_usage_row(ui: &mut egui::Ui, obj: &mut Map<String, Value>) {
+    let t = Tokens::get(ui.ctx());
+    ui.group(|ui| {
+        ui.label(RichText::new(tl!("Memory Usage")).strong());
+        let mut mb = obj.get("memoryUsageMb").and_then(Value::as_u64).unwrap_or(8192);
+        ui.horizontal(|ui| {
+            ui.label(tl!("Per-document RAM limit (MB)"));
+            if ui.add(egui::DragValue::new(&mut mb).range(256..=1_048_576).suffix(" MB")).changed() {
+                obj.insert("memoryUsageMb".into(), json!(mb));
+            }
+        });
+        if let Some(ram) = crate::gpu_canvas::physical_memory().filter(|n| *n > 0) {
+            let installed = ram / (1 << 20);
+            let percent = mb as f64 * 100.0 / (ram as f64 / (1 << 20) as f64);
+            ui.label(crate::i18n::fmt(tl!("Installed RAM: {ram} MB; this limit: {percent}%"), &[("ram", &installed.to_string()), ("percent", &format!("{percent:.1}"))]));
+        }
+        ui.label(RichText::new(tl!("Limits each open document's pixels plus History. Oldest undo states are discarded when the limit is exceeded.")).color(t.text_dim));
+        ui.label(RichText::new(tl!("Applies immediately when saved. Memory is not reserved in advance.")).color(t.text_dim));
+        ui.label(RichText::new(tl!("With GPU Memory set to Automatic, this also limits the GPU layer budget. That budget is capped at one quarter of installed RAM and, when known, three eighths of the graphics card's memory, with a 512 MB minimum. Raising this limit beyond those caps does not increase the GPU budget.")).color(t.text_dim));
+    });
+    ui.add_space(8.0);
 }
 
 /// One grid row per setting in `keys` (already filtered by `field_visible`).
@@ -2361,7 +2428,7 @@ fn presets_io_body(ui: &mut egui::Ui, f: &mut Map<String, Value>) {
             180.0,
         );
     });
-    for (k, label) in [("brushes", tl!("Brushes")), ("customShapes", tl!("Custom Shapes"))] {
+    for (k, label) in [("brushes", tl!("Brushes")), ("customShapes", tl!("Custom Shapes")), ("tools", tl!("Tool Presets"))] {
         let mut on = f.get(k).and_then(Value::as_bool).unwrap_or(true);
         crate::widgets::checkbox(ui, &mut on, label);
         f.insert(k.into(), json!(on));
@@ -2485,7 +2552,7 @@ pub fn confirm(app: &mut PhotocraftApp, f: &Map<String, Value>) -> Result<Value,
         }
         "presets" => Ok(Value::Null),
         "presetsIO" => {
-            let kinds: Vec<&str> = ["brushes", "customShapes"].into_iter().filter(|k| f.get(*k).and_then(Value::as_bool).unwrap_or(true)).collect();
+            let kinds: Vec<&str> = ["brushes", "customShapes", "tools"].into_iter().filter(|k| f.get(*k).and_then(Value::as_bool).unwrap_or(true)).collect();
             if f.get("action").and_then(Value::as_str) == Some("import") {
                 app.pick_file_bytes(move |app, name, bytes| {
                     let text = String::from_utf8(bytes).map_err(|_| format!("{name} is not a preset file"))?;
@@ -2529,6 +2596,22 @@ mod shortcut_set_tests;
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn memory_usage_has_a_dedicated_explanation_and_keeps_its_value() {
+        use egui_kittest::{Harness, kittest::Queryable};
+        let values = json!({"memoryUsageMb":50000}).as_object().unwrap().clone();
+        assert!(!field_visible("performance", &values, "memoryUsageMb", ""));
+        let mut h = Harness::builder()
+            .with_size(vec2(680.0, 350.0))
+            .build_ui_state(|ui, values| section_fields(ui, "performance", values, &["memoryUsageMb".into()], crate::i18n::Lang::EN, None, ""), values);
+        h.run_steps(2);
+        h.get_by_label("Memory Usage");
+        h.get_by_label("Per-document RAM limit (MB)");
+        h.get_by_label("Limits each open document's pixels plus History. Oldest undo states are discarded when the limit is exceeded.");
+        h.get_by_label("Applies immediately when saved. Memory is not reserved in advance.");
+        assert_eq!(h.state()["memoryUsageMb"], 50000);
+    }
+
     #[test]
     fn colour_preferences_take_a_typed_hex_value() {
         // #668: the canvas colour (and every colour preference) showed its hex but couldn't take one.
@@ -2616,14 +2699,29 @@ mod tests {
     }
 
     #[test]
-    fn preferences_dialog_width_follows_the_window() {
+    fn preferences_dialog_width_follows_its_resizable_area() {
         let prefs = serde_json::json!({"__prefsui": "prefs"});
         let prefs = prefs.as_object().unwrap();
         assert_eq!(super::width(prefs, 200.0), Some(380.0));
         assert_eq!(super::width(prefs, 800.0), Some(800.0));
-        assert_eq!(super::width(prefs, 3000.0), Some(1040.0));
+        // A dialog resized wider than it opens is filled, not left with empty space (#7420).
+        assert_eq!(super::width(prefs, 3000.0), Some(3000.0));
         let shortcuts = serde_json::json!({"__prefsui": "shortcuts"});
         assert_eq!(super::width(shortcuts.as_object().unwrap(), 3000.0), Some(720.0));
+    }
+
+    #[test]
+    fn preferences_settings_fill_the_dialog_down_to_the_buttons() {
+        // The settings area plus the button row (spacing, 8 pt gap, buttons) stays inside what the
+        // resizable area gives it, at any size: the area grows to fit its content, so asking for
+        // more would make the dialog grow every frame. The area follows the dialog's size (#7420).
+        for available in [300.0, 600.0, 1400.0] {
+            let h = super::settings_height(available, 4.0, 30.0);
+            assert!(h + 4.0 + 8.0 + 30.0 <= available, "{available}");
+            assert!(h + 4.0 + 8.0 + 30.0 + 8.0 >= available, "{available}");
+        }
+        assert_eq!(super::settings_height(1400.0, 4.0, 30.0) - super::settings_height(600.0, 4.0, 30.0), 800.0);
+        assert_eq!(super::settings_height(50.0, 4.0, 30.0), 160.0);
     }
     use super::*;
     use std::sync::{Arc, Mutex};
@@ -3082,6 +3180,39 @@ mod tests {
     }
 
     #[test]
+    fn a_wrongly_typed_value_resets_only_itself_and_is_repaired_on_disk() {
+        // #6611: one bad value used to reset every preference, on every launch.
+        let saved = json!({
+            "fileHandling": {"recentFileCount": "ten", "autosaveMinutes": 5},
+            "performance": {"historyStates": 12},
+            "shortcuts": {"edit.fill": "Cmd+Shift+F", "file.open": 7},
+            "futureSection": {"kept": true},
+        });
+        let (mut app, store) = app_with_saved(Some(saved.to_string()));
+        let ctx = egui::Context::default();
+        tick(&mut app, &ctx);
+        let p = app.session.prefs();
+        assert_eq!((p.file_handling.recent_file_count, p.file_handling.autosave_minutes, p.performance.history_states), (20, 5, 12));
+        assert!(!app.ui.status.contains("reset"), "{}", app.ui.status);
+        let notice = app.ui.notices.iter().find(|n| n.title == "Some preferences were reset").expect("a notice names the bad values");
+        let text = notice.text(&notice.lines[0]);
+        assert!(text.contains("fileHandling.recentFileCount, shortcuts.file.open"), "{text}");
+        // The file now holds the default in its place and keeps everything else.
+        let v = stored(&store);
+        assert_eq!(v["fileHandling"]["recentFileCount"], 20);
+        assert_eq!(v["fileHandling"]["autosaveMinutes"], 5);
+        assert_eq!(v["performance"]["historyStates"], 12);
+        assert_eq!(v["shortcuts"]["edit.fill"], "Cmd+Shift+F");
+        assert!(v["shortcuts"].get("file.open").is_none());
+        assert_eq!(v["futureSection"]["kept"], true, "keys this version doesn't know survive");
+        // So the next launch loads cleanly.
+        let (mut next, _) = app_with_saved(store.lock().unwrap().clone());
+        tick(&mut next, &ctx);
+        assert!(next.ui.notices.iter().all(|n| n.title != "Some preferences were reset"));
+        assert_eq!(next.session.prefs().file_handling.autosave_minutes, 5);
+    }
+
+    #[test]
     fn merge_keeps_changes_made_elsewhere() {
         let base = json!({"a": {"x": 1, "y": 1}, "list": [1], "gone": 1, "kept": 1});
         // Here: a.x changed, `gone` removed, `new` added.
@@ -3534,11 +3665,13 @@ mod tests {
         assert!(!prefs::is_hidden("type.useEscToCommit"));
         assert!(!prefs::is_hidden("type.smartQuotes"));
         assert!(!prefs::is_hidden("type.showFontNamesInEnglish"));
-        // Rotate View with Trackpad and the pinch zoom are live; the other Enhanced Controls rows
-        // stay hidden.
+        // Rotate View with Trackpad, the pinch zoom and Enable Gestures are live; the other
+        // Enhanced Controls rows stay hidden.
         assert!(has_visible_fields(&values, "enhancedControls"));
         assert!(!prefs::is_hidden("enhancedControls.rotateViewWithTrackpad"));
         assert!(!prefs::is_hidden("enhancedControls.zoomWithTrackpadPinch"));
+        assert!(!prefs::is_hidden("enhancedControls.touchGestures"));
+        assert!(prefs::is_hidden("enhancedControls.scrubbySliderAcceleration"));
         // Camera Raw Defaults shows only "Open in Camera Raw" so far.
         assert!(has_visible_fields(&values, "rawDefaults"));
         assert!(!prefs::is_hidden("rawDefaults.openInCameraRaw"));
@@ -3575,6 +3708,23 @@ mod tests {
         tick(&mut app2, &ctx);
         assert_eq!(app2.session.prefs().interface.theme, Theme::Classic);
         assert!(store2.lock().unwrap().as_ref().unwrap().contains("classic"));
+    }
+
+    #[test]
+    fn preset_export_dialog_offers_tool_presets() {
+        use egui_kittest::{Harness, kittest::Queryable};
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        let ctx = egui::Context::default();
+        let opened = crate::menus::invoke(&mut app, &ctx, "edit.presets.exportImportPresets", json!({})).unwrap();
+        let fields = app.ui.dialog_mut(opened["dialog"].as_u64().unwrap()).unwrap().fields.clone();
+        assert_eq!(fields["tools"], true);
+        let mut h = Harness::builder().with_size(vec2(420.0, 260.0)).build_ui_state(presets_io_body, fields);
+        h.run_steps(2);
+        h.get_by_label("Tool Presets").click();
+        h.run_steps(2);
+        assert_eq!(h.state()["tools"], false);
+        assert_eq!(h.state()["brushes"], true);
+        assert_eq!(h.state()["customShapes"], true);
     }
 
     #[test]
@@ -4126,9 +4276,11 @@ mod tests {
         assert!(note.starts_with("Monitor profile in use: sRGB") && note.contains("fallback"), "{note}");
         assert!(crate::menus::invoke(&mut app, &ctx, "edit.fade", json!({})).is_err());
         app.run("select.rect", json!({"x": 4, "y": 4, "width": 8, "height": 8})).unwrap();
-        let d = crate::menus::invoke(&mut app, &ctx, "edit.contentAwareFill", json!({})).unwrap()["dialog"].as_u64().unwrap();
-        assert_eq!(app.ui.dialogs.iter().find(|x| x.id == d).unwrap().fields["__preview"], true);
-        crate::dialogs::confirm(&mut app, d).unwrap();
+        // Content-Aware Fill opens its workspace (caf_ui); OK fills.
+        let r = crate::menus::invoke(&mut app, &ctx, "edit.contentAwareFill", json!({})).unwrap();
+        assert!(r["contentAwareFill"]["window"].is_array(), "{r}");
+        crate::caf_ui::commit(&mut app);
+        assert!(app.distort.caf.is_none());
         let r = crate::menus::invoke(&mut app, &ctx, "edit.contentAwareScale", json!({})).unwrap();
         assert_eq!(r["transform"]["rect"], json!([4.0, 4.0, 12.0, 12.0]));
         crate::transform_tool::cancel(&mut app);

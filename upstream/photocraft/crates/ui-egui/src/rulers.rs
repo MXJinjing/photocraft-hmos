@@ -329,10 +329,14 @@ fn ruler_pos(xf: &ViewXform, vertical: bool, u: f64, px_per_unit: f64, zero: [f6
 /// (`y_axis` false) or the left one, from Preferences › Units & Rulers and the zoom. Minor ticks
 /// sit at tenths of the step.
 fn ruler_scale(app: &PhotocraftApp, xf: &ViewXform, y_axis: bool) -> (f64, f64) {
+    ruler_scale_of(app, app.session.active().map(|d| &*d.doc), xf, y_axis)
+}
+
+/// [`ruler_scale`] for the view of `doc`.
+fn ruler_scale_of(app: &PhotocraftApp, doc: Option<&photocraft_doc::Document>, xf: &ViewXform, y_axis: bool) -> (f64, f64) {
     let ur = &app.session.prefs().units_and_rulers;
     let (unit, ppi) = (ur.rulers, ur.point_size.per_inch());
-    let (dpi, size) =
-        app.session.active().map_or((72.0, [1.0, 1.0]), |d| (d.doc.resolution_dpi.max(1.0) as f64, [d.doc.size.width as f64, d.doc.size.height as f64]));
+    let (dpi, size) = doc.map_or((72.0, [1.0, 1.0]), |d| (d.resolution_dpi.max(1.0) as f64, [d.size.width as f64, d.size.height as f64]));
     let px_per_unit = unit.to_px(1.0, dpi, if y_axis { size[1] } else { size[0] }, ppi).max(1e-9);
     // The top ruler runs along document x, which pixel aspect correction stretches.
     let zoom = if y_axis { xf.zoom } else { xf.zoom_x() };
@@ -356,9 +360,16 @@ fn ruler_label(v: f64, step: f64, whole: bool) -> String {
     if step >= 1.0 || whole { format!("{}", v.round() as i64) } else { crate::widgets::fmt_num2(v) }
 }
 
-/// Rulers along the top and left of `full` (the canvas rect before `content_rect`), with the
-/// pointer position marked; dragging out of a ruler creates a guide.
-pub fn draw_rulers(app: &mut PhotocraftApp, ui: &mut egui::Ui, full: Rect, xf: &ViewXform) {
+/// The rulers of `doc`'s view in `full`: background, ticks and labels from its zero point.
+/// Returns the top, left and corner rects, the painter, the zero point and the minor tick sizes.
+#[allow(clippy::type_complexity)]
+fn paint(
+    app: &PhotocraftApp,
+    ui: &egui::Ui,
+    full: Rect,
+    xf: &ViewXform,
+    doc: &photocraft_doc::Document,
+) -> (Rect, Rect, Rect, egui::Painter, [f64; 2], [f64; 2]) {
     let t = Tokens::get(ui.ctx());
     let top = Rect::from_min_max(pos2(full.left() + RULER, full.top()), pos2(full.right(), full.top() + RULER));
     let left = Rect::from_min_max(pos2(full.left(), full.top() + RULER), pos2(full.left() + RULER, full.bottom()));
@@ -376,11 +387,11 @@ pub fn draw_rulers(app: &mut PhotocraftApp, ui: &mut egui::Ui, full: Rect, xf: &
     let unit = app.session.prefs().units_and_rulers.rulers;
     let whole = unit == Unit::Pixels;
     // The zero point (#2955): rulers read 0 there and count the distance from it.
-    let origin = app.session.active().map_or([0.0, 0.0], |d| d.doc.ruler_origin);
+    let origin = doc.ruler_origin;
     let mut ticks = [1.0; 2];
     for vertical in [false, true] {
         let p = p.with_clip_rect(if vertical { left } else { top });
-        let (px_per_unit, step) = ruler_scale(app, xf, vertical);
+        let (px_per_unit, step) = ruler_scale_of(app, Some(doc), xf, vertical);
         ticks[usize::from(vertical)] = step * px_per_unit / 10.0;
         let (u0, u1) = if vertical {
             ruler_range(xf, left.left_top(), left.left_bottom(), 1, px_per_unit, origin)
@@ -393,9 +404,10 @@ pub fn draw_rulers(app: &mut PhotocraftApp, ui: &mut egui::Ui, full: Rect, xf: &
             let c = at(v);
             if vertical {
                 p.line_segment([pos2(left.right() - RULER, c), pos2(left.right(), c)], tick);
-                // Labels stacked, as in Photoshop.
+                // Labels stacked, as in Photoshop, each character centred in the ruler's width
+                // (a narrow "1" used to hug the left edge while a "0" filled the strip).
                 for (i, ch) in ruler_label(v, step, whole).chars().enumerate() {
-                    p.text(pos2(left.left() + 3.0, c + 2.0 + i as f32 * 8.5), Align2::LEFT_TOP, ch, font.clone(), t.text_dim);
+                    p.text(pos2(left.left() + RULER * 0.5, c + 2.0 + i as f32 * 8.5), Align2::CENTER_TOP, ch, font.clone(), t.text_dim);
                 }
             } else {
                 p.line_segment([pos2(c, top.bottom() - RULER), pos2(c, top.bottom())], tick);
@@ -413,6 +425,23 @@ pub fn draw_rulers(app: &mut PhotocraftApp, ui: &mut egui::Ui, full: Rect, xf: &
             v += step;
         }
     }
+    (top, left, corner, p, origin, ticks)
+}
+
+/// Rulers for a document view that isn't the active one (another tile of Window › Arrange, a
+/// floating window): shown as the active view's are, but guides and the zero point are dragged
+/// in the active view (#6017).
+pub fn paint_rulers(app: &PhotocraftApp, ui: &egui::Ui, full: Rect, xf: &ViewXform, doc: &photocraft_doc::Document) {
+    paint(app, ui, full, xf, doc);
+}
+
+/// Rulers along the top and left of `full` (the canvas rect before `content_rect`), with the
+/// pointer position marked; dragging out of a ruler creates a guide.
+pub fn draw_rulers(app: &mut PhotocraftApp, ui: &mut egui::Ui, full: Rect, xf: &ViewXform) {
+    let Some(doc) = app.session.active().map(|d| d.doc.clone()) else { return };
+    let (top, left, corner, p, origin, ticks) = paint(app, ui, full, xf, &doc);
+    let t = Tokens::get(ui.ctx());
+    let unit = app.session.prefs().units_and_rulers.rulers;
     // Pointer position markers.
     if let Some(h) = ui.ctx().pointer_hover_pos().filter(|h| full.contains(*h)) {
         let m = Stroke::new(1.0, t.text);
@@ -532,6 +561,28 @@ mod tests {
             }
         }
         assert!(failures.is_empty(), "ruler drawing overlaps the origin corner: {failures:?}");
+    }
+
+    /// #7314: the stacked characters of the left ruler's labels are centred on the strip, so a
+    /// narrow "1" lines up with a wide "0".
+    #[test]
+    fn left_ruler_label_characters_are_centred() {
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        app.run("file.new", json!({"width": 256, "height": 128})).unwrap();
+        let (mut h, full, _) = ruler_harness(app);
+        h.run_steps(2);
+        let centres: Vec<f32> = h
+            .output()
+            .shapes
+            .iter()
+            .filter_map(|s| if let egui::Shape::Text(t) = &s.shape { Some(t) } else { None })
+            .filter(|t| t.pos.x < full.min.x + RULER && t.pos.y > full.min.y + RULER)
+            .map(|t| t.pos.x + t.galley.size().x * 0.5)
+            .collect();
+        assert!(centres.len() > 2, "the left ruler draws labels: {centres:?}");
+        for c in &centres {
+            assert!((c - (full.min.x + RULER * 0.5)).abs() < 0.01, "character centre {c} in {centres:?}");
+        }
     }
 
     #[test]
@@ -829,7 +880,17 @@ mod tests {
     fn command_drag_over_a_guide_moves_the_guide_with_any_tool() {
         use crate::canvas::{ToolEvent, tool_event};
         use crate::state::Tool;
-        for (tool, locked) in [(Tool::Brush, false), (Tool::RectMarquee, false), (Tool::Lasso, false), (Tool::MagicWand, false), (Tool::RectMarquee, true)] {
+        for (tool, locked) in [
+            (Tool::Brush, false),
+            (Tool::Eraser, false),
+            (Tool::Gradient, false),
+            (Tool::Frame, false),
+            (Tool::Artboard, false),
+            (Tool::RectMarquee, false),
+            (Tool::Lasso, false),
+            (Tool::MagicWand, false),
+            (Tool::RectMarquee, true),
+        ] {
             let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
             app.run("file.new", json!({"width": 80, "height": 60, "background": "transparent"})).unwrap();
             app.sync_views();

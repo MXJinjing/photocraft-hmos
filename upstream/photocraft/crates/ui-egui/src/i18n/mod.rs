@@ -514,6 +514,21 @@ mod tests {
         assert_eq!(Lang::from_pref("xx-unknown"), Lang::EN);
     }
 
+    /// The brush size/hardness shortcut rows (`tools.*` commands without a menu item) must be translated in
+    /// every catalog, or they show English in the Keyboard Shortcuts dialog and cannot be found by searching.
+    #[test]
+    fn brush_size_and_hardness_shortcuts_are_translated_in_every_language() {
+        let keys = ["Decrease Brush Size", "Increase Brush Size", "Decrease Brush Hardness", "Increase Brush Hardness"];
+        for lang in Lang::all().filter(|lang| *lang != Lang::EN) {
+            for key in keys {
+                assert!(has(lang, key), "{} has no translation for {key:?}", lang.code());
+            }
+        }
+        let zh = Lang::from_code("zh-hans").expect("zh-hans registered");
+        assert_eq!(tr(zh, "Decrease Brush Size"), "减小画笔大小");
+        assert_eq!(tr(zh, "Increase Brush Size"), "增大画笔大小");
+    }
+
     #[test]
     fn simplified_chinese_covers_dynamic_shortcuts_and_layer_counts() {
         let zh = Lang::from_code("zh-hans").expect("zh-hans registered");

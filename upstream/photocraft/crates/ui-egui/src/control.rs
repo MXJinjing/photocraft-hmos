@@ -1043,6 +1043,13 @@ fn dispatch(app: &mut PhotocraftApp, ctx: &egui::Context, req: &ControlRequest) 
                     }
                     continue;
                 }
+                // ⌘/Ctrl-click with Curves open adds a point at the pixel's tone, on press only (#7325).
+                if !secondary && !space && button != "middle" && mods.command && crate::adjust_dialog::curves_on_top(app) {
+                    if matches!(ev, ToolEvent::Down { .. }) {
+                        crate::adjust_dialog::add_point_at(app, ctx, x, y, mods.shift);
+                    }
+                    continue;
+                }
                 // A Properties Levels/Curves eyedropper owns the primary button the same way.
                 if app.ui.dialogs.is_empty() && !matches!(s("button"), Some("secondary" | "right")) && crate::layer_picker::armed(app).is_some() {
                     if matches!(ev, ToolEvent::Down { .. }) {
@@ -1093,7 +1100,10 @@ fn dispatch(app: &mut PhotocraftApp, ctx: &egui::Context, req: &ControlRequest) 
                         }
                         continue;
                     }
-                    if crate::canvas_tool_menu::applies(app.ui.tool) || crate::canvas_tool_menu::editing_text(app, app.ui.tool) {
+                    if crate::canvas_tool_menu::applies(app.ui.tool)
+                        || crate::canvas_tool_menu::editing_text(app, app.ui.tool)
+                        || crate::canvas_tool_menu::type_layer_at(app, app.ui.tool, [x, y]).is_some()
+                    {
                         if down {
                             crate::canvas_tool_menu::open_at(app, ctx, app.ui.tool, screen_point(app, x, y), Some([x, y]));
                         }

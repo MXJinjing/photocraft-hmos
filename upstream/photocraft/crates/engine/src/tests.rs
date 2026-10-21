@@ -703,6 +703,38 @@ fn fill_layer_pixel_rewrites_refresh_the_effect_maps() {
 }
 
 #[test]
+fn growing_the_canvas_re_renders_a_cached_fill_layer() {
+    // A PSD fill layer keeps its stored pixels as a fill cache covering only the old canvas.
+    // Canvas Size, an extending Crop and Reveal All must re-render the fill over the new area,
+    // as Photoshop does, instead of leaving the added bands transparent (#7362).
+    let grow: [(&str, Value); 2] = [
+        ("image.canvasSize", json!({"width": 100, "anchor": "left"})),
+        ("image.crop", json!({"x": 0, "y": 0, "width": 100, "height": 48, "deleteCroppedPixels": false})),
+    ];
+    for (cmd, params) in grow {
+        let mut s = Session::new();
+        s.execute("file.new", json!({"width": 64, "height": 48, "background": "transparent"})).unwrap();
+        s.execute("layer.newFillLayer.solidColor", json!({"color": "#ff0000"})).unwrap();
+        s.edit("cache", |doc, active| {
+            let fmt = doc.pixel_format();
+            let l = doc.layer_mut(active.unwrap()).unwrap();
+            let photocraft_doc::LayerContent::Fill(f) = &l.content else { return Err(EngineError::Other("not a fill layer".into())) };
+            let fill = f.clone();
+            let mut surface = photocraft_raster::Surface::new(fmt);
+            surface.fill_rect(photocraft_geom::Rect::new(0, 0, 64, 48), &[1.0, 0.0, 0.0, 1.0]);
+            l.fill_cache = Some(photocraft_doc::FillCache { fill, surface });
+            Ok(())
+        })
+        .unwrap();
+        s.execute(cmd, params).unwrap();
+        let d = &s.active().unwrap().doc;
+        assert_eq!(d.size.width, 100, "{cmd} grows the canvas");
+        let px = photocraft_compose::render(d, d.bounds()).get(90, 20);
+        assert!(px[3] > 0.99 && px[0] > 0.99 && px[1] < 0.01, "{cmd}: the fill covers the added area, got {px:?}");
+    }
+}
+
+#[test]
 fn group_effect_maps_follow_child_visibility_and_opacity() {
     // A styled group's maps come from its children's composite: hiding a child or changing its
     // opacity must refresh the group's shadow. Warm render vs. purged render must agree.

@@ -82,6 +82,27 @@ fn rotate_arbitrary_other_modes() {
 }
 
 #[test]
+fn rotate_arbitrary_keeps_the_background_opaque_with_a_translucent_background_colour() {
+    let mut s = session(40, 20, 8, "rgb");
+    s.execute("tools.setColors", json!({"background": "#00ff0080"})).unwrap();
+    s.execute("image.rotation.arbitrary", json!({"angle": 30})).unwrap();
+    let corner = doc(&s).layers[0].surface().unwrap().rgba(0, 0);
+    assert_eq!(corner, [0.0, 1.0, 0.0, 1.0], "the uncovered corner is opaque background colour");
+}
+
+#[test]
+fn rotate_arbitrary_keeps_the_full_precision_angle() {
+    // Rounded to f32 this angle crosses a whole pixel: 1003 px instead of 1002, so a rotated crop
+    // that sized its canvas with `rotated_size` at f64 would land 1 px off.
+    let angle = 0.114_706_514_493_370_71;
+    let mut s = Session::new();
+    s.execute("file.new", json!({"width": 1000, "height": 1000})).unwrap();
+    let r = s.execute("image.rotation.arbitrary", json!({"angle": angle})).unwrap();
+    assert_eq!(rotated_size(Size::new(1000, 1000), angle), Size::new(1002, 1002));
+    assert_eq!((r["width"].as_u64(), r["height"].as_u64()), (Some(1002), Some(1002)));
+}
+
+#[test]
 fn rotate_arbitrary_rotates_grouped_locked_children_and_preserves_lock() {
     let mut s = Session::new();
     s.execute("file.new", json!({"width": 16, "height": 16, "background": "white"})).unwrap();

@@ -681,7 +681,11 @@ fn native_rgb_compatible(page: &PrintPage, handling: &str) -> bool {
         && page.label.as_deref().is_none_or(str::is_empty)
 }
 
-/// Print One Copy repeats these.
+/// Where the settings of the last print are kept in Preferences' remembered dialog settings.
+pub const REMEMBERED: &str = "file.print";
+
+/// Print One Copy repeats these, and Print opens with them. They are kept in the preferences as
+/// well, so they survive a relaunch, as Photoshop's do (#7410).
 fn remember_print(s: &mut Session, p: &Value) {
     let mut remembered = p.clone();
     if let Some(o) = remembered.as_object_mut() {
@@ -690,7 +694,29 @@ fn remember_print(s: &mut Session, p: &Value) {
         // Output and dry-run choices are not remembered, so a send override must not survive them.
         o.remove("send");
     }
+    let kept = remembered.clone();
+    s.prefs.edit(|prefs| {
+        prefs.dialogs.insert(REMEMBERED.into(), kept);
+    });
     s.file_menu.last_print = Some(remembered);
+}
+
+/// Drops the `printer` of the settings `q` (and its driver settings) when the print server lists
+/// printers but not that one, so the job goes to the default printer. An empty list can't tell.
+fn drop_vanished_printer(q: &mut Value, listed: &[&str]) {
+    let Some(name) = q.get("printer").and_then(Value::as_str).filter(|n| !n.is_empty()) else { return };
+    if listed.is_empty() || listed.iter().any(|l| l.eq_ignore_ascii_case(name)) {
+        return;
+    }
+    if let Some(o) = q.as_object_mut() {
+        o.remove("printer");
+        o.remove("printerSettings");
+    }
+}
+
+/// The settings of the last print: this session's, else those remembered from an earlier one.
+pub fn last_print(s: &Session) -> Option<Value> {
+    s.file_menu.last_print.clone().or_else(|| s.prefs().dialogs.get(REMEMBERED).filter(|v| v.is_object()).cloned())
 }
 
 /// The `printer` parameter, or the system's default printer.
@@ -815,7 +841,13 @@ fn print(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn print_one_copy(s: &mut Session, p: &Value) -> Result<Value> {
-    let mut q = s.file_menu.last_print.clone().unwrap_or_else(|| json!({}));
+    let mut q = last_print(s).unwrap_or_else(|| json!({}));
+    // A printer remembered from an earlier session may be gone: then the default takes the job,
+    // as the Print dialog falls back (#7410). A list that can't be read decides nothing.
+    if let Ok(listed) = system_printers(s, &q) {
+        let names: Vec<&str> = listed["printers"].as_array().into_iter().flatten().filter_map(|p| p["name"].as_str()).collect();
+        drop_vanished_printer(&mut q, &names);
+    }
     if let (Some(o), Some(extra)) = (q.as_object_mut(), p.as_object()) {
         for (k, v) in extra {
             o.insert(k.clone(), v.clone());

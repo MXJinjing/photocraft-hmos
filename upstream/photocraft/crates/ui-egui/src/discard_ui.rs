@@ -234,7 +234,12 @@ fn save(app: &mut PhotocraftApp, ctx: &egui::Context, doc: DocId) -> bool {
     }
     match saved {
         // A Save Document script may have edited the document after it was written: still dirty.
-        Ok(_) => !app.save_options_open() && !app.saving() && index_of(app, doc).is_some_and(|i| !app.session.documents()[i].is_dirty()),
+        // A write the platform can't confirm (a web download) leaves it dirty too, and counts.
+        Ok(_) => {
+            !app.save_options_open()
+                && !app.saving()
+                && index_of(app, doc).is_some_and(|i| app.services.write_unconfirmed || !app.session.documents()[i].is_dirty())
+        }
         // Backing out of the file dialog is the user's choice, not an error.
         Err(e) if e == crate::file_dialog::CANCELLED => false,
         Err(e) => {
@@ -247,7 +252,7 @@ fn save(app: &mut PhotocraftApp, ctx: &egui::Context, doc: DocId) -> bool {
 
 /// A completed save may release the close prompt. Choosing a path only starts a layered TIFF
 /// save; TIFF Options calls this after the write, and `jobs_ui` when a background save ends.
-/// Copies and failed writes leave the doc dirty.
+/// Copies and failed writes leave the doc dirty; so does any write when it is unconfirmed.
 fn save_mark(app: &PhotocraftApp, doc: DocId) -> Option<SaveMark> {
     let st = app.session.documents().get(index_of(app, doc)?)?;
     Some(SaveMark { doc, path: st.path.clone(), saved_revision: st.saved_revision })
@@ -344,7 +349,7 @@ pub(crate) fn saved_document(app: &mut PhotocraftApp, ctx: &egui::Context, doc: 
     // Still the prompt that asked (quitting may have replaced it meanwhile).
     if !app.save_options_open()
         && app.discard.as_ref().and_then(|p| p.docs.first()) == Some(&doc)
-        && index_of(app, doc).is_some_and(|i| !app.session.documents()[i].is_dirty())
+        && index_of(app, doc).is_some_and(|i| app.services.write_unconfirmed || !app.session.documents()[i].is_dirty())
     {
         advance(app, ctx);
     }
@@ -1043,6 +1048,30 @@ mod tests {
         assert_eq!(*written.lock().unwrap(), ["/pics/big.psd"]);
         assert!(h.state().discard.is_none());
         assert!(h.state().session.documents().is_empty(), "closed once saved");
+    }
+
+    /// #6414: on the web a save stays dirty (the download isn't confirmed), and answering Save
+    /// still closes the tab after one write.
+    #[test]
+    fn saving_from_the_prompt_closes_after_an_unconfirmed_write() {
+        use std::{cell::RefCell, rc::Rc};
+        let written: Rc<RefCell<Vec<String>>> = Rc::default();
+        let w = written.clone();
+        let mut app = app_with_docs(1);
+        make_dirty(&mut app, 0);
+        app.session.active_mut().unwrap().path = Some("/pics/kept.psd".into());
+        app.services.write_unconfirmed = true;
+        app.services.export = Some(Box::new(|_: &photocraft_doc::Document, _: &str, _: &crate::ExportSettings| Ok((b"out".to_vec(), Vec::new()))));
+        app.services.write = Some(Box::new(move |p: &str, _: &[u8]| {
+            w.borrow_mut().push(p.to_string());
+            Ok(())
+        }));
+        let mut h = prompt_for(app, "file.close", egui::os::OperatingSystem::Windows);
+        h.key_press(Key::Y);
+        h.run_steps(3);
+        assert_eq!(*written.borrow(), ["/pics/kept.psd"]);
+        assert!(h.state().discard.is_none());
+        assert!(h.state().session.documents().is_empty(), "closed after one write");
     }
 
     #[path = "tiff_tests.rs"]

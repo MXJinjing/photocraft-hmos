@@ -65,15 +65,13 @@ const SOURCE_MOMENTS_MAX: usize = 1 << 20;
 #[derive(Clone)]
 pub(crate) struct Rng(u64);
 impl Rng {
+    /// A generator whose sequence is fixed by `seed`.
     pub(crate) fn new(seed: u64) -> Self {
         Rng(seed ^ 0x9E37_79B9_7F4A_7C15)
     }
+    /// The next value of the SplitMix64 sequence.
     pub(crate) fn next(&mut self) -> u64 {
-        self.0 = self.0.wrapping_add(0x9E37_79B9_7F4A_7C15);
-        let mut z = self.0;
-        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
-        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
-        z ^ (z >> 31)
+        crate::photo_util::splitmix64(&mut self.0)
     }
     /// Skip `n` numbers (the same state as after `n` calls of [`Rng::next`]).
     pub(crate) fn skip(&mut self, n: u64) {

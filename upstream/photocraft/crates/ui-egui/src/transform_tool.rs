@@ -792,11 +792,12 @@ fn preview_image(
         (None, Some(s)) if layer.is_some_and(|l| matches!(l.content, LayerContent::Raster(_))) => Some(s),
         _ => {
             let mut solo = doc.clone();
-            for l in solo.layers.iter_mut() {
-                if l.id != id && doc.layer(id).is_some_and(|_| !contains(l, id)) {
-                    l.visible = false;
-                } else {
-                    // Its clipping base is hidden here, which would clip it away entirely (#5239).
+            if layer.is_some() {
+                solo_layer(&mut solo.layers, id);
+            } else {
+                // Keep the previous fallback for an invalid id: render the document, with only
+                // top-level clipping disabled. Production callers get ids from this document.
+                for l in &mut solo.layers {
                     l.clipped = false;
                 }
             }
@@ -983,6 +984,26 @@ fn show_only(layers: &mut [photocraft_doc::Layer], keep: &[LayerId]) {
         }
         match &mut l.content {
             LayerContent::Group(g) if g.children.iter().any(|c| keep.iter().any(|k| contains(c, *k))) => show_only(&mut g.children, keep),
+            _ => l.visible = false,
+        }
+    }
+}
+
+/// Leave only `id`, its descendants and the groups holding it visible. Every layer on that path
+/// is detached from its clipping base because the base is hidden in this isolated render (#5239).
+/// Hide every layer but `id` and the groups holding it, and unclip those, so a render shows that
+/// layer alone (the Free Transform preview, Liquify's one-layer backdrop).
+pub(crate) fn solo_layer(layers: &mut [photocraft_doc::Layer], id: LayerId) {
+    for l in layers {
+        if l.id == id {
+            l.clipped = false;
+            continue;
+        }
+        match &mut l.content {
+            LayerContent::Group(g) if g.children.iter().any(|c| contains(c, id)) => {
+                l.clipped = false;
+                solo_layer(&mut g.children, id);
+            }
             _ => l.visible = false,
         }
     }
@@ -1237,6 +1258,9 @@ pub(crate) fn nudge(app: &mut PhotocraftApp, dx: f64, dy: f64) {
     }
 }
 
+/// Save for Web (Legacy): refused under an open box, as it would export without the preview (#6737).
+pub(crate) const SAVE_FOR_WEB: &str = "file.export.saveForWebLegacy";
+
 /// While transforming, Undo and Redo apply to the box: `Some(enabled)` for those commands (and
 /// Toggle Last State, which would change the document under the box), `None` for the rest.
 pub fn is_enabled(app: &PhotocraftApp, id: &str) -> Option<bool> {
@@ -1253,6 +1277,8 @@ pub fn is_enabled(app: &PhotocraftApp, id: &str) -> Option<bool> {
         "edit.redo" => Some(steps.is_some_and(|s| !s.redo.is_empty())),
         // No Toggle Last State or history jump under the box, and one box at a time.
         "edit.toggleLastState" | "history.selectState" | "edit.contentAwareScale" | "edit.puppetWarp" => Some(false),
+        // Save for Web exports the committed document and would ignore the pending box (#6737).
+        SAVE_FOR_WEB => Some(false),
         // Rotate and Flip turn the box (not while warping, where the mesh is the box).
         _ if box_preset(id).is_some() => Some(t.warp.is_none()),
         // Editable type can't be distorted (#2630, as #2701 rules for the menus outside a box).
@@ -1292,7 +1318,7 @@ fn box_preset(id: &str) -> Option<(f64, f64, f64)> {
 /// `None` for other commands or when not transforming.
 /// The commands the open box answers itself ([`is_enabled`], [`intercept`]).
 fn box_command(id: &str) -> bool {
-    matches!(id, "edit.undo" | "edit.redo" | "edit.toggleLastState" | "edit.contentAwareScale" | "edit.puppetWarp") || box_preset(id).is_some()
+    matches!(id, "edit.undo" | "edit.redo" | "edit.toggleLastState" | "edit.contentAwareScale" | "edit.puppetWarp" | SAVE_FOR_WEB) || box_preset(id).is_some()
 }
 
 pub fn intercept(app: &mut PhotocraftApp, id: &str) -> Option<Result<serde_json::Value, String>> {
@@ -1303,7 +1329,7 @@ pub fn intercept(app: &mut PhotocraftApp, id: &str) -> Option<Result<serde_json:
     match id {
         "edit.undo" => Some(Ok(step(app, false))),
         "edit.redo" => Some(Ok(step(app, true))),
-        "edit.toggleLastState" | "history.selectState" | "edit.contentAwareScale" | "edit.puppetWarp" => {
+        "edit.toggleLastState" | "history.selectState" | "edit.contentAwareScale" | "edit.puppetWarp" | SAVE_FOR_WEB => {
             Some(Err("Commit or cancel the transform first".into()))
         }
         _ => {
@@ -2603,9 +2629,23 @@ fn quad_scale(t: &TransformSession) -> f32 {
 }
 
 /// W and H (%), the angle (°) and the horizontal skew (°) the options bar shows for the box.
+/// A mirrored box reads as a negative W or H, whichever keeps the angle nearer 0 (Photoshop:
+/// Flip Horizontal is W -100 % at 0°, Flip Vertical H -100 % at 0°). Both are the same box:
+/// negating W and H and turning by a half turn cancel out.
 fn readout(t: &TransformSession) -> (f64, f64, f64, f64) {
     let p = Parts::of(t);
-    (p.sx * 100.0, p.sy.abs() * 100.0, p.angle.to_degrees(), p.skew_h.to_degrees())
+    let wrap = |a: f64| {
+        let a = a.rem_euclid(std::f64::consts::TAU);
+        if a > std::f64::consts::PI { a - std::f64::consts::TAU } else { a }
+    };
+    let turned = wrap(p.angle + std::f64::consts::PI);
+    let (sx, sy, angle) = if p.sy < 0.0 && turned.abs() < wrap(p.angle).abs() { (-p.sx, -p.sy, turned) } else { (p.sx, p.sy, p.angle) };
+    (sx * 100.0, sy * 100.0, angle.to_degrees(), p.skew_h.to_degrees())
+}
+
+/// `v`, kept off zero with its sign: a divisor for a W or H scale that may be negative.
+fn nonzero(v: f64) -> f64 {
+    if v.abs() < 1e-9 { 1e-9f64.copysign(v) } else { v }
 }
 
 /// The box's affine part read as Photoshop's options bar does: the frame scaled (W, H), skewed
@@ -2848,14 +2888,17 @@ pub(crate) fn position_size_fields(app: &mut PhotocraftApp, ui: &mut egui::Ui, t
     let (suffix, places) = (u.unit.suffix(), u.unit.decimals() as u32);
     // Lengths need more room than a percentage ("2116.67 mm").
     let size_w = if u.unit == photocraft_engine::prefs::Unit::Percent { 66.0 } else { 84.0 };
+    // Whatever their unit, W and H take any other typed in (`500 px` or `2 in` in percent, `50%`
+    // in a length), converted at the document's resolution against the box's original side (#6284).
+    let units = crate::widgets::FieldUnits { unit: u.unit, dpi: u.dpi, ppi: u.ppi };
     lbl(ui, "W:");
-    let rw = crate::widgets::value_field_prec(ui, &mut w, -wlim_u..=wlim_u, suffix, size_w, places);
+    let rw = crate::widgets::value_field_extent(ui, &mut w, -wlim_u..=wlim_u, suffix, size_w, places, units, side_w);
     let link = !app.ui.transform_unlinked;
     if crate::icons::button(ui, if link { "link" } else { "unlink" }, 22.0, link, tl!("Maintain aspect ratio")).clicked() {
         app.ui.transform_unlinked = link;
     }
     lbl(ui, "H:");
-    let rh = crate::widgets::value_field_prec(ui, &mut h, -hlim_u..=hlim_u, suffix, size_w, places);
+    let rh = crate::widgets::value_field_extent(ui, &mut h, -hlim_u..=hlim_u, suffix, size_w, places, units, side_h);
     for r in [&rw, &rh] {
         r.context_menu(|ui| {
             if let Some(name) = crate::rulers::unit_menu(ui, u.unit) {
@@ -2866,12 +2909,12 @@ pub(crate) fn position_size_fields(app: &mut PhotocraftApp, ui: &mut egui::Ui, t
     let (w, h) = (size_pct(&u, w, side_w) as f32, size_pct(&u, h, side_h) as f32);
     if rw.changed() || rh.changed() {
         let (kx, ky) = if link {
-            let k = if rw.changed() { w as f64 / sx.max(1e-9) } else { h as f64 / sy.max(1e-9) };
+            let k = if rw.changed() { w as f64 / nonzero(sx) } else { h as f64 / nonzero(sy) };
             // Linked, the other side follows: keep it within its own limit too.
             let k = k.min(f64::from(wlim) / sx.abs().max(1e-9)).min(f64::from(hlim) / sy.abs().max(1e-9));
             (k, k)
         } else {
-            (w as f64 / sx.max(1e-9), h as f64 / sy.max(1e-9))
+            (w as f64 / nonzero(sx), h as f64 / nonzero(sy))
         };
         scale_about_pivot(app, kx, ky);
     }
@@ -3331,6 +3374,43 @@ mod tests {
         assert!(eq6(skew, 20.0), "{skew}");
     }
 
+    /// The test box flipped horizontally and vertically, as Edit › Transform › Flip leaves it.
+    const FLIPPED_H: [[f64; 2]; 4] = [[100.0, 0.0], [0.0, 0.0], [0.0, 50.0], [100.0, 50.0]];
+    const FLIPPED_V: [[f64; 2]; 4] = [[0.0, 50.0], [100.0, 50.0], [100.0, 0.0], [0.0, 0.0]];
+
+    /// Photoshop puts a flip's minus on the flipped axis and keeps the angle at 0: Flip Horizontal
+    /// reads W -100 %, Flip Vertical H -100 % (it read 180° and nothing at all).
+    #[test]
+    fn a_flipped_box_reads_as_a_negative_scale_on_that_axis() {
+        let mut t = session();
+        for (quad, want) in [(FLIPPED_H, (-100.0, 100.0)), (FLIPPED_V, (100.0, -100.0))] {
+            t.quad = quad;
+            let (w, h, angle, skew) = readout(&t);
+            assert!(eq6(w, want.0) && eq6(h, want.1) && eq6(angle, 0.0) && eq6(skew, 0.0), "{quad:?}: {w} {h} {angle} {skew}");
+        }
+        // Flipped both ways is a half turn, not a mirror.
+        t.quad = [[100.0, 50.0], [0.0, 50.0], [0.0, 0.0], [100.0, 0.0]];
+        let (w, h, angle, _) = readout(&t);
+        assert!(eq6(w, 100.0) && eq6(h, 100.0) && eq6(angle.abs(), 180.0), "{w} {h} {angle}");
+    }
+
+    /// The bar's fields act on a flipped box without undoing the flip: angle 0 keeps it as it is,
+    /// and a typed W scales it and keeps it mirrored.
+    #[test]
+    fn bar_fields_keep_a_flipped_box_flipped() {
+        let flip_h = |app: &mut PhotocraftApp| app.ui.transform.as_mut().unwrap().quad = FLIPPED_H;
+        let t = type_into_bar_field_with(flip_h, 4, "0");
+        assert!(t.quad.iter().flatten().zip(FLIPPED_H.iter().flatten()).all(|(a, b)| eq6(*a, *b)), "{:?}", t.quad);
+        let t = type_into_bar_field_with(flip_h, 2, "-50");
+        let (w, h, angle, _) = readout(&t);
+        assert!(eq6(w, -50.0) && eq6(h, 50.0) && eq6(angle, 0.0), "{w} {h} {angle}");
+        assert!(eq6(t.quad[0][0] - t.quad[1][0], 50.0), "50 px wide, still mirrored: {:?}", t.quad);
+        let flip_v = |app: &mut PhotocraftApp| app.ui.transform.as_mut().unwrap().quad = FLIPPED_V;
+        let t = type_into_bar_field_with(flip_v, 3, "-200");
+        let (w, h, _, _) = readout(&t);
+        assert!(eq6(w, 200.0) && eq6(h, -200.0), "{w} {h}");
+    }
+
     /// Typing H and V skews leans the box about the reference point; the angle, W and H fields keep
     /// their values, and V stays as typed.
     #[test]
@@ -3443,6 +3523,93 @@ mod tests {
         assert!((t.quad[1][0] - t.quad[0][0] - 250.0).abs() < 0.01, "{:?}", t.quad);
         // Percent is still the default.
         assert_eq!(shown_size(&bar_harness(|_| {})), ["100", "100"]);
+    }
+
+    /// Opens a document at `dpi` so the W/H fields convert typed lengths at its resolution.
+    fn at_dpi(app: &mut PhotocraftApp, dpi: f32) {
+        app.session.execute("file.new", json!({"width": 400, "height": 400})).unwrap();
+        app.session
+            .edit("resolution", |doc, _| {
+                doc.resolution_dpi = dpi;
+                Ok(())
+            })
+            .unwrap();
+    }
+
+    /// The box's width and height in px after a W/H edit.
+    fn box_size(t: &TransformSession) -> (f64, f64) {
+        (t.quad[1][0] - t.quad[0][0], t.quad[3][1] - t.quad[0][1])
+    }
+
+    #[test]
+    fn w_and_h_in_percent_take_a_typed_length() {
+        use photocraft_engine::prefs::Unit;
+        let near = |a: f64, b: f64| (a - b).abs() < 0.01;
+        // The 100 × 50 px box with W/H showing percent (#6284): a typed length is the box's new side.
+        for (text, px) in
+            [("40px", 40.0), ("40 px", 40.0), ("2in", 600.0), ("2 in", 600.0), ("5cm", 5.0 / 2.54 * 300.0), ("25.4mm", 300.0), ("72pt", 300.0), ("1pica", 50.0)]
+        {
+            // Linked: the height follows the width.
+            let t = type_into_bar_field_with(|app| at_dpi(app, 300.0), 2, text);
+            let (w, h) = box_size(&t);
+            assert!(near(w, px) && near(h, px / 2.0), "{text} linked: {w} × {h}");
+            // Unlinked: only the width changes.
+            let t = type_into_bar_field_with(
+                |app| {
+                    at_dpi(app, 300.0);
+                    app.ui.transform_unlinked = true;
+                },
+                2,
+                text,
+            );
+            let (w, h) = box_size(&t);
+            assert!(near(w, px) && near(h, 50.0), "{text} unlinked: {w} × {h}");
+        }
+        // H takes a length too; linked, the width follows.
+        let t = type_into_bar_field_with(|app| at_dpi(app, 300.0), 3, "1in");
+        let (w, h) = box_size(&t);
+        assert!(near(w, 600.0) && near(h, 300.0), "H 1in: {w} × {h}");
+        // A plain number is still the percentage.
+        let (w, _) = box_size(&type_into_bar_field_with(|app| at_dpi(app, 300.0), 2, "40"));
+        assert!(near(w, 40.0), "40 is 40 % of 100 px: {w}");
+        // A percentage typed into a length field is that share of the box's original side.
+        let px = |app: &mut PhotocraftApp| {
+            at_dpi(app, 300.0);
+            set_size_unit(app, Unit::Pixels.name());
+        };
+        let (w, h) = box_size(&type_into_bar_field_with(px, 2, "50%"));
+        assert!(near(w, 50.0) && near(h, 25.0), "50% in px: {w} × {h}");
+        let inches = |app: &mut PhotocraftApp| {
+            at_dpi(app, 300.0);
+            set_size_unit(app, Unit::Inches.name());
+        };
+        let (w, h) = box_size(&type_into_bar_field_with(inches, 3, "300%"));
+        assert!(near(w, 300.0) && near(h, 150.0), "300% in inches: {w} × {h}");
+    }
+
+    #[test]
+    fn w_and_h_reject_or_clamp_hostile_typed_lengths() {
+        let near = |a: f64, b: f64| (a - b).abs() < 0.01;
+        // Text that is no number leaves the box alone.
+        for text in ["px", "in", "NaN", "%"] {
+            let (w, h) = box_size(&type_into_bar_field_with(|app| at_dpi(app, 300.0), 2, text));
+            assert!(near(w, 100.0) && near(h, 50.0), "{text}: {w} × {h}");
+        }
+        // Invalid text after a number keeps only what applied while typing (a plain number applies
+        // per keystroke), never a NaN or a box past the largest document.
+        for text in ["1in/0", "1e400px", "2 inches", "1e308in"] {
+            let (w, h) = box_size(&type_into_bar_field_with(|app| at_dpi(app, 300.0), 2, text));
+            assert!(w.is_finite() && h.is_finite() && w.abs() <= f64::from(POSITION_LIMIT_PX) + 0.01, "{text}: {w} × {h}");
+        }
+        // A huge length stops at the field's limit: the box stays within the largest document.
+        let (w, h) = box_size(&type_into_bar_field_with(|app| at_dpi(app, 300.0), 2, "1e9in"));
+        assert!(w.is_finite() && w <= f64::from(POSITION_LIMIT_PX) + 0.01 && h <= f64::from(POSITION_LIMIT_PX), "{w} × {h}");
+        // A negative length flips, as a negative percentage does.
+        let (w, _) = box_size(&type_into_bar_field_with(|app| at_dpi(app, 300.0), 2, "-40px"));
+        assert!(near(w, -40.0), "{w}");
+        // Zero collapses the side without dividing by zero.
+        let (w, h) = box_size(&type_into_bar_field_with(|app| at_dpi(app, 300.0), 2, "0px"));
+        assert!(w.is_finite() && h.is_finite(), "{w} × {h}");
     }
 
     #[test]
@@ -3909,6 +4076,23 @@ mod tests {
         app.ui.tool = if app.ui.tool == Tool::Brush { Tool::Move } else { Tool::Brush };
         end_if_left(&mut app);
         assert!(app.ui.transform.is_none() && app.transform_preview.is_none(), "another tool ends it");
+    }
+
+    /// #6737: Save for Web exports the committed document, so it is off while a box is pending.
+    #[test]
+    fn save_for_web_is_off_under_a_pending_transform() {
+        let ctx = egui::Context::default();
+        let mut app = app_with_square(64, photocraft_geom::Rect::new(8, 8, 24, 24));
+        assert!(crate::menus::is_enabled(&app, SAVE_FOR_WEB), "enabled with no box");
+        crate::menus::invoke(&mut app, &ctx, "edit.freeTransform", json!({})).unwrap();
+        assert!(!crate::menus::is_enabled(&app, SAVE_FOR_WEB), "off under the box");
+        assert!(crate::menus::invoke(&mut app, &ctx, SAVE_FOR_WEB, json!({})).is_err(), "the dialog doesn't open");
+        let path = std::env::temp_dir().join(format!("pc-web6737-{}.png", std::process::id())).to_string_lossy().into_owned();
+        let r = crate::menus::invoke(&mut app, &ctx, SAVE_FOR_WEB, json!({"path": path, "format": "png24"}));
+        assert!(r.is_err() && !std::path::Path::new(&path).exists(), "nor does the export run");
+        assert!(app.ui.transform.is_some(), "the box stays open");
+        cancel(&mut app);
+        assert!(crate::menus::is_enabled(&app, SAVE_FOR_WEB), "back after the box closes");
     }
 
     /// #352: ⌥⌘T transforms a copy. OK leaves the original and a moved copy as one history step;
@@ -4753,6 +4937,60 @@ mod tests {
         // At 100% the texture has at least as many texels as the box covers screen pixels.
         let t = app.ui.transform.as_ref().unwrap();
         assert!(pv.texture.size()[0] as f64 >= t.rect[2] - t.rect[0]);
+    }
+
+    #[test]
+    fn nested_group_preview_excludes_its_siblings() {
+        use photocraft_color::PixelFormat;
+        use photocraft_doc::Layer;
+
+        let mut app = app_with_square(64, photocraft_geom::Rect::new(8, 8, 24, 24));
+        let st = app.session.active_mut().unwrap();
+        let doc = Arc::make_mut(&mut st.doc);
+        let target_pixels = doc.layers.pop().unwrap();
+        let mut sibling = Layer::raster("sibling", PixelFormat::RGBA8);
+        sibling.surface_mut().unwrap().fill_rect(photocraft_geom::Rect::new(12, 12, 20, 20), &[0.0, 0.0, 1.0, 1.0]);
+        let target = Layer::group("target", vec![target_pixels]);
+        let target_id = target.id;
+        doc.layers.push(Layer::group("parent", vec![target, sibling]));
+
+        let (image, _) = preview_image(&st.doc, target_id, None, photocraft_geom::Rect::new(8, 8, 24, 24), 4096, false);
+        assert_eq!(
+            image.pixels[8 * image.size[0] + 8],
+            Color32::from_rgb(255, 0, 0),
+            "a sibling in the parent group must not be baked into the moving texture"
+        );
+    }
+
+    #[test]
+    fn nested_group_preview_detaches_every_clipped_ancestor() {
+        use photocraft_color::PixelFormat;
+        use photocraft_doc::Layer;
+
+        let mut app = app_with_square(64, photocraft_geom::Rect::new(8, 8, 24, 24));
+        let st = app.session.active_mut().unwrap();
+        let doc = Arc::make_mut(&mut st.doc);
+        let target_pixels = doc.layers.pop().unwrap();
+        let target = Layer::group("target", vec![target_pixels]);
+        let target_id = target.id;
+        let mut middle = Layer::group("middle clipped ancestor", vec![target]);
+        middle.clipped = true;
+        let mut inner_base = Layer::raster("hidden inner clipping base", PixelFormat::RGBA8);
+        inner_base.surface_mut().unwrap().fill_rect(photocraft_geom::Rect::new(0, 0, 64, 64), &[0.0, 0.0, 1.0, 1.0]);
+        let mut outer = Layer::group("outer clipped ancestor", vec![inner_base, middle]);
+        outer.clipped = true;
+        doc.layers.push(outer);
+
+        let (image, _) = preview_image(&st.doc, target_id, None, photocraft_geom::Rect::new(8, 8, 24, 24), 4096, false);
+        assert_eq!(image.pixels[8 * image.size[0] + 8], Color32::from_rgb(255, 0, 0), "hidden clipping bases must not make a nested target disappear");
+    }
+
+    #[test]
+    fn unknown_preview_target_keeps_the_previous_document_fallback() {
+        let app = app_with_square(64, photocraft_geom::Rect::new(8, 8, 24, 24));
+        let st = app.session.active().unwrap();
+        let (image, _) = preview_image(&st.doc, LayerId::fresh(), None, photocraft_geom::Rect::new(8, 8, 24, 24), 4096, false);
+        assert_eq!(image.pixels[8 * image.size[0] + 8], Color32::from_rgb(255, 0, 0));
     }
 
     /// The textured meshes `draw_content` paints for the moving pixels (not the box or handles).

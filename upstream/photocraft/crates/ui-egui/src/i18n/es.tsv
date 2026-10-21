@@ -2717,6 +2717,22 @@ cameraData	Lens	Objetivo
 	Snap to Origin	Ajustar a origen
 	Search settings…	Buscar ajustes…
 	No matching settings	No hay ajustes que coincidan
+# Edit › Content-Aware Fill workspace
+	Sampling Brush Tool	Herramienta Pincel de muestreo
+	Sampling Area Overlay	Superposición del área de muestreo
+	Show Sampling Area	Mostrar área de muestreo
+	Indicates	Indica
+	Sampling Area	Área de muestreo
+	Excluded Area	Área excluida
+	Sampling Area Options	Opciones del área de muestreo
+	Rectangular	Rectangular
+	Fill Settings	Ajustes de relleno
+	Rotation Adaptation	Adaptación de rotación
+	Very High	Muy alta
+	Full	Completa
+	Mirror	Reflejar
+	Output Settings	Ajustes de salida
+	Output To	Salida a
 	Loading fonts…	Cargando fuentes…
 	Response curve	Curva de respuesta
 	Tool	Herramienta
@@ -4136,6 +4152,10 @@ navigator	Zoom	Zoom
 # View › Guides › right-click a guide
 	Edit Selected Guides	Editar guías seleccionadas
 	Clear Selected Guides	Borrar guías seleccionadas
+	Pasting from other apps is unavailable	Pegar desde otras aplicaciones no está disponible
+	PhotoCraft can't reach the system clipboard in this session. On Wayland, a Flatpak sandbox hides the protocol that images from other apps are read through.	PhotoCraft no puede acceder al portapapeles del sistema en esta sesión. En Wayland, el entorno aislado de Flatpak oculta el protocolo con el que se leen las imágenes de otras aplicaciones.
+	To paste from other apps, start PhotoCraft under XWayland: `{command}`	Para pegar desde otras aplicaciones, inicia PhotoCraft en XWayland: `{command}`
+	Nothing to paste: PhotoCraft can't read the system clipboard here	Nada que pegar: PhotoCraft no puede leer aquí el portapapeles del sistema
 	Delete this set	Eliminar este conjunto
 	New Set…	Nuevo conjunto…
 	PhotoCraft Defaults	Valores por defecto de PhotoCraft
@@ -4150,6 +4170,7 @@ navigator	Zoom	Zoom
 	There are too many sets: delete one first.	Hay demasiados conjuntos: elimine uno primero.
 	set name	nombre del conjunto
 	{set} (modified)	{set} (modificado)
+	Show file name in title	Mostrar nombre de archivo en el título
 	Accept and Go to Conflict	Aceptar e ir al conflicto
 	Changes undone.	Cambios deshechos.
 	Choose a new shortcut for this command, or leave it without one.	Elija un nuevo método abreviado para este comando o déjelo sin ninguno.
@@ -4172,6 +4193,19 @@ navigator	Zoom	Zoom
 	GPU Memory (MB, 0 = Automatic)	Memoria de GPU (MB, 0 = Automático)
 	{name} was changed by another app after it was opened or saved here.	Otra aplicación cambió {name} después de abrirlo o guardarlo aquí.
 	Replace it with this document, or cancel and use File › Save As to keep both.	Reemplázalo con este documento, o cancela y usa Archivo › Guardar como para conservar ambos.
+	Decrease Brush Size	Reducir tamaño del pincel
+	Increase Brush Size	Aumentar tamaño del pincel
+	Decrease Brush Hardness	Reducir dureza del pincel
+	Increase Brush Hardness	Aumentar dureza del pincel
+	Memory Usage	Uso de memoria
+	Per-document RAM limit (MB)	Límite de RAM por documento (MB)
+	Installed RAM: {ram} MB; this limit: {percent}%	RAM instalada: {ram} MB; este límite: {percent}%
+	Limits each open document's pixels plus History. Oldest undo states are discarded when the limit is exceeded.	Limita los píxeles más el Historial de cada documento abierto. Se descartan los estados de deshacer más antiguos al superar el límite.
+	Applies immediately when saved. Memory is not reserved in advance.	Se aplica al guardar. La memoria no se reserva de antemano.
+	With GPU Memory set to Automatic, this also limits the GPU layer budget. That budget is capped at one quarter of installed RAM and, when known, three eighths of the graphics card's memory, with a 512 MB minimum. Raising this limit beyond those caps does not increase the GPU budget.	Con Memoria GPU en Automático, también limita el presupuesto GPU. Está topeado a un cuarto de la RAM y, si se conoce, tres octavos de la memoria de la tarjeta, mínimo 512 MB. Subir el límite no aumenta el presupuesto GPU.
+	Use	Usar
+	In Front	Delante
+	Behind	Detrás
 # HarmonyOS host additions retained during upstream sync
 	Stylus	Lápiz
 	Block finger input	Bloquear entrada táctil

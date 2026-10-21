@@ -804,3 +804,23 @@ fn type_size_keys_follow_key_position_and_the_typed_selection() {
     assert_eq!(logged(&h), ["type.decreaseSize"]);
     assert_eq!(sizes(&h), [(2, base), (3, base + 2.0)], "only the selected \"He\" shrinks");
 }
+
+/// AZERTY: `;` sits on the US comma key and `,` on the US M key. Plain `,` / `;` bindings (brush
+/// hardness) must match the character typed, not the key's position, or `;` fires `,`'s command.
+#[test]
+fn plain_comma_and_semicolon_bindings_follow_the_typed_character_on_azerty() {
+    let mut h = harness();
+    h.state_mut().session.edit_prefs(|p| {
+        p.shortcuts.insert("tools.decreaseBrushHardness".into(), ",".into());
+        p.shortcuts.insert("tools.increaseBrushHardness".into(), ";".into());
+    });
+    let tap = |h: &mut Harness<'_, PhotocraftApp>, key, physical| {
+        h.event(egui::Event::Key { key, physical_key: Some(physical), pressed: true, repeat: false, modifiers: Modifiers::NONE });
+        h.event(egui::Event::Key { key, physical_key: Some(physical), pressed: false, repeat: false, modifiers: Modifiers::NONE });
+        h.run_steps(2);
+    };
+    tap(&mut h, egui::Key::Semicolon, egui::Key::Comma);
+    assert_eq!(logged(&h), ["tools.increaseBrushHardness"]);
+    tap(&mut h, egui::Key::Comma, egui::Key::M);
+    assert_eq!(logged(&h), ["tools.decreaseBrushHardness"]);
+}

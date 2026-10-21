@@ -215,7 +215,9 @@ fn key_owner(app: &PhotocraftApp, ctx: &egui::Context) -> (bool, usize, bool, bo
 }
 
 /// Keys whose shortcuts follow the key's position, as in Photoshop: ⇧⌘. is ⇧⌘> on a US layout,
-/// but types `:` on Nordic and German ones, so its character would never match.
+/// but types `:` on Nordic and German ones, so its character would never match. Only ⌘ shortcuts
+/// follow the position: a plain `,` or `;` binding (brush hardness on AZERTY, where `;` sits on the
+/// US comma key) must match the character typed.
 const POSITIONAL: [Key; 2] = [Key::Period, Key::Comma];
 
 /// Dispatch this frame's shortcut presses in the order they arrived (⌘Z then ⌘S undoes, then
@@ -236,7 +238,7 @@ pub fn dispatch_pressed(app: &mut PhotocraftApp, ctx: &egui::Context, focus: Foc
         egui::Event::Key { key, physical_key, pressed: true, modifiers, .. } => {
             let by_position = physical_key
                 .filter(|p| POSITIONAL.contains(p))
-                .and_then(|p| table.iter().find(|(_, sc)| sc.logical_key == p && key_matches(sc, p, *modifiers)));
+                .and_then(|p| table.iter().find(|(_, sc)| sc.modifiers.command && sc.logical_key == p && key_matches(sc, p, *modifiers)));
             by_position.or_else(|| table.iter().find(|(_, sc)| key_matches(sc, *key, *modifiers))).map(|(id, _)| (id.clone(), *key == Key::Tab))
         }
         _ => None,

@@ -35,6 +35,10 @@ pub use photocraft_gpu::{DeviceHealth, Fault};
 
 /// Default tile side; documents up to this size (and the device limit) use a single texture.
 pub const DEFAULT_TILE: u32 = 8192;
+/// Mip levels no larger than this on either side are redrawn whole on every edit rather than
+/// just their damage (see [`mip_damage`], #6418). Every corrupted level measured was at most
+/// 64 px; this leaves a factor of two.
+const WHOLE_MIP_SIDE: u32 = 128;
 const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 /// Canvas texture format of high-bit documents (see [`GpuCanvas::format_for`]).
 const FORMAT_HIGH: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
@@ -294,6 +298,15 @@ impl GpuCanvas {
         }
     }
 
+    /// Take any GPU measurement that has landed since the last call, without compositing
+    /// anything. [`Compositor::render`] carries measurements out in its stats, but a refresh is
+    /// the only thing that collects them, so the last refresh before the app goes idle would
+    /// never be reported. The frame loop calls this so it is.
+    pub fn take_gpu_timing(&self) -> Option<photocraft_gpu::GpuTiming> {
+        let mut r = self.rs.renderer.write();
+        r.callback_resources.get_mut::<Resources>()?.compositor.as_mut()?.take_gpu_timing()
+    }
+
     /// GPU bytes the wgpu compositor holds: resident layer pages and caches (effect maps and
     /// lower-stack chunks). Keep the scorecard's memory measurements inclusive of reuse.
     pub fn compositor_bytes(&self) -> Option<(u64, usize)> {
@@ -471,6 +484,8 @@ impl GpuCanvas {
             },
         };
         comp.set_health(self.health.clone());
+        // Measured, not waited for: the timestamps come back a frame or two later.
+        comp.measure_gpu_time(device, queue);
         if let Some(b) = res.compositor_budget {
             comp.set_memory_budget(b);
         }
@@ -635,8 +650,10 @@ impl GpuCanvas {
             Ok(stats) => {
                 out.kind = if damage.is_some() { "gpu-rect" } else { "gpu-full" };
                 out.px = region.width() as u64 * region.height() as u64;
+                // Encoding and submitting only: the GPU is still running this work.
                 out.composite_ms = now_ms() - t0;
                 out.uploads = stats.tiles_uploaded as u64;
+                out.gpu = stats.gpu_time;
                 return out;
             }
             Err(e) => out.fallback = Some(e.0),
@@ -875,13 +892,21 @@ pub struct Refresh {
     pub upload_ms: f64,
     /// Layer tiles the wgpu compositor uploaded.
     pub uploads: u64,
+    /// How long the GPU spent executing a recent wgpu composite, once its timestamps came back
+    /// (a frame or two after that refresh, so usually an earlier one than this). It carries its
+    /// own pixel count and is never this refresh's unless they match. `None` when the device has
+    /// no timestamp queries, on the CPU compositor, and on wasm: no number at all is reported
+    /// rather than `composite_ms`, which measures encoding and submitting, not executing. It
+    /// leaves out layer-tile uploads (`uploads` above counts them), so a first refresh of a
+    /// document under-reports by more than the few per cent of a warm one.
+    pub gpu: Option<photocraft_gpu::GpuTiming>,
     /// Why the wgpu compositor wasn't used.
     pub fallback: Option<String>,
 }
 
-/// How the app creates its wgpu device: egui's defaults, except that the texture and buffer size
-/// limits are the adapter's own rather than egui's 8192 px cap, so large documents stay on the
-/// GPU compositor.
+/// How the app creates its wgpu device: egui's defaults clamped to the adapter's supported limits,
+/// with the adapter's own texture and buffer sizes rather than egui's 8192 px cap, so large
+/// documents stay on the GPU compositor.
 pub fn wgpu_setup() -> egui_wgpu::WgpuSetup {
     let mut setup = egui_wgpu::WgpuSetup::without_display_handle();
     use_adapter_limits(&mut setup);
@@ -890,7 +915,8 @@ pub fn wgpu_setup() -> egui_wgpu::WgpuSetup {
 
 /// Make `setup` request the adapter's own texture and buffer size limits instead of egui's
 /// default 8192 px cap (which sent every document wider or taller than 8192 px to the CPU
-/// compositor). Everything else (features, the WebGL2 base limits on GL) stays egui's default.
+/// compositor). Other limits use egui's defaults (WebGL2's on GL), clamped to adapter support;
+/// features stay egui's default.
 pub fn use_adapter_limits(setup: &mut egui_wgpu::WgpuSetup) {
     use_adapter_limits_with(setup, |_| {});
 }
@@ -901,16 +927,51 @@ pub fn use_adapter_limits_with(setup: &mut egui_wgpu::WgpuSetup, on_adapter: imp
     if let egui_wgpu::WgpuSetup::CreateNew(create) = setup {
         create.device_descriptor = std::sync::Arc::new(move |adapter| {
             on_adapter(adapter);
-            wgpu::DeviceDescriptor { label: Some("photocraft wgpu device"), required_limits: device_limits(adapter), ..Default::default() }
+            device_descriptor(adapter)
         });
     }
 }
 
-/// egui's base limits (WebGL2's on GL) with the adapter's maximum texture and buffer sizes.
+/// How the app asks for its device: egui's defaults, the adapter's texture and buffer size
+/// limits ([`device_limits`]), and timestamp queries where the adapter has them, so the canvas
+/// can report how long the GPU actually spends compositing ([`photocraft_gpu::GpuTimer`]).
+/// A bench or test that builds its own device should use this rather than [`device_limits`]
+/// alone, or it measures a device the app never creates. (`bevel_bench`, `fx_bench` and
+/// `interactive_bench` still call [`device_limits`] directly and so report no GPU time.)
+pub fn device_descriptor(adapter: &wgpu::Adapter) -> wgpu::DeviceDescriptor<'static> {
+    wgpu::DeviceDescriptor {
+        label: Some("photocraft wgpu device"),
+        required_limits: device_limits(adapter),
+        required_features: timing_features(adapter),
+        ..Default::default()
+    }
+}
+
+/// The timestamp-query features when the adapter supports all of them, else none: asking for a
+/// feature an adapter lacks fails device creation, and a canvas without GPU timing is far better
+/// than no canvas.
+///
+/// `PHOTOCRAFT_NO_GPU_TIMING` suppresses the request as well as the timer
+/// ([`photocraft_gpu::Compositor::measure_gpu_time`]), so the variable also rescues a driver
+/// that advertises the features and then fails or misbehaves on device creation — not only one
+/// whose timestamps come back wrong.
+pub fn timing_features(adapter: &wgpu::Adapter) -> wgpu::Features {
+    let want = photocraft_gpu::timing::FEATURES;
+    if std::env::var_os("PHOTOCRAFT_NO_GPU_TIMING").is_some() {
+        return wgpu::Features::empty();
+    }
+    if adapter.features().contains(want) { want } else { wgpu::Features::empty() }
+}
+
+/// egui's base limits (WebGL2's on GL), clamped to adapter support, with its maximum texture and buffer sizes.
 pub fn device_limits(adapter: &wgpu::Adapter) -> wgpu::Limits {
-    let base = if adapter.get_info().backend == wgpu::Backend::Gl { wgpu::Limits::downlevel_webgl2_defaults() } else { wgpu::Limits::default() };
-    let a = adapter.limits();
-    wgpu::Limits { max_texture_dimension_2d: a.max_texture_dimension_2d, max_buffer_size: a.max_buffer_size, ..base }
+    device_limits_for(adapter.get_info().backend, adapter.limits())
+}
+
+fn device_limits_for(backend: wgpu::Backend, supported: wgpu::Limits) -> wgpu::Limits {
+    let base = if backend == wgpu::Backend::Gl { wgpu::Limits::downlevel_webgl2_defaults() } else { wgpu::Limits::default() };
+    let base = base.or_worse_values_from(&supported);
+    wgpu::Limits { max_texture_dimension_2d: supported.max_texture_dimension_2d, max_buffer_size: supported.max_buffer_size, ..base }
 }
 
 /// Milliseconds since first call (monotonic). Always 0 on wasm, where `std::time` is unavailable.
@@ -932,7 +993,9 @@ pub struct Perf {
     pub ui_ms: f64,
     /// Worst UI frame of the last ~second (ms).
     pub ui_max_ms: f64,
-    /// Last canvas refresh: CPU composite (ms).
+    /// Last canvas refresh, CPU side (ms): the CPU composite on the CPU path, and on the GPU
+    /// path the cost of *encoding and submitting* the composite — not of running it, which is
+    /// `gpu_ms`.
     pub composite_ms: f64,
     /// Last canvas refresh: conversion + upload (ms).
     pub upload_ms: f64,
@@ -944,6 +1007,16 @@ pub struct Perf {
     pub gpu: bool,
     /// Layer tiles uploaded by the last GPU composite.
     pub gpu_uploads: u64,
+    /// How long the GPU spent executing a recent composite (ms), from timestamp queries read
+    /// back after the fact. `None` on the CPU compositor, on a device without timestamp queries
+    /// and on wasm — there is then no honest number to report, and `composite_ms` is not one.
+    /// Excludes layer-tile uploads and end-of-batch work (see `photocraft_gpu::timing`), so it
+    /// is a few per cent under the GPU's full share of a warm refresh and further under a cold
+    /// one.
+    pub gpu_ms: Option<f64>,
+    /// Pixels of the refresh `gpu_ms` measured, which is a frame or two behind
+    /// `last_refresh_px` and may be a different size.
+    pub gpu_ms_px: u64,
     /// Why the last refresh fell back to the CPU compositor (None = GPU composited).
     pub gpu_fallback: Option<String>,
     /// Adapter, backend, driver and fallback state (Help › System Info).
@@ -1096,9 +1169,27 @@ impl Perf {
         self.upload_ms = upload_ms;
         if !kind.starts_with("gpu") {
             self.gpu_uploads = 0;
+            // The CPU compositor did this one: there is no GPU time, and the last GPU
+            // refresh's would be read as this refresh's.
+            self.gpu_ms = None;
+            self.gpu_ms_px = 0;
         } else {
             self.gpu_fallback = None;
         }
+    }
+
+    /// Record a canvas refresh and any GPU measurement that came back with it.
+    pub fn record_refresh(&mut self, r: &Refresh) {
+        self.record(r.kind, r.px, r.composite_ms, r.upload_ms);
+        if let Some(t) = r.gpu {
+            self.record_gpu(t);
+        }
+    }
+
+    /// Record a GPU composite measurement that came back (see [`photocraft_gpu::GpuTiming`]).
+    pub fn record_gpu(&mut self, t: photocraft_gpu::GpuTiming) {
+        self.gpu_ms = Some(t.ms);
+        self.gpu_ms_px = t.px;
     }
     pub fn span(&mut self, name: &'static str, ms: f64) {
         self.spans.insert(name, (ms * 100.0).round() / 100.0);
@@ -1759,6 +1850,20 @@ fn mip_count(w: u32, h: u32) -> u32 {
     32 - w.max(h).max(1).leading_zeros()
 }
 
+/// The rect (x0, y0, x1, y1) of a `lw`×`lh` mip level to redraw when `prev` changed in the level
+/// above: that damage halved and padded by one texel for odd-size rounding, or the whole level
+/// when it is at most [`WHOLE_MIP_SIDE`] on either side. On AMD's Vulkan driver a pass that draws
+/// only part of a level of 64 px or less corrupts texels outside its scissor, at the level's
+/// top-left (#6418: RX 6900 XT, driver 26.8.1; DX12 on the same card is fine). Such a level costs
+/// next to nothing to redraw, so this holds for every adapter; the levels after it are smaller
+/// still, so the rest of the chain is redrawn whole too.
+fn mip_damage([x0, y0, x1, y1]: [u32; 4], lw: u32, lh: u32) -> [u32; 4] {
+    if lw.max(lh) <= WHOLE_MIP_SIDE {
+        return [0, 0, lw, lh];
+    }
+    [(x0 / 2).saturating_sub(1), (y0 / 2).saturating_sub(1), (x1.div_ceil(2) + 1).min(lw), (y1.div_ceil(2) + 1).min(lh)]
+}
+
 /// A buffer holding `contents`, like `DeviceExt::create_buffer_init` but without its panic when
 /// the device was lost (an invalid buffer has no mapped range): the buffer is then just invalid.
 fn init_buffer(device: &wgpu::Device, label: &str, contents: &[u8], usage: wgpu::BufferUsages) -> wgpu::Buffer {
@@ -1856,9 +1961,7 @@ impl DocTextures {
             (x0, y0, x1, y1) = (x0 - tx, y0 - ty, x1 - tx, y1 - ty);
             for level in 1..t.levels.len() {
                 let (lw, lh) = ((tw >> level).max(1), (th >> level).max(1));
-                // Damage at this level, padded by one texel for odd-size rounding.
-                (x0, y0) = ((x0 / 2).saturating_sub(1), (y0 / 2).saturating_sub(1));
-                (x1, y1) = ((x1.div_ceil(2) + 1).min(lw), (y1.div_ceil(2) + 1).min(lh));
+                [x0, y0, x1, y1] = mip_damage([x0, y0, x1, y1], lw, lh);
                 let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
                     label: Some("pc_mip"),
                     layout: &res.mip_bgl,
@@ -2374,6 +2477,94 @@ mod mip_tests;
 mod tests {
     use super::*;
 
+    /// A GPU measurement arrives a frame or two after its refresh, so most GPU refreshes carry
+    /// none; the last one reported must stand until a newer one lands. A CPU refresh is
+    /// different: there is no GPU time at all then, and keeping the old number would show it as
+    /// this refresh's. Runs anywhere — the GPU timing tests need hardware and CI has none.
+    #[test]
+    fn a_gpu_measurement_stands_until_replaced_and_a_cpu_refresh_clears_it() {
+        let timing = |ms, px| photocraft_gpu::GpuTiming { ms, px, spans: 1 };
+        let refresh = |kind, gpu| Refresh { kind, gpu, ..Default::default() };
+        let mut perf = Perf::default();
+        assert_eq!(perf.gpu_ms, None, "nothing is reported before a measurement");
+
+        perf.record_refresh(&refresh("gpu-full", Some(timing(83.9, 24_000_000))));
+        assert_eq!((perf.gpu_ms, perf.gpu_ms_px), (Some(83.9), 24_000_000));
+
+        // The common case: a GPU refresh whose own measurement has not come back yet.
+        perf.record_refresh(&refresh("gpu-rect", None));
+        assert_eq!((perf.gpu_ms, perf.gpu_ms_px), (Some(83.9), 24_000_000), "the last measurement stands");
+
+        perf.record_refresh(&refresh("gpu-rect", Some(timing(11.2, 1_098_640))));
+        assert_eq!((perf.gpu_ms, perf.gpu_ms_px), (Some(11.2), 1_098_640), "a newer measurement replaces it");
+
+        // The CPU compositor did this one: the GPU number belongs to no refresh on screen.
+        perf.record_refresh(&refresh("full", None));
+        assert_eq!((perf.gpu_ms, perf.gpu_ms_px), (None, 0), "a CPU refresh clears it rather than showing a stale one");
+
+        // And it comes back on the next GPU refresh that carries one.
+        perf.record_refresh(&refresh("gpu-full", Some(timing(42.0, 6_000_000))));
+        assert_eq!((perf.gpu_ms, perf.gpu_ms_px), (Some(42.0), 6_000_000));
+    }
+
+    #[test]
+    fn device_limits_support_v3d_shader_variable_limit() {
+        let supported = wgpu::Limits { max_texture_dimension_2d: 7680, max_inter_stage_shader_variables: 15, ..wgpu::Limits::default() };
+        let requested = device_limits_for(wgpu::Backend::Vulkan, supported.clone());
+        assert_eq!(requested.max_inter_stage_shader_variables, 15);
+        assert!(requested.check_limits(&supported));
+        assert_eq!(requested.max_texture_dimension_2d, 7680);
+        assert_eq!(requested.max_buffer_size, supported.max_buffer_size);
+    }
+
+    #[test]
+    fn device_limits_support_weaker_gl_adapters() {
+        let supported = wgpu::Limits {
+            max_texture_dimension_2d: 1024,
+            max_texture_dimension_3d: 128,
+            max_bind_groups: 2,
+            max_buffer_size: 128 << 20,
+            ..wgpu::Limits::downlevel_webgl2_defaults()
+        };
+        let requested = device_limits_for(wgpu::Backend::Gl, supported.clone());
+        assert!(requested.check_limits(&supported));
+        assert_eq!(requested, supported);
+    }
+
+    #[test]
+    fn device_limits_preserve_backend_defaults_on_capable_adapters() {
+        let supported = wgpu::Limits {
+            max_texture_dimension_2d: 16_384,
+            max_buffer_size: 1 << 30,
+            max_bind_groups: 8,
+            max_inter_stage_shader_variables: 32,
+            min_uniform_buffer_offset_alignment: 64,
+            min_storage_buffer_offset_alignment: 64,
+            ..wgpu::Limits::default()
+        };
+        for (backend, base) in [
+            (wgpu::Backend::Vulkan, wgpu::Limits::default()),
+            (wgpu::Backend::Dx12, wgpu::Limits::default()),
+            (wgpu::Backend::Metal, wgpu::Limits::default()),
+            (wgpu::Backend::Gl, wgpu::Limits::downlevel_webgl2_defaults()),
+        ] {
+            let requested = device_limits_for(backend, supported.clone());
+            assert!(requested.check_limits(&supported));
+            assert_eq!(requested, wgpu::Limits { max_texture_dimension_2d: 16_384, max_buffer_size: 1 << 30, ..base }, "{backend:?}");
+        }
+    }
+
+    #[test]
+    fn device_limits_support_larger_minimum_alignments() {
+        let supported = wgpu::Limits { min_uniform_buffer_offset_alignment: 512, min_storage_buffer_offset_alignment: 1024, ..wgpu::Limits::default() };
+        for backend in [wgpu::Backend::Vulkan, wgpu::Backend::Gl] {
+            let requested = device_limits_for(backend, supported.clone());
+            assert!(requested.check_limits(&supported));
+            assert_eq!(requested.min_uniform_buffer_offset_alignment, 512);
+            assert_eq!(requested.min_storage_buffer_offset_alignment, 1024);
+        }
+    }
+
     /// The scratch-texture workaround is for Intel's DX12 drivers (#892); other DX12 adapters
     /// render straight into the level like every other backend (#4515).
     #[test]
@@ -2389,6 +2580,17 @@ mod tests {
         assert!(separate_mip_targets(Dx12, nvidia, Some("1")));
         assert!(!separate_mip_targets(Dx12, intel, Some(" 0 ")));
         assert!(separate_mip_targets(Dx12, intel, Some("yes")));
+    }
+
+    /// #6418: levels of at most WHOLE_MIP_SIDE are redrawn whole; larger ones keep the damage.
+    #[test]
+    fn small_mip_levels_are_redrawn_whole() {
+        // A 3 × 3 dab at (800, 500) of a 1791 × 1083 tile, at mip 1 (895 × 541): halved and padded.
+        assert_eq!(mip_damage([800, 500, 803, 503], 895, 541), [399, 249, 403, 253]);
+        // At most 128 px on either side: the whole level, wherever the damage is.
+        assert_eq!(mip_damage([100, 60, 102, 63], 111, 67), [0, 0, 111, 67]);
+        assert_eq!(mip_damage([0, 0, 1, 1], 128, 2), [0, 0, 128, 2]);
+        assert_eq!(mip_damage([0, 0, 1, 1], 129, 2), [0, 0, 2, 2]);
     }
 
     #[test]
