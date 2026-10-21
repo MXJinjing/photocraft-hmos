@@ -64,3 +64,26 @@ Local evidence is in `work/graceful-startup/`: `pad-hilog.log`,
 `startup-contact-sheet.jpg`, `after.png` and `keyboard.png`. The work directory
 is ignored and is not part of the commit. Device log timestamps above use the
 device's raw log time.
+
+## Main integration verification (2026-10-21)
+
+The startup commits were replayed onto main at `1ea010e2` for PR #68, excluding
+the original branch's unmerged Recent URI permission work (PR #60). The only
+conflict was the module declaration position; main's `sandbox_paths` and
+`viewports` declarations and export behavior were retained.
+
+- All 99 native adapter tests passed; upstream offline Cargo metadata passed.
+- Host-mode, sub-window, save-picker and large-file-open script tests passed
+  using DevEco's bundled TypeScript through `NODE_PATH`.
+- Release ARM64 Rust and ArkTS compiled. The repository's safe build-profile
+  template produced an unsigned debug HAP, which passed native verification.
+  The original local signing configuration belongs to a different bundle name.
+- The Pad already had a newer version of main's bundle, so runtime verification
+  used a temporary `io.github.storytold.photocraft.startuptest` package. AppScope
+  was restored immediately after packaging; no package/version changes enter
+  the PR, and the existing application was not downgraded or uninstalled.
+- On the 2880 x 1920 Pad, `ready` was logged at 18:52:05.214, `first_frame` at
+  18:52:05.363, and reveal completion at 18:52:05.716. The editor rendered
+  correctly and Ctrl+N opened the new-document dialog after reveal.
+- Main integration evidence is retained in the original checkout under
+  `work/graceful-startup-main/`; no test documents were created.
