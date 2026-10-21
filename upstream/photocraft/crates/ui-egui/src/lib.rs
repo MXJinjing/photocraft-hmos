@@ -204,6 +204,7 @@ pub mod stroke_trace;
 pub mod stroke_trail;
 pub mod stroke_ui;
 pub mod stylus;
+pub mod stylus_debug;
 pub mod stylus_protocol;
 pub mod swap_arrow;
 pub mod swatches_ui;
@@ -239,6 +240,7 @@ pub mod vp_ui;
 pub mod warp_preview;
 #[cfg(target_arch = "wasm32")]
 pub mod web_host;
+pub mod window_fullscreen;
 pub mod wheel_nav;
 pub mod wide_angle_ui;
 pub mod widgets;
@@ -550,6 +552,8 @@ pub struct Services {
     /// Photoshop's live keyboard shortcut set, imported once at first launch (`kys_import`).
     pub photoshop_shortcuts: Option<PhotoshopShortcutsFn>,
     pub system_theme: Option<SystemThemeFn>,
+    /// Host-window full screen (HarmonyOS): shows the status-bar button and Window menu item.
+    pub window_fullscreen: Option<window_fullscreen::WindowFullscreen>,
     /// The native window is connected directly to a Wayland compositor.
     pub is_wayland: bool,
     /// On Wayland, the shell command that starts this install under XWayland, where native file
@@ -707,6 +711,8 @@ pub struct PhotocraftApp {
     /// Native 2-in-1 title-bar geometry in egui points: right-side caption-button width and
     /// title-bar height. Zero means the host has no integrated system title bar.
     pub host_titlebar: egui::Vec2,
+    /// Render floating document viewports in HarmonyOS native sub-windows.
+    pub native_doc_windows: bool,
     /// Windows and Linux: the window has no OS decorations and the app's top bar is the title bar
     /// (caption buttons, window dragging and edge resizing, `titlebar`).
     pub custom_titlebar: bool,
@@ -946,6 +952,7 @@ impl PhotocraftApp {
             styled: false,
             integrated_titlebar: false,
             host_titlebar: egui::Vec2::ZERO,
+            native_doc_windows: false,
             custom_titlebar: false,
             last_window_title: String::new(),
             fonts_ready: false,
@@ -1060,6 +1067,7 @@ impl PhotocraftApp {
                     .unwrap_or_else(|| "GPU canvas initialization failed".into());
                 self.perf.gpu_info.canvas = "cpu".into();
                 self.perf.gpu_info.fallback = Some(detail.clone());
+                self.perf.gpu_fallback = Some(detail.clone());
                 gpu_status::queue_fallback_notice(self, detail);
                 return;
             }
@@ -1340,6 +1348,12 @@ impl PhotocraftApp {
     /// the preferences (`fileHandling.recentFiles`), so it survives a restart; `ui.recent_files`
     /// mirrors it for the menus and the Home screen.
     pub fn push_recent(&mut self, path: &str) {
+        // HarmonyOS (and similar hosts) record ordinary Save as `save-default/…` tokens that only
+        // resolve while the page keeps the matching URI. Listing them in Recent makes Home › Recent
+        // open fail after restart; skip them (real download-dir paths still list).
+        if file_open::is_ephemeral_save_token(path) {
+            return;
+        }
         let cap = self.recent_cap();
         let mut r = self.session.prefs().file_handling.recent_files.clone();
         r.retain(|p| p != path);
@@ -1372,6 +1386,16 @@ impl PhotocraftApp {
     /// run every frame: a slice comparison of at most 100 paths, no allocation unless it changed.
     pub fn sync_recent(&mut self) {
         let cap = self.recent_cap();
+        let stored = &self.session.prefs().file_handling.recent_files;
+        // Drop leftover picker tokens from older builds so Home › Recent cannot offer them.
+        if stored.iter().any(|p| file_open::is_ephemeral_save_token(p)) {
+            let cleaned: Vec<String> = stored
+                .iter()
+                .filter(|p| !file_open::is_ephemeral_save_token(p))
+                .cloned()
+                .collect();
+            self.session.prefs.edit(|p| p.file_handling.recent_files = cleaned);
+        }
         let stored = &self.session.prefs().file_handling.recent_files;
         let want = stored.get(..cap.min(stored.len())).unwrap_or_default();
         if self.ui.recent_files.as_slice() != want {
@@ -2128,6 +2152,7 @@ impl PhotocraftApp {
         });
         // Finish this frame's pen release before placing a queued squeeze menu.
         chrome_ui::drain_stylus_gestures(self, &ctx);
+        stylus_debug::window(self, &ctx);
         panels::properties_window(self, &ctx);
         brush_panel::window(self, &ctx);
         preset_panels::windows(self, &ctx);
@@ -3449,6 +3474,7 @@ mod native_host_tests {
         app.services.default_save = Some(Box::new(|_, _| Ok("save-default/1/untitled.psd".into())));
         menus::invoke_unguarded(&mut app, &ctx, "file.save", serde_json::json!({})).unwrap();
         assert_eq!(*written.lock().unwrap(), ["save-as/15/untitled.psd", "save-default/1/untitled.psd", "save-default/1/untitled.psd"]);
+        assert!(app.ui.recent_files.is_empty(), "picker tokens must not enter Open Recent");
     }
     /// Without `default_save`, a document whose path is a consumed `save-as/…` token must not
     /// be treated as an in-place Save destination.

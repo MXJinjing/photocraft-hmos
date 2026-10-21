@@ -1441,6 +1441,10 @@
 	Soft light	М'яка світла
 	Soft Dark Theme	М'яка темна тема
 	Soft Light Theme	М'яка світла тема
+	ArkUI Light Theme	Світла тема ArkUI
+	ArkUI Dark Theme	Темна тема ArkUI
+	ArkUI Pro Light Theme	Світла тема ArkUI Pro
+	ArkUI Pro Dark Theme	Темна тема ArkUI Pro
 	Adwaita Light Theme	Світла тема Adwaita
 	Adwaita Dark Theme	Темна тема Adwaita
 	Adwaita	Adwaita
@@ -3956,15 +3960,45 @@ curves	Smooth	Згладити
 	Double-tap pen body	Подвійне торкання корпусу пера
 	Current tool and Eraser	Поточний інструмент і Гумка
 	Previous tool	Попередній інструмент
-	Long-press pen body	Тривале натискання корпусу пера
+	Squeeze pen body	Стискання корпусу пера
+
+# Stylus diagnostics
+	Hovering	Наведення
+	Stylus Debug…	Діагностика пера…
+	Stylus Debug	Діагностика пера
+	Use a real Pad and a pen that supports tilt, double-tap and squeeze.	Використовуйте справжній планшет і перо з нахилом, подвійним дотиком та стисканням.
+	No connection reported	З’єднання не повідомлено
+	Latest pen sample	Останні дані пера
+	Tilt from vertical	Нахил від вертикалі
+	Screen bearing	Напрямок на екрані
+	Waiting for pen input	Очікування введення пером
+	Samples	Відліки
+	Pen contact	Перо торкається екрана
+	No pen contact — values are retained	Немає контакту — значення збережено
+	Arrow: screen-projected tilt direction, not barrel rotation. Upright: no direction.	Стрілка: проєкція нахилу на екран, не обертання пера. Вертикально: напрямку немає.
+	Zero tilt may mean an upright pen or unavailable hardware data.	Нульовий нахил означає вертикальне перо або відсутність даних обладнання.
+	HarmonyOS contact input does not currently report barrel rotation.	Контактне введення HarmonyOS наразі не повідомляє обертання пера.
+	Received	Отримано
+	Test gestures only (do not run shortcuts)	Лише перевірка жестів (без виконання швидких команд)
+	No indicator means no event received, not necessarily unsupported hardware.	Немає індикатора — подію не отримано; це не обов’язково означає несумісне обладнання.
+	Test area — does not change the document	Область перевірки — не змінює документ
+	Draw here with the pen	Малюйте тут пером
+	Reset test	Скинути перевірку
+	Readings are before the pressure curve and remain available with tablet pressure off.	Дані до кривої натиску, доступні й за вимкненого натиску планшета.
+	Eraser end	Кінець із гумкою
+	Pen tip	Кінчик пера
+	Connected	Підключено
 	Show or hide context menu	Показати або приховати контекстне меню
 	Choose printer, copies and duplex in the system print dialog.	Виберіть принтер, кількість копій і двосторонній друк у системному діалозі друку.
 	System print preview opened	Відкрито системний попередній перегляд друку
 	Stylus	Стилус
 	Block finger input	Блокувати введення пальцем
+	Stylus hover preview	Попередній перегляд стилуса при наведенні
 	Only show canvas	Показати лише полотно
 	Right sidebar	Права бічна панель
 	Connected pen	Підключене перо
 	No pen connected	Перо не підключено
-	Battery unavailable	Заряд батареї недоступний
-	Battery: {percent}%	Заряд батареї: {percent}%
+
+# Window full screen (HarmonyOS host)
+	Enter Full Screen	Повноекранний режим
+	Exit Full Screen	Вийти з повноекранного режиму

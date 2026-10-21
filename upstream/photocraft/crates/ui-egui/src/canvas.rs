@@ -1707,6 +1707,7 @@ fn ensure_gpu(app: &mut PhotocraftApp, ctx: &egui::Context, idx: usize, visible:
     // Display textures for a canvas this large would not fit the GPU: the reduced CPU canvas
     // draws it (checked before the memory budget, which walks the history, every frame).
     if !gpu.fits_canvas(&doc) {
+        app.perf.gpu_fallback = Some(crate::gpu_canvas::OVER_CANVAS_BUDGET.into());
         crate::background_redraw::cancel(app, id);
         // Drawn on the CPU canvas: no layer budget applies to it.
         if app.perf.gpu_layer_fit.is_some_and(|f| f.doc == id.0) {
@@ -1722,6 +1723,7 @@ fn ensure_gpu(app: &mut PhotocraftApp, ctx: &egui::Context, idx: usize, visible:
     if r.kind == "lost" || r.kind == crate::gpu_canvas::REFRESH_OVER_BUDGET {
         // The device is gone (`gpu_status` then drops the GPU canvas) or the canvas is over the
         // texture budget: draw this frame on the CPU path.
+        app.perf.gpu_fallback = r.fallback;
         crate::background_redraw::cancel(app, id);
         return false;
     }
@@ -6131,6 +6133,15 @@ pub(crate) fn finish_touch_stroke(app: &mut PhotocraftApp) -> bool {
 
 /// Extra OS windows showing documents (multi-window / multi-monitor).
 pub fn extra_windows(app: &mut PhotocraftApp, ctx: &egui::Context) {
+    let embedded = ctx.embed_viewports();
+    if app.native_doc_windows {
+        ctx.set_embed_viewports(false);
+    }
+    extra_windows_in(app, ctx);
+    ctx.set_embed_viewports(embedded);
+}
+
+fn extra_windows_in(app: &mut PhotocraftApp, ctx: &egui::Context) {
     let wins = app.ui.windows.clone();
     for w in wins.into_iter().filter(|w| w.open) {
         let Some(st) = app.session.documents().get(w.document) else { continue };
@@ -6829,7 +6840,7 @@ mod tests {
         let uploaded = |ctx: &egui::Context| ctx.tex_manager().read().allocated().filter(|(_, meta)| meta.name == "canvas-dots").count();
         for kind in ThemeKind::ALL {
             let ctx = egui::Context::default();
-            let dotted = matches!(kind, ThemeKind::Studio | ThemeKind::StudioLight | ThemeKind::SolarizedDark);
+            let dotted = matches!(kind, ThemeKind::Studio | ThemeKind::StudioLight | ThemeKind::SolarizedDark | ThemeKind::ArkuiLight | ThemeKind::ArkuiDark | ThemeKind::ArkuiProLight | ThemeKind::ArkuiProDark);
             assert_eq!(tiles(&ctx, kind), dotted, "{kind:?}");
             assert_eq!(uploaded(&ctx), usize::from(dotted), "{kind:?}");
         }

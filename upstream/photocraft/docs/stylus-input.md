@@ -22,18 +22,19 @@ below to provide additional pen actions and connection state.
 | `type` | Fields | Meaning |
 | --- | --- | --- |
 | `pointer` | `source`, `sample` | Source is `mouse`, `pen` or `touch`. Sample is a pen reading or `null` when no pen is down. Non-pen samples are discarded. |
-| `barrelButton` | `pressed`, `timestampMs` | Side-button state; the shared recognizer derives double-tap or long-press. |
-| `gesture` | `gesture`, `timestampMs` | An adapter has recognized `doubleTap` or `longPress`. Preferences decide the action. |
-| `connection` | `connected`, optional `deviceName`, `batteryPercent` | Whether a pen is attached, independently of screen contact, with its current name and battery (0–100). Missing metadata means unavailable. |
+| `barrelButton` | `pressed`, `timestampMs` | Side-button state; the shared recognizer derives double-tap or the held-button squeeze fallback. |
+| `gesture` | `gesture`, `timestampMs` | An adapter has recognized `doubleTap` or `squeeze`. The legacy `longPress` name is accepted as an alias for `squeeze`. Preferences decide the action. |
+| `connection` | `connected`, optional `deviceName` | Whether a pen is attached, independently of screen contact, with its current InputKit name when available. |
 
 A sample contains `pressure` (0–1), `tiltX` and `tiltY` (degrees, −90–90), `rotation`
 (degrees, normalized to 0–360 exclusive), and `eraser` (boolean). Omitted sample fields default
 to pressure 1, zero tilt/rotation and eraser false. The shared sink clamps numeric ranges and
 replaces non-finite sample values.
 
-Connection metadata is a snapshot. Disconnect clears the previous device's name and battery.
-Names are limited to 128 non-control characters; invalid battery ranges become unavailable.
-Version 1 packets without metadata continue to work. The title-bar pen icon is always available,
+Connection metadata is a snapshot. Disconnect clears the previous device's name. Names are
+limited to 128 non-control characters. Version 1 packets without metadata continue to work.
+Battery state belongs to the operating system and is neither queried nor displayed by PhotoCraft.
+The title-bar pen icon is always available,
 including before any connection, and its menu shows the current device status above preferences.
 
 All producers sharing a feed must use the same timestamp clock. Web/native-container adapters
@@ -41,7 +42,43 @@ use Unix epoch milliseconds, matching `Date.now()`. Convert SDK timestamps befor
 SDK uptime and epoch timestamps must not be mixed. Non-finite action times are ignored.
 Repeated identical gestures within 350 ms are suppressed across native actions and browser
 side-button recognition. The queue holds at most eight actions. The shared side-button
-recognizer uses 400 ms for double-tap and 450 ms for long-press.
+recognizer uses 400 ms for double-tap and 450 ms for its held-side-button squeeze fallback.
+
+## Help › Stylus Debug
+
+Open **Help › Stylus Debug…** without needing a document. On HarmonyOS this uses the existing
+native egui immediate-viewport sub-window host, with its own system title bar, surface and input;
+web hosts without native viewports embed it instead. On HarmonyOS use a real Pad and a pen
+that supports tilt and the desired body gestures; an emulator can check the window layout and
+transport but cannot prove physical sensor or gesture support.
+
+- Touch the test area, vary pressure, tilt left/right/up/down, then lift. The window retains the
+  last sanitized device sample (before pressure curves and even when tablet pressure is off).
+  The pressure-width test marks are session-only and never modify the document.
+- Tilt X/Y are degrees. The ring arrow is the pen axis projected onto the screen: 0° up,
+  90° right, 180° down and 270° left. Its length increases with inclination from vertical.
+  Upright has no bearing. This is not barrel rotation or the physical nib's chisel orientation;
+  the current HarmonyOS contact bridge does not report barrel rotation. The HarmonyOS host sends
+  the display's quarter-turn rotation and portrait/landscape state to the shared feed, which
+  converts the natural panel tilt axes into the current screen axes before painting or display.
+  Landscape panels add the half turn used by the Pad pen driver. Zero tilt alone cannot distinguish
+  an upright pen from hardware that does not report tilt.
+- Proximity is recorded separately from contact. The single contact-status line reads **Hovering**
+  or **Pen contact** and includes the latest X/Y point, without replacing the last contact tilt.
+  The sample counter also shows the pen sampling rate over the most recent second.
+- Double-tap and squeeze each have an accepted-event count and a 1.2-second indicator. Events
+  within the existing 350 ms deduplication window count once. No event is not proof of missing
+  hardware support. Squeeze is now named consistently in menus and preferences; the existing
+  `tools.stylusLongPress` preference key is retained for saved-settings compatibility.
+- **Test gestures only** defaults on while the window is open; gesture shortcuts are consumed
+  without changing tools or opening canvas menus. Closing the window restores normal behavior.
+  Uncheck it to test configured shortcut actions. **Reset test** resets this view, not input
+  queues or settings.
+
+Automated checks cover screen-axis geometry, sanitized readings, non-consuming observation,
+legacy input compatibility, deduplication, gesture isolation and UI reset behavior. Physical
+Pad tests must still verify that moving the actual pen changes the readings and both gestures
+reach their indicators.
 
 ## Native web-container transport, version 1
 
@@ -52,7 +89,7 @@ window.dispatchEvent(new CustomEvent('photocraft-stylus-input', {
   detail: {
     version: 1,
     type: 'gesture',
-    gesture: 'longPress',
+    gesture: 'squeeze',
     timestampMs: Date.now()
   }
 }));
@@ -72,19 +109,14 @@ Never cache/replay gestures: that could open a menu again after a page reload.
 
 `entry/src/main/ets/stylus/StylusProtocol.ets` defines typed packet factories, the injection
 script and a `StylusAdapter` lifecycle interface (`start`, `stop`, `publishState`).
-`HarmonyStylusAdapter.ets` uses Pen Kit, InputKit and ConnectivityKit:
+`HarmonyStylusAdapter.ets` uses Pen Kit and InputKit:
 
 - SDK `doubleTap` becomes the shared `doubleTap` action.
-- SDK `squeeze` becomes the shared `longPress` action used by the current preferences.
+- SDK `squeeze` becomes the shared `squeeze` action (轻捏).
 - Device changes and a one-second poll publish connection state and the InputKit device name.
-- After a pen is detected, the native page requests Bluetooth access once per adapter lifetime.
-  Denial keeps pen settings and InputKit names available. Connected Bluetooth HID and BLE devices are queried independently and deduplicated.
-  Matches prefer exact device address, then name. When InputKit supplies a driver name, a
-  fallback requires exactly one input pen and one recognisable connected remote pen.
-  Only an unambiguous match supplies the remote name and battery. NearLink/non-Bluetooth pens and devices not reporting battery show unavailable.
-- Battery reads are serialized; a slower read remains valid across one-second polls of the
-  same device. Device revisions and lifecycle generations reject results from disconnected,
-  replaced or restarted devices.
+  Device enumeration is serialized; triggers received during a scan coalesce into one immediate
+  follow-up, so a scan slower than the polling interval is still accepted without overlapping calls.
+- No Bluetooth or NearLink permission is requested. The adapter does not query or display battery state.
 - Registration failures are handled separately, allowing supported capabilities to keep working.
 - Start/stop are idempotent; asynchronous connection queries from a previous lifecycle are ignored.
 
@@ -102,7 +134,7 @@ reported sample fields remain dependent on the platform/device.
 Rust tests cover decoding, validation, normalized actions and cross-source deduplication.
 The fixture `crates/ui-egui/tests/fixtures/stylus-packets.json` is shared with the ArkTS adapter
 test, which generates packets from the actual factories and checks lifecycle, transport,
-startup state, action mapping and partial SDK availability:
+startup state, action mapping, serialized slow scans and partial SDK availability:
 
 ```sh
 node scripts/test_stylus_adapter.cjs /path/to/typescript

@@ -38,7 +38,8 @@ export class NativeDropAdapter {
     }
   }
 
-  async receive(event: DragEvent, isCurrent: () => boolean): Promise<Array<DroppedImage>> {
+  async receive(event: DragEvent, isCurrent: () => boolean,
+    handoff: (name: string, fd: number) => void = this.openFile): Promise<Array<DroppedImage>> {
     event.dragBehavior = DragBehavior.COPY;
     event.setResult(DragResult.DRAG_FAILED);
     if (this.busy || !isCurrent()) { return []; }
@@ -92,7 +93,7 @@ export class NativeDropAdapter {
         }
         const file = image.file;
         try {
-          this.openFile(image.name, file.fd);
+          handoff(image.name, file.fd);
         } finally {
           try { await fileIo.close(file); } catch (error) { console.error('Drop file close failed'); }
           image.file = null;

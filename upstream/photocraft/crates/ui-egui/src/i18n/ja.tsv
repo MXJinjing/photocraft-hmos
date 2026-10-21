@@ -761,6 +761,10 @@
 	Soft light	ソフトライト
 	Soft Dark Theme	ソフトダークテーマ
 	Soft Light Theme	ソフトライトテーマ
+	ArkUI Light Theme	ArkUI ライトテーマ
+	ArkUI Dark Theme	ArkUI ダークテーマ
+	ArkUI Pro Light Theme	ArkUI Pro ライトテーマ
+	ArkUI Pro Dark Theme	ArkUI Pro ダークテーマ
 	Next Theme	次のテーマ
 	Actions	アクション
 	Brush Settings	ブラシ設定
@@ -3924,10 +3928,38 @@ curves	Smooth	スムーズ
 # HarmonyOS host additions retained during upstream sync
 	Stylus	スタイラス
 	Block finger input	指の入力を無効にする
+	Stylus hover preview	スタイラスのホバープレビュー
 	Double-tap pen body	ペン軸をダブルタップ
 	Current tool and Eraser	現在のツールと消しゴム
 	Previous tool	前のツール
-	Long-press pen body	ペン軸を長押し
+	Squeeze pen body	ペン軸をスクイーズ
+
+# Stylus diagnostics
+	Hovering	ホバー中
+	Stylus Debug…	スタイラス診断…
+	Stylus Debug	スタイラス診断
+	Use a real Pad and a pen that supports tilt, double-tap and squeeze.	傾き・ダブルタップ・スクイーズ対応のペンと実機のタブレットを使用してください。
+	No connection reported	接続の報告なし
+	Latest pen sample	最新のペンデータ
+	Tilt from vertical	垂直からの傾き
+	Screen bearing	画面上の方向
+	Waiting for pen input	ペン入力を待機中
+	Samples	サンプル数
+	Pen contact	ペン接触中
+	No pen contact — values are retained	接触なし — 最後の値を保持
+	Arrow: screen-projected tilt direction, not barrel rotation. Upright: no direction.	矢印は画面に投影した傾きの方向で、軸の回転ではありません。垂直時は方向なし。
+	Zero tilt may mean an upright pen or unavailable hardware data.	傾きがゼロの場合、垂直か、ハードウェアデータがない可能性があります。
+	HarmonyOS contact input does not currently report barrel rotation.	現在、HarmonyOSの接触入力は軸の回転を報告しません。
+	Received	受信
+	Test gestures only (do not run shortcuts)	ジェスチャーのみテスト（ショートカットを実行しない）
+	No indicator means no event received, not necessarily unsupported hardware.	点灯しない場合はイベント未受信です。ハードウェア非対応とは限りません。
+	Test area — does not change the document	試し書き領域 — ドキュメントは変更されません
+	Draw here with the pen	ここにペンで描いてください
+	Reset test	テストをリセット
+	Readings are before the pressure curve and remain available with tablet pressure off.	筆圧カーブ適用前の値です。筆圧を無効にしても表示されます。
+	Eraser end	消しゴム側
+	Pen tip	ペン先
+	Connected	接続済み
 	Show or hide context menu	コンテキストメニューの表示/非表示
 	Choose printer, copies and duplex in the system print dialog.	システムの印刷ダイアログでプリンター、部数、両面印刷を選択します。
 	System print preview opened	システムの印刷プレビューを開きました
@@ -3935,5 +3967,7 @@ curves	Smooth	スムーズ
 	Right sidebar	右サイドバー
 	Connected pen	接続中のペン
 	No pen connected	ペンが接続されていません
-	Battery unavailable	バッテリー情報なし
-	Battery: {percent}%	バッテリー: {percent}%
+
+# Window full screen (HarmonyOS host)
+	Enter Full Screen	フルスクリーンにする
+	Exit Full Screen	フルスクリーンを終了

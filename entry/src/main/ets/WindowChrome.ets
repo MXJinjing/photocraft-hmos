@@ -1,5 +1,6 @@
 import { window } from '@kit.ArkUI';
 import { BusinessError, deviceInfo } from '@kit.BasicServicesKit';
+import { LOADING_CHROME, paintWindow } from './SystemBars';
 
 const TITLE_HEIGHT: number = 38;
 
@@ -29,6 +30,7 @@ export class WindowChrome {
       this.win.on('windowSizeChange', this.sizeChanged);
       this.watching = true;
       this.applyDecor();
+      this.repaintChrome();
       this.refresh();
     } catch (error) {
       let failure = error as BusinessError;
@@ -49,9 +51,18 @@ export class WindowChrome {
   }
 
   private onLayoutSignal(): void {
-    // 切入自由多窗时系统才露出三键区；先重套 decor，再刷几何。
+    // 切入自由多窗时系统才露出三键区；先重套 decor，再刷主题色与几何。
     this.applyDecor();
+    this.repaintChrome();
     this.refresh();
+  }
+
+  private repaintChrome(): void {
+    if (!this.watching) { return; }
+    // setDecorButtonStyle often no-ops or fails outside freeform. Re-apply the current
+    // theme chrome when layout changes so tablet → freeform matches a cold freeform start.
+    let color = AppStorage.get<string>('photocraftChrome') ?? LOADING_CHROME;
+    paintWindow(this.win, color);
   }
 
   private applyDecor(): void {

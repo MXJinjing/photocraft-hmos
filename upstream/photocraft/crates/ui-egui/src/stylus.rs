@@ -26,7 +26,7 @@
 //! Preferences › Tools › Use Tablet Pressure off makes a pen paint like a mouse. Flipping the pen
 //! to its eraser end selects the Eraser tool and flipping back restores the previous tool, as in
 //! Photoshop. Platform adapters submit [`StylusInput`] to the shared feed. The shell consumes
-//! normalised double-tap and long-press actions without knowing which SDK produced them.
+//! normalised double-tap and squeeze actions without knowing which SDK produced them.
 //! The versioned host transport is documented in `docs/stylus-input.md`.
 //!
 //! Automation simulates a pen with `ui.pointer` events carrying `pressure`, `tiltX`, `tiltY`
@@ -34,6 +34,7 @@
 
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex, PoisonError};
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
@@ -100,7 +101,32 @@ impl PointerSource {
 #[serde(rename_all = "camelCase")]
 pub enum PenGesture {
     DoubleTap,
-    LongPress,
+    #[serde(alias = "longPress")]
+    Squeeze,
+}
+
+/// Non-consuming, pre-preference readings for Help › Stylus Debug. Never drains painting input.
+#[derive(Clone, Debug, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StylusDiagnostics {
+    pub last_pen: Option<PenSample>,
+    pub samples: u64,
+    /// Pen samples in the last second, in Hz (including proximity samples while hovering).
+    pub sample_rate_hz: f32,
+    pub double_taps: u64,
+    pub squeezes: u64,
+    /// The pen is in range and above the surface (pressure 0, not in contact).
+    pub hovering: bool,
+    /// Last hover point in egui points for `hover_viewport`.
+    pub hover: Option<[f32; 2]>,
+    /// Last pen-contact point in egui points for `contact_viewport`.
+    pub contact: Option<[f32; 2]>,
+    /// Quarter turns clockwise reported by the display, used to put tilt into screen axes.
+    pub display_rotation: u8,
+    #[serde(skip)]
+    pub hover_viewport: Option<egui::ViewportId>,
+    #[serde(skip)]
+    pub contact_viewport: Option<egui::ViewportId>,
 }
 
 /// The common input contract for browser, native tablet and host adapters.
@@ -124,8 +150,6 @@ pub enum StylusInput {
         connected: bool,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         device_name: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        battery_percent: Option<u8>,
     },
 }
 
@@ -134,7 +158,6 @@ pub enum StylusInput {
 pub struct StylusDevice {
     pub connected: bool,
     pub name: Option<String>,
-    pub battery_percent: Option<u8>,
 }
 
 /// Barrel-button timing. A short second press within [`DOUBLE_MS`] is a double-tap; holding for
@@ -162,7 +185,7 @@ impl BarrelWatch {
             if !self.long_sent && now - started >= Self::LONG_MS {
                 self.long_sent = true;
                 self.last_tap_up = None;
-                return Some(PenGesture::LongPress);
+                return Some(PenGesture::Squeeze);
             }
             return None;
         }
@@ -192,6 +215,13 @@ struct Slot {
     /// Attachment reported by an adapter, distinct from contact with the screen.
     device: StylusDevice,
     queue: VecDeque<PenSample>,
+    diagnostics: StylusDiagnostics,
+    sample_times: VecDeque<Instant>,
+    /// Quarter turns clockwise from the hardware's natural axes. Display rotation changes the
+    /// screen direction represented by the same physical pen tilt.
+    display_rotation: u8,
+    /// Whether the display is currently wider than it is tall.
+    display_landscape: bool,
 }
 
 impl Default for Slot {
@@ -204,11 +234,52 @@ impl Default for Slot {
             last_gesture: None,
             device: StylusDevice::default(),
             queue: VecDeque::new(),
+            diagnostics: StylusDiagnostics::default(),
+            sample_times: VecDeque::new(),
+            display_rotation: 0,
+            display_landscape: false,
         }
     }
 }
 
+/// HarmonyOS Pen Kit reports tilt in the panel's fixed axes. Landscape panels need an extra
+/// half turn relative to the portrait mapping before the arrow matches the visible screen.
+fn tilt_correction(quarter_turns: u8, landscape: bool) -> u8 {
+    if landscape { quarter_turns.wrapping_add(2) % 4 } else { quarter_turns % 4 }
+}
+
+fn prune_sample_times(times: &mut VecDeque<Instant>, now: Instant) {
+    let cutoff = now.checked_sub(Duration::from_secs(1)).unwrap_or(now);
+    while times.front().is_some_and(|at| *at < cutoff) {
+        times.pop_front();
+    }
+    while times.len() > 4096 {
+        times.pop_front();
+    }
+}
+
+/// Put hardware tilt axes into the current screen axes. The XComponent reports tilt against
+/// the natural panel axes, which stay fixed while the display rotates around them.
+fn tilt_in_screen_axes(sample: PenSample, quarter_turns: u8) -> PenSample {
+    if quarter_turns.is_multiple_of(4) {
+        return sample;
+    }
+    // tan() is the tangent of the tilt from vertical; rotating its x/y components turns the
+    // 3-D pen vector around the z axis without changing how far it leans.
+    let x = sample.tilt_x.clamp(-89.999, 89.999).to_radians().tan();
+    let y = sample.tilt_y.clamp(-89.999, 89.999).to_radians().tan();
+    let (x, y) = match quarter_turns % 4 {
+        1 => (y, -x),
+        2 => (-x, -y),
+        _ => (-y, x),
+    };
+    PenSample { tilt_x: x.atan().to_degrees(), tilt_y: y.atan().to_degrees(), ..sample }
+}
+
 fn enqueue_gesture(slot: &mut Slot, gesture: PenGesture, now: f64) {
+    if !now.is_finite() {
+        return;
+    }
     if let Some((prev, at)) = slot.last_gesture
         && prev == gesture
         && now.is_finite()
@@ -218,6 +289,11 @@ fn enqueue_gesture(slot: &mut Slot, gesture: PenGesture, now: f64) {
         return;
     }
     slot.last_gesture = Some((gesture, now));
+    let count = match gesture {
+        PenGesture::DoubleTap => &mut slot.diagnostics.double_taps,
+        PenGesture::Squeeze => &mut slot.diagnostics.squeezes,
+    };
+    *count = count.saturating_add(1);
     slot.gestures.push(gesture);
     let overflow = slot.gestures.len().saturating_sub(8);
     if overflow > 0 {
@@ -247,7 +323,7 @@ impl StylusFeed {
                 self.push_gesture(gesture, timestamp_ms);
                 true
             }
-            StylusInput::Connection { connected, device_name, battery_percent } => self.set_device(connected, device_name, battery_percent),
+            StylusInput::Connection { connected, device_name } => self.set_device(connected, device_name),
         }
     }
 
@@ -266,13 +342,86 @@ impl StylusFeed {
     pub fn report(&self, source: PointerSource, sample: Option<PenSample>) {
         if let Ok(mut g) = self.0.lock() {
             g.source = source;
-            g.sample = if source == PointerSource::Pen { sample.map(PenSample::sanitized) } else { None };
+            let rotation = tilt_correction(g.display_rotation, g.display_landscape);
+            g.sample = if source == PointerSource::Pen { sample.map(PenSample::sanitized).map(|sample| tilt_in_screen_axes(sample, rotation)) } else { None };
             if let Some(sample) = g.sample {
+                if sample.pressure > 0.0 {
+                    g.diagnostics.hovering = false;
+                    g.diagnostics.hover = None;
+                    g.diagnostics.hover_viewport = None;
+                    g.diagnostics.last_pen = Some(sample);
+                }
+                g.diagnostics.samples = g.diagnostics.samples.saturating_add(1);
+                let now = Instant::now();
+                prune_sample_times(&mut g.sample_times, now);
+                g.sample_times.push_back(now);
                 if g.queue.len() >= FEED_QUEUE {
                     g.queue.pop_front();
                 }
                 g.queue.push_back(sample);
             }
+        }
+    }
+    /// Record proximity separately from contact so hovering does not overwrite the last tilted
+    /// contact reading.
+    pub fn report_hover(&self, viewport: egui::ViewportId, at: [f32; 2]) {
+        if let Ok(mut g) = self.0.lock()
+            && at.iter().all(|v| v.is_finite())
+        {
+            g.diagnostics.hovering = true;
+            g.diagnostics.hover = Some(at);
+            g.diagnostics.hover_viewport = Some(viewport);
+        }
+    }
+    /// Clear proximity only for the viewport that reported it, so one window's blur cannot
+    /// erase another window's live hover.
+    pub fn clear_hover(&self, viewport: egui::ViewportId) {
+        if let Ok(mut g) = self.0.lock()
+            && g.diagnostics.hover_viewport == Some(viewport)
+        {
+            g.diagnostics.hovering = false;
+            g.diagnostics.hover = None;
+            g.diagnostics.hover_viewport = None;
+        }
+    }
+    /// Record the current pen tip while it is touching the screen.
+    pub fn report_contact(&self, viewport: egui::ViewportId, at: [f32; 2]) {
+        if let Ok(mut g) = self.0.lock()
+            && at.iter().all(|v| v.is_finite())
+        {
+            g.diagnostics.contact = Some(at);
+            g.diagnostics.contact_viewport = Some(viewport);
+        }
+    }
+    /// Clear the contact point for the viewport that reported it.
+    pub fn clear_contact(&self, viewport: egui::ViewportId) {
+        if let Ok(mut g) = self.0.lock()
+            && g.diagnostics.contact_viewport == Some(viewport)
+        {
+            g.diagnostics.contact = None;
+            g.diagnostics.contact_viewport = None;
+        }
+    }
+    /// Display rotation is a quarter-turn count clockwise (0..=3).
+    pub fn set_display_rotation(&self, quarter_turns: u8, landscape: bool) {
+        if quarter_turns > 3 {
+            return;
+        }
+        if let Ok(mut g) = self.0.lock() {
+            let previous = tilt_correction(g.display_rotation, g.display_landscape);
+            let corrected = tilt_correction(quarter_turns, landscape);
+            let delta = (corrected + 4 - previous) % 4;
+            if delta != 0 {
+                if let Some(sample) = g.sample {
+                    g.sample = Some(tilt_in_screen_axes(sample, delta));
+                }
+                if let Some(sample) = g.diagnostics.last_pen {
+                    g.diagnostics.last_pen = Some(tilt_in_screen_axes(sample, delta));
+                }
+            }
+            g.display_rotation = quarter_turns;
+            g.display_landscape = landscape;
+            g.diagnostics.display_rotation = quarter_turns;
         }
     }
     /// Barrel button from a pen Pointer Event. Returns the gesture just recognised, if any.
@@ -301,17 +450,9 @@ impl StylusFeed {
         changed
     }
     /// Update connection and metadata together; a disconnect clears the previous pen's details.
-    pub fn set_device(&self, connected: bool, name: Option<String>, battery_percent: Option<u8>) -> bool {
+    pub fn set_device(&self, connected: bool, name: Option<String>) -> bool {
         let name = name.map(|s| s.chars().filter(|c| !c.is_control()).take(128).collect::<String>());
-        let device = if connected {
-            StylusDevice {
-                connected,
-                name: name.map(|s| s.trim().to_owned()).filter(|s| !s.is_empty()),
-                battery_percent: battery_percent.filter(|v| *v <= 100),
-            }
-        } else {
-            StylusDevice::default()
-        };
+        let device = if connected { StylusDevice { connected, name: name.map(|s| s.trim().to_owned()).filter(|s| !s.is_empty()) } } else { StylusDevice::default() };
         let Ok(mut g) = self.0.lock() else { return false };
         let changed = g.device != device;
         g.device = device;
@@ -323,6 +464,20 @@ impl StylusFeed {
     }
     pub fn device(&self) -> StylusDevice {
         self.0.lock().map(|g| g.device.clone()).unwrap_or_default()
+    }
+    /// Latest sanitized device data, before pressure curves or Use Tablet Pressure filtering.
+    pub fn diagnostics(&self) -> StylusDiagnostics {
+        let Ok(mut g) = self.0.lock() else { return StylusDiagnostics::default() };
+        prune_sample_times(&mut g.sample_times, Instant::now());
+        let mut diagnostics = g.diagnostics.clone();
+        diagnostics.sample_rate_hz = match (g.sample_times.front(), g.sample_times.back()) {
+            (Some(first), Some(last)) if g.sample_times.len() > 1 => {
+                let seconds = last.saturating_duration_since(*first).as_secs_f32();
+                if seconds > 0.0 { (g.sample_times.len() - 1) as f32 / seconds } else { 0.0 }
+            }
+            _ => 0.0,
+        };
+        diagnostics
     }
     /// Gestures queued since the last take, oldest first.
     pub fn take_gestures(&self) -> Vec<PenGesture> {
@@ -1177,7 +1332,7 @@ mod tests {
 
         let mut held = BarrelWatch::default();
         assert_eq!(held.update(true, 0.0), None);
-        assert_eq!(held.update(true, BarrelWatch::LONG_MS), Some(PenGesture::LongPress));
+        assert_eq!(held.update(true, BarrelWatch::LONG_MS), Some(PenGesture::Squeeze));
         assert_eq!(held.update(false, BarrelWatch::LONG_MS + 20.0), None, "releasing a long-press is not a tap");
         assert_eq!(held.update(true, 1000.0), None);
         assert_eq!(held.update(false, 1040.0), None, "the long-press consumed the previous tap");
@@ -1192,9 +1347,9 @@ mod tests {
         assert!(feed.report_barrel(true, 1_140.0).is_none());
         assert_eq!(feed.report_barrel(false, 1_180.0), Some(PenGesture::DoubleTap));
         assert_eq!(feed.take_gestures(), vec![PenGesture::DoubleTap], "the barrel echo of the host action is dropped");
-        feed.push_gesture(PenGesture::LongPress, 2_000.0);
-        feed.push_gesture(PenGesture::LongPress, 2_100.0);
-        assert_eq!(feed.take_gestures(), vec![PenGesture::LongPress]);
+        feed.push_gesture(PenGesture::Squeeze, 2_000.0);
+        feed.push_gesture(PenGesture::Squeeze, 2_100.0);
+        assert_eq!(feed.take_gestures(), vec![PenGesture::Squeeze]);
     }
 
     #[test]

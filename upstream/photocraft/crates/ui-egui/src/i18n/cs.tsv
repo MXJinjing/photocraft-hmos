@@ -767,6 +767,10 @@
 	Soft light	Jemný světlý
 	Soft Dark Theme	Jemné tmavé téma
 	Soft Light Theme	Jemné světlé téma
+	ArkUI Light Theme	Světlý motiv ArkUI
+	ArkUI Dark Theme	Tmavý motiv ArkUI
+	ArkUI Pro Light Theme	Světlý motiv ArkUI Pro
+	ArkUI Pro Dark Theme	Tmavý motiv ArkUI Pro
 	Next Theme	Další motiv
 	Actions	Akce
 	Brush Settings	Nastavení štětce
@@ -3855,10 +3859,38 @@ navigator	Zoom	Zvětšení
 # HarmonyOS host additions retained during upstream sync
 	Stylus	Stylus
 	Block finger input	Blokovat zadávání prstem
+	Stylus hover preview	Náhled při najetí stylusu
 	Double-tap pen body	Dvojité klepnutí na tělo pera
 	Current tool and Eraser	Aktuální nástroj a guma
 	Previous tool	Předchozí nástroj
-	Long-press pen body	Dlouhé stisknutí těla pera
+	Squeeze pen body	Stisknutí těla pera
+
+# Stylus diagnostics
+	Hovering	Pero nad plochou
+	Stylus Debug…	Diagnostika pera…
+	Stylus Debug	Diagnostika pera
+	Use a real Pad and a pen that supports tilt, double-tap and squeeze.	Použijte skutečný tablet a pero podporující náklon, dvojité klepnutí a stisk těla.
+	No connection reported	Připojení nebylo hlášeno
+	Latest pen sample	Poslední vzorek pera
+	Tilt from vertical	Náklon od svislice
+	Screen bearing	Směr na obrazovce
+	Waiting for pen input	Čekání na vstup pera
+	Samples	Vzorky
+	Pen contact	Kontakt pera
+	No pen contact — values are retained	Bez kontaktu — hodnoty zachovány
+	Arrow: screen-projected tilt direction, not barrel rotation. Upright: no direction.	Šipka: průmět náklonu na obrazovku, nikoli otáčení pera. Svisle: bez směru.
+	Zero tilt may mean an upright pen or unavailable hardware data.	Nulový náklon může znamenat svislé pero nebo nedostupná hardwarová data.
+	HarmonyOS contact input does not currently report barrel rotation.	Kontaktní vstup HarmonyOS aktuálně nehlásí otáčení pera.
+	Received	Přijato
+	Test gestures only (do not run shortcuts)	Testovat pouze gesta (bez spouštění zkratek)
+	No indicator means no event received, not necessarily unsupported hardware.	Bez indikátoru nebyla přijata událost; nemusí to znamenat nepodporovaný hardware.
+	Test area — does not change the document	Testovací plocha — nemění dokument
+	Draw here with the pen	Kreslete zde perem
+	Reset test	Obnovit test
+	Readings are before the pressure curve and remain available with tablet pressure off.	Hodnoty před křivkou přítlaku, dostupné i při vypnutém přítlaku tabletu.
+	Eraser end	Konec s gumou
+	Pen tip	Hrot pera
+	Connected	Připojeno
 	Show or hide context menu	Zobrazit nebo skrýt místní nabídku
 	Choose printer, copies and duplex in the system print dialog.	Vyberte tiskárnu, počet kopií a oboustranný tisk v systémovém dialogu.
 	System print preview opened	Systémový náhled tisku otevřen
@@ -3866,5 +3898,7 @@ navigator	Zoom	Zvětšení
 	Right sidebar	Pravý postranní panel
 	Connected pen	Připojené pero
 	No pen connected	Žádné pero není připojeno
-	Battery unavailable	Stav baterie není dostupný
-	Battery: {percent}%	Baterie: {percent}%
+
+# Window full screen (HarmonyOS host)
+	Enter Full Screen	Přejít na celou obrazovku
+	Exit Full Screen	Ukončit celou obrazovku

@@ -24,6 +24,10 @@ pub struct StylusPacket {
 #[derive(Deserialize, Default)]
 pub struct Input {
     pub kind: String,
+    /// Native sub-window key; 0 is the main window.
+    #[serde(default)]
+    #[cfg_attr(not(target_env = "ohos"), allow(dead_code))]
+    pub win: u32,
     #[serde(default)]
     pub points: Vec<Contact>,
     #[serde(default)]
@@ -54,6 +58,12 @@ pub struct Input {
     pub source: PointerSource,
     #[serde(default)]
     pub sample: Option<PenSample>,
+    /// Quarter turns clockwise of the display (0..=3), sent when the system rotation changes.
+    #[serde(default)]
+    pub rotation: u8,
+    /// Current display is wider than it is tall.
+    #[serde(default)]
+    pub landscape: bool,
     #[serde(default)]
     pub packet: Option<StylusPacket>,
     #[serde(default)]
@@ -72,6 +82,17 @@ pub struct Input {
 struct PreviewResume {
     cached: [Option<Pos2>; 5],
     first_hover: Option<Pos2>,
+}
+
+#[derive(Debug)]
+struct PenHoverPreview(bool);
+
+impl Default for PenHoverPreview {
+    fn default() -> Self {
+        // The host applies the persisted preference before accepting input. Keeping the
+        // adapter's standalone default enabled preserves its platform-neutral test contract.
+        Self(true)
+    }
 }
 
 impl PreviewResume {
@@ -107,6 +128,7 @@ pub struct State {
     last_mouse: Option<Pos2>,
     preview_resume: Option<PreviewResume>,
     preview_hidden: bool,
+    pen_hover_preview: PenHoverPreview,
     ignore_fingers: bool,
     /// Multi-touch / pinch navigation is active; leftover fingers must not Primary.
     touch_nav_active: bool,
@@ -116,6 +138,8 @@ pub struct State {
     axis_zoom: Option<f32>,
     pub modifiers: Modifiers,
     pub feed: StylusFeed,
+    /// Input belongs to this viewport; diagnostic hover positions use its local points.
+    pub viewport: egui::ViewportId,
 }
 impl State {
     fn finger_owns_pointer(&self) -> bool {
@@ -189,6 +213,25 @@ impl State {
         }
     }
 
+    /// Apply the user preference. Disabling an already visible pen hover clears it on the
+    /// next egui frame; enabling waits for a fresh pen position instead of restoring stale data.
+    pub fn set_pen_hover_preview(&mut self, enabled: bool, events: &mut Vec<Event>) -> bool {
+        if self.pen_hover_preview.0 == enabled {
+            return false;
+        }
+        self.pen_hover_preview.0 = enabled;
+        if enabled {
+            self.preview_resume = None;
+            return false;
+        }
+        if !self.pen_down && !self.preview_hidden && self.hover_origin.is_some() {
+            self.hide_pen_preview();
+            events.push(Event::PointerGone);
+            return true;
+        }
+        false
+    }
+
     fn clear_touches(&mut self, events: &mut Vec<Event>) {
         for (id, pos) in std::mem::take(&mut self.touches) {
             events.push(Event::Touch {
@@ -230,6 +273,8 @@ impl State {
     }
 
     pub fn cancel(&mut self, pos: Pos2, events: &mut Vec<Event>) {
+        self.feed.clear_hover(self.viewport);
+        self.feed.clear_contact(self.viewport);
         self.clear_touches(events);
         self.pen_down = false;
         self.hover_origin = None;
@@ -497,6 +542,7 @@ impl State {
                         });
                     }
                     self.pen_down = true;
+                    self.feed.clear_hover(self.viewport);
                     self.contact_origin = Some(pos);
                     self.preview_resume = None;
                     self.preview_hidden = false;
@@ -507,7 +553,20 @@ impl State {
                 if self.pen_down && is_hover_move {
                     return;
                 }
+                if input.source == PointerSource::Pen && !is_hover_move && input.action != 1 {
+                    self.feed.report_contact(self.viewport, [pos.x, pos.y]);
+                }
                 if input.source == PointerSource::Pen && is_hover_move {
+                    self.feed.report_hover(self.viewport, [pos.x, pos.y]);
+                    if !self.pen_hover_preview.0 {
+                        self.feed.report(input.source, input.sample);
+                        self.last_pen = Some(pos);
+                        if !self.preview_hidden {
+                            self.hide_pen_preview();
+                            events.push(Event::PointerGone);
+                        }
+                        return;
+                    }
                     if let Some(resume) = self.preview_resume.as_mut() {
                         if resume.blocks_hover(pos) {
                             return;
@@ -536,6 +595,8 @@ impl State {
                 let pen_up = input.source == PointerSource::Pen && input.action == 1;
                 if pen_up {
                     self.pen_down = false;
+                    self.feed.clear_hover(self.viewport);
+                    self.feed.clear_contact(self.viewport);
                     self.hide_pen_preview();
                 }
                 self.feed.report(input.source, input.sample);
@@ -576,11 +637,14 @@ impl State {
                 if self.pen_down {
                     return;
                 }
+                self.feed.clear_hover(self.viewport);
+                self.feed.clear_contact(self.viewport);
                 if self.feed.source() == PointerSource::Pen {
                     self.hide_pen_preview();
                 }
                 events.push(Event::PointerGone);
             }
+            "display_rotation" => self.feed.set_display_rotation(input.rotation, input.landscape),
             "blur" => self.cancel(pos, events),
             "wheel" => events.push(Event::MouseWheel {
                 unit: egui::MouseWheelUnit::Point,

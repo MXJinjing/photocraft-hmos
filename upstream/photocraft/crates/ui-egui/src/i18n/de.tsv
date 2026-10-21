@@ -756,6 +756,10 @@
 	Soft light	Weich hell
 	Soft Dark Theme	Weiches Design (Dunkel)
 	Soft Light Theme	Weiches Design (Hell)
+	ArkUI Light Theme	ArkUI-Design (Hell)
+	ArkUI Dark Theme	ArkUI-Design (Dunkel)
+	ArkUI Pro Light Theme	ArkUI Pro-Design (Hell)
+	ArkUI Pro Dark Theme	ArkUI Pro-Design (Dunkel)
 	Next Theme	Nächstes Design
 	Actions	Aktionen
 	Brush Settings	Pinseleinstellungen
@@ -3248,10 +3252,38 @@ curves	Smooth	Glätten
 # HarmonyOS host additions retained during upstream sync
 	Stylus	Stift
 	Block finger input	Fingereingabe blockieren
+	Stylus hover preview	Stiftvorschau beim Schweben
 	Double-tap pen body	Stiftgehäuse doppeltippen
 	Current tool and Eraser	Aktuelles Werkzeug und Radierer
 	Previous tool	Vorheriges Werkzeug
-	Long-press pen body	Stiftgehäuse lange drücken
+	Squeeze pen body	Stiftgehäuse zusammendrücken
+
+# Stylus diagnostics
+	Hovering	Stift in Reichweite
+	Stylus Debug…	Stiftdiagnose…
+	Stylus Debug	Stiftdiagnose
+	Use a real Pad and a pen that supports tilt, double-tap and squeeze.	Ein echtes Tablet und einen Stift mit Neigung, Doppeltippen und Drückgeste verwenden.
+	No connection reported	Keine Verbindung gemeldet
+	Latest pen sample	Letzter Stiftmesswert
+	Tilt from vertical	Neigung zur Senkrechten
+	Screen bearing	Bildschirmrichtung
+	Waiting for pen input	Warten auf Stifteingabe
+	Samples	Messwerte
+	Pen contact	Stiftkontakt
+	No pen contact — values are retained	Kein Stiftkontakt — Werte bleiben erhalten
+	Arrow: screen-projected tilt direction, not barrel rotation. Upright: no direction.	Pfeil: projizierte Neigungsrichtung, keine Stiftdrehung. Senkrecht: keine Richtung.
+	Zero tilt may mean an upright pen or unavailable hardware data.	Null Neigung kann einen senkrechten Stift oder fehlende Hardwaredaten bedeuten.
+	HarmonyOS contact input does not currently report barrel rotation.	HarmonyOS-Kontakteingaben melden derzeit keine Stiftdrehung.
+	Received	Empfangen
+	Test gestures only (do not run shortcuts)	Nur Gesten testen (keine Kurzbefehle ausführen)
+	No indicator means no event received, not necessarily unsupported hardware.	Keine Anzeige bedeutet kein empfangenes Ereignis, nicht unbedingt fehlende Hardwareunterstützung.
+	Test area — does not change the document	Testfläche — verändert das Dokument nicht
+	Draw here with the pen	Hier mit dem Stift zeichnen
+	Reset test	Test zurücksetzen
+	Readings are before the pressure curve and remain available with tablet pressure off.	Werte vor der Druckkurve, auch bei ausgeschaltetem Tablettdruck verfügbar.
+	Eraser end	Radiererende
+	Pen tip	Stiftspitze
+	Connected	Verbunden
 	Show or hide context menu	Kontextmenü ein- oder ausblenden
 	Choose printer, copies and duplex in the system print dialog.	Drucker, Kopien und Duplex im Systemdruckdialog auswählen.
 	System print preview opened	Systemdruckvorschau geöffnet
@@ -3259,5 +3291,7 @@ curves	Smooth	Glätten
 	Right sidebar	Rechte Seitenleiste
 	Connected pen	Verbundener Stift
 	No pen connected	Kein Stift verbunden
-	Battery unavailable	Akkustand nicht verfügbar
-	Battery: {percent}%	Akku: {percent}%
+
+# Window full screen (HarmonyOS host)
+	Enter Full Screen	Vollbild aktivieren
+	Exit Full Screen	Vollbild beenden

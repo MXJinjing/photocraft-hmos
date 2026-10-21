@@ -56,8 +56,11 @@ const { default: EntryAbility } = load('entryability/EntryAbility', {
   '../SystemBars': bars,
   '../SystemTheme': systemTheme,
   '../WindowChrome': { WindowChrome: class { start() {} stop() {} refresh() {} } },
+  '../Fullscreen': { FullscreenSync: class { start() {} stop() {} reassert() {} } },
+  '../SubWindowHost': { subWindowHost: { attach() {}, closeAll() {} } },
       '../input/NativeCursorAdapter': { restorePointerVisibility() {} },
-      '../openInbox': { acceptOpenWant() {} }, '../closeGuard': { resetCloseGuard() {}, requestWindowClose() {} }
+      '../openInbox': { acceptOpenWant() {} }, '../closeGuard': { resetCloseGuard() {}, requestWindowClose() {} },
+      '../SubWindowHost': { subWindowHost: { attach() {}, closeAll() {} } }
 });
 async function main() {
   const app = new EntryAbility();

@@ -61,6 +61,12 @@ function drop(records, status = 0, delayed = false) {
   assert.equal(calls.filter(c => c[0] === 'close').length, 3);
   assert.equal(event.dragBehavior, 0); assert.deepEqual(event.results, [1, 0]);
   assert.ok(event.options.destUri.startsWith('file:///cache/')); assert.equal(event.options.progressIndicator, 1);
+  const placed = [];
+  await adapter.receive(drop([uri('layer.png')]), () => true, (name, fd) => {
+    assert.ok(!calls.some(c => c[0] === 'close' && c[1] === fd), 'descriptor stays open during per-drop handoff');
+    placed.push(name);
+  });
+  assert.deepEqual(placed, ['layer.png'], 'canvas drops use the per-drop callback instead of opening a document');
   result = await adapter.receive(drop([pixels()]), () => true);
   assert.equal(result[0].name, 'dropped-image.png');
   assert.equal(calls.find(c => c[0] === 'pack')[1].format, 'image/png'); assert.ok(calls.some(c => c[0] === 'release'));

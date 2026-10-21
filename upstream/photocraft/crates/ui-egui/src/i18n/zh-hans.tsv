@@ -767,6 +767,12 @@
 	Soft light	柔和浅色
 	Soft Dark Theme	柔和深色主题
 	Soft Light Theme	柔和浅色主题
+	ArkUI Light Theme	ArkUI 浅色主题
+	ArkUI Dark Theme	ArkUI 深色主题
+	ArkUI Pro Light Theme	ArkUI Pro 浅色主题
+	ArkUI Pro Dark Theme	ArkUI Pro 深色主题
+	ArkUI Pro Light	ArkUI Pro 浅色
+	ArkUI Pro Dark	ArkUI Pro 深色
 	Next Theme	下一代主题
 	Actions	动作
 	Brush Settings	画笔设置
@@ -2871,10 +2877,11 @@ curves	Smooth	平滑
 # HarmonyOS host additions retained during upstream sync
 	Stylus	手写笔
 	Block finger input	屏蔽手指输入
+	Stylus hover preview	手写笔悬停预览
 	Double-tap pen body	双击笔身
 	Current tool and Eraser	当前工具与橡皮擦
 	Previous tool	上一个工具
-	Long-press pen body	轻捏笔身
+	Squeeze pen body	轻捏笔身
 	Show or hide context menu	显示或隐藏右键菜单
 	Choose printer, copies and duplex in the system print dialog.	在系统打印面板中选择打印机、份数和双面。
 	System print preview opened	已打开系统打印预览
@@ -2882,5 +2889,34 @@ curves	Smooth	平滑
 	Right sidebar	右侧面板
 	Connected pen	已连接的笔
 	No pen connected	未连接笔
-	Battery unavailable	电量不可用
-	Battery: {percent}%	电量：{percent}%
+
+# Window full screen (HarmonyOS host)
+	Enter Full Screen	进入全屏
+	Exit Full Screen	退出全屏
+
+# Stylus diagnostics
+	Hovering	正在悬停
+	Connected	已连接
+	Stylus Debug…	手写笔调试…
+	Stylus Debug	手写笔调试
+	Use a real Pad and a pen that supports tilt, double-tap and squeeze.	请使用真实平板及支持倾斜、双击与轻捏的手写笔。
+	No connection reported	系统未报告连接
+	Latest pen sample	最近一次手写笔数据
+	Tilt from vertical	偏离垂直角度
+	Screen bearing	屏幕朝向
+	Waiting for pen input	等待手写笔输入
+	Samples	采样次数
+	Pen contact	正在落笔
+	No pen contact — values are retained	未落笔（保留最近读数）
+	Arrow: screen-projected tilt direction, not barrel rotation. Upright: no direction.	箭头表示倾斜在屏幕上的投影方向，并非笔杆旋转；垂直握笔时无方向。
+	Zero tilt may mean an upright pen or unavailable hardware data.	倾斜为零可能表示垂直握笔，也可能是硬件未提供数据。
+	HarmonyOS contact input does not currently report barrel rotation.	当前鸿蒙触点输入未上报笔杆旋转。
+	Received	已触发
+	Test gestures only (do not run shortcuts)	仅测试手势（不执行快捷动作）
+	No indicator means no event received, not necessarily unsupported hardware.	未亮灯表示未收到事件，不代表硬件一定不支持。
+	Test area — does not change the document	试写区（不会修改文档）
+	Draw here with the pen	请用手写笔在此试写
+	Reset test	重置测试
+	Readings are before the pressure curve and remain available with tablet pressure off.	显示应用压感曲线之前的数据；关闭数位板压感仍可查看。
+	Eraser end	橡皮端
+	Pen tip	笔尖

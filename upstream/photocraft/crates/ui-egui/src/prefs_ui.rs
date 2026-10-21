@@ -99,6 +99,8 @@ fn selected_theme(interface: &prefs::Interface, system: Option<egui::Theme>) -> 
             LightTheme::Adwaita => ThemeKind::Adwaita,
             LightTheme::BreezeLight => ThemeKind::BreezeLight,
             LightTheme::SoftLight => ThemeKind::SoftLight,
+            LightTheme::ArkuiLight => ThemeKind::ArkuiLight,
+            LightTheme::ArkuiProLight => ThemeKind::ArkuiProLight,
         }
     } else {
         match interface.dark_theme {
@@ -109,6 +111,8 @@ fn selected_theme(interface: &prefs::Interface, system: Option<egui::Theme>) -> 
             DarkTheme::AdwaitaDark => ThemeKind::AdwaitaDark,
             DarkTheme::BreezeDark => ThemeKind::BreezeDark,
             DarkTheme::SoftDark => ThemeKind::SoftDark,
+            DarkTheme::ArkuiDark => ThemeKind::ArkuiDark,
+            DarkTheme::ArkuiProDark => ThemeKind::ArkuiProDark,
         }
     }
 }
@@ -157,6 +161,8 @@ const LIGHT_THEME_OPTIONS: &[(&str, ThemeKind)] = &[
     ("adwaita", ThemeKind::Adwaita),
     ("breezeLight", ThemeKind::BreezeLight),
     ("softLight", ThemeKind::SoftLight),
+    ("arkuiLight", ThemeKind::ArkuiLight),
+    ("arkuiProLight", ThemeKind::ArkuiProLight),
 ];
 const DARK_THEME_OPTIONS: &[(&str, ThemeKind)] = &[
     ("proMedium", ThemeKind::ProMedium),
@@ -166,6 +172,8 @@ const DARK_THEME_OPTIONS: &[(&str, ThemeKind)] = &[
     ("adwaitaDark", ThemeKind::AdwaitaDark),
     ("breezeDark", ThemeKind::BreezeDark),
     ("softDark", ThemeKind::SoftDark),
+    ("arkuiDark", ThemeKind::ArkuiDark),
+    ("arkuiProDark", ThemeKind::ArkuiProDark),
 ];
 
 fn favorite_theme_groups(favorites: &[SavedTheme]) -> (Vec<ThemeKind>, Vec<ThemeKind>) {
@@ -1090,7 +1098,7 @@ pub fn open_mismatch(app: &mut PhotocraftApp, message: &str, action: &str, missi
 pub fn body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Value>) {
     match f.get("__prefsui").and_then(Value::as_str).unwrap_or("") {
         "prefs" => {
-            let mut info = app.perf.gpu_info.lines();
+            let mut info = app.perf.gpu_info_lines();
             info.extend(gpu_memory_lines(app));
             f.insert("__gpuInfo".into(), json!(info));
             let system = system_theme(app, ui.ctx());
@@ -1127,8 +1135,9 @@ fn gpu_memory_lines(app: &PhotocraftApp) -> Vec<String> {
 
 fn humanize(key: &str) -> String {
     match key {
+        "blockFingerInputConfigured" => return "Block finger input".into(),
         "stylusDoubleTap" => return "Double-tap pen body".into(),
-        "stylusLongPress" => return "Long-press pen body".into(),
+        "stylusLongPress" => return "Squeeze pen body".into(),
         "appearanceMode" => return "Appearance Mode".into(),
         "exrAcesCg" => return "Open color-less EXR as ACEScg".into(),
         "darkTheme" => return "Dark Theme".into(),
@@ -1201,6 +1210,10 @@ fn choice_label(v: &str) -> String {
         "metal" => "Metal".into(),
         "gl" => "OpenGL".into(),
         "cpu" => "CPU (no GPU acceleration)".into(),
+        "arkuiLight" => "ArkUI Light Theme".into(),
+        "arkuiDark" => "ArkUI Dark Theme".into(),
+        "arkuiProLight" => "ArkUI Pro Light Theme".into(),
+        "arkuiProDark" => "ArkUI Pro Dark Theme".into(),
         v => humanize(v),
     }
 }
@@ -1651,7 +1664,9 @@ fn section_fields(
     }
     keys.retain(|k| field_visible(section, obj, k, &query));
     if section == "tools" {
-        keys.retain(|k| !matches!(k.as_str(), "blockFingerInput" | "stylusDoubleTap" | "stylusLongPress"));
+        keys.retain(|k| {
+            !matches!(k.as_str(), "blockFingerInput" | "blockFingerInputConfigured" | "stylusHoverPreview" | "stylusDoubleTap" | "stylusLongPress")
+        });
     }
     egui::Grid::new(("prefs-grid", section)).num_columns(2).spacing([14.0, 7.0]).show(ui, |ui| field_rows(ui, section, obj, keys, lang));
     if section == "tools" {
@@ -1801,11 +1816,24 @@ fn stylus_fields(ui: &mut egui::Ui, obj: &mut Map<String, Value>) {
     egui::Grid::new("prefs-stylus").num_columns(2).spacing([14.0, 7.0]).show(ui, |ui| {
         let label = ui.add(egui::Label::new(RichText::new(tl!("Block finger input")).color(t.text_dim)).sense(egui::Sense::click()));
         let mut blocked = obj.get("blockFingerInput").and_then(Value::as_bool).unwrap_or(false);
-        crate::widgets::checkbox(ui, &mut blocked, "").labelled_by(label.id);
+        let checkbox = crate::widgets::checkbox(ui, &mut blocked, "").labelled_by(label.id);
+        let mut changed = checkbox.changed();
         if label.clicked() {
             blocked = !blocked;
+            changed = true;
         }
         obj.insert("blockFingerInput".into(), json!(blocked));
+        if changed {
+            obj.insert("blockFingerInputConfigured".into(), json!(true));
+        }
+        ui.end_row();
+        let label = ui.add(egui::Label::new(RichText::new(tl!("Stylus hover preview")).color(t.text_dim)).sense(egui::Sense::click()));
+        let mut preview = obj.get("stylusHoverPreview").and_then(Value::as_bool).unwrap_or(false);
+        crate::widgets::checkbox(ui, &mut preview, "").labelled_by(label.id);
+        if label.clicked() {
+            preview = !preview;
+        }
+        obj.insert("stylusHoverPreview".into(), json!(preview));
         ui.end_row();
         ui.label(tl!("Double-tap pen body"));
         let mut double = obj.get("stylusDoubleTap").and_then(Value::as_str).unwrap_or("eraser").to_string();
@@ -1813,7 +1841,7 @@ fn stylus_fields(ui: &mut egui::Ui, obj: &mut Map<String, Value>) {
         crate::widgets::dropdown(ui, "pref-tools.stylusDoubleTap", &mut double, &options, 240.0);
         obj.insert("stylusDoubleTap".into(), json!(double));
         ui.end_row();
-        ui.label(tl!("Long-press pen body"));
+        ui.label(tl!("Squeeze pen body"));
         let mut long = obj.get("stylusLongPress").and_then(Value::as_str).unwrap_or("contextMenu").to_string();
         let options: Vec<_> = crate::chrome_ui::STYLUS_LONG_PRESS_OPTIONS.iter().map(|(mode, label)| (mode.name().to_string(), tl!(label))).collect();
         crate::widgets::dropdown(ui, "pref-tools.stylusLongPress", &mut long, &options, 240.0);
@@ -2750,6 +2778,10 @@ mod tests {
             ("breezeDark", ThemeKind::BreezeDark, AppearanceMode::Dark),
             ("softLight", ThemeKind::SoftLight, AppearanceMode::Light),
             ("softDark", ThemeKind::SoftDark, AppearanceMode::Dark),
+            ("arkuiLight", ThemeKind::ArkuiLight, AppearanceMode::Light),
+            ("arkuiDark", ThemeKind::ArkuiDark, AppearanceMode::Dark),
+            ("arkuiProLight", ThemeKind::ArkuiProLight, AppearanceMode::Light),
+            ("arkuiProDark", ThemeKind::ArkuiProDark, AppearanceMode::Dark),
         ] {
             app.run("prefs.set", json!({"path": "interface.theme", "value": id})).unwrap();
             tick(&mut app, &ctx);
@@ -2759,8 +2791,8 @@ mod tests {
             assert_eq!(app.ui.theme, kind, "{id}");
         }
         // The two slots are independent: choosing the dark one left the light choice alone.
-        assert_eq!(app.session.prefs().interface.light_theme, LightTheme::SoftLight);
-        assert_eq!(app.session.prefs().interface.dark_theme, DarkTheme::SoftDark);
+        assert_eq!(app.session.prefs().interface.light_theme, LightTheme::ArkuiProLight);
+        assert_eq!(app.session.prefs().interface.dark_theme, DarkTheme::ArkuiProDark);
     }
 
     #[test]
@@ -3679,6 +3711,13 @@ mod tests {
         assert!(!prefs::is_hidden("general.autoShowHomeScreen"));
         assert!(!prefs::is_hidden("interface.uiScale"));
         assert!(!prefs::is_hidden("interface.uiFontSize"));
+        // LINUX_ONLY: follow is_desktop_linux() (target_env = "ohos" on HarmonyOS triples).
+        assert_eq!(
+            prefs::is_hidden("performance.linuxDisplayServer"),
+            !prefs::is_desktop_linux()
+        );
+        assert!(prefs::is_hidden_for("performance.linuxDisplayServer", false));
+        assert!(!prefs::is_hidden_for("performance.linuxDisplayServer", true));
         // Hidden values still round-trip through the dialog untouched.
         let (mut app, _) = app_with_store();
         app.run("prefs.set", json!({"values": {"type.smartQuotes": false}})).unwrap();
@@ -3771,23 +3810,27 @@ mod tests {
         h.run_steps(2);
         h.get_by_label("Block finger input").click();
         h.run_steps(2);
-        h.get_by_label("Stylus").click();
+        h.get_by_label("Stylus hover preview").click();
         h.run_steps(2);
         h.get_by_label("Previous tool").click();
         h.run_steps(2);
-        h.get_by_label("Stylus").click();
-        h.run_steps(2);
         h.query_all_by_label("Off").last().unwrap().click();
         h.run_steps(2);
+        h.get_by_label("Stylus").click();
+        h.run_steps(2);
+        assert!(h.query_by_label("Block finger input").is_none(), "the trigger still closes its own menu");
 
         let id = open_preferences(h.state_mut(), "tools");
         h.run_steps(3);
         let draft = &h.state().ui.dialogs.iter().find(|d| d.id == id).unwrap().fields["values"]["tools"];
-        assert_eq!(draft["blockFingerInput"], true);
+        assert_eq!(draft["blockFingerInput"], false);
+        assert_eq!(draft["blockFingerInputConfigured"], true);
+        assert_eq!(draft["stylusHoverPreview"], true);
         assert_eq!(draft["stylusDoubleTap"], "previous");
         assert_eq!(draft["stylusLongPress"], "off");
         assert!(h.query_by_label("Double-tap pen body").is_some());
-        assert!(h.query_by_label("Long-press pen body").is_some());
+        assert!(h.query_by_label("Squeeze pen body").is_some());
+        assert!(h.query_by_label("Stylus hover preview").is_some());
         h.get_by_label("Block finger input").scroll_to_me();
         h.run_steps(3);
         let checkbox_x = h.get_by_label("Block finger input").rect().left();
@@ -3801,6 +3844,8 @@ mod tests {
         }
         h.get_by_label("Block finger input").click();
         h.run_steps(2);
+        h.get_by_label("Stylus hover preview").click();
+        h.run_steps(2);
         h.query_all_by_role(egui::accesskit::Role::ComboBox).find(|n| n.value().as_deref() == Some("Previous tool")).unwrap().scroll_to_me();
         h.run_steps(3);
         h.query_all_by_role(egui::accesskit::Role::ComboBox).find(|n| n.value().as_deref() == Some("Previous tool")).unwrap().click();
@@ -3813,11 +3858,13 @@ mod tests {
         h.run_steps(2);
         h.get_by_label("Show or hide context menu").click();
         h.run_steps(2);
-        assert!(h.state().session.prefs().tools.block_finger_input, "editing a draft must not change live settings");
+        assert!(!h.state().session.prefs().tools.block_finger_input, "editing a draft must not change live settings");
+        assert!(h.state().session.prefs().tools.stylus_hover_preview);
         assert_eq!(h.state().session.prefs().tools.stylus_double_tap, StylusDoubleTap::Previous);
         h.get_by_label("Apply").click();
         h.run_steps(3);
-        assert!(!h.state().session.prefs().tools.block_finger_input);
+        assert!(h.state().session.prefs().tools.block_finger_input);
+        assert!(!h.state().session.prefs().tools.stylus_hover_preview);
         assert_eq!(h.state().session.prefs().tools.stylus_double_tap, StylusDoubleTap::Eraser);
         assert_eq!(h.state().session.prefs().tools.stylus_long_press, StylusLongPress::ContextMenu);
         // Cancel a later edit; the previously applied values remain shared with the menu.
@@ -3825,7 +3872,7 @@ mod tests {
         h.run_steps(2);
         h.get_by_label("Cancel").click();
         h.run_steps(3);
-        assert!(!h.state().session.prefs().tools.block_finger_input);
+        assert!(h.state().session.prefs().tools.block_finger_input);
         h.state_mut().stylus.feed.push_gesture(crate::stylus::PenGesture::DoubleTap, 2000.0);
         let ctx = h.ctx.clone();
         crate::chrome_ui::drain_stylus_gestures(h.state_mut(), &ctx);
@@ -3837,7 +3884,9 @@ mod tests {
         let id = open_preferences(h.state_mut(), "tools");
         assert_eq!(h.state().ui.dialogs.iter().find(|d| d.id == id).unwrap().fields["values"]["tools"]["stylusDoubleTap"], "previous");
         let (restarted, _) = app_with_saved(store.lock().unwrap().clone());
-        assert!(!restarted.session.prefs().tools.block_finger_input);
+        assert!(restarted.session.prefs().tools.block_finger_input);
+        assert!(restarted.session.prefs().tools.block_finger_input_configured);
+        assert!(!restarted.session.prefs().tools.stylus_hover_preview);
         assert_eq!(restarted.session.prefs().tools.stylus_double_tap, StylusDoubleTap::Previous);
         assert_eq!(restarted.session.prefs().tools.stylus_long_press, StylusLongPress::ContextMenu);
     }

@@ -17,7 +17,7 @@ fn app() -> PhotocraftApp {
 fn bar() -> Harness<'static, PhotocraftApp> {
     let mut h = Harness::builder().with_size(egui::vec2(1280.0, 720.0)).build_ui_state(
         |ui, app| {
-            crate::menus::menu_bar(app, ui);
+            crate::menus::menu_bar(app, ui, 1280.0);
         },
         app(),
     );

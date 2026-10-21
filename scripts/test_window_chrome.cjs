@@ -7,6 +7,7 @@ const WindowStatusType = { UNDEFINED: 0, FULL_SCREEN: 1, MAXIMIZE: 2, MINIMIZE: 
 
 function runScenario(options = {}) {
   const storage = new Map();
+  if (options.chrome) { storage.set('photocraftChrome', options.chrome); }
   const timers = new Map();
   const listeners = new Map();
   let serial = 0;
@@ -14,6 +15,7 @@ function runScenario(options = {}) {
   let rect = options.rect ?? { width: 120, height: 38 };
   let fail = false;
   let decorCalls = 0;
+  let paintCalls = [];
   let decorThrow = options.decorThrow ?? false;
   const win = {
     setWindowDecorHeight() {
@@ -37,16 +39,26 @@ function runScenario(options = {}) {
   });
   vm.runInNewContext(compiled.outputText, {
     module: moduleObject, exports: moduleObject.exports, console: { info() {} },
-    AppStorage: { setOrCreate: (key, value) => storage.set(key, value) },
+    AppStorage: {
+      get: key => storage.get(key),
+      setOrCreate: (key, value) => storage.set(key, value)
+    },
     setTimeout: callback => { timers.set(++serial, callback); return serial; },
     clearTimeout: id => timers.delete(id),
-    require: name => name === '@kit.ArkUI'
-      ? { window: { WindowStatusType } }
-      : { deviceInfo: { deviceType: options.deviceType ?? 'tablet' }, BusinessError: Error }
+    require: name => {
+      if (name === '@kit.ArkUI') { return { window: { WindowStatusType } }; }
+      if (name === './SystemBars') {
+        return {
+          LOADING_CHROME: '#FF262626',
+          paintWindow: (paintedWin, color) => { paintCalls.push({ win: paintedWin, color }); }
+        };
+      }
+      return { deviceInfo: { deviceType: options.deviceType ?? 'tablet' }, BusinessError: Error };
+    }
   });
   const chrome = new moduleObject.exports.WindowChrome(win);
   return {
-    chrome, storage, timers, listeners, win,
+    chrome, storage, timers, listeners, win, paintCalls,
     get status() { return status; },
     set status(value) { status = value; },
     get rect() { return rect; },
@@ -91,7 +103,8 @@ function runScenario(options = {}) {
   const s = runScenario({
     status: WindowStatusType.FULL_SCREEN,
     rect: { width: 0, height: 0 },
-    decorThrow: true
+    decorThrow: true,
+    chrome: '#FF141415'
   });
   s.chrome.start();
   assert.equal(s.listeners.size, 3, 'status/size/rect listeners survive decor failure outside freeform');
@@ -99,8 +112,12 @@ function runScenario(options = {}) {
   // Enter freeform: decor becomes available, caption rect arrives on a delayed retry.
   s.decorThrow = false;
   s.status = WindowStatusType.FLOATING;
+  const paintsBefore = s.paintCalls.length;
   s.listeners.get('windowStatusChange')(WindowStatusType.FLOATING);
   assert.ok(s.decorCalls >= 2, 'decor is re-applied on freeform status change');
+  assert.ok(s.paintCalls.length > paintsBefore, 'theme chrome is re-painted on freeform status change');
+  assert.equal(s.paintCalls.at(-1).color, '#FF141415', 'freeform entry re-paints stored theme chrome');
+  assert.equal(s.paintCalls.at(-1).win, s.win);
   assert.equal(s.storage.get('photocraftTitleRight') ?? 0, 0, 'empty freeform transition retains prior zero until geometry exists');
   s.rect = { width: 139, height: 37 };
   s.flushTimers();
@@ -122,10 +139,14 @@ function runScenario(options = {}) {
     'status and size must use distinct typed callbacks for ArkTS overloads'
   );
   const decorAfterStart = s.decorCalls;
+  const paintsAfterStart = s.paintCalls.length;
+  assert.ok(paintsAfterStart >= 1, 'start paints chrome once decor listeners are up');
   s.status = WindowStatusType.FLOATING;
   s.rect = { width: 120, height: 38 };
   s.listeners.get('windowSizeChange')({ width: 1280, height: 800 });
   assert.ok(s.decorCalls > decorAfterStart, 'size change into freeform re-applies decor');
+  assert.ok(s.paintCalls.length > paintsAfterStart, 'size change into freeform re-paints theme chrome');
+  assert.equal(s.paintCalls.at(-1).color, '#FF262626', 'missing AppStorage chrome falls back to LOADING_CHROME');
   assert.equal(s.storage.get('photocraftTitleRight'), 128, 'size-driven freeform entry publishes caption inset');
   s.chrome.stop();
 }
@@ -138,4 +159,4 @@ function runScenario(options = {}) {
   assert.equal(s.storage.get('photocraftTitleRight'), undefined);
 }
 
-console.log('Passed: title geometry transitions, freeform-entry recovery after fullscreen start, distinct status/size callbacks and cleanup.');
+console.log('Passed: title geometry transitions, freeform-entry recovery after fullscreen start, theme chrome re-paint on freeform entry, distinct status/size callbacks and cleanup.');

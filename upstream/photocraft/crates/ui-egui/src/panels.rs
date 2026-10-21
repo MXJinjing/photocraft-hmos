@@ -138,6 +138,8 @@ pub fn toolbar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                 .auto_shrink([false, true])
                 .max_height((ui.available_height() - footer).max(0.0))
                 .min_scrolled_height(0.0)
+                .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
+                .scroll_source(egui::scroll_area::ScrollSource { scroll_bar: false, drag: egui::scroll_area::DragScroll::Always, mouse_wheel: true })
                 .show(ui, |ui| {
                     // Pro has no group dividers, so its two columns fill every row across groups.
                     let sections: Vec<Vec<(usize, Vec<Tool>)>> = if t.pro { vec![sections.into_iter().flatten().collect()] } else { sections };
@@ -607,8 +609,8 @@ pub fn title_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
             let title = app
                 .session
                 .active()
-                .map(|d| format!("{}{}", if show_name { d.doc.name.as_str() } else { "PhotoCraft" }, if d.is_dirty() { "  •" } else { "" }))
-                .unwrap_or_else(|| "PhotoCraft".into());
+                .map(|d| format!("{}{}", if show_name { d.doc.name.as_str() } else { crate::brand::APP_NAME }, if d.is_dirty() { "  •" } else { "" }))
+                .unwrap_or_else(|| crate::brand::APP_NAME.into());
             // The menus and the far-end controls are laid out first; the title is centred in
             // whatever room is left between them (`free`, left to right: menus then controls, or
             // controls then menus in a right-to-left UI), shortened or dropped rather than drawn
@@ -651,7 +653,8 @@ pub fn title_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                     let left_edge = if caption_left > 0.0 { full.left() + caption_left + 4.0 } else { full.left() };
                     egui::Rect::from_min_max(egui::pos2(left_edge, full.top()), egui::pos2((menus_end - TITLE_GAP).max(left_edge), full.bottom()))
                 } else {
-                    let right_edge = if caption_right > 0.0 { full.right() - caption_right - 4.0 } else { full.right() };
+                    let native_button_room = if app.host_titlebar.x > 0.0 { app.host_titlebar.x + 4.0 } else { 0.0 };
+                    let right_edge = (full.right() - caption_right.max(native_button_room) - 4.0).max(full.left());
                     egui::Rect::from_min_max(egui::pos2((menus_end + TITLE_GAP).min(right_edge), full.top()), egui::pos2(right_edge, full.bottom()))
                 };
                 let mut group_ui = ui.new_child(egui::UiBuilder::new().max_rect(group).layout(crate::direction::trailing()));
@@ -704,6 +707,28 @@ pub fn title_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                         }
                         button.context_menu(|ui| crate::prefs_ui::appearance_context_menu(app, ui));
                     }
+                    // The community Discord, one click away while the bar has room for it
+                    // (narrow windows drop it first; it is also Help › Discord).
+                    if crate::links::SHOW_PROJECT_LINKS && ui.available_width() - stylus_room >= DISCORD_ROOM {
+                        let discord = egui::Button::image_and_text(
+                            icons::image("message-square", 14.0, t.text_dim),
+                            egui::RichText::new(tl!("Discord")).color(t.text_dim).size(12.0),
+                        )
+                        .frame(false);
+                        if ui
+                            .add(discord)
+                            .on_hover_text({
+                                let template = "Join the ArtCraft Discord ({url})";
+                                crate::i18n::fmt(tl!(template), &[("url", crate::links::DISCORD)])
+                            })
+                            .clicked()
+                        {
+                            crate::links::open(app, ui.ctx(), crate::links::DISCORD);
+                        }
+                        if stylus_room > 0.0 {
+                            ui.add_space(10.0);
+                        }
+                    }
                     crate::chrome_ui::stylus_menu(app, ui);
                     if rtl { ui.min_rect().right() } else { ui.min_rect().left() }
                 };
@@ -751,9 +776,9 @@ pub fn system_title_bar(app: &PhotocraftApp) -> bool {
 /// drops out and only the app name (and the `*`) remains (#5037).
 pub fn window_title(app: &PhotocraftApp) -> String {
     if !app.session.prefs().interface.show_file_name_in_title {
-        return format!("{}PhotoCraft", if app.session.active().is_some_and(|d| d.is_dirty()) { "*" } else { "" });
+        return format!("{}{}", if app.session.active().is_some_and(|d| d.is_dirty()) { "*" } else { "" }, crate::brand::APP_NAME);
     }
-    app.session.active().map(|d| format!("{}{} \u{2014} PhotoCraft", if d.is_dirty() { "*" } else { "" }, d.doc.name)).unwrap_or_else(|| "PhotoCraft".into())
+    app.session.active().map(|d| format!("{}{} \u{2014} {}", if d.is_dirty() { "*" } else { "" }, d.doc.name, crate::brand::APP_NAME)).unwrap_or_else(|| crate::brand::APP_NAME.into())
 }
 
 /// Keep the OS window title (and the taskbar / Alt-Tab entry) on the active file. Sends
@@ -768,6 +793,8 @@ pub fn sync_window_title(app: &mut PhotocraftApp, ctx: &egui::Context) {
 
 /// Minimum space kept between the window title and the menus or controls beside it.
 const TITLE_GAP: f32 = 16.0;
+/// Free room the title bar needs after its other controls to show the Discord button.
+const DISCORD_ROOM: f32 = 120.0;
 /// The workspace switcher's narrowest width, and one 28 pt title-bar icon with its spacing.
 const WORKSPACE_MIN: f32 = 90.0;
 const ICON_SLOT: f32 = 34.0;
@@ -828,19 +855,19 @@ mod title_tests {
 
     #[test]
     fn window_title_with_no_document_is_the_app_name() {
-        assert_eq!(window_title(&app(true)), "PhotoCraft");
+        assert_eq!(window_title(&app(true)), crate::brand::APP_NAME);
     }
 
     #[test]
     fn window_title_follows_the_active_file() {
         let mut app = app(true);
         open_named(&mut app, "foo.psd");
-        assert_eq!(window_title(&app), "foo.psd \u{2014} PhotoCraft");
+        assert_eq!(window_title(&app), format!("foo.psd \u{2014} {}", crate::brand::APP_NAME));
         // Unsaved changes gain a `*` prefix, like the `•` in the app-drawn title.
         if let Some(st) = app.session.active_mut() {
             st.revision += 1;
         }
-        assert_eq!(window_title(&app), "*foo.psd \u{2014} PhotoCraft");
+        assert_eq!(window_title(&app), format!("*foo.psd \u{2014} {}", crate::brand::APP_NAME));
     }
 
     #[test]
@@ -848,11 +875,11 @@ mod title_tests {
         let mut app = app(true);
         open_named(&mut app, "foo.psd");
         app.session.prefs.edit(|p| p.interface.show_file_name_in_title = false);
-        assert_eq!(window_title(&app), "PhotoCraft");
+        assert_eq!(window_title(&app), crate::brand::APP_NAME);
         if let Some(st) = app.session.active_mut() {
             st.revision += 1;
         }
-        assert_eq!(window_title(&app), "*PhotoCraft");
+        assert_eq!(window_title(&app), format!("*{}", crate::brand::APP_NAME));
     }
 
     #[test]
@@ -874,7 +901,7 @@ mod title_tests {
         app.session.prefs.edit(|p| p.interface.show_file_name_in_title = false);
         let hidden = texts(&mut app);
         assert!(!hidden.iter().any(|t| t.contains("foo.psd")), "file name hidden: {hidden:?}");
-        assert!(hidden.iter().any(|t| t.contains("PhotoCraft")), "app name kept: {hidden:?}");
+        assert!(hidden.iter().any(|t| t.contains(crate::brand::APP_NAME)), "app name kept: {hidden:?}");
     }
 
     #[test]
@@ -912,11 +939,11 @@ mod title_tests {
         let ctx = egui::Context::default();
         crate::PhotocraftApp::setup_context(&ctx, crate::theme::ThemeKind::ALL[0]);
         super::sync_window_title(&mut app, &ctx);
-        assert_eq!(app.last_window_title, "PhotoCraft");
+        assert_eq!(app.last_window_title, crate::brand::APP_NAME);
         let mut out = ctx.run_ui(egui::RawInput::default(), |_| {});
         out.textures_delta.clear();
         let cmds = out.viewport_output.remove(&egui::ViewportId::ROOT).map(|v| v.commands).unwrap_or_default();
-        assert!(cmds.iter().any(|c| matches!(c, egui::ViewportCommand::Title(t) if t == "PhotoCraft")), "{cmds:?}");
+        assert!(cmds.iter().any(|c| matches!(c, egui::ViewportCommand::Title(t) if t == crate::brand::APP_NAME)), "{cmds:?}");
         // Same document state again: the cached title stops a repeat command.
         super::sync_window_title(&mut app, &ctx);
         let mut out = ctx.run_ui(egui::RawInput::default(), |_| {});
@@ -925,7 +952,7 @@ mod title_tests {
         assert!(!cmds.iter().any(|c| matches!(c, egui::ViewportCommand::Title(_))), "repeat Title: {cmds:?}");
         open_named(&mut app, "foo.psd");
         super::sync_window_title(&mut app, &ctx);
-        assert_eq!(app.last_window_title, "foo.psd \u{2014} PhotoCraft");
+        assert_eq!(app.last_window_title, format!("foo.psd \u{2014} {}", crate::brand::APP_NAME));
     }
 }
 
@@ -973,7 +1000,10 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         .frame(egui::Frame::NONE.fill(t.chrome).inner_margin(egui::Margin::symmetric(10, 0)))
         .show(ui, |ui| {
             ui.style_mut().spacing.scroll = egui::style::ScrollStyle { bar_width: 4.0, ..egui::style::ScrollStyle::floating() };
-            egui::ScrollArea::horizontal().id_salt("tool-options").auto_shrink([false, false]).show(ui, |ui| {
+            egui::ScrollArea::horizontal().id_salt("tool-options").auto_shrink([false, false])
+                .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
+                .scroll_source(egui::scroll_area::ScrollSource { scroll_bar: false, drag: egui::scroll_area::DragScroll::Always, mouse_wheel: true })
+                .show(ui, |ui| {
             // Font ink can extend beyond its advance width at fractional positions.
             // Include its gutter in the container layout, including right-aligned actions.
             egui::Frame::NONE.inner_margin(egui::Margin { right: 2, ..Default::default() }).show(ui, |ui| {
@@ -1063,8 +1093,18 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                         }
                         ui.add_enabled_ui(!block, |ui| {
                             percent_field(ui, tl!("Opacity"), &mut b.opacity, 0.0..=100.0, 62.0);
-                            if icons::button(ui, "circle-dot", 24.0, b.pressure_opacity, tl!("Always use pressure for opacity")).clicked() {
-                                b.pressure_opacity = !b.pressure_opacity;
+                            // Eraser keeps its own pressure flags, independent of the brush.
+                            let pressure_opacity = if tool == Tool::Eraser {
+                                app.ui.tool_options.eraser_pressure_opacity
+                            } else {
+                                b.pressure_opacity
+                            };
+                            if icons::button(ui, "circle-dot", 24.0, pressure_opacity, tl!("Always use pressure for opacity")).clicked() {
+                                if tool == Tool::Eraser {
+                                    app.ui.tool_options.eraser_pressure_opacity = !pressure_opacity;
+                                } else {
+                                    b.set_opacity_uses_pen_pressure(!pressure_opacity);
+                                }
                             }
                         });
                         // A Pencil- or Block-mode Eraser is always full flow, without build-up (Photoshop).
@@ -1079,8 +1119,17 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                         smoothing_field(ui, b, 58.0);
                         smoothing_options(ui, b);
                         widgets::vline(ui, 22.0);
-                        if icons::button(ui, "circle-dot", 24.0, b.pressure_size, tl!("Always use pressure for size")).clicked() {
-                            b.pressure_size = !b.pressure_size;
+                        let pressure_size = if tool == Tool::Eraser {
+                            app.ui.tool_options.eraser_pressure_size
+                        } else {
+                            b.pressure_size
+                        };
+                        if icons::button(ui, "circle-dot", 24.0, pressure_size, tl!("Always use pressure for size")).clicked() {
+                            if tool == Tool::Eraser {
+                                app.ui.tool_options.eraser_pressure_size = !pressure_size;
+                            } else {
+                                b.set_size_uses_pen_pressure(!pressure_size);
+                            }
                         }
                     }
                     // Pencil: Photoshop's options (no hardness or flow: the pencil is always hard).
@@ -1128,8 +1177,19 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                         opt_label(ui, tl!("Smoothing"));
                         smoothing_field(ui, b, 66.0);
                         widgets::vline(ui, 22.0);
-                        widgets::toggle(ui, &mut b.pressure_size, tl!("Pressure for Size"));
-                        widgets::toggle(ui, &mut b.pressure_opacity, tl!("Pressure for Opacity"));
+                        if tool == Tool::Eraser {
+                            widgets::toggle(ui, &mut app.ui.tool_options.eraser_pressure_size, tl!("Pressure for Size"));
+                            widgets::toggle(ui, &mut app.ui.tool_options.eraser_pressure_opacity, tl!("Pressure for Opacity"));
+                        } else {
+                            let mut size_on = b.pressure_size;
+                            if widgets::toggle(ui, &mut size_on, tl!("Pressure for Size")).changed() {
+                                b.set_size_uses_pen_pressure(size_on);
+                            }
+                            let mut opacity_on = b.pressure_opacity;
+                            if widgets::toggle(ui, &mut opacity_on, tl!("Pressure for Opacity")).changed() {
+                                b.set_opacity_uses_pen_pressure(opacity_on);
+                            }
+                        }
                     }
                     Tool::MixerBrush => {
                         brush_preset_chip(ui, b, &mut app.ui);
@@ -1661,18 +1721,26 @@ pub fn status_bar_heights(t: &Tokens) -> (f32, f32) {
 
 pub fn status_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let t = Tokens::get(ui.ctx());
+    let button_size = crate::status_panel_controls::button_size(t.pro);
     egui::Panel::bottom("status_bar")
-        .exact_size(status_bar_heights(&t).0)
+        .exact_size(button_size + 2.0)
+        .show_separator_line(false)
         .frame(egui::Frame::NONE.fill(t.chrome).inner_margin(egui::Margin::symmetric(10, 0)))
         .show(ui, |ui| {
             let control_h = status_bar_heights(&t).1;
+            // Draw the divider inside the bar so the original 30-point Fit button fits without
+            // increasing the bar by the panel separator's extra point.
+            let rect = ui.max_rect();
+            ui.painter().hline(rect.x_range(), rect.top(), ui.visuals().widgets.noninteractive.bg_stroke);
+            let body_rect = crate::status_panel_controls::show(app, ui, button_size);
+            let mut body = ui.new_child(egui::UiBuilder::new().id_salt("status-body").max_rect(body_rect));
+            body.set_clip_rect(body.clip_rect().intersect(body_rect));
             // Read from the right in a right-to-left UI, with the trailing group at the left.
-            crate::direction::horizontal_centered(ui, |ui| {
+            crate::direction::horizontal_centered(&mut body, |ui| {
                 if t.pro {
                     crate::chrome_ui::status_bar_pro(app, ui);
                     // Background job progress with Cancel, at the far end (#210).
                     ui.with_layout(crate::direction::trailing(), |ui| {
-                        crate::jobs_ui::status_progress(app, ui);
                         crate::background_redraw::status(app, ui);
                         crate::chrome_ui::gpu_memory_status(app, ui);
                     });
@@ -1682,12 +1750,13 @@ pub fn status_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                     let (w, h, mode, bits, layers) =
                         (st.doc.size.width, st.doc.size.height, crate::canvas::mode_label(&st.doc), st.doc.depth.bits(), st.doc.layer_count());
                     let mut pct = app.ui.views[i].zoom * 100.0;
-                    if widgets::compact_wrapping_value_field(ui, &mut pct, crate::zoom_levels::percent_range(&app.ui.views[i]), "%", vec2(78.0, control_h))
-                        .changed()
-                    {
+                    let (zoom_response, zoom_rect) =
+                        widgets::compact_value_field_with_rect(ui, &mut pct, crate::zoom_levels::percent_range(&app.ui.views[i]), "%", 78.0, control_h);
+                    if zoom_response.changed() {
                         app.ui.views[i].zoom = crate::zoom_levels::clamp(pct / 100.0, app.ui.views[i].doc_size);
                         app.ui.views[i].fit_pending = false;
                     }
+                    crate::status_panel_controls::fit_button(app, ui, zoom_rect);
                     widgets::vline(ui, 16.0);
                     label(ui, &crate::i18n::fmt(tl!("{mode} Color · {bits} bit"), &[("mode", mode), ("bits", &bits.to_string())]));
                     widgets::vline(ui, 16.0);
@@ -1703,17 +1772,6 @@ pub fn status_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                     ui.label(RichText::new(&app.ui.status).color(if is_err { t.warning } else { t.text_faint }));
                 }
                 ui.with_layout(crate::direction::trailing(), |ui| {
-                    if app.session.active().is_some()
-                        && !t.pro
-                        && widgets::compact_button(ui, tl!("Fit"), control_h).clicked()
-                        && let Some(i) = app.session.active_index()
-                    {
-                        app.ui.views[i].fit_pending = true;
-                    }
-                    if app.session.has_jobs() {
-                        ui.add_space(6.0);
-                        crate::jobs_ui::status_progress(app, ui);
-                    }
                     crate::background_redraw::status(app, ui);
                     crate::chrome_ui::gpu_memory_status(app, ui);
                 });
@@ -3003,7 +3061,11 @@ fn layer_row(
     let t = Tokens::get(ctx);
     // Photoshop's default (medium) thumbnails: 32 pt rows.
     let row_h = if t.pro { 32.0 } else { 46.0 };
-    let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), row_h), Sense::click_and_drag());
+    let source = app.stylus.feed.source();
+    let item = egui::Id::new(("layer-row", l.id.0));
+    let sense = crate::list_drag::row_sense(ctx, source, item);
+    let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), row_h), sense);
+    let resp = crate::list_drag::after_row(ctx, source, item, &resp);
     // A drag from a mask's thumbnail drags that mask, not the layer (#3113, #3119).
     let mask_drag = starts_mask_drag(ctx, l, &resp);
     if let Some(kind) = mask_drag {
@@ -3013,7 +3075,7 @@ fn layer_row(
     layer_drag_and_drop(app, ctx, ui, l, rect, &resp, actions);
     fx_drop(ctx, ui, l, rect, actions);
     crate::smart_ui::drop_on_row(ctx, ui, l, rect, actions);
-    if resp.drag_started() && !mask_drag {
+    if crate::list_drag::may_begin_drag(ctx, source, item, &resp) && !mask_drag {
         crate::layer_transfer::begin_from_panel(app, ctx, l.id);
     }
     // Rows are painted: name them for screen readers and UI tests.
@@ -3056,7 +3118,8 @@ fn layer_row(
     let eye = Rect::from_min_size(pos2(x, rect.center().y - 11.0), vec2(22.0, 22.0));
     // The eye takes drags too (so a drag starting on it never reorders the row): dragging down
     // the eyes gives every row swept over the visibility the first eye toggled to.
-    let eye_resp = ui.interact(eye, ui.id().with(("eye", l.id.0)), Sense::click_and_drag());
+    let eye_sense = if crate::list_drag::prefers_scroll(source) { Sense::click() } else { Sense::click_and_drag() };
+    let eye_resp = ui.interact(eye, ui.id().with(("eye", l.id.0)), eye_sense);
     // A hidden layer's eye box is left empty (still clickable).
     if l.visible {
         // Centre the drawing in the column while preserving the visibility hit area.
@@ -3116,10 +3179,13 @@ fn layer_row(
     let (name_right, indicators, fx_toggled) = crate::layer_row_ui::indicators(ui, &painter, rect, x, l, fx_open, actions);
     // Dragging the fx badge drags all the layer's effects, not the layer (Photoshop). Like the eye,
     // it takes the drag from the row; clicks still reach the row.
-    if let Some(&(_, badge)) = indicators.iter().find(|(k, _)| *k == crate::layer_row_ui::Indicator::Fx)
-        && ui.interact(badge, ui.id().with(("fx-badge", l.id.0)), Sense::drag()).drag_started()
-    {
-        start_fx_drag(ctx, l.id, None);
+    if let Some(&(_, badge)) = indicators.iter().find(|(k, _)| *k == crate::layer_row_ui::Indicator::Fx) {
+        // The row gate owns the touch double-press arm. A normal touch drag must remain a
+        // ScrollArea gesture even when it starts on the FX badge.
+        let fx_resp = ui.interact(badge, ui.id().with(("fx-badge", l.id.0)), crate::list_drag::row_sense(ctx, source, item));
+        if crate::list_drag::may_begin_drag(ctx, source, item, &fx_resp) {
+            start_fx_drag(ctx, l.id, None);
+        }
     }
     // Clicking the lock icon unlocks the layer, and makes the Background a normal one (Photoshop,
     // #4723). It takes the click from the row, so the row isn't selected.
@@ -4198,7 +4264,9 @@ fn layer_drag_and_drop(
     let key = egui::Id::new("layer-drag");
     // A drag from the mask thumbnail (`starts_mask_drag`) moves the mask, not the layer.
     let mask_drag = ctx.data(|d| d.get_temp::<MaskDrag>(mask_drag_key())).is_some_and(|(id, _)| id == l.id.0);
-    if resp.drag_started() && !mask_drag {
+    let source = app.stylus.feed.source();
+    let item = egui::Id::new(("layer-row", l.id.0));
+    if crate::list_drag::may_begin_drag(ctx, source, item, resp) && !mask_drag {
         ctx.data_mut(|d| d.insert_temp(key, l.id.0));
     }
     let Some(dragged) = ctx.data(|d| d.get_temp::<u64>(key)) else { return };
@@ -4393,6 +4461,7 @@ fn fx_drop(ctx: &egui::Context, ui: &egui::Ui, l: &Layer, rect: Rect, actions: &
 /// on "Effects" shows or hides them all, the eye on an effect's row just that one (#1622).
 fn effect_rows(app: &mut PhotocraftApp, ui: &mut egui::Ui, l: &Layer, depth: usize, actions: &mut Vec<(String, Value)>) {
     let t = Tokens::get(ui.ctx());
+    let source = app.stylus.feed.source();
     let indent = 30.0 + depth as f32 * 14.0 + 34.0;
     let mut rows: Vec<(String, bool, Option<&'static str>)> = vec![("Effects".into(), l.effects.enabled, None)];
     for e in &l.effects.items {
@@ -4400,9 +4469,13 @@ fn effect_rows(app: &mut PhotocraftApp, ui: &mut egui::Ui, l: &Layer, depth: usi
         rows.push((e.label().to_string(), e.enabled(), kind));
     }
     for (i, (name, on, kind)) in rows.into_iter().enumerate() {
-        let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 22.0), Sense::click_and_drag());
+        let item = ui.id().with(("layer-fx-row", l.id.0, i));
+        let sense = crate::list_drag::row_sense(ui.ctx(), source, item);
+        let (rect, raw_resp) = ui.allocate_exact_size(vec2(ui.available_width(), 22.0), sense);
+        let resp = crate::list_drag::after_row(ui.ctx(), source, item, &raw_resp);
+        let can_drag = !crate::list_drag::prefers_scroll(source) || crate::list_drag::is_armed(ui.ctx(), item);
         // Drag the row onto another layer to move its effects there, ⌥-drag to copy them.
-        if resp.drag_started() {
+        if can_drag && resp.drag_started() {
             start_fx_drag(ui.ctx(), l.id, i.checked_sub(1));
         }
         if !ui.is_rect_visible(rect) {
