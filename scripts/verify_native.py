@@ -53,7 +53,7 @@ def verify(path: Path) -> None:
         if forbidden:
             raise ValueError(f'web assets remain: {forbidden}')
         pages = json.loads(archive.read('resources/base/profile/main_pages.json'))
-        if pages.get('src') != ['pages/Index']:
+        if pages.get('src') != ['pages/Index', 'pages/SubWindow']:
             raise ValueError(f'non-native pages remain: {pages}')
         verify_file_open(json.loads(archive.read('module.json')),
                          json.loads(archive.read('resources/rawfile/arkdata/utd/utd.json5')))

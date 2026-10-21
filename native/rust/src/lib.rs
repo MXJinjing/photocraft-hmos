@@ -19,6 +19,8 @@ mod display_color;
 #[cfg(any(target_env = "ohos", test))]
 mod documents;
 #[cfg(any(target_env = "ohos", test))]
+mod export_write;
+#[cfg(any(target_env = "ohos", test))]
 mod drop_import;
 #[cfg(feature = "host-recovery-test")]
 mod fault_injection;
@@ -510,6 +512,7 @@ fn worker(config: Config, rx: mpsc::Receiver<Message>) {
     )));
     // Sandbox: the app's files and document folder, plus folders granted by the file manager.
     sandbox_paths::init(&[config.files.as_str(), document_files.as_str()]);
+    export_write::install(&config.files);
     // Default batch/export output: ~/Downloads/<bundle>/{processed,batch,...}.
     photocraft_ui_egui::path_pick::ensure_output_subdirs(std::path::Path::new(document_files));
     let profiles = std::path::Path::new(&config.files).join("icc");

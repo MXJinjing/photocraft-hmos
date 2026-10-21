@@ -20,6 +20,7 @@ const io = {
     files.set(path, Buffer.concat([files.get(path), chunk]));
     return chunk.length;
   },
+  async mkdir(path) { files.set(path, Buffer.alloc(0)); },
   async fsync() {}, async close(file) { handles.delete(file.fd); },
   async rename(from, to) { files.set(to, files.get(from)); files.delete(from); },
   async copyFile(from, to) {
@@ -59,5 +60,21 @@ vm.runInNewContext(compiled.outputText, {
   assert.equal(files.size, 2);
   assert.equal(handles.size, 0);
   await assert.rejects(docs.write('/outside/photo.psd', new ArrayBuffer(0)), /Invalid/);
+  fail = false;
+  await docs.writeOutput('/Download/test/processed/image.jpg', Uint8Array.from([1,2,3]).buffer);
+  assert.deepEqual(files.get('/Download/test/processed/image.jpg'), Buffer.from([1,2,3]));
+  await docs.writeOutput('/Download/test/processed/image.jpg', Uint8Array.from([4]).buffer);
+  assert.deepEqual(files.get('/Download/test/processed/image.jpg'), Buffer.from([4]));
+  failPublish = true;
+  await assert.rejects(docs.writeOutput('/Download/test/processed/image.jpg', new ArrayBuffer(0)), /publish failed/);
+  assert.deepEqual(files.get('/Download/test/processed/image.jpg'), Buffer.from([4]));
+  for (const path of ['/Download/test/../outside.jpg', '/Download/test//bad.png', '/Download/test2/a.png', '/outside/a.png']) {
+    await assert.rejects(docs.writeOutput(path, new ArrayBuffer(0)), /Invalid export/);
+  }
+  docs.grantOutput('/chosen');
+  await docs.writeOutput('/chosen/exports/layer.png', Uint8Array.from([9]).buffer);
+  assert.deepEqual(files.get('/chosen/exports/layer.png'), Buffer.from([9]));
+  assert.equal([...files.keys()].some(path => path.endsWith('.tmp')), false);
+  assert.equal(handles.size, 0);
   console.log('Passed: collision suffixes, source preservation, short writes, repeat saves, failed-save cleanup.');
 })().catch(error => { console.error(error); process.exitCode = 1; });

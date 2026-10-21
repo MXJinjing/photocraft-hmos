@@ -263,6 +263,7 @@ struct Index {
     else if (request.kind === 'folder') { this.selectFolder(id, request.text === 'output'); }
     else if (request.kind === 'save_default') { this.selectSave(id, request.text, true); }
     else if (request.kind === 'save_select') { this.selectSave(id, request.text); }
+    else if (request.kind === 'export_write') { this.writeExport(id, request.text, data); }
     else if (request.kind === 'write') { this.writeFile(id, request.text, data); }
     else if (request.kind === 'print') { this.printFile(id, request.text, data); }
     else if (request.kind === 'close') {
@@ -397,6 +398,7 @@ struct Index {
       if (!this.alive || generation !== this.generation || path.length === 0) {
         native.reply(id, false, 'cancelled', new ArrayBuffer(0)); return;
       }
+      if (output) { this.documents?.grantOutput(path); }
       native.reply(id, true, path, new ArrayBuffer(0));
     } catch (error) {
       native.reply(id, false, (error as Error).message, new ArrayBuffer(0));
@@ -422,6 +424,15 @@ struct Index {
       native.reply(id, false, failure.message, new ArrayBuffer(0));
     } finally {
       this.restoreEditorFocus();
+    }
+  }
+  private async writeExport(id: number, path: string, bytes: ArrayBuffer): Promise<void> {
+    try {
+      if (this.documents === undefined) { throw new Error('Document directory unavailable'); }
+      await this.documents.writeOutput(path, bytes);
+      native.reply(id, true, path, new ArrayBuffer(0));
+    } catch (error) {
+      native.reply(id, false, (error as Error).message, new ArrayBuffer(0));
     }
   }
   private async writeFile(id: number, name: string, bytes: ArrayBuffer): Promise<void> {

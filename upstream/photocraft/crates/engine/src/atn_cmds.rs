@@ -3178,7 +3178,7 @@ fn save(s: &mut Session, p: &Value) -> Result<Value> {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn write_file(path: &str, bytes: &[u8]) -> std::io::Result<()> {
-    std::fs::write(path, bytes)
+    photocraft_format::atomic_write(std::path::Path::new(path), bytes)
 }
 
 #[cfg(target_arch = "wasm32")]

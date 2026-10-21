@@ -18,7 +18,7 @@ class NativePackageTests(unittest.TestCase):
         config['app'] = json.loads((ROOT / 'AppScope/app.json5').read_text())['app']
         with zipfile.ZipFile(path, 'w') as archive:
             archive.writestr('module.json', json.dumps(config))
-            archive.writestr('resources/base/profile/main_pages.json', json.dumps({'src': ['pages/Index']}))
+            archive.writestr('resources/base/profile/main_pages.json', json.dumps({'src': ['pages/Index', 'pages/SubWindow']}))
             archive.writestr('resources/rawfile/arkdata/utd/utd.json5',
                              (ROOT / 'entry/src/main/resources/rawfile/arkdata/utd/utd.json5').read_text())
             for abi, machine in libraries:

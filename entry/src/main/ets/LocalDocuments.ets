@@ -6,6 +6,7 @@ export class LocalDocuments {
   private sequence: number = 0;
   private directory: string;
   private staging: string;
+  private outputRoots: string[] = [];
   constructor(directory: string, staging: string) { this.directory = directory; this.staging = staging; }
   root(): string { return this.directory; }
   owns(path: string): boolean {
@@ -33,8 +34,26 @@ export class LocalDocuments {
     }
     throw new Error('同名文件过多');
   }
+  grantOutput(root: string): void {
+    if (root.length > 0 && !this.outputRoots.includes(root)) { this.outputRoots.push(root); }
+  }
+  async writeOutput(path: string, bytes: ArrayBuffer): Promise<void> {
+    let roots = [this.directory, ...this.outputRoots];
+    let parts = path.split('/');
+    if (!path.startsWith('/') || path.includes('\\') ||
+      parts.some((part: string, index: number) => index > 0 && (part === '' || part === '.' || part === '..')) ||
+      !roots.some((root: string) => path.startsWith(root + '/'))) {
+      throw new Error('Invalid export path');
+    }
+    let parent = path.substring(0, path.lastIndexOf('/'));
+    if (!await fileIo.access(parent)) { await fileIo.mkdir(parent, true); }
+    await this.publish(path, bytes);
+  }
   async write(path: string, bytes: ArrayBuffer): Promise<void> {
     if (!this.owns(path)) { throw new Error('Invalid application document path'); }
+    await this.publish(path, bytes);
+  }
+  private async publish(path: string, bytes: ArrayBuffer): Promise<void> {
     // Public document directories allow opening files, but not rename/unlink.
     // Stage the completed export in the sandbox and keep a backup while publishing
     // through a granted file descriptor. Never fall back to a location picker.
