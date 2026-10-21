@@ -39,7 +39,28 @@ The release ARM64 Rust library and debug HAP built successfully via
 `CARGO_PROFILE_DEV_DEBUG=0 CARGO_INCREMENTAL=0 CARGO_BUILD_JOBS=2 cargo test
 --offline --manifest-path native/rust/Cargo.toml` to limit temporary disk use.
 
-Pad runtime verification is pending: `PhotoCraftPadAPI20` is offline and its
-official screenshot command times out. The connected `127.0.0.1:5557` instance
-is the 2in1 simulator. Do not treat that connection as Pad verification. Restart
-the Pad only after confirming there are no unsaved documents to preserve.
+## Pad verification (2026-10-21)
+
+After the user confirmed there were no unsaved documents, the unresponsive
+`PhotoCraftPadAPI20` process was stopped and cold-booted. Installation and tests
+used `127.0.0.1:5555`, confirmed by `const.product.devicetype = tablet`, with
+2880 x 1920 screenshots. The 2in1 instance at `127.0.0.1:5557` was untouched.
+
+- First launch: `ready` at 18:34:46.006, `first_frame` at 18:34:46.136,
+  reveal complete at 18:34:46.466 (330 ms after the notification reached ArkUI).
+- Process relaunch: `ready` at 18:35:28.839, `first_frame` at 18:35:29.058,
+  reveal complete at 18:35:29.392 (334 ms).
+- Twenty sequential full-size screenshots captured system launch, the opaque
+  branded loading cover, the reveal and the stable editor. No blank black frame
+  appeared in these samples. Screenshot capture is not a frame-perfect recording
+  and cannot rule out a shorter transient between samples.
+- Both touching New Document and pressing Ctrl+N opened the new-document dialog
+  after reveal. Escape closed it. This confirms the cover no longer blocks input
+  and hardware-keyboard focus is restored. No documents were created or modified.
+- Save/Save As and external-browser flows were not manually retested in this run.
+
+Local evidence is in `work/graceful-startup/`: `pad-hilog.log`,
+`pad-relaunch-hilog.log`, `frames.json`, `frame-00.png` through `frame-19.png`,
+`startup-contact-sheet.jpg`, `after.png` and `keyboard.png`. The work directory
+is ignored and is not part of the commit. Device log timestamps above use the
+device's raw log time.
