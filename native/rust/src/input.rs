@@ -87,17 +87,6 @@ struct PreviewResume {
     first_hover: Option<Pos2>,
 }
 
-#[derive(Debug)]
-struct PenHoverPreview(bool);
-
-impl Default for PenHoverPreview {
-    fn default() -> Self {
-        // The host applies the persisted preference before accepting input. Keeping the
-        // adapter's standalone default enabled preserves its platform-neutral test contract.
-        Self(true)
-    }
-}
-
 impl PreviewResume {
     fn stationary(&self, pos: Pos2) -> bool {
         self.cached
@@ -131,7 +120,7 @@ pub struct State {
     last_mouse: Option<Pos2>,
     preview_resume: Option<PreviewResume>,
     preview_hidden: bool,
-    pen_hover_preview: PenHoverPreview,
+    pen_hover_canvas: Option<egui::Rect>,
     ignore_fingers: bool,
     /// Multi-touch / pinch navigation is active; leftover fingers must not Primary.
     touch_nav_active: bool,
@@ -229,23 +218,9 @@ impl State {
         }
     }
 
-    /// Apply the user preference. Disabling an already visible pen hover clears it on the
-    /// next egui frame; enabling waits for a fresh pen position instead of restoring stale data.
-    pub fn set_pen_hover_preview(&mut self, enabled: bool, events: &mut Vec<Event>) -> bool {
-        if self.pen_hover_preview.0 == enabled {
-            return false;
-        }
-        self.pen_hover_preview.0 = enabled;
-        if enabled {
-            self.preview_resume = None;
-            return false;
-        }
-        if !self.pen_down && !self.preview_hidden && self.hover_origin.is_some() {
-            self.hide_pen_preview();
-            events.push(Event::PointerGone);
-            return true;
-        }
-        false
+    /// Chrome hover resumes immediately after lift; canvas keeps its stationary-sample guard.
+    pub fn set_pen_hover_canvas(&mut self, canvas: egui::Rect) {
+        self.pen_hover_canvas = Some(canvas);
     }
 
     fn clear_touches(&mut self, events: &mut Vec<Event>) {
@@ -589,14 +564,11 @@ impl State {
                 }
                 if input.source == PointerSource::Pen && is_hover_move {
                     self.feed.report_hover(self.viewport, [pos.x, pos.y]);
-                    if !self.pen_hover_preview.0 {
-                        self.feed.report(input.source, input.sample);
-                        self.last_pen = Some(pos);
-                        if !self.preview_hidden {
-                            self.hide_pen_preview();
-                            events.push(Event::PointerGone);
-                        }
-                        return;
+                    let over_canvas = self
+                        .pen_hover_canvas
+                        .is_none_or(|canvas| canvas.contains(pos));
+                    if !over_canvas {
+                        self.preview_resume = None;
                     }
                     if let Some(resume) = self.preview_resume.as_mut() {
                         if resume.blocks_hover(pos) {

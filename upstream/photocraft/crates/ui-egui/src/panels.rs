@@ -96,6 +96,7 @@ pub fn toolbar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
             let (shrink, grow) = if crate::direction::is_rtl() { ("chevrons-right", "chevrons-left") } else { ("chevrons-left", "chevrons-right") };
             icons::paint(ui, cr, if double { shrink } else { grow }, 11.0, if resp.hovered() { t.text } else { t.text_faint });
             resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tl!("Toolbar")));
+            let resp = crate::tooltips::label(resp, if double { tl!("Show tools in one column") } else { tl!("Show tools in two columns") }, true);
             if resp.clicked() {
                 app.ui.panels.toolbar_double = !double;
             }
@@ -2768,7 +2769,7 @@ fn fx_button(ui: &mut egui::Ui, size: f32, tip: &str) -> egui::Response {
     ui.painter().galley(r.center() - g.size() / 2.0, g, t.icon);
     footer_menu_arrow(ui, r);
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tip));
-    resp.on_hover_text(tip)
+    crate::tooltips::label(resp, tip, true)
 }
 
 /// How a Layers panel row is selected: in the (multi-)selection, the primary/active layer, and
@@ -3703,8 +3704,8 @@ fn field_chips(app: &mut PhotocraftApp, ui: &mut egui::Ui, chips: Rect) {
         p.rect_stroke(fgr.expand(2.0), 2.0, frame, StrokeKind::Outside);
     }
     // The foreground is on top, so it takes the clicks where the two overlap.
-    let bg_resp = ui.interact(bgr, ui.id().with("field-bg"), Sense::click());
-    let fg_resp = ui.interact(fgr, ui.id().with("field-fg"), Sense::click());
+    let bg_resp = crate::tooltips::label(ui.interact(bgr, ui.id().with("field-bg"), Sense::click()), tl!("Background"), true);
+    let fg_resp = crate::tooltips::label(ui.interact(fgr, ui.id().with("field-fg"), Sense::click()), tl!("Foreground"), true);
     let picked = if fg_resp.clicked() { false } else { bg_resp.clicked() || bg_active };
     app.ui.color_panel.background = picked;
     if fg_resp.double_clicked() || bg_resp.double_clicked() {

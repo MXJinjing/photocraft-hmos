@@ -3253,3 +3253,8 @@ curves	Smooth	Haluskan
 # Window full screen (HarmonyOS host)
 	Enter Full Screen	Masuk layar penuh
 	Exit Full Screen	Keluar dari layar penuh
+
+# Icon-only toolbar controls
+	Show tools in one column	Tampilkan alat dalam satu kolom
+	Show tools in two columns	Tampilkan alat dalam dua kolom
+	Open the Color Picker	Buka pemilih warna

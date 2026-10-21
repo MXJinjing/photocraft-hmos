@@ -217,6 +217,7 @@ pub mod tiff_options_ui;
 mod tile_overlay;
 mod timeline_ui;
 mod titlebar;
+mod tooltips;
 pub use titlebar::{Caption, CaptionFamily, CaptionIcon, CaptionIcons, CaptionStyle, RenderIconFn};
 pub mod list_drag;
 pub mod tone;
@@ -3485,3 +3486,6 @@ mod native_host_tests {
 }
 #[cfg(test)]
 mod options_hit_area_tests;
+
+#[cfg(test)]
+mod toolbar_tooltip_tests;

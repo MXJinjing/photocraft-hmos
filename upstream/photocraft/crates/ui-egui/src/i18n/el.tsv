@@ -3960,3 +3960,8 @@ curves	Smooth	Εξομάλυνση
 # Window full screen (HarmonyOS host)
 	Enter Full Screen	Είσοδος σε πλήρη οθόνη
 	Exit Full Screen	Έξοδος από πλήρη οθόνη
+
+# Icon-only toolbar controls
+	Show tools in one column	Εμφάνιση εργαλείων σε μία στήλη
+	Show tools in two columns	Εμφάνιση εργαλείων σε δύο στήλες
+	Open the Color Picker	Άνοιγμα επιλογέα χρώματος

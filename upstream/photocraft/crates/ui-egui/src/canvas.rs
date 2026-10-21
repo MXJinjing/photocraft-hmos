@@ -635,6 +635,11 @@ pub(crate) fn pencil_tip_is_round(size: f32) -> bool {
 /// Clone Stamp and Healing Brush stay an empty circle until Option is held, the source-point
 /// cursor. Other brushes follow Preferences › Cursors › Show Crosshair in Brush Tip, as in
 /// Photoshop; the Background Eraser always shows its sampling hotspot.
+/// Keep the HarmonyOS pen preference scoped to the painted brush cursor, never UI hit testing.
+fn hide_pen_hover_tip(ohos: bool, source: crate::stylus::PointerSource, preview: bool, down: bool) -> bool {
+    ohos && source == crate::stylus::PointerSource::Pen && !preview && !down
+}
+
 fn brush_tip_centre(tool: Tool, option: bool, show_crosshair: bool) -> bool {
     if tool == Tool::QuickSelection {
         return false;
@@ -4043,6 +4048,16 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
                     } else {
                         pipette_cursor(ui.ctx(), p)
                     }
+                }
+                t if (t.is_brushlike() || t == Tool::QuickSelection)
+                    && hide_pen_hover_tip(
+                        cfg!(target_env = "ohos"),
+                        app.stylus.feed.source(),
+                        app.session.prefs().tools.stylus_hover_preview,
+                        ui.input(|i| i.pointer.any_down()),
+                    ) =>
+                {
+                    egui::CursorIcon::None
                 }
                 t if t.is_brushlike() || t == Tool::QuickSelection => {
                     // Preferences › Cursors: brush tip outline (normal = the 50% contour, or
@@ -8846,3 +8861,20 @@ mod rotation_preview_isolation_tests {
 #[cfg(test)]
 #[path = "canvas_display_memo_tests.rs"]
 mod display_memo_tests;
+
+#[cfg(test)]
+mod pen_hover_tip_tests {
+    #[test]
+    fn preview_toggle_only_hides_an_idle_harmonyos_pen_tip() {
+        use crate::stylus::PointerSource;
+        for ohos in [false, true] {
+            for source in [PointerSource::Mouse, PointerSource::Pen, PointerSource::Touch] {
+                for preview in [false, true] {
+                    for down in [false, true] {
+                        assert_eq!(super::hide_pen_hover_tip(ohos, source, preview, down), ohos && source == PointerSource::Pen && !preview && !down);
+                    }
+                }
+            }
+        }
+    }
+}

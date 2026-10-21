@@ -2881,3 +2881,7 @@ curves	Smooth	平滑
 	Readings are before the pressure curve and remain available with tablet pressure off.	显示应用压感曲线之前的数据；关闭数位板压感仍可查看。
 	Eraser end	橡皮端
 	Pen tip	笔尖
+# Icon-only toolbar controls
+	Show tools in one column	将工具栏切换为单列
+	Show tools in two columns	将工具栏切换为双列
+	Open the Color Picker	打开拾色器

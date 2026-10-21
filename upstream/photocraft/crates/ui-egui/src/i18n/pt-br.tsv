@@ -4050,3 +4050,8 @@ layerLabel	No Color	Sem cor
 # Window full screen (HarmonyOS host)
 	Enter Full Screen	Entrar em tela cheia
 	Exit Full Screen	Sair da tela cheia
+
+# Icon-only toolbar controls
+	Show tools in one column	Mostrar ferramentas em uma coluna
+	Show tools in two columns	Mostrar ferramentas em duas colunas
+	Open the Color Picker	Abrir o seletor de cores

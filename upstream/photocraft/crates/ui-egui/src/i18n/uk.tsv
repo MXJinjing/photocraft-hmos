@@ -3960,3 +3960,8 @@ curves	Smooth	Згладити
 # Window full screen (HarmonyOS host)
 	Enter Full Screen	Повноекранний режим
 	Exit Full Screen	Вийти з повноекранного режиму
+
+# Icon-only toolbar controls
+	Show tools in one column	Показати інструменти в один стовпець
+	Show tools in two columns	Показати інструменти у два стовпці
+	Open the Color Picker	Відкрити палітру кольорів
