@@ -23,6 +23,8 @@ export async function runBrushPreviewTest(): Promise<void> {
       moduleName: 'entry', abilityName: 'EntryAbility' });
     await wait(15000);
     native.command('{"id":"file.new","params":{"width":512,"height":512}}');
+    // Hover preview is opt-in; a fresh independent test bundle starts with it disabled.
+    native.command('{"id":"prefs.set","params":{"path":"tools.stylusHoverPreview","value":true}}');
     native.command('{"id":"tools.setBrush","params":{"brush":{"size":24}}}');
     native.command('{"id":"view.fitOnScreen"}');
     await wait(1000);
