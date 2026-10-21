@@ -25,6 +25,7 @@ import { subWindowHost, WindowRequest } from '../SubWindowHost';
 import { display, window } from '@kit.ArkUI';
 import { configureDisplayColor } from '../DisplayColor';
 import { SYSTEM_THEME_DARK, SYSTEM_THEME_LIGHT } from '../SystemTheme';
+import { pickFolder, sandboxDocumentDirectory, ensureOutputSubdirs } from '../folderPicker';
 
 class NativeConfig {
   files: string;
@@ -161,11 +162,23 @@ struct Index {
   private async initializeHost(generation: number): Promise<void> {
     // 先取得文档目录再创建原生宿主，避免首次保存时目录尚未准备好。
     try {
-      let uri = await applicationDocumentUri(this.context);
-      let documents = new fileUri.FileUri(uri).path;
-      if (documents.length === 0) throw new Error('Application document directory has no path');
+      let uri: string = '';
+      let documents: string = '';
+      try {
+        uri = await applicationDocumentUri(this.context);
+        documents = new fileUri.FileUri(uri).path;
+        if (documents.length === 0) throw new Error('Application document directory has no path');
+      } catch (error) {
+        // DOWNLOAD authorization failed: documents stay in the sandbox (filesDir/Documents)
+        // and the save picker opens at its own default location.
+        console.error(`PhotoCraft DOWNLOAD directory unavailable: ${(error as Error).message}`);
+        uri = '';
+        documents = sandboxDocumentDirectory(this.context);
+      }
       if (!this.alive || generation !== this.generation) { return; }
       this.documents = new LocalDocuments(documents, this.context.filesDir);
+      // ~/Downloads/<bundle>/{processed,batch,exports,...} for batch/export defaults.
+      ensureOutputSubdirs(documents);
       this.documentUri = uri;
       let scale: number = this.getUIContext().vp2px(1);
       const displayP3 = await configureDisplayColor(this.context);
@@ -289,8 +302,11 @@ struct Index {
       }).catch((error: BusinessError) => { console.info(`Fullscreen request: ${error.code} ${error.message}`); });
     }
     else if (request.kind === 'open') { this.openFile(id); }
+    else if (request.kind === 'import') { this.importFile(id); }
+    else if (request.kind === 'folder') { this.selectFolder(id, request.text === 'output'); }
     else if (request.kind === 'save_default') { this.selectSave(id, request.text, true); }
     else if (request.kind === 'save_select') { this.selectSave(id, request.text); }
+    else if (request.kind === 'export_write') { this.writeExport(id, request.text, data); }
     else if (request.kind === 'write') { this.writeFile(id, request.text, data); }
     else if (request.kind === 'print') { this.printFile(id, request.text, data); }
     else if (request.kind === 'close') {
@@ -326,6 +342,31 @@ struct Index {
         native.reply(id, false, 'cancelled', new ArrayBuffer(0)); return;
       }
       let uris = source === 'gallery' ? await this.selectGalleryUris() : await this.selectDocumentUris();
+      if (!this.alive || generation !== this.generation || uris.length === 0) {
+        native.reply(id, false, 'cancelled', new ArrayBuffer(0)); return;
+      }
+      let file = await fileIo.open(uris[0], fileIo.OpenMode.READ_ONLY);
+      try {
+        if (!this.alive || generation !== this.generation) {
+          native.reply(id, false, 'cancelled', new ArrayBuffer(0)); return;
+        }
+        let opened = new fileUri.FileUri(uris[0]);
+        native.replyFile(id, this.documents?.owns(opened.path) ? opened.path : opened.name, file.fd);
+      } finally { await fileIo.close(file); }
+    } catch (error) {
+      let failure = error as Error;
+      native.reply(id, false, failure.message, new ArrayBuffer(0));
+    } finally {
+      this.restoreEditorFocus();
+    }
+  }
+  private async importFile(id: number): Promise<void> {
+    // File › Import / presets / scripts / path_pick: go straight to the file manager.
+    // Document Open keeps chooseOpenSource (files vs gallery) via openFile.
+    this.ime.stop(); this.cursor.reset();
+    let generation = this.generation;
+    try {
+      let uris = await this.selectDocumentUris();
       if (!this.alive || generation !== this.generation || uris.length === 0) {
         native.reply(id, false, 'cancelled', new ArrayBuffer(0)); return;
       }
@@ -389,6 +430,25 @@ struct Index {
     let result = await new photoAccessHelper.PhotoViewPicker().select(options);
     return result.photoUris;
   }
+  private async selectFolder(id: number, output: boolean): Promise<void> {
+    // Native path fields (batch input/output, plug-in folder, export folders) ask for a folder.
+    // 2in1: DocumentSelectMode.FOLDER. Tablet: input stages multi-selected files; output uses
+    // the DOWNLOAD document directory (never a single-file picker for folder fields).
+    this.ime.stop(); this.cursor.reset();
+    let generation = this.generation;
+    try {
+      let path = await pickFolder(this.context, output, this.documents?.root() ?? '', '');
+      if (!this.alive || generation !== this.generation || path.length === 0) {
+        native.reply(id, false, 'cancelled', new ArrayBuffer(0)); return;
+      }
+      if (output) { this.documents?.grantOutput(path); }
+      native.reply(id, true, path, new ArrayBuffer(0));
+    } catch (error) {
+      native.reply(id, false, (error as Error).message, new ArrayBuffer(0));
+    } finally {
+      this.restoreEditorFocus();
+    }
+  }
   private async selectSave(id: number, suggested: string, ordinary: boolean = false): Promise<void> {
     this.ime.stop(); this.cursor.reset();
     let generation = this.generation;
@@ -407,6 +467,15 @@ struct Index {
       native.reply(id, false, failure.message, new ArrayBuffer(0));
     } finally {
       this.restoreEditorFocus();
+    }
+  }
+  private async writeExport(id: number, path: string, bytes: ArrayBuffer): Promise<void> {
+    try {
+      if (this.documents === undefined) { throw new Error('Document directory unavailable'); }
+      await this.documents.writeOutput(path, bytes);
+      native.reply(id, true, path, new ArrayBuffer(0));
+    } catch (error) {
+      native.reply(id, false, (error as Error).message, new ArrayBuffer(0));
     }
   }
   private async writeFile(id: number, name: string, bytes: ArrayBuffer): Promise<void> {

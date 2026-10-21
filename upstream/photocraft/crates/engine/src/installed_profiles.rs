@@ -40,9 +40,29 @@ const MAX_FILES: usize = 1000;
 /// Larger files are not profiles anyone prints with.
 const MAX_BYTES: u64 = 32 << 20;
 
-/// The operating system's colour profile folders.
+/// The app's own profile folder (HarmonyOS: `<filesDir>/icc`), set by a sandboxed host.
+static APP_DIR: Mutex<Option<PathBuf>> = Mutex::new(None);
+
+/// Sets the app's own profile folder: profiles imported into it are listed like installed ones.
+/// HarmonyOS lists only this folder (the app can't read the system's).
+pub fn set_app_profile_dir(dir: Option<PathBuf>) {
+    *APP_DIR.lock().unwrap_or_else(|e| e.into_inner()) = dir;
+    refresh();
+}
+
+/// The app's own profile folder, if the host set one.
+pub fn app_profile_dir() -> Option<PathBuf> {
+    APP_DIR.lock().unwrap_or_else(|e| e.into_inner()).clone()
+}
+
+/// The operating system's colour profile folders, then the app's own (see
+/// [`set_app_profile_dir`]). HarmonyOS apps are sandboxed: only the app's folder.
 pub fn profile_dirs() -> Vec<PathBuf> {
     let mut v = Vec::new();
+    if cfg!(target_env = "ohos") {
+        v.extend(app_profile_dir());
+        return v;
+    }
     let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")).map(PathBuf::from);
     if cfg!(windows) {
         let root = std::env::var_os("SystemRoot").map_or_else(|| PathBuf::from(r"C:\Windows"), PathBuf::from);
@@ -61,6 +81,7 @@ pub fn profile_dirs() -> Vec<PathBuf> {
             v.push(h.join(".color/icc"));
         }
     }
+    v.extend(app_profile_dir());
     v
 }
 
@@ -115,14 +136,20 @@ fn read_one(path: &Path) -> Option<InstalledProfile> {
 /// within this long.
 const FRESH: std::time::Duration = std::time::Duration::from_secs(10);
 
+type Cache = Mutex<Option<(std::time::Instant, Vec<InstalledProfile>)>>;
+static CACHE: Cache = Mutex::new(None);
+
+/// Forget the cached scan: the next [`installed`] rescans (a profile was just imported).
+pub fn refresh() {
+    *CACHE.lock().unwrap_or_else(|e| e.into_inner()) = None;
+}
+
 /// The installed profiles (cached; see [`FRESH`]). Empty on the web.
 pub fn installed() -> Vec<InstalledProfile> {
     if cfg!(target_arch = "wasm32") {
         return Vec::new();
     }
-    type Cache = Mutex<Option<(std::time::Instant, Vec<InstalledProfile>)>>;
-    static CACHE: std::sync::OnceLock<Cache> = std::sync::OnceLock::new();
-    let cache = CACHE.get_or_init(Default::default);
+    let cache = &CACHE;
     if let Some((at, list)) = cache.lock().unwrap_or_else(|e| e.into_inner()).as_ref()
         && at.elapsed() < FRESH
     {
@@ -215,6 +242,22 @@ mod tests {
         assert!(cmyk.is_destination());
         // The listed path is what the profile commands accept.
         assert!(crate::color_cmds::resolve_profile(&cmyk.path, None, None).is_ok());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn the_app_profile_folder_is_listed_and_a_refresh_rescans() {
+        let d = temp_dir("app");
+        set_app_profile_dir(Some(d.clone()));
+        assert!(profile_dirs().contains(&d));
+        let before = installed().len();
+        std::fs::write(d.join("imported.icc"), Builtin::Srgb.profile().to_bytes().as_slice()).unwrap();
+        refresh();
+        let after = installed();
+        set_app_profile_dir(None);
+        assert!(after.iter().any(|p| p.path.ends_with("imported.icc")), "{after:?}");
+        assert!(after.len() > before);
+        assert!(!profile_dirs().contains(&d));
         let _ = std::fs::remove_dir_all(&d);
     }
 

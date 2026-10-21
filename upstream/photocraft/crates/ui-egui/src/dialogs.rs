@@ -157,6 +157,7 @@ pub(crate) fn close_box(ui: &mut egui::Ui, rect: egui::Rect) -> bool {
 }
 
 pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
+    crate::path_pick::publish(ctx, app.services.path_pickers_only);
     crate::layer_style::color_picker::prune(app);
     crate::type_panels_ui::color_picker::prune(app);
     crate::edit_history::track_dialogs(app, ctx);
@@ -510,6 +511,10 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
         }
         if let Some(dm) = app.ui.dialog_mut(d.id) {
             dm.fields = fields;
+        }
+        // A path field's Choose… (sandboxed hosts): only now, so the answer isn't overwritten.
+        if let Some(request) = crate::path_pick::take_request(ctx) {
+            crate::path_pick::start(app, d.id, request);
         }
         // A colour swatch (Edit › Fill, Edit › Stroke) opens the Color Picker over the dialog.
         if outcome.is_none() {

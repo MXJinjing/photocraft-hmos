@@ -732,6 +732,15 @@ pub fn body(ui: &mut egui::Ui, f: &mut Map<String, Value>) {
                         opts.push((cur.clone(), stem.as_str()));
                     }
                     crate::widgets::dropdown(ui, &format!("flt-{cmd}-{}", p.key), &mut cur, &opts, 170.0);
+                    // Sandboxed hosts see only the app's own profiles: Import… copies one in.
+                    if p.key == "profile"
+                        && PROFILE_DIALOGS.contains(&cmd.as_str())
+                        && crate::path_pick::pickers_only(ui.ctx())
+                        && crate::widgets::secondary_button(ui, tl!("Import…"), 64.0).clicked()
+                    {
+                        let kind = crate::path_pick::PickKind::File { extensions: vec!["icc".into(), "icm".into()], stage: crate::path_pick::Stage::Profiles };
+                        crate::path_pick::request(ui.ctx(), "/profile", kind);
+                    }
                     f.insert(p.key.clone(), json!(cur));
                 });
             }
@@ -744,7 +753,10 @@ pub fn body(ui: &mut egui::Ui, f: &mut Map<String, Value>) {
                 let mut v = f.get(&p.key).and_then(Value::as_str).unwrap_or_default().to_string();
                 ui.horizontal(|ui| {
                     ui.label(egui::RichText::new(label(&p.key)).color(t.text_dim));
-                    ui.add(egui::TextEdit::singleline(&mut v).desired_width(200.0));
+                    // Sandboxed hosts: a path is chosen with the system picker, not typed.
+                    if !crate::path_pick::locked_field(ui, crate::path_pick::kind_for(&cmd, &p.key), &format!("/{}", p.key), &v, 270.0) {
+                        ui.add(egui::TextEdit::singleline(&mut v).desired_width(200.0));
+                    }
                 });
                 if v.is_empty() {
                     f.remove(&p.key);

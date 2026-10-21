@@ -21,6 +21,10 @@
 //!   (`F_FULLFSYNC`), which SMB shares and some virtual file systems refuse while a plain `fsync`
 //!   works. [`sync_file`] falls back to the plain one there (#1336).
 //!
+//! On HarmonyOS, a registered host writer publishes public document paths through CoreFileKit
+//! after staging complete bytes in the private sandbox. Public folders do not support POSIX
+//! rename/unlink. Private paths retain the atomic replacement described above.
+//!
 //! On the web there is no file system: writes go through the platform services (downloads), so
 //! this module is never reached there; on `wasm32` every call returns the `std` "unsupported"
 //! error.
@@ -30,6 +34,20 @@
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
+
+/// A sandboxed platform can publish completed bytes through its permission bridge.
+/// Return `None` for private paths where ordinary atomic replacement is supported.
+#[cfg(target_env = "ohos")]
+pub type HostWriter = fn(&Path, &[u8]) -> Option<io::Result<()>>;
+#[cfg(target_env = "ohos")]
+static HOST_WRITER: std::sync::OnceLock<HostWriter> = std::sync::OnceLock::new();
+
+/// Install before starting engine jobs. The callback must wait for publication to finish;
+/// errors must not fall back to a POSIX rename in a public document directory.
+#[cfg(target_env = "ohos")]
+pub fn set_host_writer(writer: HostWriter) {
+    let _ = HOST_WRITER.set(writer);
+}
 
 /// The file-system steps [`atomic_write_with`] performs. [`RealFs`] is the real thing; tests
 /// wrap it to inject failures.
@@ -159,12 +177,18 @@ impl RenameRetry {
 /// Errors keep their [`io::ErrorKind`] and say what happened and that the original file is
 /// unchanged.
 pub fn atomic_write(path: &Path, bytes: &[u8]) -> io::Result<()> {
-    atomic_write_with(&RealFs, RenameRetry::platform(), path, bytes)
+    atomic_write_progress(path, bytes, &|_| {})
 }
 
 /// [`atomic_write`] reporting the fraction of `bytes` written to `progress` as it goes (a save's
 /// progress bar, #3389); the flush and rename follow the last report.
 pub fn atomic_write_progress(path: &Path, bytes: &[u8], progress: &dyn Fn(f32)) -> io::Result<()> {
+    #[cfg(target_env = "ohos")]
+    if let Some(result) = HOST_WRITER.get().and_then(|write| write(path, bytes)) {
+        result?;
+        progress(1.0);
+        return Ok(());
+    }
     atomic_write_with_progress(&RealFs, RenameRetry::platform(), path, bytes, progress)
 }
 

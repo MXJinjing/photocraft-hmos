@@ -88,6 +88,7 @@ pub mod export_dialog;
 pub mod eyedropper_ui;
 pub mod field_tab;
 pub mod file_dialog;
+pub mod path_pick;
 pub mod file_open;
 pub mod file_ui;
 pub mod fill_ui;
@@ -444,6 +445,10 @@ pub struct Recoverable {
     pub path: Option<String>,
     pub load: Box<dyn FnOnce() -> Result<Document, String> + Send + 'static>,
 }
+/// Show a folder picker for a synchronous host (one without [`Services::file_dialog`]).
+/// `true` asks for an output folder (the command writes there), `false` for one it reads.
+/// `None`: cancelled; `Some(Err(_))`: the picker could not be shown or the folder is unusable.
+pub type PickFolderFn = Box<dyn FnMut(bool) -> Option<Result<String, String>>>;
 /// Append text to a file (History Log).
 pub type AppendTextFn = Box<dyn FnMut(&str, &str) -> Result<(), String>>;
 /// Requests from the operating system since the last call (see [`OsEvent`]).
@@ -471,12 +476,32 @@ pub struct Services {
     pub import: Option<ImportFn>,
     /// Encode a document for a file name (format chosen by extension).
     pub export: Option<ExportFn>,
-    /// Show a single-file picker for commands that import one file (Open As, presets, scripts).
+    /// File › Open / Open As: document picker. On HarmonyOS this shows the files-vs-gallery
+    /// source chooser before the system picker.
     pub pick_open: Option<PickOpenFn>,
+    /// Import one file into an existing flow (notes, presets, scripts, plug-ins, LUTs, …).
+    /// When set, [`PhotocraftApp::pick_file_bytes`] uses this instead of [`Self::pick_open`], so
+    /// sandboxed hosts can skip the document-open source chooser and go straight to the file
+    /// manager. Absent on desktop (everything shares `pick_open`).
+    pub pick_import: Option<PickOpenFn>,
     /// Show File › Open's multi-file picker; returns the selected paths.
     pub pick_open_paths: Option<PickOpenPathsFn>,
     /// Show a "save file" dialog; returns a path/name to write.
     pub pick_save: Option<PickSaveFn>,
+    /// Folder picker for synchronous hosts (see [`PickFolderFn`]); without one, a folder request
+    /// on such a host is cancelled.
+    pub pick_folder: Option<PickFolderFn>,
+    /// Sandboxed hosts (HarmonyOS): path fields are read-only and filled only through the system
+    /// pickers (a "Choose…" button beside each field); typing a path is not allowed.
+    pub path_pickers_only: bool,
+    /// The host's private, writable application directory. Files picked for path fields are
+    /// copied under it (`imports/`, `plugins/`, `icc/`), since a sandboxed app has no paths to
+    /// the user's files.
+    pub sandbox_dir: Option<String>,
+    /// System-visible application document folder (HarmonyOS `DocumentPickerMode.DOWNLOAD`,
+    /// i.e. `~/Downloads/<bundle>`). Batch/export defaults write under subfolders here
+    /// (`processed`, `exports`, …). Absent on desktop hosts.
+    pub documents_dir: Option<String>,
     /// Always choose a target, even for Save of a named document. Hosts with
     /// opaque storage URIs use the picker to associate the display name with
     /// write authority. They also export through these services instead of
