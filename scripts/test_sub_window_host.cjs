@@ -19,7 +19,9 @@ function load() {
     LocalStorage, Promise, Map, Set, Array,
     require: name => name === '@kit.ArkUI'
       ? { window: { WindowEventType } }
-      : { BusinessError: Error }
+      : name === '@kit.BasicServicesKit'
+        ? { BusinessError: Error, deviceInfo: { deviceType: 'tablet' } }
+        : { BusinessError: Error }
   });
   return moduleObject.exports;
 }
@@ -29,6 +31,10 @@ function scenario({ failCreate = false } = {}) {
   const sent = [];
   const created = [];
   const stage = {
+    getMainWindow: async () => ({
+      getWindowStatus: () => 0,
+      getWindowProperties: () => ({ windowRect: { left: 100, top: 50, width: 2880, height: 1920 } })
+    }),
     createSubWindowWithOptions: async (name, options) => {
       if (failCreate) throw Object.assign(new Error('no window'), { code: 1300002 });
       const win = {
@@ -49,7 +55,8 @@ function scenario({ failCreate = false } = {}) {
   host.attach(stage, message => sent.push(JSON.parse(message)));
   return { api, host, sent, created };
 }
-const tick = () => new Promise(resolve => setTimeout(resolve, 0));
+// Flush promise continuations through window creation/loading before asserting calls.
+const tick = () => new Promise(resolve => setImmediate(resolve));
 const openRequest = (extra = {}) => Object.assign(
   { op: 'open', win: 4, title: 'a — window 4', width: 1600, height: 1200, x: null, y: null }, extra);
 
@@ -64,7 +71,8 @@ const openRequest = (extra = {}) => Object.assign(
     assert.equal(win.name, 'pc-doc-4');
     assert.equal(win.options.decorEnabled, true, 'system min/max/close come from decorEnabled');
     assert.equal(win.options.title, 'a — window 4');
-    assert.deepEqual(win.calls, [['resize', 1600, 1200], ['load', 'pages/SubWindow', 4], ['show']]);
+    assert.deepEqual(win.calls, [['resize', 1600, 1200], ['move', 740, 410], ['load', 'pages/SubWindow', 4], ['show']],
+      'an unpositioned sub-window is centered in the main window');
     assert.equal(s.host.count(), 1);
 
     // Positioned windows are moved before content loads.
@@ -72,6 +80,11 @@ const openRequest = (extra = {}) => Object.assign(
     s2.host.handle(openRequest({ win: 5, x: 40, y: 60 }));
     await tick(); await tick();
     assert.deepEqual(s2.created[0].calls.slice(0, 2), [['resize', 1600, 1200], ['move', 40, 60]]);
+
+    // An explicit position still wins over centering.
+    const clamped = s2.api.centeredSubWindowOrigin({ left: 0, top: 0, width: 800, height: 600 }, 1200, 900);
+    assert.equal(clamped.x, 0);
+    assert.equal(clamped.y, 0);
 
     // --- System close only asks Rust: veto the close, let the app decide ---
     const veto = await win.listeners.get('windowWillClose')();
@@ -140,5 +153,5 @@ const openRequest = (extra = {}) => Object.assign(
     assert.equal(api.taggedForWindow('{"kind":"blur"}', 0), '{"kind":"blur"}');
     assert.equal(api.subWindowName(12), 'pc-doc-12');
   }
-  console.log('Passed: native sub-window open/decor/close/veto/destroy/race handling and input tagging.');
+  console.log('Passed: native sub-window centering, decoration, close/veto/destroy/race handling and input tagging.');
 })().catch(error => { console.error(error); process.exit(1); });

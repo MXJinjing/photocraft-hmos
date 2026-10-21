@@ -31,9 +31,14 @@ function load(name, dependencies) {
       '../WindowChrome': { WindowChrome: class { start() {} stop() {} refresh() {} } },
       '../SystemTheme': { publishSystemTheme() {}, systemThemeFromColorMode: () => 'dark' },
       '../Fullscreen': { FullscreenSync: class { start() {} stop() {} reassert() {} } },
+      '../SubWindowHost': { subWindowHost: { attach() {}, closeAll() {} } },
       '../input/NativeCursorAdapter': { restorePointerVisibility() {} },
       '../openInbox': { acceptOpenWant: want => calls.push(['open', want.uri]) },
       '../closeGuard': { resetCloseGuard() {}, requestWindowClose() {} },
+      '../SubWindowHost': { subWindowHost: {
+        attach: (stage, forward) => calls.push(['attach', stage, typeof forward]),
+        closeAll: () => calls.push(['closeAll']),
+      } },
     });
     const app = new EntryAbility();
     app.context = { config: { colorMode: 0 } };
@@ -50,5 +55,9 @@ function load(name, dependencies) {
     assert.ok(calls.some(c => c[0] === 'open' && c[1] === 'file://example.psd'), 'file Wants still reach the active editor');
     app.onWindowStageCreate(stage);
     assert.equal(pages[1], expected, 'the selected host survives window-stage recreation');
+    assert.equal(calls.filter(c => c[0] === 'attach' && c[1] === stage && c[2] === 'function').length, 2,
+      'every window stage attaches the native sub-window host');
+    app.onWindowStageDestroy();
+    assert.equal(calls.filter(c => c[0] === 'closeAll').length, 1, 'stage teardown closes floating sub-windows');
   }
-console.log('Passed: native-only routing regardless of legacy Want flags, lifecycle, stage recreation and file Wants.');
+console.log('Passed: native-only routing regardless of legacy Want flags, lifecycle, stage recreation, sub-window host attach/teardown and file Wants.');

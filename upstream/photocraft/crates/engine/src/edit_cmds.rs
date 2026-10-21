@@ -835,6 +835,44 @@ fn guide_color(p: &Value) -> Result<Option<[u8; 3]>> {
     )
 }
 
+/// Edit Selected Guides (the guide context menu): change one guide's orientation, position and
+/// colour in one history step. A guide that keeps its orientation keeps its index; one that turns
+/// goes to the end of the other list. Without `color` it keeps its own colour, or none.
+fn edit_guide(s: &mut Session, p: &Value) -> Result<Value> {
+    let orientation = |key: &str| match p.get(key).map(|v| v.as_str()) {
+        None => Ok(None),
+        Some(Some("horizontal")) => Ok(Some(false)),
+        Some(Some("vertical")) => Ok(Some(true)),
+        Some(_) => Err(EngineError::Other(format!("`{key}` must be \"horizontal\" or \"vertical\""))),
+    };
+    let from = orientation("orientation")?.unwrap_or(false);
+    let to = orientation("newOrientation")?.unwrap_or(from);
+    let index = p.get("index").and_then(Value::as_u64).ok_or(EngineError::Other("missing `index`".into()))?;
+    let pos = guide_position(s, p, to)?;
+    let color = guide_color(p)?;
+    s.edit("Edit Guide", |doc, _| {
+        let guides = &mut doc.guides;
+        let list = if from { &guides.vertical } else { &guides.horizontal };
+        let i = usize::try_from(index).ok().filter(|i| *i < list.len()).ok_or(EngineError::Other("no such guide".into()))?;
+        let old = list[i];
+        let at = pos.unwrap_or(old);
+        let rgb = color.or_else(|| guides.color(from, old));
+        if from == to {
+            let list = if from { &mut guides.vertical } else { &mut guides.horizontal };
+            list[i] = at;
+        } else {
+            (if from { &mut guides.vertical } else { &mut guides.horizontal }).remove(i);
+            (if to { &mut guides.vertical } else { &mut guides.horizontal }).push(at);
+        }
+        guides.prune_colors();
+        if rgb.is_some() {
+            guides.set_color(to, at, rgb);
+        }
+        Ok(())
+    })?;
+    Ok(Value::Null)
+}
+
 /// View › New Guide / guide moves (undoable, like Photoshop's "New Guide"/"Move Guide" states).
 fn guide_cmd(s: &mut Session, p: &Value, op: &str) -> Result<Value> {
     let vertical = p.get("orientation").and_then(Value::as_str).unwrap_or("horizontal") == "vertical";
@@ -1013,6 +1051,15 @@ pub fn specs() -> Vec<CommandSpec> {
             r##"{"orientation":"horizontal|vertical","index":n,"position":px or "<number><unit>"} (units as for view.newGuide)"##,
             has_doc,
             |s, p| guide_cmd(s, p, "move")
+        ),
+        spec!(
+            "view.editGuide",
+            "Edit Guide",
+            &[],
+            None,
+            r##"{"orientation":"horizontal|vertical","index":n,"newOrientation":"horizontal|vertical"?,"position":px or "<number><unit>"?,"color":name or "#rrggbb"?} (Edit Selected Guides: units and colours as for view.newGuide; % is of the new orientation's extent; whatever is left out stays as it was)"##,
+            has_doc,
+            edit_guide
         ),
         spec!("view.deleteGuide", "Delete Guide", &[], None, r##"{"orientation":"horizontal|vertical","index":n}"##, has_doc, |s, p| guide_cmd(s, p, "delete")),
         spec!("view.clearGuides", "Clear Guides", &["View"], None, "{}", has_doc, |s, p| guide_cmd(s, p, "clear")),
@@ -2080,6 +2127,60 @@ mod tests {
         let g = &s.active().unwrap().doc.guides;
         assert!(g.vertical.is_empty() && g.colors.is_empty());
         assert_eq!(s.active().unwrap().history.can_undo(), undo_before);
+    }
+
+    #[test]
+    fn editing_a_guide_changes_what_is_given_in_one_undoable_step() {
+        let mut s = Session::new();
+        s.execute("file.new", json!({"width": 400, "height": 200})).unwrap();
+        s.execute("view.newGuide", json!({"orientation": "vertical", "position": 10})).unwrap();
+        s.execute("view.newGuide", json!({"orientation": "vertical", "position": 20, "color": "magenta"})).unwrap();
+        s.execute("view.newGuide", json!({"orientation": "vertical", "position": 30})).unwrap();
+        let guides = |s: &Session| s.active().unwrap().doc.guides.clone();
+        // Position only: the guide keeps its index and its own colour.
+        s.execute("view.editGuide", json!({"orientation": "vertical", "index": 1, "position": "50%"})).unwrap();
+        let g = guides(&s);
+        assert_eq!(g.vertical, vec![10.0, 200.0, 30.0]);
+        assert_eq!((g.color(true, 20.0), g.color(true, 200.0)), (None, Some([0xff, 0x00, 0xff])));
+        // Colour only: an uncoloured guide gets one; the position stays.
+        s.execute("view.editGuide", json!({"orientation": "vertical", "index": 0, "color": "#123456"})).unwrap();
+        assert_eq!(guides(&s).color(true, 10.0), Some([0x12, 0x34, 0x56]));
+        // Turning it: % is of the new orientation's extent, and the colour goes along.
+        s.execute("view.editGuide", json!({"orientation": "vertical", "index": 1, "newOrientation": "horizontal", "position": "25%"})).unwrap();
+        let g = guides(&s);
+        assert_eq!((g.vertical.clone(), g.horizontal.clone()), (vec![10.0, 30.0], vec![50.0]));
+        assert_eq!((g.color(true, 200.0), g.color(false, 50.0)), (None, Some([0xff, 0x00, 0xff])));
+        // One step each: undo restores the vertical guide with its colour.
+        s.undo();
+        let g = guides(&s);
+        assert_eq!((g.vertical.clone(), g.horizontal.is_empty()), (vec![10.0, 200.0, 30.0], true));
+        assert_eq!(g.color(true, 200.0), Some([0xff, 0x00, 0xff]));
+    }
+
+    #[test]
+    fn bad_guide_edits_are_refused_without_a_history_step() {
+        let mut s = Session::new();
+        s.execute("file.new", json!({"width": 400, "height": 200})).unwrap();
+        s.execute("view.newGuide", json!({"orientation": "vertical", "position": 10, "color": "green"})).unwrap();
+        let before = s.active().unwrap().doc.guides.clone();
+        for bad in [
+            json!({}),
+            json!({"orientation": "vertical"}),
+            json!({"orientation": "vertical", "index": 1}),
+            json!({"orientation": "horizontal", "index": 0}),
+            json!({"orientation": "vertical", "index": -1}),
+            json!({"orientation": "vertical", "index": "0"}),
+            json!({"orientation": "vertical", "index": u64::MAX}),
+            json!({"orientation": "diagonal", "index": 0}),
+            json!({"orientation": "vertical", "index": 0, "newOrientation": 3}),
+            json!({"orientation": "vertical", "index": 0, "position": "far"}),
+            json!({"orientation": "vertical", "index": 0, "position": 1e12}),
+            json!({"orientation": "vertical", "index": 0, "color": "puce"}),
+        ] {
+            assert!(s.execute("view.editGuide", bad.clone()).is_err(), "{bad}");
+        }
+        assert_eq!(s.active().unwrap().doc.guides, before);
+        assert_eq!(s.active().unwrap().history.undo_label(), Some("New Guide"));
     }
 
     #[test]

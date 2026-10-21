@@ -14,6 +14,32 @@ fn checked(app: &PhotocraftApp, id: &str) -> Option<bool> {
     menu_items(app).into_iter().find(|i| i.id == id).and_then(|i| i.checked)
 }
 
+/// #1209: the browser picker supplies bytes even when the engine cannot read native paths.
+#[test]
+fn place_embedded_enablement_does_not_require_native_doc() {
+    for has_doc in [true, false] {
+        for has_picker in [true, false] {
+            let (mut app, _) = app_with(usize::from(has_doc));
+            if has_picker {
+                app.services.file_dialog = Some(Box::new(|_, _, _| {}));
+            }
+            for native_filesystem in [false, true] {
+                let native_doc = native_filesystem && has_doc;
+                assert_eq!(
+                    is_enabled_with_engine(&app, "file.placeEmbedded", || native_doc),
+                    Some(has_doc && has_picker),
+                    "Place Embedded: doc={has_doc}, picker={has_picker}, native_doc={native_doc}"
+                );
+                assert_eq!(
+                    is_enabled_with_engine(&app, "file.placeLinked", || native_doc),
+                    Some(native_doc),
+                    "Place Linked must retain the engine's native_doc guard"
+                );
+            }
+        }
+    }
+}
+
 #[test]
 fn show_snap_extras_and_screen_modes_are_state() {
     let (mut app, ctx) = app_with(1);
@@ -327,8 +353,8 @@ fn new_guide_layout_remembers_successful_values_not_cancelled_edits() {
 
 #[test]
 fn new_guide_layout_does_not_remember_a_failed_command() {
-    let (mut app, _) = app_with(0);
-    let id = front(&mut app, "view.newGuideLayout", &json!({})).unwrap().unwrap()["dialog"].as_u64().unwrap();
+    let (mut app, ctx) = app_with(0);
+    let id = front(&mut app, &ctx, "view.newGuideLayout", &json!({})).unwrap().unwrap()["dialog"].as_u64().unwrap();
     app.ui.dialog_mut(id).unwrap().fields.insert("columns".into(), json!(3));
     assert!(crate::dialogs::confirm(&mut app, id).is_err());
     assert_eq!(app.ui.view.guide_layout["columns"], 8);
@@ -336,10 +362,10 @@ fn new_guide_layout_does_not_remember_a_failed_command() {
 
 #[test]
 fn lookup_export_dialog_uses_the_current_adjustment_selection() {
-    let (mut app, _ctx) = app_with(1);
+    let (mut app, ctx) = app_with(1);
     app.run("layer.newAdjustmentLayer.invert", json!({})).unwrap();
     let current = app.session.active().unwrap().active_layer.unwrap();
-    let opened = front(&mut app, "file.export.colorLookupTables", &json!({})).unwrap().unwrap();
+    let opened = front(&mut app, &ctx, "file.export.colorLookupTables", &json!({})).unwrap().unwrap();
     let id = opened["dialog"].as_u64().unwrap();
     let dialog = &app.ui.dialogs.last().unwrap().fields;
     assert_eq!(dialog["scope"], "selected");
@@ -348,7 +374,7 @@ fn lookup_export_dialog_uses_the_current_adjustment_selection() {
     app.ui.close_dialog(id);
 
     app.run("layer.new.layer", json!({"name": "Unrelated pixels"})).unwrap();
-    let opened = front(&mut app, "file.export.colorLookupTables", &json!({})).unwrap().unwrap();
+    let opened = front(&mut app, &ctx, "file.export.colorLookupTables", &json!({})).unwrap().unwrap();
     let id = opened["dialog"].as_u64().unwrap();
     assert_eq!(app.ui.dialogs.last().unwrap().fields["scope"], "all");
     app.ui.close_dialog(id);
@@ -357,6 +383,32 @@ fn lookup_export_dialog_uses_the_current_adjustment_selection() {
     let direct = app.run("file.export.colorLookupTables", json!({"size": 3, "scope": "selected"})).unwrap();
     assert_eq!(direct["layerCount"], 1);
     assert!(direct["cube"].as_str().unwrap().contains("LUT_3D_SIZE 3"));
+}
+
+/// Batch and Image Processor carry Photoshop's "Include All Subfolders" checkbox (AUTO-219-5,
+/// #3753): off by default, and confirming it on processes a subfolder's images too.
+#[test]
+fn batch_dialogs_include_all_subfolders() {
+    let (mut app, ctx) = app_with(1);
+    let dir = std::env::temp_dir().join(format!("photocraft-ui-batch-subfolders-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("in/sub")).unwrap();
+    let input = dir.join("in").to_string_lossy().into_owned();
+    app.run("file.saveACopy", json!({"path": dir.join("in/sub/a.png").to_string_lossy()})).unwrap();
+    app.session.actions.list.push(photocraft_engine::actions_cmds::Action::new("Invert", vec![("image.adjustments.invert".into(), json!({}))]));
+    for (id, out) in [("file.automate.batch", "batch"), ("file.scripts.imageProcessor", "processed")] {
+        let d = menu(&mut app, &ctx, id, json!({})).unwrap()["dialog"].as_u64().unwrap();
+        let fields = &mut app.ui.dialog_mut(d).unwrap().fields;
+        assert_eq!(fields["includeSubfolders"], json!(false), "{id}");
+        assert_eq!(fields["__labels"]["includeSubfolders"], json!("Include All Subfolders"), "{id}");
+        fields.insert("input".into(), json!(input));
+        fields.insert("output".into(), json!(dir.join(out).to_string_lossy()));
+        fields.insert("includeSubfolders".into(), json!(true));
+        let r = crate::dialogs::confirm(&mut app, d).unwrap();
+        assert_eq!(r["files"].as_array().map(Vec::len), Some(1), "{id}: {r}");
+        assert!(dir.join(out).join("sub").is_dir(), "{id} keeps the subfolder: {r}");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// Float in Window takes the document and the screen position a dragged-off tab was dropped at

@@ -219,6 +219,40 @@ pub(crate) fn stem(path: &str) -> String {
     }
 }
 
+/// Whether `a` and `b` name the same file: the same text, or, when both exist, the same file on
+/// disk (a hard link, a different case on a case-insensitive volume, `./` or `..` in one of them).
+pub fn same_file(a: &str, b: &str) -> bool {
+    if a == b {
+        return true;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        if let (Ok(x), Ok(y)) = (std::fs::metadata(a), std::fs::metadata(b)) {
+            return x.dev() == y.dev() && x.ino() == y.ino();
+        }
+    }
+    #[cfg(windows)]
+    {
+        // NTFS and FAT compare names without case.
+        if let (Ok(x), Ok(y)) = (std::fs::canonicalize(a), std::fs::canonicalize(b)) {
+            return x.to_string_lossy().to_lowercase() == y.to_string_lossy().to_lowercase();
+        }
+    }
+    false
+}
+
+/// A path as command results report it: `/` between components, whatever the platform.
+///
+/// `join` already builds with `/`, but a directory from the caller or from `std::path::absolute`
+/// carries the native separator, which would leave a reported path mixed. The control channel
+/// takes `/` and rejects alternate separators (`AuthorizedWorkspace` in `crates/automation`), so
+/// a result spelt this way can be handed straight back to it. Verbatim and UNC prefixes keep
+/// theirs: Win32 does not accept `/` after a leading `\\`.
+pub(crate) fn forward_slashes(path: String) -> String {
+    if path.starts_with(r"\\") { path } else { path.replace('\\', "/") }
+}
+
 pub(crate) fn join(dir: &str, name: &str) -> String {
     if dir.is_empty() {
         name.to_string()
@@ -340,6 +374,8 @@ pub(crate) fn encode(doc: &Document, path: &str, save: impl Into<SaveOpts>) -> R
         tga_bits: save.tga_bits,
         image_previews: save.image_previews,
         psd_maximize_compatibility: save.psd_maximize_compatibility,
+        // Linked files a PSD embeds are resolved against the document being worked on.
+        document_path: crate::doc_path::current(),
         ..Default::default()
     };
     // No quality chosen: write the file the way it was opened (a JPEG at its own quality, a WebP
@@ -457,6 +493,20 @@ fn save_a_copy(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 /// Open a file's bytes, decoding them as the format `as_ext` (Open As) when given.
+/// EXR/HDR rarely states its colour space, so io tags it with the linear-sRGB default.
+/// With File Handling's ACEScg option on, such an EXR opens as ACEScg instead (AP1,
+/// linear) — the working space ACES render pipelines write. Only the io default is
+/// replaced; an embedded or EXIF-declared profile is kept untouched.
+fn tag_exr_colorspace(s: &Session, name: &str, doc: &mut Document) {
+    if !name.to_ascii_lowercase().ends_with(".exr") || !s.prefs.get().file_handling.exr_aces_cg {
+        return;
+    }
+    let linear = photocraft_cms::Builtin::LinearSrgb.profile().to_bytes();
+    if doc.icc_profile.as_ref().map(|v| v.as_slice()) == Some(linear.as_slice()) {
+        doc.icc_profile = Some(photocraft_cms::Builtin::AcesCg.profile().to_bytes());
+    }
+}
+
 pub fn open_bytes_as(s: &mut Session, name: &str, bytes: &[u8], as_ext: Option<&str>, path: Option<String>) -> Result<Value> {
     crate::allocation::checkpoint("importing document")?;
     let decode_name = match as_ext {
@@ -465,6 +515,7 @@ pub fn open_bytes_as(s: &mut Session, name: &str, bytes: &[u8], as_ext: Option<&
     };
     let r = photocraft_io::import(&decode_name, bytes).map_err(|e| EngineError::Other(format!("{decode_name}: {e}")))?;
     let mut doc = r.document;
+    tag_exr_colorspace(s, &decode_name, &mut doc);
     let path = match template_name(s, name) {
         Some(untitled) => {
             doc.name = untitled;
@@ -563,7 +614,16 @@ fn place(s: &mut Session, p: &Value, linked: bool) -> Result<Value> {
     let cmd = if linked { "file.placeLinked" } else { "file.placeEmbedded" };
     let path = str_param(p, "path", cmd)?.to_string();
     let bytes = read_file(&path)?;
-    place_bytes(s, &path, bytes, linked.then(|| path.clone()), p)
+    // The link is stored absolute: a relative one would later be taken from the document's
+    // folder (`doc_path`), not the working directory the path was given in.
+    let link = linked.then(|| {
+        if std::path::Path::new(&path).is_relative() {
+            std::path::absolute(&path).map_or_else(|_| path.clone(), |a| a.to_string_lossy().into_owned())
+        } else {
+            path.clone()
+        }
+    });
+    place_bytes(s, &path, bytes, link, p)
 }
 
 // ---------- File Info (XMP) ----------
@@ -930,13 +990,106 @@ pub(crate) fn batch_inputs(p: &Value, cmd: &str) -> Result<Vec<String>> {
     }
 }
 
+/// One input of a batch run: the file, and the folder it sits in relative to the input folder
+/// (`""` at the top level, `"a/b"` two levels down), which its result keeps under `output`.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct BatchInput {
+    pub path: String,
+    pub rel_dir: String,
+}
+
+/// Subfolders below a batch input folder are walked at most this deep ("Include All Subfolders").
+pub(crate) const MAX_SUBFOLDER_DEPTH: usize = 32;
+/// A batch over subfolders lists at most this many files; a larger tree is an error, not a run
+/// that silently stops partway.
+pub(crate) const MAX_SUBFOLDER_FILES: usize = 100_000;
+
+/// [`batch_inputs`] for the commands whose Photoshop dialog has "Include All Subfolders" (Batch,
+/// Image Processor): with `"includeSubfolders": true` a folder input also yields the images in its
+/// subfolders, each tagged with its relative folder. `output` (when inside the input folder, as
+/// the dialog's default `<input>/batch` is) is not walked, so a rerun doesn't process its results.
+pub(crate) fn batch_inputs_tree(p: &Value, cmd: &str, output: &str) -> Result<Vec<BatchInput>> {
+    let recurse = match p.get("includeSubfolders") {
+        None | Some(Value::Null) => false,
+        Some(Value::Bool(b)) => *b,
+        Some(_) => return Err(EngineError::BadParams { cmd: cmd.into(), msg: "\"includeSubfolders\" must be true or false".into() }),
+    };
+    match p.get("input").or_else(|| p.get("files")) {
+        Some(Value::String(dir)) if recurse => list_images_tree(dir, output, cmd),
+        _ => Ok(batch_inputs(p, cmd)?.into_iter().map(|path| BatchInput { path, rel_dir: String::new() }).collect()),
+    }
+}
+
+/// The images under `dir` and its subfolders: each folder's files sorted by name, then its
+/// subfolders in name order (depth first). Bounded by [`MAX_SUBFOLDER_DEPTH`] and
+/// [`MAX_SUBFOLDER_FILES`]; a folder reached twice (a symlink loop) is walked once, and `skip`
+/// (the output folder) is left out.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn list_images_tree(dir: &str, skip: &str, cmd: &str) -> Result<Vec<BatchInput>> {
+    use std::path::{Path, PathBuf};
+    let canon = |p: &Path| std::fs::canonicalize(p).ok();
+    let root = Path::new(dir);
+    let root_canon = canon(root).ok_or_else(|| EngineError::Other(format!("{dir}: cannot open the folder")))?;
+    let skip = if skip.is_empty() { None } else { canon(Path::new(skip)) };
+    let mut seen = std::collections::HashSet::new();
+    seen.insert(root_canon);
+    let mut out = Vec::new();
+    // Depth first with an explicit stack (no recursion): (folder, relative folder, depth).
+    let mut stack: Vec<(PathBuf, String, usize)> = vec![(root.to_path_buf(), String::new(), 0)];
+    while let Some((folder, rel, depth)) = stack.pop() {
+        let shown = folder.to_string_lossy().into_owned();
+        // The top folder must be readable; a subfolder that isn't is skipped.
+        let files = match list_images(&shown) {
+            Ok(f) => f,
+            Err(e) if depth == 0 => return Err(e),
+            Err(_) => continue,
+        };
+        if out.len().saturating_add(files.len()) > MAX_SUBFOLDER_FILES {
+            return Err(EngineError::BadParams { cmd: cmd.into(), msg: format!("{dir} holds more than {MAX_SUBFOLDER_FILES} images with its subfolders") });
+        }
+        out.extend(files.into_iter().map(|path| BatchInput { path, rel_dir: rel.clone() }));
+        if depth >= MAX_SUBFOLDER_DEPTH {
+            continue;
+        }
+        let Ok(rd) = std::fs::read_dir(&folder) else { continue };
+        let mut subs: Vec<(String, PathBuf)> = rd
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .filter(|p| p.is_dir())
+            .filter_map(|p| Some((p.file_name()?.to_string_lossy().into_owned(), p)))
+            .collect();
+        subs.sort();
+        // Pushed in reverse so the stack pops them in name order.
+        for (name, sub) in subs.into_iter().rev() {
+            let Some(c) = canon(&sub) else { continue };
+            if skip.as_ref() == Some(&c) || !seen.insert(c) {
+                continue;
+            }
+            let rel = if rel.is_empty() { name } else { format!("{rel}/{name}") };
+            stack.push((sub, rel, depth + 1));
+        }
+    }
+    Ok(out)
+}
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn list_images_tree(dir: &str, _skip: &str, _cmd: &str) -> Result<Vec<BatchInput>> {
+    Err(EngineError::Other(format!("cannot list {dir}: no file system on the web")))
+}
+
 /// Opens each input in a scratch session, runs `f` on it and saves it to `output` as `format`
 /// (`"same"` keeps the input's extension). Errors per file are collected, not fatal.
 pub(crate) fn process_files(inputs: &[String], output: &str, format: &str, save: SaveOpts, suffix: &str, f: &dyn Fn(&mut Session) -> Result<()>) -> Value {
-    let outputs = inputs.iter().map(|path| {
+    let inputs: Vec<BatchInput> = inputs.iter().map(|path| BatchInput { path: path.clone(), rel_dir: String::new() }).collect();
+    process_tree(&inputs, output, format, save, suffix, f)
+}
+
+/// [`process_files`] for inputs from subfolders: each result goes to its input's relative folder
+/// under `output` (created as needed), so `a/x.png` and `b/x.png` don't collide.
+pub(crate) fn process_tree(inputs: &[BatchInput], output: &str, format: &str, save: SaveOpts, suffix: &str, f: &dyn Fn(&mut Session) -> Result<()>) -> Value {
+    let outputs = inputs.iter().map(|BatchInput { path, rel_dir }| {
         let ext =
             if format == "same" { path.rsplit('.').next().unwrap_or("png").to_ascii_lowercase() } else { format.trim_start_matches('.').to_ascii_lowercase() };
-        (path.as_str(), join(output, &format!("{}{suffix}.{ext}", stem(path))))
+        (path.as_str(), join(&join(output, rel_dir), &format!("{}{suffix}.{ext}", stem(path))))
     });
     process_outputs(outputs, save, f)
 }
@@ -1000,8 +1153,8 @@ fn batch(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some((id, _)) = steps.iter().find(|(id, _)| crate::commands::find(id).is_none()) {
         return Err(EngineError::BadParams { cmd: cmd.into(), msg: format!("unknown command `{id}` in the action") });
     }
-    let inputs = batch_inputs(p, cmd)?;
     let output = str_param(p, "output", cmd)?.to_string();
+    let inputs = batch_inputs_tree(p, cmd, &output)?;
     let format = p.get("format").and_then(Value::as_str).unwrap_or("same").to_string();
     // Steps that call another action play it from the caller's actions; the playback stack comes
     // along so an action that batches itself is caught as a recursive call.
@@ -1032,23 +1185,23 @@ fn batch(s: &mut Session, p: &Value) -> Result<Value> {
         Ok(())
     };
     let r = match names {
-        Some(names) => process_outputs(inputs.iter().map(String::as_str).zip(names), save, &run),
-        None => process_files(&inputs, &output, &format, save, "", &run),
+        Some(names) => process_outputs(inputs.iter().map(|i| i.path.as_str()).zip(names), save, &run),
+        None => process_tree(&inputs, &output, &format, save, "", &run),
     };
     Ok(r)
 }
 
 fn image_processor(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "file.scripts.imageProcessor";
-    let inputs = batch_inputs(p, cmd)?;
     let output = str_param(p, "output", cmd)?.to_string();
+    let inputs = batch_inputs_tree(p, cmd, &output)?;
     let format = p.get("format").and_then(Value::as_str).unwrap_or("jpg").to_string();
     let fit = match (size_param(p, "width"), size_param(p, "height")) {
         (None, None) => None,
         (w, h) => Some(json!({"width": w.unwrap_or(1e9), "height": h.unwrap_or(1e9), "dontEnlarge": true})),
     };
     let to_srgb = p.get("convertToSrgb").and_then(Value::as_bool).unwrap_or(false);
-    let r = process_files(&inputs, &output, &format, SaveOpts::from_params(s, p, cmd)?.or_quality(8.0), "", &|scratch| {
+    let r = process_tree(&inputs, &output, &format, SaveOpts::from_params(s, p, cmd)?.or_quality(8.0), "", &|scratch| {
         if to_srgb && scratch.active().is_some_and(|d| d.doc.mode != ColorMode::Rgb) {
             scratch.execute("image.mode.rgb", json!({}))?;
         }
@@ -1549,7 +1702,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Batch…",
             &["File", "Automate"],
             None,
-            r##"{"steps":[[commandId,params]|{"command":id,"params":{}}…] (a recorded action),"input":folder|[paths],"output":folder,"format":"same|png|jpg|psd|tiff|…"="same","quality":0..12?,"naming":string? (blank keeps source names; {name}, {serial} padded to 3 digits, {date} as YYYY-MM-DD UTC; extension added automatically),"startingSerial":1..4294967295=1 (input position, including failed inputs),"tiffLayers":bool=false,"tgaBits":24|32?,"dpxBits":8|10|12|16? (DPX: bits per sample; unset, 8 for an 8-bit document, else 16),"calledActions":[{"name","steps"}…]? (the actions Play Action steps call; default: the session's)} → {files, errors} (an input whose output name was already written in the run goes to errors)"##,
+            r##"{"steps":[[commandId,params]|{"command":id,"params":{}}…] (a recorded action),"input":folder|[paths],"includeSubfolders":bool=false (a folder input also takes the images in its subfolders, up to 32 levels and 100000 files; each result keeps its subfolder under output),"output":folder,"format":"same|png|jpg|psd|tiff|…"="same","quality":0..12?,"naming":string? (blank keeps source names; {name}, {serial} padded to 3 digits, {date} as YYYY-MM-DD UTC; extension added automatically),"startingSerial":1..4294967295=1 (input position, including failed inputs),"tiffLayers":bool=false,"tgaBits":24|32?,"dpxBits":8|10|12|16? (DPX: bits per sample; unset, 8 for an 8-bit document, else 16),"calledActions":[{"name","steps"}…]? (the actions Play Action steps call; default: the session's)} → {files, errors} (an input whose output name was already written in the run goes to errors)"##,
             native,
             batch
         ),
@@ -1558,7 +1711,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Image Processor…",
             &["File", "Scripts"],
             None,
-            r##"{"input":folder|[paths],"output":folder,"format":"jpg|png|psd|tiff|…"="jpg","quality":0..12=8,"tiffLayers":bool=false,"tgaBits":24|32?,"dpxBits":8|10|12|16? (DPX: bits per sample; unset, 8 for an 8-bit document, else 16),"width":px?,"height":px? (fit, never enlarge),"convertToSrgb":bool=false} → {files, errors} (an input whose output name was already written in the run goes to errors)"##,
+            r##"{"input":folder|[paths],"includeSubfolders":bool=false (a folder input also takes the images in its subfolders, up to 32 levels and 100000 files; each result keeps its subfolder under output),"output":folder,"format":"jpg|png|psd|tiff|…"="jpg","quality":0..12=8,"tiffLayers":bool=false,"tgaBits":24|32?,"dpxBits":8|10|12|16? (DPX: bits per sample; unset, 8 for an 8-bit document, else 16),"width":px?,"height":px? (fit, never enlarge),"convertToSrgb":bool=false} → {files, errors} (an input whose output name was already written in the run goes to errors)"##,
             native,
             image_processor
         ),
@@ -1616,3 +1769,41 @@ pub fn specs() -> Vec<CommandSpec> {
 #[cfg(test)]
 #[path = "file_cmds/tests.rs"]
 mod tests;
+
+#[cfg(test)]
+mod aces_exr_tests {
+    use super::*;
+
+    /// File Handling › "Open color-less EXR as ACEScg": off, an EXR opens on io's linear-sRGB
+    /// default; on, it opens as ACEScg — the working space ACES render pipelines write.
+    #[test]
+    fn exr_aces_cg_preference_retags_the_opened_document() {
+        let image = photocraft_codecs::Image::from_f32(
+            4,
+            4,
+            photocraft_codecs::ChannelLayout::Rgb,
+            &[
+                0.25, 0.5, 0.75, 1.0, 0.25, 0.5, 0.75, 1.0, 0.25, 0.5, 0.75, 1.0, 0.25, 0.5, 0.75, 1.0, 0.25, 0.5, 0.75, 1.0, 0.25, 0.5, 0.75, 1.0, 0.25, 0.5,
+                0.75, 1.0, 0.25, 0.5, 0.75, 1.0, 0.25, 0.5, 0.75, 1.0, 0.25, 0.5, 0.75, 1.0, 0.25, 0.5, 0.75, 1.0, 0.25, 0.5, 0.75, 1.0,
+            ],
+        )
+        .unwrap();
+        let bytes = photocraft_codecs::encode(&image, photocraft_codecs::Format::OpenExr, &photocraft_codecs::EncodeOptions::default()).unwrap();
+
+        let linear = photocraft_cms::Builtin::LinearSrgb.profile().to_bytes();
+        let aces = photocraft_cms::Builtin::AcesCg.profile().to_bytes();
+
+        // Off (the default): io's linear-sRGB tagging stays.
+        let mut s = Session::new();
+        open_bytes_as(&mut s, "shot.exr", &bytes, None, None).unwrap();
+        let d = &s.active().unwrap().doc;
+        assert_eq!(d.icc_profile.as_deref().map(|v| v.as_slice()), Some(linear.as_slice()));
+
+        // On: the same file opens as ACEScg.
+        let mut s = Session::new();
+        s.prefs.edit(|p| p.file_handling.exr_aces_cg = true);
+        open_bytes_as(&mut s, "shot.exr", &bytes, None, None).unwrap();
+        let d = &s.active().unwrap().doc;
+        assert_eq!(d.icc_profile.as_deref().map(|v| v.as_slice()), Some(aces.as_slice()));
+    }
+}

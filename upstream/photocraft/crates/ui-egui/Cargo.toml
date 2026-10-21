@@ -44,6 +44,8 @@ wgpu = { version = "30", default-features = false, features = ["std", "wgsl"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 log = { workspace = true }
+# Display order of right-to-left labels (`bidi_text.rs`); already linked through usvg.
+unicode-bidi = "0.3"
 base64 = "0.22"
 # Inflating the translation catalogs, stored deflated (build.rs); already linked through photocraft-io.
 flate2 = { workspace = true }
@@ -61,7 +63,7 @@ web-sys = { version = "0.3", features = ["Window", "Location", "Navigator"] }
 # Installed RAM for the GPU memory budget (`gpu_canvas::physical_memory`): the safe binding the
 # desktop app already uses, pinned to the same version.
 [target.'cfg(target_os = "windows")'.dependencies]
-winsafe = { version = "=0.0.29", default-features = false, features = ["kernel"] }
+winsafe = { version = "=0.0.29", default-features = false, features = ["kernel", "dxgi"] }
 
 [dev-dependencies]
 # egui's own default fonts in tests: the oracle for egui_fonts.rs, and contexts made with

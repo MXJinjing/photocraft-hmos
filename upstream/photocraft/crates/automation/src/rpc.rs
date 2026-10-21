@@ -29,8 +29,8 @@ use serde_json::{Value, json};
 
 use crate::budgets::{BatchReplyBudget, write_reply};
 use crate::security::{
-    ConnectionLimiter, LineRead, MAX_BATCH_STEPS, MAX_CONNECTIONS, MAX_REQUEST_BYTES, authentication_reply, configure_stream, discard_rest_of_line,
-    read_bounded_line, repeat_auth_reply,
+    AUTH_DEADLINE, AuthDeadlineStream, ConnectionLimiter, LineRead, MAX_BATCH_STEPS, MAX_CONNECTIONS, MAX_REQUEST_BYTES, authentication_reply,
+    configure_stream, discard_rest_of_line, read_bounded_line, repeat_auth_reply,
 };
 use crate::{AutomationError, Headless};
 
@@ -91,17 +91,9 @@ impl Headless {
                 let all = self.command_list();
                 Ok(match str_of(&p, "filter").map(str::to_lowercase) {
                     None => all,
-                    Some(n) => Value::Array(
-                        all.as_array()
-                            .into_iter()
-                            .flatten()
-                            .filter(|c| {
-                                let hay = format!("{} {}", c["id"].as_str().unwrap_or(""), c["label"].as_str().unwrap_or(""));
-                                hay.to_lowercase().contains(&n)
-                            })
-                            .cloned()
-                            .collect(),
-                    ),
+                    Some(n) => {
+                        Value::Array(all.as_array().into_iter().flatten().filter(|c| photocraft_engine::commands::list_entry_matches(c, &n)).cloned().collect())
+                    }
                 })
             }
             "session.list" => Ok(self.session_list()),
@@ -270,10 +262,12 @@ pub fn serve_lines(h: &Mutex<Headless>, mut r: impl BufRead, mut w: impl Write) 
     }
 }
 
-fn serve_tcp_connection(h: &Mutex<Headless>, stream: std::net::TcpStream, token: &str) -> std::io::Result<()> {
+/// Serve one connection. It must complete `auth` within `auth_deadline` of connecting, however
+/// much it sends meanwhile (#4965); after that only the idle timeout applies.
+fn serve_tcp_connection(h: &Mutex<Headless>, stream: std::net::TcpStream, token: &str, auth_deadline: std::time::Duration) -> std::io::Result<()> {
     configure_stream(&stream)?;
     let read = stream.try_clone()?;
-    let mut reader = std::io::BufReader::new(read);
+    let mut reader = std::io::BufReader::new(AuthDeadlineStream::new(read, auth_deadline));
     let mut out = stream;
     let mut line = String::new();
     let mut authenticated = false;
@@ -298,6 +292,9 @@ fn serve_tcp_connection(h: &Mutex<Headless>, stream: std::net::TcpStream, token:
         } else {
             let (reply, ok) = authentication_reply(&line, token);
             authenticated = ok;
+            if ok {
+                reader.get_mut().authenticated()?;
+            }
             reply
         };
         write_reply(&mut out, &reply)?;
@@ -330,7 +327,7 @@ pub fn serve_tcp(addr: &str, h: Arc<Mutex<Headless>>, token: String, ready: impl
         let token = Arc::clone(&token);
         std::thread::spawn(move || {
             let _permit = permit;
-            let _ = serve_tcp_connection(&h, stream, &token);
+            let _ = serve_tcp_connection(&h, stream, &token, AUTH_DEADLINE);
         });
     }
     Ok(())
@@ -365,7 +362,7 @@ mod tests {
 
     /// Pins the reply shape documented in docs/control-protocol.md › Command list replies
     /// (#3684): a bare JSON array (not `{"commands": [...]}`), one object per command with
-    /// exactly these keys, from `engine.commands` (filtered or not) and `command.list`.
+    /// exactly these keys (plus an optional `keywords` string), from `engine.commands` (filtered or not) and `command.list`.
     #[test]
     fn command_list_replies_are_documented_array_of_objects() {
         let h = session();
@@ -377,8 +374,10 @@ mod tests {
             let items = reply.as_array().unwrap_or_else(|| panic!("{name} must reply with a bare array, got {reply}"));
             assert!(!items.is_empty(), "{name}");
             for c in items {
-                let mut keys: Vec<&str> = c.as_object().unwrap().keys().map(String::as_str).collect();
+                // `keywords` is optional: only commands with other search names carry it (#5060).
+                let mut keys: Vec<&str> = c.as_object().unwrap().keys().map(String::as_str).filter(|k| *k != "keywords").collect();
                 keys.sort_unstable();
+                assert!(c.get("keywords").is_none_or(Value::is_string), "{name}: {c}");
                 assert_eq!(keys, ["disabledReason", "enabled", "id", "label", "menu", "needsDocument", "params", "shortcut"], "{name}: {c}");
                 assert!(c["id"].is_string() && c["label"].is_string() && c["params"].is_string() && c["enabled"].is_boolean(), "{c}");
                 assert!(c["needsDocument"].is_boolean(), "{c}");
@@ -818,6 +817,60 @@ mod tests {
         let v: Value = serde_json::from_str(&line).unwrap();
         assert_eq!(v["id"], "a");
         assert!(v["result"].as_array().unwrap().iter().any(|m| m == "batch"));
+    }
+
+    /// #4965: a connection that keeps sending without authenticating is closed at the deadline,
+    /// and one that authenticated in time keeps being served after it.
+    #[test]
+    fn tcp_connections_must_authenticate_before_the_deadline_whatever_they_send() {
+        use std::io::{BufReader, Write as _};
+        use std::time::{Duration, Instant};
+        const TOKEN: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let h = Mutex::new(Headless::new());
+            let mut results = Vec::new();
+            for _ in 0..2 {
+                let (stream, _) = listener.accept().unwrap();
+                let started = Instant::now();
+                let r = serve_tcp_connection(&h, stream, TOKEN, Duration::from_millis(300));
+                results.push((r.map_err(|e| e.kind()), started.elapsed()));
+            }
+            results
+        });
+
+        // Never a newline, a byte every 20 ms: each read succeeds long before the idle timeout.
+        let mut slow = std::net::TcpStream::connect(addr).unwrap();
+        for _ in 0..150 {
+            if slow.write_all(b" ").is_err() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        drop(slow);
+
+        // Authenticates at once, then asks again 300 ms after the deadline.
+        let mut s = std::net::TcpStream::connect(addr).unwrap();
+        s.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        writeln!(s, r#"{{"id":"auth","method":"auth","params":{{"token":"{TOKEN}"}}}}"#).unwrap();
+        let mut reader = BufReader::new(s.try_clone().unwrap());
+        let mut line = String::new();
+        reader.read_line(&mut line).unwrap();
+        assert_eq!(serde_json::from_str::<Value>(&line).unwrap()["result"]["authenticated"], true);
+        std::thread::sleep(Duration::from_millis(600));
+        writeln!(s, r#"{{"id":"a","method":"methods"}}"#).unwrap();
+        line.clear();
+        reader.read_line(&mut line).unwrap();
+        assert_eq!(serde_json::from_str::<Value>(&line).unwrap()["id"], "a");
+        drop(reader);
+        drop(s);
+
+        let results = server.join().unwrap();
+        let (slow_result, slow_time) = &results[0];
+        assert!(matches!(slow_result, Err(std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock)), "{slow_result:?}");
+        assert!(*slow_time < Duration::from_secs(3), "the trickle did not extend the deadline: {slow_time:?}");
+        assert_eq!(results[1].0, Ok(()), "the authenticated connection ended with its client");
     }
 
     #[test]

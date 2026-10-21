@@ -177,6 +177,12 @@ fn set_quiet(s: &mut Session, f: impl FnOnce(&mut Document)) -> Result<()> {
 pub(crate) fn compound<R>(s: &mut Session, label: &str, f: impl FnOnce(&mut Session) -> Result<R>) -> Result<R> {
     let st = s.active().ok_or(EngineError::NoDocument)?;
     let (before, history, prior) = (st.doc.clone(), st.history.clone(), st.layer_target());
+    // An inner command may select a layer that disappears when the compound rolls back.
+    // Selection, channel targeting and coalescing must roll back with the document (#4975).
+    let anchor = st.layer_anchor;
+    let channel_view = st.channel_view.clone();
+    let coalesce = st.coalesce.clone();
+    let was_clean = !st.is_dirty();
     let journal = s.journal.len();
     // Color Sampler points are view state a step may move (crop, rotation): roll them back too, so
     // a failed second step can't leave them pinned to pixels the restored document no longer has.
@@ -187,23 +193,37 @@ pub(crate) fn compound<R>(s: &mut Session, label: &str, f: impl FnOnce(&mut Sess
     }
     let st = s.active_mut().ok_or(EngineError::NoDocument)?;
     st.history = history;
-    match r {
+    let result = match r {
         Ok(v) => {
             // As in `Session::edit`: undo targets what was selected just before the step (#1356).
             st.history.set_current_layers(prior);
             st.history.record(label, before, st.layer_target());
-            st.history.trim(&st.doc);
+            st.trim_history();
             st.coalesce = None;
             Ok(v)
         }
         Err(e) => {
             st.doc = before;
+            st.active_layer = prior.active;
+            st.selected_layers = prior.selected;
+            st.layer_anchor = anchor;
+            st.channel_view = channel_view;
+            st.coalesce = coalesce;
             st.color_samplers = samplers;
             st.revision += 1;
+            // A failed compound does not make an otherwise untouched document dirty.
+            if was_clean {
+                st.saved_revision = st.revision;
+            }
             st.last_damage = None;
             Err(e)
         }
+    };
+    if result.is_err() {
+        // The app-wide tool colours/mask mode follow the restored channel target.
+        s.sync_tools_mask_target();
     }
+    result
 }
 
 /// Current time as ISO 8601 UTC (`2026-10-01T12:34:56Z`); empty on the web (no clock).

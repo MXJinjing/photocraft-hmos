@@ -688,6 +688,49 @@ fn pen_samples_finger_source_and_host_gestures_reach_the_shared_feed() {
     assert!(app.stylus.feed.get().is_none());
 }
 use super::*;
+
+#[test]
+fn native_input_reaches_stylus_debug_without_consuming_stroke_samples() {
+    let mut input = State::default();
+    let mut events = Vec::new();
+    input.push(serde_json::from_str(r#"{"kind":"pointer","source":"pen","action":0,"x":20,"y":40,"sample":{"pressure":0.4,"tiltX":45,"tiltY":-30}}"#).unwrap(), 1., &mut events);
+    let snapshot = input.feed.diagnostics();
+    assert_eq!(input.feed.source(), PointerSource::Pen);
+    assert_eq!(snapshot.samples, 1);
+    assert_eq!(snapshot.last_pen.unwrap().tilt_y, -30.0);
+    assert_eq!(snapshot.contact, Some([20.0, 40.0]));
+    assert_eq!(input.feed.drain().len(), 1);
+    for (gesture, at) in [("doubleTap", 1000), ("squeeze", 2000), ("longPress", 3000)] {
+        input.push(serde_json::from_value(serde_json::json!({"kind":"stylus","packet":{"version":1,"type":"gesture","gesture":gesture,"timestampMs":at}})).unwrap(), 1., &mut events);
+    }
+    let snapshot = input.feed.diagnostics();
+    assert_eq!((snapshot.double_taps, snapshot.squeezes), (1, 2));
+    assert_eq!(input.feed.take_gestures().len(), 3);
+    input.push(serde_json::from_str(r#"{"kind":"pointer","source":"pen","action":1,"x":20,"y":40}"#).unwrap(), 1., &mut events);
+    assert_eq!(input.feed.diagnostics().contact, None, "lifting clears the contact point");
+    input.push(serde_json::from_str(r#"{"kind":"display_rotation","rotation":1}"#).unwrap(), 1., &mut events);
+    input.push(serde_json::from_str(r#"{"kind":"pointer","source":"pen","action":2,"x":75,"y":125,"sample":{"pressure":0,"tiltX":45,"tiltY":0}}"#).unwrap(), 1., &mut events);
+    input.push(serde_json::from_str(r#"{"kind":"pointer","source":"pen","action":2,"x":90,"y":140,"sample":{"pressure":0,"tiltX":45,"tiltY":0}}"#).unwrap(), 1., &mut events);
+    let snapshot = input.feed.diagnostics();
+    assert_eq!(snapshot.display_rotation, 1);
+    assert!(snapshot.hovering);
+    assert_eq!(snapshot.hover, Some([90.0, 140.0]));
+    assert_eq!(snapshot.samples, 2, "the hover sample keeps the latest contact tilt");
+    let last = snapshot.last_pen.unwrap();
+    assert!((last.tilt_x + 30.0).abs() < 0.01 && (last.tilt_y + 45.0).abs() < 0.01);
+    input.push(serde_json::from_str(r#"{"kind":"hover_leave"}"#).unwrap(), 1., &mut events);
+    assert!(!input.feed.diagnostics().hovering);
+}
+
+#[test]
+fn native_landscape_rotation_adds_the_pad_half_turn() {
+    let mut input = State::default();
+    let mut events = Vec::new();
+    input.push(serde_json::from_str(r#"{"kind":"pointer","source":"pen","action":0,"x":20,"y":40,"sample":{"pressure":0.4,"tiltX":0,"tiltY":-45}}"#).unwrap(), 1., &mut events);
+    input.push(serde_json::from_str(r#"{"kind":"display_rotation","rotation":0,"landscape":true}"#).unwrap(), 1., &mut events);
+    let last = input.feed.diagnostics().last_pen.unwrap();
+    assert!(last.tilt_x.abs() < 0.01 && (last.tilt_y - 45.0).abs() < 0.01);
+}
 #[test]
 fn cancel_releases_pointer_and_scales_coordinates() {
     let mut state = State::default();
@@ -1466,6 +1509,65 @@ fn mouse_echo_after_pinch_cannot_press_or_move_a_tool() {
     state.push(
         super::Input {
             kind: "pointer".into(),
+            ..Default::default()
+        },
+        2.,
+        &mut events,
+    );
+    assert_eq!(state.pressed, Some(egui::PointerButton::Primary));
+    assert_eq!(state.feed.source(), super::PointerSource::Mouse);
+}
+
+#[test]
+fn mouse_echo_after_single_finger_lift_cannot_reclassify_the_tap() {
+    let mut state = super::State::default();
+    let mut events = vec![];
+    snapshot(&mut state, &[(1, 200., 200.)], &mut events);
+    snapshot(&mut state, &[], &mut events);
+    events.clear();
+    state.push(
+        super::Input {
+            kind: "axis".into(),
+            action: 2,
+            zoom: 1.01,
+            x: 200.,
+            y: 200.,
+            ..Default::default()
+        },
+        2.,
+        &mut events,
+    );
+    assert_eq!(state.feed.source(), super::PointerSource::Touch);
+    events.clear();
+    state.push(
+        super::Input {
+            kind: "pointer".into(),
+            action: 3,
+            ..Default::default()
+        },
+        2.,
+        &mut events,
+    );
+    for action in [0, 2, 1] {
+        state.push(
+            super::Input {
+                kind: "pointer".into(),
+                action,
+                x: 200.,
+                y: 200.,
+                ..Default::default()
+            },
+            2.,
+            &mut events,
+        );
+    }
+    assert!(events.is_empty(), "post-lift mouse echo leaked: {events:?}");
+    assert_eq!(state.feed.source(), super::PointerSource::Touch);
+    state.push(
+        super::Input {
+            kind: "pointer".into(),
+            x: 400.,
+            y: 200.,
             ..Default::default()
         },
         2.,

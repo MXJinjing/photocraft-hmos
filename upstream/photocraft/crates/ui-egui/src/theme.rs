@@ -968,6 +968,11 @@ impl Tokens {
         self.histogram_bg
     }
 
+    /// Menu highlights keep dark labels readable in the ArkUI light palettes.
+    pub fn menu_hover(&self) -> Color32 {
+        if matches!(self.kind, ThemeKind::ArkuiLight | ThemeKind::ArkuiProLight) { Color32::from_rgb(225, 237, 255) } else { self.hover }
+    }
+
     /// The background behind selected text in a text field (#3789): a subtle shade rather than
     /// egui's default blue. The monochrome Pro themes use a grey so a selection doesn't read as a
     /// second accent; coloured themes keep their own accent. Scoped to text fields by
@@ -1456,6 +1461,22 @@ mod tests {
             assert!(contrast(t.primary_text, t.primary_bg) >= 3.0, "{kind:?}: suggested-action button label");
         }
         assert_eq!(ThemeKind::from_name("gnome dark"), Some(ThemeKind::AdwaitaDark));
+    }
+
+    #[test]
+    fn arkui_light_menu_highlights_keep_dark_text_readable() {
+        for kind in [ThemeKind::ArkuiLight, ThemeKind::ArkuiProLight] {
+            let t = Tokens::for_kind(kind);
+            assert_eq!(t.menu_hover(), Color32::from_rgb(225, 237, 255));
+            assert!(contrast(t.text, t.menu_hover()) >= 7.0, "{kind:?}: menu label contrast");
+            assert!(contrast(t.text_dim, t.menu_hover()) >= 4.5, "{kind:?}: shortcut contrast");
+        }
+        for kind in ThemeKind::ALL {
+            if !matches!(kind, ThemeKind::ArkuiLight | ThemeKind::ArkuiProLight) {
+                let t = Tokens::for_kind(kind);
+                assert_eq!(t.menu_hover(), t.hover, "{kind:?}: preserve other palettes");
+            }
+        }
     }
 
     #[test]

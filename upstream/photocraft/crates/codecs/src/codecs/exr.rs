@@ -187,6 +187,21 @@ pub(crate) fn decode(bytes: &[u8], limits: &Limits) -> Result<Image, CodecError>
     Ok(img)
 }
 
+/// The size of the part [`decode`] opens, from the headers alone. Deep files are refused (their
+/// flattened size comes from the deep decoder), as is a part [`decode`] cannot show.
+pub(crate) fn probe(bytes: &[u8], limits: &Limits) -> Result<(u32, u32), CodecError> {
+    let meta = read_meta(bytes, limits)?;
+    if meta.requirements.has_deep_data {
+        return Err(CodecError::unsupported(F, "no header-only size probe for deep data"));
+    }
+    let pick = pick_part(&meta);
+    let info = meta.headers.get(pick).map(|h| part_info(pick, h)).ok_or_else(|| err("no parts"))?;
+    if info.color_rank() == 0 {
+        return Err(CodecError::unsupported(F, "no R/G/B or Y channels"));
+    }
+    Ok((info.width, info.height))
+}
+
 /// Decode one part of a multi-part file by its index into [`info`]'s list. A file with
 /// deep parts is not mixed: the deep decoder composites those instead.
 pub(crate) fn decode_part(bytes: &[u8], index: usize, limits: &Limits) -> Result<Image, CodecError> {

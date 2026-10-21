@@ -767,6 +767,38 @@ fn command_list_reports_enablement() {
     assert_eq!(find("layer.new.layer")["enabled"], false);
 }
 
+/// The Elliptical and Single Row/Column Marquee are `select.rect` options: a command-list filter
+/// for "ellipse" or "marquee" finds it through its keywords (#5060).
+#[test]
+fn command_list_filter_finds_the_marquees_by_keyword() {
+    let mut s = Session::new();
+    let list = s.execute("command.list", json!({})).unwrap();
+    let rows = list.as_array().unwrap();
+    let found = |needle: &str| -> Vec<String> {
+        rows.iter().filter(|c| crate::commands::list_entry_matches(c, needle)).map(|c| c["id"].as_str().unwrap().to_string()).collect()
+    };
+    for needle in ["ellipse", "Elliptical Marquee", "marquee", "single row", "SELECT.RECT"] {
+        assert!(found(needle).contains(&"select.rect".to_string()), "{needle}: {:?}", found(needle));
+    }
+    let rect = rows.iter().find(|c| c["id"] == "select.rect").unwrap();
+    assert!(rect["keywords"].as_str().is_some_and(|k| k.contains("Elliptical Marquee")), "{rect}");
+    // Commands without keywords don't get an empty field, and the filter still reads id and label.
+    assert!(rows.iter().find(|c| c["id"] == "file.new").unwrap().get("keywords").is_none());
+    assert_eq!(found("gaussian blur"), ["filter.blur.gaussianBlur"]);
+    assert!(found("no command is called this").is_empty());
+}
+
+/// Every keyword entry names a real command, so a renamed id can't leave one behind.
+#[test]
+fn search_keywords_name_real_commands() {
+    for (id, words) in crate::commands::SEARCH_KEYWORDS {
+        assert!(crate::commands::find(id).is_some(), "keywords for unknown command {id}");
+        assert!(!words.trim().is_empty(), "{id}");
+    }
+    assert!(crate::commands::search_keywords("select.rect").is_some());
+    assert!(crate::commands::search_keywords("no.such.command").is_none());
+}
+
 /// With no document open, a document command says so instead of only `enabled: false` (#3664).
 #[test]
 fn command_list_tells_no_document_from_other_preconditions() {
@@ -1121,6 +1153,47 @@ fn coalesced_edits_share_one_history_step() {
     let st = s.active().unwrap();
     let l = st.doc.layer(st.active_layer.unwrap()).unwrap().opacity;
     assert!((l - 1.0).abs() < 1e-6, "{l}");
+}
+
+/// #2259: the commands behind the arrow-key nudges take the `coalesce` key, so a run of them is
+/// one step an agent can drive too, and one Undo takes the whole run back.
+#[test]
+fn translate_and_transform_selection_coalesce_into_one_step() {
+    let mut s = Session::new();
+    s.execute("file.new", json!({"width": 60, "height": 60})).unwrap();
+    s.execute("layer.new.layer", json!({})).unwrap();
+    s.execute("select.rect", json!({"x": 10, "y": 10, "width": 10, "height": 10})).unwrap();
+    s.execute("edit.fill", json!({"color": "#ff0000"})).unwrap();
+    let steps = |s: &Session| s.active().unwrap().history.past_len();
+    let left = |s: &Session| {
+        let st = s.active().unwrap();
+        st.doc.layer(st.active_layer.unwrap()).unwrap().surface().unwrap().content_bounds().x0
+    };
+    let sel = |s: &Session| s.active().unwrap().doc.selection.as_ref().unwrap().content_bounds().x0;
+
+    let base = steps(&s);
+    for _ in 0..5 {
+        s.execute("layer.translate", json!({"dx": 1, "dy": 0, "coalesce": "nudge:1"})).unwrap();
+    }
+    assert_eq!((steps(&s), left(&s)), (base + 1, 15), "five nudges, one step");
+    s.execute("layer.translate", json!({"dx": 1, "dy": 0, "coalesce": "nudge:2"})).unwrap();
+    s.execute("layer.translate", json!({"dx": 1, "dy": 0})).unwrap();
+    s.execute("layer.translate", json!({"dx": 1, "dy": 0, "coalesce": "nudge:2"})).unwrap();
+    assert_eq!(steps(&s), base + 4, "another key, an uncoalesced move and a repeated key each start a step");
+    for _ in 0..3 {
+        assert!(s.undo());
+    }
+    assert_eq!(left(&s), 15);
+    assert!(s.undo());
+    assert_eq!(left(&s), 10, "Undo takes the run of five back at once");
+
+    let base = steps(&s);
+    for _ in 0..4 {
+        s.execute("select.transformSelection", json!({"dx": 1, "dy": 0, "coalesce": "nudge:3"})).unwrap();
+    }
+    assert_eq!((steps(&s), sel(&s)), (base + 1, 14));
+    assert!(s.undo());
+    assert_eq!(sel(&s), 10);
 }
 
 #[test]

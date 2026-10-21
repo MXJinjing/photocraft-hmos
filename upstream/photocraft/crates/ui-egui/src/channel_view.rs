@@ -106,15 +106,25 @@ fn render_with_source(
         return None;
     }
     let layer_mask = v.shown_layer_mask(doc);
-    // ⌥-click mask view (#196): the layer mask alone, in grayscale (white reveals); ⇧⌥ with
-    // nothing else shown: just the rubylith. Both straight from the mask, in parallel rows, so
-    // switching the view on a 24 MP document takes one frame.
+    // ⌥-click mask view (#196): the pixel mask alone, in grayscale (white reveals); ⇧⌥ with
+    // nothing else shown: just the rubylith. Use the compositor's cached feather for the pixel
+    // mask, but leave vector masks out: this view targets the pixel mask channel by itself.
+    let feathered_mask = v
+        .layer_mask
+        .and_then(|view| doc.layer(view.layer))
+        .filter(|layer| layer.mask.as_ref().is_some_and(|mask| mask.enabled && photocraft_compose::masks::feather_sigma(mask.feather) > 0.0))
+        .and_then(|layer| {
+            let mut pixel_mask_layer = layer.clone();
+            pixel_mask_layer.vector_mask = None;
+            photocraft_compose::masks::combined_mask(&pixel_mask_layer, doc.bounds())
+        });
+    let shown_mask = layer_mask.map(|(m, mode)| (feathered_mask.as_ref().unwrap_or(&m.surface), mode));
     let only_mask = ChannelView { layer_mask: None, ..v.clone() }.is_plain(doc);
-    match layer_mask {
-        Some((m, MaskViewMode::Gray)) => return Some(mask_px(&m.surface, r, factor, |g| Color32::from_gray(q(g)))),
+    match shown_mask {
+        Some((m, MaskViewMode::Gray)) => return Some(mask_px(m, r, factor, |g| Color32::from_gray(q(g)))),
         Some((m, MaskViewMode::Overlay)) if only_mask => {
             let c = AlphaChannel::DEFAULT_COLOR.to_rgb();
-            return Some(mask_px(&m.surface, r, factor, |g| {
+            return Some(mask_px(m, r, factor, |g| {
                 let a = 0.5 * (1.0 - g.clamp(0.0, 1.0));
                 Color32::from_rgba_premultiplied(q(c[0] * a), q(c[1] * a), q(c[2] * a), q(a))
             }));
@@ -138,9 +148,9 @@ fn render_with_source(
         } else if let Some(q) = doc.quick_mask.as_ref().filter(|_| !v.quick_mask_hidden) {
             solo_quick = true;
             gray(&q.surface)
-        } else if let Some((m, _)) = layer_mask {
+        } else if let Some((m, _)) = shown_mask {
             solo_mask = true;
-            gray(&m.surface)
+            gray(m)
         } else {
             let m = active.and_then(|id| doc.layer(id)).and_then(|l| l.mask.as_ref())?;
             solo_mask = true;
@@ -204,8 +214,8 @@ fn render_with_source(
     }
     // ⇧⌥-click mask view (#196): the layer mask as Quick Mask's red over the hidden areas
     // (Photoshop's Layer Mask Display Options default).
-    if !solo_mask && let Some((m, MaskViewMode::Overlay)) = layer_mask {
-        tint(sample(&m.surface, r, factor), AlphaChannel::DEFAULT_COLOR, 0.5, &|x| 1.0 - x);
+    if !solo_mask && let Some((m, MaskViewMode::Overlay)) = shown_mask {
+        tint(sample(m, r, factor), AlphaChannel::DEFAULT_COLOR, 0.5, &|x| 1.0 - x);
     }
     Some(out.into_iter().map(|p| Color32::from_rgba_premultiplied(q(p[0]), q(p[1]), q(p[2]), q(p[3]))).collect())
 }
@@ -511,6 +521,35 @@ mod tests {
         let px = render(&st.doc, &st.channel_view, b, 1, false, st.active_layer).unwrap();
         assert!(px[0].r() >= 124 && px[0].g() == 0 && px[0].a() >= 124, "about 50% red over the hidden end: {:?}", px[0]);
         assert!(px[36].a() <= 4, "next to nothing over the revealed end: {:?}", px[36]);
+    }
+
+    #[test]
+    fn layer_mask_views_show_the_feathered_mask() {
+        let mut s = Session::new();
+        s.execute("file.new", json!({"width": 37, "height": 21})).unwrap();
+        s.execute("layer.new.layer", json!({})).unwrap();
+        s.execute("layer.layerMask.revealAll", json!({})).unwrap();
+        s.execute("paint.gradient", json!({"from": [0, 0], "to": [37, 0], "colors": ["#000000", "#ffffff"], "target": "mask"})).unwrap();
+        s.execute("layer.layerMask.edit", json!({"feather": 4})).unwrap();
+        s.execute("view.layerMask", json!({"mode": "gray"})).unwrap();
+
+        let st = s.active().unwrap();
+        let bounds = st.doc.bounds();
+        let layer = st.doc.layer(st.active_layer.unwrap()).unwrap();
+        let raw = layer.mask.as_ref().unwrap().surface.sample_channel(0, 0, 0);
+        let effective = photocraft_compose::masks::combined_mask(layer, bounds).unwrap();
+        let softened = effective.sample_channel(0, 0, 0);
+        assert!((softened - raw).abs() > 0.01, "the fixture has a visible feather at its edge");
+
+        let gray = render(&st.doc, &st.channel_view, bounds, 1, false, st.active_layer).unwrap();
+        assert_eq!(gray[0], Color32::from_gray(q(softened)), "gray view uses the compositor's feathered mask");
+
+        s.execute("view.layerMask", json!({"mode": "overlay"})).unwrap();
+        let st = s.active().unwrap();
+        let overlay = render(&st.doc, &st.channel_view, bounds, 1, false, st.active_layer).unwrap();
+        let alpha = 0.5 * (1.0 - softened);
+        let red = AlphaChannel::DEFAULT_COLOR.to_rgb();
+        assert_eq!(overlay[0], Color32::from_rgba_premultiplied(q(red[0] * alpha), q(red[1] * alpha), q(red[2] * alpha), q(alpha)));
     }
 
     /// `cargo test --release -p photocraft-ui-egui --lib mask_view_switch_24mp -- --ignored --nocapture`

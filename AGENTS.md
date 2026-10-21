@@ -22,6 +22,12 @@ PhotoCraft's own source specific guidance is in `upstream/photocraft/AGENTS.md`;
 - **HarmonyOS host features and fixes** (ArkTS/native adapter, Hmos-only UI wiring, etc.) keep using topic branches and PRs **into `main`**.
 - The root `build-profile.json5` contains local signing material and is ignored. `build-profile.example.json5` is the safe template. Never commit signing certificates, private keys or passwords.
 
+## Package identity: public and local debug builds
+
+- The committed open-source HarmonyOS package name is **`io.github.storytold.photocraft.hmos`**. Keep it consistent in `AppScope/app.json5`, `build-profile.example.json5`, the custom file-open types in `entry/src/main/module.json5`, and the UTD declarations in `entry/src/main/resources/rawfile/arkdata/utd/utd.json5`. CI and published HAPs use this identity.
+- Use a separate, private local worktree for a differently named debug app (for example, `io.github.mxjinjing.hmos`); do not push or merge its package-identity edits into the public branches. In that worktree, change the app name and all custom file-open types/UTDs together, match the ignored `build-profile.json5` signing configuration, and set `PHOTOCRAFT_BUNDLE` in ignored `scripts/dev.local.env` for `scripts/dev.sh` launch and local HAP verification. `PHOTOCRAFT_BUNDLE` alone does **not** change the HAP's actual package name.
+- Before committing or publishing a public build, check the package identity and file associations for private debug names. The default `scripts/verify_native.py` check must continue to require the public package name; its `--expected-bundle` override is only for local debug builds.
+
 ## Team workflow (photocraft-hmos agents)
 
 | Role | Work dir | Branch / PR target | Notes |

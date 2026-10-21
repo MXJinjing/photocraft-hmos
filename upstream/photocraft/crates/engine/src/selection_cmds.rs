@@ -30,10 +30,6 @@ fn mode(p: &Value) -> SelectionMode {
 
 /// A Color Range replacement is scoped to the selection that was active when it opened.
 /// Explicit add/subtract/intersect operations retain their normal selection-combine semantics.
-fn point_in_selection(doc: &Document, x: i32, y: i32) -> bool {
-    doc.selection.as_ref().is_none_or(|selection| selection.sample_channel(x, y, 0) > 0.0)
-}
-
 fn scope_color_range(mask: &mut [f32], doc: &Document, area: Rect, m: SelectionMode) {
     if m != SelectionMode::Replace {
         return;
@@ -50,10 +46,17 @@ fn scope_color_range(mask: &mut [f32], doc: &Document, area: Rect, m: SelectionM
 fn sample_pixels(s: &Session, all_layers: bool) -> Result<(Rect, Vec<[f32; 4]>)> {
     let d = s.active().ok_or(EngineError::NoDocument)?;
     let area = d.doc.bounds();
+    // Match the decoders' raster budget before either the layer or composite path allocates.
+    let len = area.size().area();
+    let max_bytes: u64 = if cfg!(target_pointer_width = "64") { 8 << 30 } else { 2 << 30 };
+    if len > max_bytes / std::mem::size_of::<[f32; 4]>() as u64 {
+        return Err(EngineError::Other("the canvas is too large to sample for a selection".into()));
+    }
     let layer = d.active_layer.and_then(|id| d.doc.layer(id)).and_then(|l| l.surface());
     match (all_layers, layer) {
         (false, Some(surf)) => {
-            let mut px = vec![[0.0f32; 4]; area.width() as usize * area.height() as usize];
+            let len = usize::try_from(len).map_err(|_| EngineError::Other("the canvas is too large to sample for a selection".into()))?;
+            let mut px = crate::allocation::filled(len, [0.0f32; 4], "sampling pixels for a selection")?;
             surf.read_rgba_into(area, &mut px);
             Ok((area, px))
         }
@@ -146,14 +149,7 @@ fn parse_color(p: &Value) -> [f32; 3] {
 
 /// Eyedropper samples from `key` (`[[x, y], …]` in document pixels): the colour under each point
 /// and where it was picked (area-local, for Localized Color Clusters).
-fn eyedropper_samples(
-    p: &Value,
-    key: &str,
-    area: Rect,
-    px: &[[f32; 4]],
-    allowed: &impl Fn(i32, i32) -> bool,
-    bad: &impl Fn(String) -> EngineError,
-) -> Result<Vec<sel::RangeSample>> {
+fn eyedropper_samples(p: &Value, key: &str, area: Rect, px: &[[f32; 4]], bad: &impl Fn(String) -> EngineError) -> Result<Vec<sel::RangeSample>> {
     let Some(pts) = p.get(key) else { return Ok(Vec::new()) };
     let pts = pts.as_array().ok_or_else(|| bad(format!("`{key}` must be [[x, y], …]")))?;
     let w = area.width() as usize;
@@ -171,9 +167,6 @@ fn eyedropper_samples(
         let Some(&[r, g, b, _]) = q else {
             return Err(bad(format!("point [{x}, {y}] in `{key}` is outside the canvas")));
         };
-        if !allowed(xi, yi) {
-            return Err(bad(format!("point [{x}, {y}] in `{key}` is outside the active selection")));
-        }
         out.push(sel::RangeSample { color: [r, g, b], at: Some(((xi - area.x0) as f32, (yi - area.y0) as f32)) });
     }
     Ok(out)
@@ -243,9 +236,6 @@ impl ColorRangeSamples {
                 let (x, y) = (x.floor() as i32, y.floor() as i32);
                 if !area.contains(x, y) {
                     return Err(bad(format!("point [{x}, {y}] in `{key}` is outside the canvas")));
-                }
-                if mode(p) == SelectionMode::Replace && !point_in_selection(doc, x, y) {
-                    return Err(bad(format!("point [{x}, {y}] in `{key}` is outside the active selection")));
                 }
                 let r = Rect::from_xywh(x, y, 1, 1);
                 let pixel = if !b(p, "sampleAllLayers", true) {
@@ -370,10 +360,10 @@ fn color_range(s: &mut Session, p: &Value) -> Result<Value> {
             let (area, px) = sample_pixels(s, b(p, "sampleAllLayers", true))?;
             let w = area.width() as usize;
             // The dialog's eyedroppers: colours picked on the image, at their positions.
-            let doc = &s.active().ok_or(EngineError::NoDocument)?.doc;
-            let allowed = |x, y| selection_mode != SelectionMode::Replace || point_in_selection(doc, x, y);
-            let plus = eyedropper_samples(p, "points", area, &px, &allowed, &bad)?;
-            let minus = eyedropper_samples(p, "subtractPoints", area, &px, &allowed, &bad)?;
+            // Like Photoshop's, they may sample anywhere on the canvas: an active selection only
+            // limits the result (scope_color_range), not where colours are picked (#5244).
+            let plus = eyedropper_samples(p, "points", area, &px, &bad)?;
+            let minus = eyedropper_samples(p, "subtractPoints", area, &px, &bad)?;
             let query = ColorRangeSamples::with_samples(s, p, area, &plus, &minus)?;
             let mask = query.coverage(&px, w, 1.0, [0.0, 0.0]);
             (area, mask)
@@ -771,6 +761,38 @@ mod tests {
     }
 
     #[test]
+    fn selection_sampling_refuses_oversized_canvases_before_reading_pixels() {
+        let mut s = Session::new();
+        s.add_document(
+            photocraft_doc::Document::new(
+                "large",
+                photocraft_geom::Size::new(300_000, 300_000),
+                photocraft_color::ColorMode::Rgb,
+                photocraft_color::SampleType::U8,
+            ),
+            None,
+        );
+        for all_layers in [false, true] {
+            assert!(sample_pixels(&s, all_layers).unwrap_err().to_string().contains("too large to sample"));
+        }
+        assert!(!s.active().unwrap().history.can_undo());
+    }
+
+    #[test]
+    fn selection_sampling_allocation_failure_keeps_the_selection() {
+        let mut s = session();
+        s.execute("select.rect", json!({"x": 5, "y": 5, "width": 4, "height": 4})).unwrap();
+        let before = s.active().unwrap().doc.clone();
+        let history = s.active().unwrap().history.entries();
+        crate::allocation::fail_next_for_test();
+        let result = s.execute("select.similar", json!({"sampleAllLayers": false}));
+        let _ = crate::allocation::capacity::<u8>(0, "reset failpoint");
+        assert!(result.is_err());
+        assert_eq!(*s.active().unwrap().doc, *before);
+        assert_eq!(s.active().unwrap().history.entries(), history);
+    }
+
+    #[test]
     fn modify_rejects_oversized_canvases_before_reading_the_mask() {
         let mut s = Session::new();
         let mut doc = photocraft_doc::Document::new(
@@ -830,14 +852,23 @@ mod tests {
     }
 
     #[test]
+    fn color_range_eyedropper_samples_anywhere_but_the_result_stays_in_the_selection() {
+        // #5244: as in Photoshop, a colour picked outside the active selection is accepted; only
+        // the result is limited to the selection.
+        let mut s = session();
+        s.execute("select.rect", json!({"x": 0, "y": 0, "width": 20, "height": 30})).unwrap();
+        let outside = json!({"points": [[30, 10]], "fuzziness": 0});
+        assert!(ColorRangeSamples::new(&s, &outside).is_ok());
+        s.execute("select.colorRange", outside).unwrap();
+        assert_eq!(coverage(&s, 10, 10), 1.0, "the red inside the selection is selected");
+        assert_eq!(coverage(&s, 30, 10), 0.0, "the sampled red outside it stays out");
+        assert_eq!(coverage(&s, 2, 2), 0.0, "white is not the sampled colour");
+    }
+
+    #[test]
     fn color_range_eyedropper_respects_selection_but_add_can_extend_it() {
         let mut s = session();
         s.execute("select.rect", json!({"x": 5, "y": 5, "width": 10, "height": 10})).unwrap();
-        let before = current_mask(&s.active().unwrap().doc).1;
-        let outside = json!({"points": [[30, 10]], "fuzziness": 0});
-        assert!(s.execute("select.colorRange", outside.clone()).unwrap_err().to_string().contains("outside the active selection"));
-        assert!(ColorRangeSamples::new(&s, &outside).err().unwrap().to_string().contains("outside the active selection"));
-        assert_eq!(current_mask(&s.active().unwrap().doc).1, before);
         s.execute("select.colorRange", json!({"points": [[10, 10]], "fuzziness": 0})).unwrap();
         assert_eq!(coverage(&s, 10, 10), 1.0);
         assert_eq!(coverage(&s, 30, 10), 0.0);

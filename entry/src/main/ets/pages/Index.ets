@@ -22,7 +22,7 @@ import { isFiniteHoverPoint, penHoverLeaveMessage, penHoverMoveMessage } from '.
 import { moveWindow, toggleWindowMaximize } from '../WindowChrome';
 import { fullscreenAvailable, fullscreenOn, reportFullscreen, requestFullscreen } from '../Fullscreen';
 import { subWindowHost, WindowRequest } from '../SubWindowHost';
-import { window } from '@kit.ArkUI';
+import { display, window } from '@kit.ArkUI';
 import { configureDisplayColor } from '../DisplayColor';
 import { SYSTEM_THEME_DARK, SYSTEM_THEME_LIGHT } from '../SystemTheme';
 import { pickFolder, sandboxDocumentDirectory, ensureOutputSubdirs } from '../folderPicker';
@@ -61,6 +61,12 @@ class NativeInput {
   alt: boolean = false;
   dx: number = 0;
   dy: number = 0;
+}
+
+class DisplayRotationInput {
+  kind: string = 'display_rotation';
+  rotation: number = 0;
+  landscape: boolean = false;
 }
 
 interface OpenSourceActions {
@@ -111,6 +117,7 @@ struct Index {
   private generation: number = 0;
   // 页面离开或重新初始化后，旧的异步结果不能继续操作当前页面。
   private alive: boolean = false;
+  private displayRotationListening: boolean = false;
   private documents: LocalDocuments | undefined = undefined;
   private documentUri: string = '';
   // Ordinary Save retains its authorized URI; Save As consumes its URI once.
@@ -125,6 +132,7 @@ struct Index {
   private ime: NativeImeAdapter = new NativeImeAdapter((message: string): void => native.input(message));
   private printing: NativePrintAdapter = new NativePrintAdapter(this.context,
     (message: string): void => { if (this.alive) { this.failure = message; } });
+  private readonly onDisplayChange = (_id: number): void => { this.sendDisplayRotation(); };
   private drainOpens(): void {
     for (let file of takeOpens()) {
       let name = file.name;
@@ -190,6 +198,7 @@ struct Index {
       setCloseRequest((): void => { native.close(); });
       this.drainOpens();
       this.stylus.start();
+      this.startDisplayRotation();
     } catch (error) {
       if (this.alive && generation === this.generation) { this.failure = (error as Error).message; }
     }
@@ -203,12 +212,46 @@ struct Index {
     this.initialized = false;
     this.saveTargets.clear();
     this.stylus.stop();
+    this.stopDisplayRotation();
     this.ime.stop();
     this.cursor.reset();
     subWindowHost.closeAll();
     setOpenListener(null);
     setCloseRequest(null);
     native.active(false);
+  }
+  private sendDisplayRotation(): void {
+    if (!this.initialized) { return; }
+    try {
+      const current = display.getDefaultDisplaySync();
+      const rotation = current.rotation;
+      if (!Number.isInteger(rotation) || rotation < 0 || rotation > 3) { return; }
+      let input = new DisplayRotationInput();
+      input.rotation = rotation;
+      input.landscape = current.width > current.height;
+      native.input(JSON.stringify(input));
+    } catch (error) {
+      console.info(`Display rotation unavailable: ${(error as Error).message}`);
+    }
+  }
+  private startDisplayRotation(): void {
+    if (this.displayRotationListening) { return; }
+    try {
+      display.on('change', this.onDisplayChange);
+      this.displayRotationListening = true;
+      this.sendDisplayRotation();
+    } catch (error) {
+      console.info(`Display rotation listener unavailable: ${(error as Error).message}`);
+    }
+  }
+  private stopDisplayRotation(): void {
+    if (!this.displayRotationListening) { return; }
+    this.displayRotationListening = false;
+    try {
+      display.off('change', this.onDisplayChange);
+    } catch (error) {
+      console.info(`Display rotation listener cleanup: ${(error as Error).message}`);
+    }
   }
   private onTitlebarChanged(): void {
     // ArkUI 的布局值使用 vp；桥接协议统一传物理像素，由 Rust 按 egui 缩放换算。
@@ -342,7 +385,7 @@ struct Index {
       this.restoreEditorFocus();
     }
   }
-    private chooseOpenSource(): Promise<string> {
+  private chooseOpenSource(): Promise<string> {
     return new Promise<string>((resolve: (value: string) => void, reject: (reason: Error) => void) => {
       const prompt = this.getUIContext().getPromptAction();
       let source: string = '';

@@ -66,6 +66,15 @@ impl Named for String {
     }
 }
 
+impl Named for photocraft_paint::BrushPreset {
+    fn name(&self) -> &str {
+        &self.name
+    }
+    fn set_name(&mut self, n: String) {
+        self.name = n;
+    }
+}
+
 /// All preset sets plus the panel state the engine needs.
 #[derive(Clone, Debug)]
 pub struct PresetState {
@@ -83,6 +92,8 @@ pub struct PresetState {
     pub documents: Vec<crate::document_preset_cmds::DocumentPreset>,
     /// File › New › Recent: the settings of documents recently created there, newest first.
     pub recent_documents: Vec<crate::document_preset_cmds::DocumentSettings>,
+    /// File › Export › Export As: named export configurations.
+    pub export_presets: Vec<crate::export_preset_cmds::ExportPreset>,
     pub clone: clone_source::CloneSources,
     /// The user defaults "Make Default" in the Layer Style dialog saves
     /// (effect kind → param set); "Reset to Default" restores them.
@@ -105,6 +116,7 @@ impl Default for PresetState {
             tool_presets: tools::builtin(),
             documents: Vec::new(),
             recent_documents: Vec::new(),
+            export_presets: Vec::new(),
             clone: Default::default(),
             layer_defaults: BTreeMap::new(),
             swatches: swatches::builtin(),
@@ -135,6 +147,8 @@ struct Persisted {
     #[serde(default)]
     recent_documents: Option<Value>,
     #[serde(default)]
+    export_presets: Option<Value>,
+    #[serde(default)]
     custom_shapes: Option<Vec<crate::edit_menu_cmds::CustomShape>>,
     #[serde(default)]
     layer_defaults: Option<BTreeMap<String, Value>>,
@@ -153,6 +167,7 @@ impl PresetState {
             tool_presets: Some(json!(self.tool_presets)),
             documents: Some(json!(self.documents)),
             recent_documents: Some(json!(self.recent_documents)),
+            export_presets: Some(json!(self.export_presets)),
             custom_shapes: Some(s.edit_state.custom_shapes.clone()),
             layer_defaults: Some(self.layer_defaults.clone()),
             swatches: Some(self.swatches.clone()),
@@ -162,10 +177,29 @@ impl PresetState {
 }
 
 impl Session {
-    /// Restore presets saved by [`PresetState::to_json`]. Missing sets keep their defaults; a
-    /// malformed blob is ignored (presets are never worth refusing to start over).
+    /// Restore presets saved by [`PresetState::to_json`]. Missing or malformed sets keep their
+    /// defaults (presets are never worth refusing to start over). Each set loads on its own: the
+    /// shell writes back only the keys that changed, so one damaged set would otherwise discard
+    /// every other set, saved document presets included, at each launch (#5602).
     pub fn load_presets_json(&mut self, v: Value) {
-        let Ok(p) = serde_json::from_value::<Persisted>(v) else { return };
+        let Value::Object(mut m) = v else { return };
+        fn take<T: serde::de::DeserializeOwned>(m: &mut serde_json::Map<String, Value>, key: &str) -> Option<T> {
+            m.remove(key).filter(|v| !v.is_null()).and_then(|v| serde_json::from_value(v).ok())
+        }
+        let p = Persisted {
+            gradients: take(&mut m, "gradients"),
+            gradient: take(&mut m, "gradient"),
+            styles: take(&mut m, "styles"),
+            shapes: take(&mut m, "shapes"),
+            pattern_groups: take(&mut m, "pattern_groups"),
+            tool_presets: take(&mut m, "tool_presets"),
+            documents: take(&mut m, "documents"),
+            recent_documents: take(&mut m, "recent_documents"),
+            export_presets: take(&mut m, "export_presets"),
+            custom_shapes: take(&mut m, "custom_shapes"),
+            layer_defaults: take(&mut m, "layer_defaults"),
+            swatches: take(&mut m, "swatches"),
+        };
         let st = &mut self.presets;
         if let Some(g) = p.gradients {
             st.gradients = g;
@@ -190,6 +224,9 @@ impl Session {
         }
         if let Some(r) = p.recent_documents {
             st.recent_documents = crate::document_preset_cmds::load_recent(r);
+        }
+        if let Some(e) = p.export_presets {
+            st.export_presets = crate::export_preset_cmds::load(e);
         }
         if let Some(c) = p.custom_shapes {
             self.edit_state.custom_shapes = c;
@@ -350,9 +387,124 @@ pub(crate) fn edit_groups<T: Named>(groups: &mut Vec<Group<T>>, action: &str, p:
 /// Params doc for the generic group commands.
 pub(crate) const GROUP_EDIT_PARAMS: &str = r##"{"action":"rename|delete|move|newGroup|renameGroup|deleteGroup","preset":name|[names] (rename/delete/move),"group":name? (narrows the lookup; the group for renameGroup/deleteGroup),"name":str (rename: new name; newGroup/renameGroup: group name),"to":group (move),"index":n? (move)}"##;
 
+fn restore_flat<T: Named>(items: &mut Vec<T>, builtin: Vec<T>) -> usize {
+    let mut restored = 0;
+    for item in builtin {
+        let name = item.name().to_ascii_lowercase();
+        if items.iter().any(|x| x.name().eq_ignore_ascii_case(&name)) {
+            continue;
+        }
+        items.push(item);
+        restored += 1;
+    }
+    restored
+}
+
+fn restore_groups<T: Named>(groups: &mut Vec<Group<T>>, builtin: Vec<Group<T>>) -> usize {
+    let mut restored = 0;
+    for group in builtin {
+        let gi = match groups.iter().position(|g| g.name == group.name) {
+            Some(i) => i,
+            None => {
+                groups.push(Group::new(&group.name, Vec::new()));
+                groups.len() - 1
+            }
+        };
+        for item in group.items {
+            if groups.iter().any(|g| g.items.iter().any(|x| x.name().eq_ignore_ascii_case(item.name()))) {
+                continue;
+            }
+            groups[gi].items.push(item);
+            restored += 1;
+        }
+    }
+    restored
+}
+
+fn restore_patterns(s: &mut Session) -> usize {
+    let mut restored = 0;
+    for pat in crate::pattern_cmds::builtin() {
+        if s.patterns.items.iter().any(|p| p.id == pat.id) {
+            continue;
+        }
+        s.patterns.items.push(pat);
+        restored += 1;
+    }
+    for group in patterns::builtin_groups() {
+        let gi = match s.presets.pattern_groups.iter().position(|g| g.name == group.name) {
+            Some(i) => i,
+            None => {
+                s.presets.pattern_groups.push(Group::new(&group.name, Vec::new()));
+                s.presets.pattern_groups.len() - 1
+            }
+        };
+        for id in group.items {
+            if s.patterns.items.iter().any(|p| p.id == id) && !s.presets.pattern_groups.iter().any(|g| g.items.contains(&id)) {
+                s.presets.pattern_groups[gi].items.push(id);
+            }
+        }
+    }
+    patterns::sync(s);
+    restored
+}
+
+fn restore_defaults(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "presets.restoreDefaults";
+    let kind = req_str(p, "kind", cmd)?;
+    let restored = match kind {
+        "brushes" => {
+            let n = restore_flat(&mut s.tools.presets, photocraft_paint::presets::builtin());
+            s.brush_presets_changed();
+            n
+        }
+        "gradients" => {
+            let n = restore_groups(&mut s.presets.gradients, gradients::builtin());
+            s.presets_changed();
+            n
+        }
+        "patterns" => {
+            let n = restore_patterns(s);
+            s.presets_changed();
+            n
+        }
+        "styles" => {
+            let n = restore_groups(&mut s.presets.styles, styles::builtin());
+            s.presets_changed();
+            n
+        }
+        "shapes" => {
+            let n = restore_groups(&mut s.presets.shapes, shapes::builtin());
+            s.presets_changed();
+            n
+        }
+        "swatches" => {
+            let n = restore_groups(&mut s.presets.swatches, swatches::builtin());
+            s.presets_changed();
+            n
+        }
+        "toolPresets" => {
+            let n = restore_flat(&mut s.presets.tool_presets, tools::builtin());
+            s.presets_changed();
+            n
+        }
+        _ => return Err(bad(cmd, format!("unknown preset kind `{kind}`"))),
+    };
+    Ok(json!({"kind": kind, "restored": restored}))
+}
+
 /// Every preset-panel command.
 pub fn specs() -> Vec<CommandSpec> {
-    let mut v = gradients::specs();
+    let mut v = vec![CommandSpec {
+        id: "presets.restoreDefaults",
+        label: "Restore Defaults",
+        menu: &[],
+        shortcut: None,
+        params: r#"{"kind":"brushes|gradients|patterns|styles|shapes|swatches|toolPresets"} → {kind, restored}"#,
+        enabled: always,
+        run: restore_defaults,
+        journal: true,
+    }];
+    v.extend(gradients::specs());
     v.extend(patterns::specs());
     v.extend(styles::specs());
     v.extend(shapes::specs());

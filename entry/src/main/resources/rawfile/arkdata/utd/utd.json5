@@ -1,7 +1,7 @@
 {
   "UniformDataTypeDeclarations": [
     {
-      "TypeId": "io.github.mxjinjing.photocraft.pcraft",
+      "TypeId": "io.github.storytold.photocraft.hmos.pcraft",
       "BelongingToTypes": [
         "general.image"
       ],
@@ -15,7 +15,7 @@
       "ReferenceURL": ""
     },
     {
-      "TypeId": "io.github.mxjinjing.photocraft.webp",
+      "TypeId": "io.github.storytold.photocraft.hmos.webp",
       "BelongingToTypes": [
         "general.image"
       ],
@@ -29,7 +29,7 @@
       "ReferenceURL": ""
     },
     {
-      "TypeId": "io.github.mxjinjing.photocraft.heif",
+      "TypeId": "io.github.storytold.photocraft.hmos.heif",
       "BelongingToTypes": [
         "general.image"
       ],
@@ -46,7 +46,7 @@
       "ReferenceURL": ""
     },
     {
-      "TypeId": "io.github.mxjinjing.photocraft.psb",
+      "TypeId": "io.github.storytold.photocraft.hmos.psb",
       "BelongingToTypes": [
         "com.adobe.photoshop-image"
       ],
@@ -62,7 +62,7 @@
       "ReferenceURL": ""
     },
     {
-      "TypeId": "io.github.mxjinjing.photocraft.qoi",
+      "TypeId": "io.github.storytold.photocraft.hmos.qoi",
       "BelongingToTypes": [
         "general.image"
       ],
@@ -76,7 +76,7 @@
       "ReferenceURL": ""
     },
     {
-      "TypeId": "io.github.mxjinjing.photocraft.hdr",
+      "TypeId": "io.github.storytold.photocraft.hmos.hdr",
       "BelongingToTypes": [
         "general.image"
       ],
@@ -90,7 +90,7 @@
       "ReferenceURL": ""
     },
     {
-      "TypeId": "io.github.mxjinjing.photocraft.portable-image",
+      "TypeId": "io.github.storytold.photocraft.hmos.portable-image",
       "BelongingToTypes": [
         "general.image"
       ],
@@ -106,7 +106,7 @@
       "ReferenceURL": ""
     },
     {
-      "TypeId": "io.github.mxjinjing.photocraft.camera-raw",
+      "TypeId": "io.github.storytold.photocraft.hmos.camera-raw",
       "BelongingToTypes": [
         "general.raw-image"
       ],

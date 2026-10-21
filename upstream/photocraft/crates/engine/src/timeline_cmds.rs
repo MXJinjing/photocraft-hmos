@@ -12,7 +12,7 @@ use crate::{EngineError, Result, Session};
 
 /// Longest timeline, in frames: every frame becomes a surface in a new video layer and a file in
 /// Render Video, so `duration` is capped well before it can exhaust memory or overflow (#1009).
-const MAX_DURATION: usize = 1_000_000;
+pub(crate) const MAX_DURATION: usize = 1_000_000;
 /// Highest frame rate; larger values only come from mistakes and become `inf` as `f32` (#1009).
 const MAX_FPS: f32 = 1000.0;
 

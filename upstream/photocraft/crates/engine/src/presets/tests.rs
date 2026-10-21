@@ -61,6 +61,32 @@ fn gradient_builtins_and_listing() {
 }
 
 #[test]
+fn restore_defaults_restores_deleted_builtins_without_removing_user_presets() {
+    let mut s = session(8);
+    s.execute("brush.presets.save", json!({"name": "My Brush"})).unwrap();
+    s.execute("edit.definePattern", json!({"name": "My Pattern"})).unwrap();
+    let brush = s.tools.presets[0].name.clone();
+    s.execute("brush.presets.delete", json!({"name": brush})).unwrap();
+    s.execute("swatches.delete", json!({"swatch": "Black"})).unwrap();
+    s.execute("pattern.presets.edit", json!({"action": "delete", "preset": "Checkerboard"})).unwrap();
+    s.execute("swatches.add", json!({"name": "My Swatch"})).unwrap();
+
+    for (kind, restored) in [("brushes", brush.as_str()), ("swatches", "Black"), ("patterns", "Checkerboard")] {
+        let r = s.execute("presets.restoreDefaults", json!({"kind": kind})).unwrap();
+        assert!(r["restored"].as_u64().unwrap() >= 1, "{kind}");
+        let present = match kind {
+            "brushes" => s.tools.presets.iter().any(|p| p.name == restored),
+            "swatches" => s.presets.swatches.iter().any(|g| g.items.iter().any(|p| p.name == restored)),
+            _ => crate::pattern_cmds::resolve(&s, restored).is_some(),
+        };
+        assert!(present, "{kind}: {restored}");
+    }
+    assert!(s.tools.presets.iter().any(|p| p.name == "My Brush"), "restore keeps user brushes");
+    assert!(s.presets.swatches.iter().any(|g| g.items.iter().any(|p| p.name == "My Swatch")), "restore keeps user swatches");
+    assert!(crate::pattern_cmds::resolve(&s, "My Pattern").is_some(), "restore keeps user patterns");
+}
+
+#[test]
 fn rainbow_gradient_presets() {
     let mut s = session(8);
     let v = s.execute("gradient.presets.list", json!({})).unwrap();
@@ -747,4 +773,30 @@ fn clone_source_errors_and_overlay() {
     let v: Value = s.execute("cloneSource.set", json!({"source": [1, 1], "width": 5000, "rotation": 270})).unwrap();
     assert_eq!(v["width"], json!(1000.0));
     assert_eq!(v["rotation"], json!(-90.0));
+}
+
+// ------------------------------------------------------------------ persistence
+
+/// #5602: one damaged preset set in the preferences file must not discard the saved New
+/// Document presets (or any other set) at the next launch.
+#[test]
+fn a_damaged_preset_set_keeps_the_other_sets() {
+    let mut s = Session::new();
+    let settings = json!({"width": 1600, "height": 900, "resolution": 144});
+    s.execute("document.presets.save", json!({"name": "Banner", "settings": settings})).unwrap();
+    let saved = s.presets.to_json(&s);
+    for key in ["gradients", "gradient", "styles", "shapes", "pattern_groups", "custom_shapes", "layer_defaults", "swatches"] {
+        let mut blob = saved.clone();
+        blob[key] = json!("not a preset set");
+        let mut next = Session::new();
+        next.load_presets_json(blob);
+        assert_eq!(next.presets.documents, s.presets.documents, "damaged `{key}`");
+        assert_eq!(next.presets.tool_presets.len(), Session::new().presets.tool_presets.len(), "damaged `{key}`");
+    }
+    // Null sets keep their defaults, as before.
+    let mut next = Session::new();
+    next.load_presets_json(json!({"tool_presets": null, "gradients": null, "documents": saved["documents"].clone()}));
+    assert_eq!(next.presets.tool_presets.len(), Session::new().presets.tool_presets.len());
+    assert_eq!(next.presets.gradients.len(), Session::new().presets.gradients.len());
+    assert_eq!(next.presets.documents, s.presets.documents);
 }

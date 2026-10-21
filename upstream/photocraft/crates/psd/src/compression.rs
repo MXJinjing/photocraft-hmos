@@ -279,10 +279,18 @@ pub(crate) fn validate_planes(compression: Compression, data: &[u8], layout: &Pl
     }
 }
 
+#[cfg(test)]
+thread_local! {
+    /// ZIP streams inflated on this thread (tests count passes over the merged image).
+    pub(crate) static INFLATES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 // Keep only the requested pixels, but consume the trailer to verify Adler-32.
 // A bounded surplus tolerates padding without unbounded decompression work.
 fn inflate_checked(data: &[u8], expected: u64, keep: bool) -> Result<Vec<u8>> {
     const OOM: PsdError = PsdError::LimitExceeded("not enough memory for the decoded channel data");
+    #[cfg(test)]
+    INFLATES.with(|n| n.set(n.get() + 1));
     let mut decoder = flate2::Decompress::new(true);
     let mut out = Vec::new();
     if keep {

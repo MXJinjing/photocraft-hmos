@@ -68,19 +68,11 @@ pub fn panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let mut st = std::mem::take(&mut app.ui.presets_ui);
     st.sizes.entry(PANEL.to_string()).or_insert(DEFAULT_SIZE);
     let max_h = (ui.available_height() - 30.0).max(60.0);
-    let card_border = crate::theme::Tokens::get(ui.ctx()).card_border;
-    let events = browser(
-        ui,
-        &mut st,
-        PANEL,
-        &groups,
-        Place { canvas, max_h, new_tip: tl!("Create new swatch"), pointer: app.stylus.feed.source() },
-        &mut |ui, r: Rect, gi, ii| {
-            let c = table.get(gi).and_then(|g| g.get(ii)).copied().unwrap_or(Color32::GRAY);
-            ui.painter().rect_filled(r, CornerRadius::same(2), c);
-            ui.painter().rect_stroke(r, CornerRadius::same(2), egui::Stroke::new(1.0, card_border), egui::StrokeKind::Inside);
-        },
-    );
+    // Flat, touching squares, as in Photoshop's Swatches panel (#5103).
+    let events = browser(ui, &mut st, PANEL, &groups, Place { canvas, max_h, new_tip: tl!("Create new swatch"), flush: true, pointer: app.stylus.feed.source() }, &mut |ui, r: Rect, gi, ii| {
+        let c = table.get(gi).and_then(|g| g.get(ii)).copied().unwrap_or(Color32::GRAY);
+        ui.painter().rect_filled(r, CornerRadius::ZERO, c);
+    });
     app.ui.presets_ui = st;
     let mods = ui.input(|i| i.modifiers);
     for e in events {
@@ -310,6 +302,20 @@ mod tests {
     /// The first swatch: below the first group header (22 px), after the 8 px grid inset.
     fn first_cell(h: &Harness<'_, PhotocraftApp>) -> egui::Pos2 {
         h.ctx.input(|i| i.viewport_rect()).min + vec2(8.0 + 12.0 + 8.0, 22.0 + 2.0 + 12.0 + 8.0)
+    }
+
+    /// #5103: the swatches touch, as in Photoshop's panel. A click just past the first cell's
+    /// right edge lands on the second swatch; with the preset grids' 4 px gap it hit nothing.
+    #[test]
+    fn swatches_touch_without_a_gap() {
+        let app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        let second = app.session.presets.swatches.first().and_then(|g| g.items.get(1)).map(|s| s.name.clone()).unwrap();
+        let mut h = Harness::builder().with_size(vec2(300.0, 300.0)).build_ui_state(|ui, app: &mut PhotocraftApp| panel(app, ui), app);
+        h.run_steps(2);
+        assert_eq!(h.state().ui.presets_ui.selected.get(PANEL), None);
+        let p = first_cell(&h);
+        click(&mut h, p + vec2(DEFAULT_SIZE / 2.0 + 1.0, 0.0), Modifiers::NONE);
+        assert_eq!(h.state().ui.presets_ui.selected.get(PANEL), Some(&second), "the second swatch, not a gap");
     }
 
     /// Clicking a swatch while characters are selected recolours them, not just the foreground.

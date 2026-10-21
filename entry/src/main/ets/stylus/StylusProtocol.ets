@@ -10,7 +10,7 @@ export enum StylusEventType {
 
 export enum StylusAction {
   DoubleTap = 'doubleTap',
-  LongPress = 'longPress'
+  Squeeze = 'squeeze'
 }
 
 export enum StylusPointerSource {

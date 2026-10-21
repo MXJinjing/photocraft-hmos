@@ -193,6 +193,24 @@ pub fn status_bar_pro(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     status_message(app, ui, &t);
 }
 
+/// The active document's layers don't fit the GPU memory budget (`perf.gpuLayerFit`): edits that
+/// redraw the whole document do it on the CPU, so say so in the status bar until they fit again.
+/// Clicking it opens Preferences › Performance, where GPU Memory raises the budget.
+pub fn gpu_memory_status(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
+    let Some(doc) = app.session.active().map(|st| st.doc.id.0) else { return };
+    let Some(fit) = app.perf.gpu_layer_fit.filter(|f| f.doc == doc && !f.fits()) else { return };
+    let t = Tokens::get(ui.ctx());
+    let resp = ui
+        .add(egui::Label::new(RichText::new(tl!("GPU Memory Full")).color(t.warning).size(12.0)).sense(Sense::click()))
+        .on_hover_text(crate::i18n::fmt(
+            tl!("The layers need {needed} of GPU memory and may hold {budget}, so edits that redraw the whole document do it on the CPU. Click to set GPU Memory."),
+            &[("needed", &fmt_bytes(fit.needed)), ("budget", &fmt_bytes(fit.budget))],
+        ));
+    if resp.clicked() {
+        crate::shortcut_dispatch::dispatch(app, ui.ctx(), "edit.preferences.performance");
+    }
+}
+
 /// The latest status message after a separator, in the warning colour when it is an error.
 fn status_message(app: &PhotocraftApp, ui: &mut egui::Ui, t: &Tokens) {
     if app.ui.status.is_empty() {
@@ -228,6 +246,16 @@ pub fn stylus_menu(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let resp = resp.on_hover_text(tl!("Stylus"));
     egui::Popup::menu(&resp).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
         let t = Tokens::get(ui.ctx());
+        // These persistent settings should keep the hover treatment when pressed or selected,
+        // rather than inheriting the global selection accent (too dark in ArkUI Pro Light).
+        let v = &mut ui.style_mut().visuals;
+        if matches!(t.kind, crate::theme::ThemeKind::ArkuiLight | crate::theme::ThemeKind::ArkuiProLight) {
+            v.widgets.hovered.bg_fill = t.menu_hover();
+            v.widgets.hovered.weak_bg_fill = t.menu_hover();
+        }
+        v.widgets.active = v.widgets.hovered;
+        v.selection.bg_fill = v.widgets.hovered.weak_bg_fill;
+        v.selection.stroke = v.widgets.hovered.fg_stroke;
         ui.set_min_width(240.0);
         if device.connected {
             ui.label(RichText::new(device.name.as_deref().unwrap_or(tl!("Connected pen"))).color(t.text));
@@ -254,7 +282,7 @@ pub fn stylus_menu(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
             }
         }
         ui.separator();
-        ui.label(RichText::new(tl!("Long-press pen body")).color(t.text_dim));
+        ui.label(RichText::new(tl!("Squeeze pen body")).color(t.text_dim));
         for &(mode, label) in STYLUS_LONG_PRESS_OPTIONS {
             if ui.add(egui::Button::selectable(app.session.prefs().tools.stylus_long_press == mode, tl!(label))).clicked() {
                 app.session.edit_prefs(|p| p.tools.stylus_long_press = mode);
@@ -273,6 +301,11 @@ pub fn drain_stylus_gestures(app: &mut PhotocraftApp, ctx: &egui::Context) {
     }
     app.stylus.note_tool(app.ui.tool);
     let gestures = app.stylus.feed.take_gestures();
+    // Diagnostics observes counters in the feed, not this action queue. Testing must not
+    // accidentally change tools or open a canvas popup; closing the window resumes shortcuts.
+    if app.ui.stylus_debug.open && app.ui.stylus_debug.suppress_actions {
+        return;
+    }
     if gestures.is_empty() {
         return;
     }
@@ -315,7 +348,7 @@ fn apply_pen_gesture(app: &mut PhotocraftApp, ctx: &egui::Context, gesture: crat
             StylusDoubleTap::Eraser => app.stylus.toggle_eraser_tool(&mut app.ui.tool),
             StylusDoubleTap::Previous => app.stylus.switch_previous_tool(&mut app.ui.tool),
         },
-        crate::stylus::PenGesture::LongPress => {
+        crate::stylus::PenGesture::Squeeze => {
             if app.session.prefs().tools.stylus_long_press == StylusLongPress::ContextMenu {
                 toggle_canvas_context_menu(app, ctx, at);
             }
@@ -465,6 +498,39 @@ mod tests {
         assert_eq!(status_info_text_with_units(&d, "dimensions", "", "", &units), "722.7 pt x 451.7 pt (240 ppi)");
     }
 
+    /// L3: layers over the GPU memory budget show "GPU Memory Full" in the status bar, for that
+    /// document only, and clicking it opens Preferences › Performance (GPU Memory).
+    #[test]
+    fn status_bar_says_when_layers_dont_fit_gpu_memory() {
+        use egui_kittest::{Harness, kittest::Queryable};
+        for theme in [crate::theme::ThemeKind::Pro, crate::theme::ThemeKind::Studio] {
+            let mut h = Harness::builder().with_size(vec2(1200.0, 700.0)).with_max_steps(64).build_eframe(move |cc| {
+                PhotocraftApp::setup_context(&cc.egui_ctx, theme);
+                let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+                app.ui.theme = theme;
+                app
+            });
+            h.state_mut().run("file.new", json!({"width": 800, "height": 600})).unwrap();
+            h.state_mut().sync_views();
+            h.run_steps(4);
+            let doc = h.state().session.active().unwrap().doc.id.0;
+            assert!(h.query_by_label("GPU Memory Full").is_none(), "{theme:?}: nothing measured yet");
+            let over = crate::gpu_canvas::LayerFit { doc, needed: 3 << 30, budget: 2 << 30 };
+            h.state_mut().perf.gpu_layer_fit = Some(crate::gpu_canvas::LayerFit { doc: doc + 1, ..over });
+            h.run_steps(2);
+            assert!(h.query_by_label("GPU Memory Full").is_none(), "{theme:?}: another document's layers");
+            h.state_mut().perf.gpu_layer_fit = Some(crate::gpu_canvas::LayerFit { budget: 4 << 30, ..over });
+            h.run_steps(2);
+            assert!(h.query_by_label("GPU Memory Full").is_none(), "{theme:?}: they fit");
+            h.state_mut().perf.gpu_layer_fit = Some(over);
+            h.run_steps(2);
+            h.get_by_label("GPU Memory Full").click();
+            h.run_steps(4);
+            let open = h.state().ui.dialogs.iter().any(|d| d.fields.get("section") == Some(&json!("performance")));
+            assert!(open, "{theme:?}: Preferences › Performance opens");
+        }
+    }
+
     #[test]
     fn status_bar_updates_dimensions_after_a_ruler_preference_change() {
         use egui_kittest::{Harness, kittest::Queryable};
@@ -511,7 +577,7 @@ mod tests {
         let mut gray = doc();
         gray.mode = photocraft_doc::ColorMode::Grayscale;
         gray.icc_profile = Some(photocraft_engine::color_cmds::working_profile(gray.mode).to_bytes());
-        assert_eq!(profile_name(&gray), "Dot Gain 20%-compatible (gamma 1.732, Photocraft)");
+        assert_eq!(profile_name(&gray), "Dot Gain 20%-compatible (gamma 1.732, PhotoCraft)");
 
         let mut custom = (*photocraft_engine::color_cmds::working_profile(photocraft_doc::ColorMode::Cmyk)).clone();
         custom.description = "PhotoCraft Studio CMYK".into();
@@ -702,7 +768,7 @@ mod tests {
         assert_eq!(crate::i18n::tr(zh, "No pen connected"), "未连接笔");
         assert_eq!(crate::i18n::tr(zh, "Stylus hover preview"), "手写笔悬停预览");
         assert_eq!(crate::i18n::tr(zh, "Double-tap pen body"), "双击笔身");
-        assert_eq!(crate::i18n::tr(zh, "Long-press pen body"), "轻捏笔身");
+        assert_eq!(crate::i18n::tr(zh, "Squeeze pen body"), "轻捏笔身");
 
         let app = crate::PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
         let mut status = Harness::builder().with_size(egui::vec2(1400.0, 80.0)).build_ui_state(
@@ -775,6 +841,56 @@ mod tests {
     }
 
     #[test]
+    fn stylus_menu_selected_buttons_keep_hover_fill() {
+        use egui_kittest::{Harness, kittest::Queryable};
+
+        fn row_fill(h: &Harness<'_, PhotocraftApp>, rect: egui::Rect) -> egui::Color32 {
+            h.output()
+                .shapes
+                .iter()
+                .find_map(|shape| match &shape.shape {
+                    egui::Shape::Rect(r)
+                        if r.rect.contains(rect.center()) && (r.rect.height() - rect.height()).abs() < 3.0 && r.fill != egui::Color32::TRANSPARENT =>
+                    {
+                        Some(r.fill)
+                    }
+                    _ => None,
+                })
+                .expect("button background is painted")
+        }
+
+        for kind in crate::theme::ThemeKind::ALL {
+            let app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+            let mut h = Harness::builder().with_size(vec2(640.0, 520.0)).build_ui_state(|ui, app| super::stylus_menu(app, ui), app);
+            PhotocraftApp::setup_context(&h.ctx, kind);
+            h.run_steps(3);
+            h.get_by_label("Stylus").click();
+            h.run_steps(3);
+            h.get_by_label("Block finger input").hover();
+            h.run_steps(12);
+            let rect = h.get_by_label("Block finger input").rect();
+            let hover = row_fill(&h, rect);
+            if matches!(kind, crate::theme::ThemeKind::ArkuiLight | crate::theme::ThemeKind::ArkuiProLight) {
+                assert_eq!(hover, egui::Color32::from_rgb(225, 237, 255), "{kind:?}: pale blue hover");
+            }
+            h.get_by_label("Block finger input").click();
+            h.run_steps(12);
+            assert!(h.state().session.prefs().tools.block_finger_input);
+            h.event(egui::Event::PointerMoved(egui::pos2(600.0, 500.0)));
+            h.run_steps(12);
+            assert_eq!(row_fill(&h, h.get_by_label("Block finger input").rect()), hover, "{kind:?}: selected matches hover after pointer leaves");
+            if matches!(kind, crate::theme::ThemeKind::ArkuiLight | crate::theme::ThemeKind::ArkuiProLight)
+                && let Some(dir) = std::env::var_os("PHOTOCRAFT_STYLUS_STATE_SCREENSHOTS")
+            {
+                h.render()
+                    .expect("render stylus settings")
+                    .save(std::path::PathBuf::from(dir).join(format!("{}-stylus-selected.png", kind.id())))
+                    .expect("save screenshot");
+            }
+        }
+    }
+
+    #[test]
     fn pen_body_gestures_follow_the_stylus_menu_settings() {
         use crate::state::Tool;
         let mut app = crate::PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
@@ -786,7 +902,7 @@ mod tests {
         assert!(app.ui.brush_picker.is_none());
 
         app.session.edit_prefs(|p| p.tools.stylus_long_press = StylusLongPress::Off);
-        super::apply_pen_gesture(&mut app, &egui::Context::default(), crate::stylus::PenGesture::LongPress, [8.0, 8.0]);
+        super::apply_pen_gesture(&mut app, &egui::Context::default(), crate::stylus::PenGesture::Squeeze, [8.0, 8.0]);
         assert!(app.ui.brush_picker.is_none());
 
         app.session.edit_prefs(|p| p.tools.stylus_double_tap = StylusDoubleTap::Off);
@@ -819,7 +935,7 @@ mod tests {
         tool_event(&mut app, ToolEvent::Down { x: 90.0, y: 80.0, pressure: 1.0 }, egui::Modifiers::NONE);
         tool_event(&mut app, ToolEvent::Up { x: 90.0, y: 80.0 }, egui::Modifiers::NONE);
         let expected = ViewXform::active(&app).unwrap().to_screen(48.0, 36.0);
-        app.stylus.feed.push_gesture(PenGesture::LongPress, 1_000.0);
+        app.stylus.feed.push_gesture(PenGesture::Squeeze, 1_000.0);
         super::drain_stylus_gestures(&mut app, &egui::Context::default());
         assert_eq!(app.ui.brush_picker, Some([expected.x, expected.y]), "menu top-left is the last pen lift, not the pen press or later mouse click");
     }

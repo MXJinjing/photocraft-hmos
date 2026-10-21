@@ -40,12 +40,20 @@ pub enum HistSource {
     BelowLayer(LayerId),
     /// One layer on its own (the target of a destructive Image › Adjustments command).
     Layer(LayerId),
+    /// The gray plane a Curves target edits: a layer mask, a saved channel or the Quick Mask.
+    /// The dialog shows this plane's own levels, not the colour layers beneath (#5335).
+    Channel { layer: LayerId, surface: photocraft_engine::channel_cmds::GraySurface },
 }
 
 fn tag(source: HistSource, space: ToneSpace) -> u64 {
     let (k, id) = match source {
         HistSource::BelowLayer(l) => (1u64, l.0),
         HistSource::Layer(l) => (2, l.0),
+        HistSource::Channel { layer, surface } => match surface {
+            photocraft_engine::channel_cmds::GraySurface::LayerMask => (3, layer.0),
+            photocraft_engine::channel_cmds::GraySurface::Alpha(i) => (4, i as u64),
+            photocraft_engine::channel_cmds::GraySurface::QuickMask => (5, layer.0),
+        },
     };
     let s = match space {
         ToneSpace::Rgb => 0u64,
@@ -68,6 +76,38 @@ fn isolate(layers: &mut [Layer], id: LayerId) -> bool {
 
 /// Histograms of `doc` as seen by `source`, in the channels of `space`.
 pub fn compute_histograms(doc: &Document, source: HistSource, space: ToneSpace) -> Histograms {
+    let mut h = vec![
+        [0u32; 256];
+        match space {
+            ToneSpace::Rgb => 4,
+            ToneSpace::Cmyk => 5,
+            ToneSpace::Lab => 3,
+        }
+    ];
+    match source {
+        // The gray plane itself: its levels are what the curve edits, whatever the document's
+        // colour mode (#5335).
+        HistSource::Channel { layer, surface } => {
+            let surf = match surface {
+                photocraft_engine::channel_cmds::GraySurface::LayerMask => doc.layer(layer).and_then(|l| l.mask.as_ref()).map(|m| &m.surface),
+                photocraft_engine::channel_cmds::GraySurface::Alpha(i) => doc.channels.get(i).map(|c| &c.surface),
+                photocraft_engine::channel_cmds::GraySurface::QuickMask => doc.quick_mask.as_ref().map(|c| &c.surface),
+            };
+            if let Some(s) = surf
+                && let Some(bin) = h.first_mut()
+            {
+                *bin = gray_bins(s, doc.bounds());
+            }
+        }
+        HistSource::BelowLayer(_) | HistSource::Layer(_) => {
+            composite_bins(doc, source, space, &mut h);
+        }
+    }
+    Histograms { tag: tag(source, space), ch: h }
+}
+
+/// Bins of the composited image below (`BelowLayer`) or of one layer alone (`Layer`), in `space`.
+fn composite_bins(doc: &Document, source: HistSource, space: ToneSpace, h: &mut [[u32; 256]]) {
     let mut d = doc.clone();
     match source {
         HistSource::BelowLayer(hide) => {
@@ -78,14 +118,9 @@ pub fn compute_histograms(doc: &Document, source: HistSource, space: ToneSpace) 
         HistSource::Layer(id) => {
             isolate(&mut d.layers, id);
         }
+        HistSource::Channel { .. } => {}
     }
     let img = photocraft_compose::thumbnail(&d, 384);
-    let n = match space {
-        ToneSpace::Rgb => 4,
-        ToneSpace::Cmyk => 5,
-        ToneSpace::Lab => 3,
-    };
-    let mut h = vec![[0u32; 256]; n];
     let bin = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as usize;
     for p in img.pixels.as_chunks::<4>().0 {
         if p[3] == 0 {
@@ -115,7 +150,26 @@ pub fn compute_histograms(doc: &Document, source: HistSource, space: ToneSpace) 
             }
         }
     }
-    Histograms { tag: tag(source, space), ch: h }
+}
+
+/// 256-bin histogram of a gray plane: its levels in 0–255, sampled like the engine's auto-tone
+/// histograms so a big canvas costs no more than about a megapixel here (#5335).
+fn gray_bins(surf: &photocraft_raster::Surface, area: photocraft_geom::Rect) -> [u32; 256] {
+    let mut h = [0u32; 256];
+    let step = ((u64::from(area.width()) * u64::from(area.height())) / 1_000_000).max(1).isqrt().max(1) as i32;
+    let mut y = area.y0;
+    while y < area.y1 {
+        let mut x = area.x0;
+        while x < area.x1 {
+            let v = (surf.sample_channel(x, y, 0).clamp(0.0, 1.0) * 255.0).round() as usize;
+            if let Some(bin) = h.get_mut(v) {
+                *bin += 1;
+            }
+            x += step;
+        }
+        y += step;
+    }
+    h
 }
 
 /// Cached histograms for a tone editor; recomputed only when something other than the editor's
@@ -126,6 +180,7 @@ pub fn histograms(app: &mut PhotocraftApp, source: HistSource, space: ToneSpace)
     let want = tag(source, space);
     let layer = match source {
         HistSource::BelowLayer(l) | HistSource::Layer(l) => l,
+        HistSource::Channel { layer, .. } => layer,
     };
     let pixels_kept = view_only(st);
     if let Some((d, l, r, h)) = app.tone_hist.as_mut()
@@ -162,11 +217,17 @@ pub fn keep_after_commit(app: &mut PhotocraftApp, layer: LayerId, before: Option
     }
 }
 
+/// Display scale for a 256-bin histogram: bar heights are `v / top` clamped to 1, linear
+/// to the tallest bin like Photoshop. A percentile of the sorted bins degenerates on
+/// sparse histograms (few occupied levels sort 0 into every low index), drawing tiny
+/// counts as tall as the real peaks (#6574).
+/// Extracted from [`draw_histogram`] so the scaling is unit-testable.
+pub fn histogram_scale_top(h: &[u32; 256]) -> f32 {
+    h.iter().copied().max().unwrap_or(1).max(1) as f32 * 1.1
+}
+
 pub fn draw_histogram(p: &egui::Painter, r: Rect, h: &[u32; 256], color: Color32) {
-    // Scale to a high percentile so a single spike (e.g. pure white) doesn't flatten the rest.
-    let mut sorted: Vec<u32> = h.to_vec();
-    sorted.sort_unstable();
-    let top = sorted.get(250).copied().unwrap_or(1).max(1) as f32 * 1.1;
+    let top = histogram_scale_top(h);
     let mut pts = vec![egui::pos2(r.left(), r.bottom())];
     for (i, v) in h.iter().enumerate() {
         let x = r.left() + (i as f32 + 0.5) / 256.0 * r.width();
@@ -361,6 +422,69 @@ mod tests {
         assert!(h[0][255] > 0 && h[0][0] == 0, "the black layer above is hidden");
         assert_eq!(compute_histograms(&st.doc, HistSource::Layer(bg), ToneSpace::Cmyk).ch.len(), 5);
         assert_eq!(compute_histograms(&st.doc, HistSource::Layer(bg), ToneSpace::Lab).ch.len(), 3);
+    }
+
+    /// #5335: the Curves histogram of a targeted gray plane describes that plane, not the
+    /// colour layers beneath it: a channel filled with 25% grey over a black layer shows a
+    /// spike at 25% grey, not at black.
+    #[test]
+    fn channel_histogram_describes_the_gray_plane() {
+        use photocraft_engine::channel_cmds::GraySurface;
+        let mut s = photocraft_engine::Session::new();
+        s.execute("file.new", json!({"width": 32, "height": 32})).unwrap(); // white background
+        s.execute("layer.new.layer", json!({})).unwrap();
+        s.execute("select.rect", json!({"x": 0, "y": 0, "width": 32, "height": 32})).unwrap();
+        s.execute("edit.fill", json!({"color": "#000000"})).unwrap();
+        s.execute("channel.new", json!({"name": "Sky sel", "fill": "white"})).unwrap();
+        s.execute("layer.layerMask.revealAll", json!({})).unwrap();
+        let b = photocraft_geom::Rect::from_xywh(0, 0, 32, 32);
+        s.edit("fill-planes", |doc, active| {
+            doc.channels[0].surface.fill_rect(b, &[0.25]);
+            doc.layer_mut(active.unwrap()).unwrap().mask.as_mut().unwrap().surface.fill_rect(b, &[0.0]);
+            Ok(())
+        })
+        .unwrap();
+        let st = s.active().unwrap();
+        let layer = st.active_layer.unwrap();
+        let h = compute_histograms(&st.doc, HistSource::Channel { layer, surface: GraySurface::Alpha(0) }, ToneSpace::Rgb);
+        assert!(h[0][64] > 0, "a spike at 25% grey, got {:?}", &h[0][0..80]);
+        assert_eq!(h[0][0], 0, "not the black layer beneath");
+        let m = compute_histograms(&st.doc, HistSource::Channel { layer, surface: GraySurface::LayerMask }, ToneSpace::Rgb);
+        assert!(m[0][0] > 0, "the hidden mask is black");
+        // Each plane keeps its own cache entry: switching targets recomputes.
+        assert_ne!(
+            tag(HistSource::Channel { layer, surface: GraySurface::Alpha(0) }, ToneSpace::Rgb),
+            tag(HistSource::Channel { layer, surface: GraySurface::LayerMask }, ToneSpace::Rgb)
+        );
+        assert_ne!(tag(HistSource::Channel { layer, surface: GraySurface::LayerMask }, ToneSpace::Rgb), tag(HistSource::Layer(layer), ToneSpace::Rgb));
+    }
+
+    /// #6574: bar heights scale linearly to the tallest bin. A 90/10 black/white
+    /// histogram draws the small bar at a ninth of the big one, not full height.
+    #[test]
+    fn histogram_scale_is_proportional_for_two_level_images() {
+        let mut h = [0u32; 256];
+        h[0] = 100_000;
+        h[255] = 900_000;
+        let top = histogram_scale_top(&h);
+        let small = (h[0] as f32 / top).min(1.0);
+        let big = (h[255] as f32 / top).min(1.0);
+        assert!((small / big - 1.0 / 9.0).abs() < 0.02, "small/big = {}, top = {top}", small / big);
+    }
+
+    /// #6574: a sparse histogram (few occupied levels) must not scale to a bin
+    /// index that is 0: the old `sorted.get(250)` degenerated to `top = 1.1`,
+    /// drawing a few hundred samples as tall as hundreds of thousands.
+    #[test]
+    fn histogram_scale_does_not_degenerate_on_sparse_histograms() {
+        let mut h = [0u32; 256];
+        h[0] = 500_000;
+        h[128] = 300;
+        h[255] = 500_000;
+        let top = histogram_scale_top(&h);
+        assert!(top > h[128] as f32, "scale {top} must exceed the tiny middle bin");
+        let tiny = (h[128] as f32 / top).min(1.0);
+        assert!(tiny < 0.05, "tiny bin draws near-flat, got {tiny}");
     }
 }
 

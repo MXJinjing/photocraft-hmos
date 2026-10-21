@@ -100,6 +100,48 @@ pub(crate) fn reselect(s: &mut Session, ids: Vec<LayerId>, active: Option<LayerI
     }
 }
 
+/// Capture a selection target while its name is still known. Later renames/deletions must not
+/// change an earlier recorded selection. Direct, non-recording calls retain their numeric IDs.
+pub(crate) fn recorded_selection(s: &Session, mut p: Value) -> Value {
+    let Some(id) = p.get("layer").and_then(Value::as_u64).map(LayerId) else { return p };
+    let Some(st) = s.active() else { return p };
+    let Some(layer) = st.doc.layer(id) else { return p };
+    let matches: Vec<_> = st.doc.walk().into_iter().filter(|(_, _, l)| l.name == layer.name).map(|(_, _, l)| l.id).collect();
+    let Some(occurrence) = matches.iter().position(|candidate| *candidate == id) else { return p };
+    if let Some(fields) = p.as_object_mut() {
+        fields.remove("layer");
+        fields.insert("name".into(), json!(layer.name));
+        if matches.len() > 1 {
+            fields.insert("occurrence".into(), json!(occurrence));
+        }
+    }
+    p
+}
+
+fn selection_target(s: &Session, p: &Value) -> Result<LayerId> {
+    let Some(name) = p.get("name") else {
+        if p.get("occurrence").is_some() {
+            return Err(bad("layer.select", "`occurrence` requires `name`"));
+        }
+        return crate::commands::explicit_layer(s, p)?.ok_or_else(|| bad("layer.select", "needs `layer` or `name`"));
+    };
+    if p.get("layer").is_some() {
+        return Err(bad("layer.select", "use either `layer` or `name`, not both"));
+    }
+    let name = name.as_str().ok_or_else(|| bad("layer.select", "`name` must be a string"))?;
+    let occurrence = p
+        .get("occurrence")
+        .map(|v| v.as_u64().and_then(|n| usize::try_from(n).ok()).ok_or_else(|| bad("layer.select", "`occurrence` must be a non-negative integer")))
+        .transpose()?;
+    let st = s.active().ok_or(EngineError::NoDocument)?;
+    let matches: Vec<_> = st.doc.walk().into_iter().filter(|(_, _, l)| l.name == name).map(|(_, _, l)| l.id).collect();
+    if matches.len() > 1 && occurrence.is_none() {
+        return Err(bad("layer.select", format!("multiple layers named `{name}`; specify `occurrence`")));
+    }
+    let index = occurrence.unwrap_or(0);
+    matches.get(index).copied().ok_or_else(|| bad("layer.select", format!("no layer named `{name}` at occurrence {index}")))
+}
+
 /// Layer rows follow the Layers panel's visual order, not Document::walk's storage order.
 /// Closed groups hide their children unless both endpoints were selected programmatically.
 fn range_order(layers: &[Layer], include_collapsed: bool, out: &mut Vec<LayerId>) {
@@ -115,7 +157,7 @@ fn range_order(layers: &[Layer], include_collapsed: bool, out: &mut Vec<LayerId>
 
 /// `layer.select`: `{"layer": id, "mode": "replace|toggle|range|add|remove"}`.
 pub fn select(s: &mut Session, p: &Value) -> Result<Value> {
-    let id = crate::commands::explicit_layer(s, p)?.ok_or_else(|| bad("layer.select", "missing `layer`"))?;
+    let id = selection_target(s, p)?;
     let mode = p.get("mode").and_then(Value::as_str).unwrap_or("replace");
     let st = s.active().ok_or(EngineError::NoDocument)?;
     if st.doc.layer(id).is_none() {
@@ -221,7 +263,8 @@ fn can_align(s: &Session) -> std::result::Result<(), String> {
     let d = doc_state(s)?;
     match d.selected_layers().len() {
         0 => Err("no layer selected".into()),
-        // Photoshop aligns a single layer to the canvas (or to an active selection); 2+ align to each other.
+        // Photoshop aligns to an active selection however many layers are selected; without one,
+        // a single layer aligns to the canvas and 2+ align to each other.
         _ => Ok(()),
     }
 }
@@ -919,8 +962,9 @@ fn align(s: &mut Session, p: &Value, kind: &str) -> Result<Value> {
             "canvas" => doc.bounds(),
             "selection" => doc.selection.as_ref().map(|m| m.content_bounds()).ok_or_else(|| EngineError::Other("there is no selection to align to".into()))?,
             "auto" | "layers" => match (&doc.selection, sel.len()) {
-                // Photoshop: one layer plus an active selection aligns to the selection bounds.
-                (Some(m), 1) if to == "auto" => m.content_bounds(),
+                // Photoshop: with an active selection, the layers align to its bounds (Layer › Align
+                // Layers to Selection), however many are selected.
+                (Some(m), _) if to == "auto" && !m.content_bounds().is_empty() => m.content_bounds(),
                 // One layer with no selection aligns to the canvas (otherwise it would align to itself).
                 (None, 1) if to == "auto" => doc.bounds(),
                 _ => items.iter().fold(Rect::EMPTY, |a, (_, b)| a.union(b)),
@@ -1270,7 +1314,13 @@ fn merge_layers(s: &mut Session) -> Result<Value> {
         let fmt = PixelFormat::new(fmt.mode, fmt.sample, true);
         let mut merged = Layer::raster(top.name.clone(), fmt);
         merged.locks = top.locks;
-        *crate::pixels_mut(&mut merged)? = crate::pixels::composite_layers(&solo, fmt, None);
+        merged.label = top.label;
+        // Clipped layers of one chain merge into a layer still clipped to their base. Clipped
+        // layers of different chains don't: the result, at the top one's slot, would clip the
+        // lower chain's pixels to the upper chain's base.
+        let base = crate::clip_group::base_of(doc, top_id);
+        merged.clipped = base.is_some() && solo.layers.iter().all(|l| l.clipped && crate::clip_group::base_of(doc, l.id) == base);
+        *crate::pixels_mut(&mut merged)? = crate::pixels::composite_layers_uncropped(&solo, fmt);
         let mid = merged.id;
         // Hidden selected layers are discarded, as in Photoshop.
         for id in &ids[..ids.len() - 1] {
@@ -1389,7 +1439,7 @@ pub fn specs() -> Vec<CommandSpec> {
             CommandSpec { id: $id, label: $label, menu: $menu, shortcut: $sc, params: $params, enabled: $enabled, journal: true, run: $run }
         };
     }
-    const ALIGN: &str = r##"{"to":"auto|layers|selection|canvas"="auto"} (auto: the selection bounds with one layer and an active selection, else the selected layers' bounds)"##;
+    const ALIGN: &str = r##"{"to":"auto|layers|selection|canvas"="auto"} (auto: the active selection's bounds when there is one, however many layers are selected; else one layer aligns to the canvas and several to their combined bounds)"##;
     vec![
         spec!("select.allLayers", "All Layers", &["Select"], Some("Cmd+Alt+A"), "{}", has_doc, |s, _| select_all_layers(s)),
         spec!("select.deselectLayers", "Deselect Layers", &["Select"], None, "{}", has_doc, |s, _| {
@@ -1437,7 +1487,15 @@ pub fn specs() -> Vec<CommandSpec> {
             link_layers(s)
         }),
         spec!("layer.mergeLayers", "Merge Layers", &["Layer"], Some("Cmd+E"), "{} (one layer selected: Merge Down)", has_layer, |s, _| merge_layers(s)),
-        spec!("layer.new.groupFromLayers", "Group from Layers…", &["Layer", "New"], None, r##"{"name":str?}"##, has_layer, group_layers),
+        spec!(
+            "layer.new.groupFromLayers",
+            "Group from Layers…",
+            &["Layer", "New"],
+            None,
+            r##"{"layer":id?,"name":str?} (no layer: every selected layer)"##,
+            has_layer,
+            group_layers
+        ),
         spec!("layer.arrange.reverse", "Reverse", &["Layer", "Arrange"], None, "{}", two_plus, |s, _| reverse(s)),
         spec!(
             "layer.lockLayers",
@@ -2049,6 +2107,37 @@ mod tests {
         // Two layers can't be distributed.
         select_all(&mut s, &[a, b]);
         assert!(!s.is_enabled("layer.distribute.leftEdges"));
+    }
+
+    #[test]
+    fn merge_keeps_pixels_outside_the_canvas() {
+        // #5067: the merged layer was cropped to the 100x80 canvas.
+        let mut s = session(8);
+        let a = rect_layer(&mut s, Rect::new(-30, -20, 10, 10));
+        let b = rect_layer(&mut s, Rect::new(90, 70, 140, 120));
+        select_all(&mut s, &[a, b]);
+        let m = LayerId(s.execute("layer.mergeLayers", json!({})).unwrap()["layer"].as_u64().unwrap());
+        let ml = doc(&s).layer(m).unwrap();
+        assert_eq!(layer_bounds(ml).unwrap(), Rect::new(-30, -20, 140, 120));
+        assert_eq!(ml.surface().unwrap().pixel(-10, -5)[3], 1.0);
+        assert_eq!(ml.surface().unwrap().pixel(130, 110)[3], 1.0);
+    }
+
+    #[test]
+    fn merge_down_and_merge_group_keep_pixels_outside_the_canvas() {
+        let mut s = session(8);
+        let a = rect_layer(&mut s, Rect::new(-30, -20, 10, 10));
+        let b = rect_layer(&mut s, Rect::new(90, 70, 140, 120));
+        s.execute("layer.mergeDown", json!({"layer": b.0})).unwrap();
+        assert_eq!(layer_bounds(doc(&s).layer(a).unwrap()).unwrap(), Rect::new(-30, -20, 140, 120));
+
+        let mut s = session(8);
+        let a = rect_layer(&mut s, Rect::new(-30, -20, 10, 10));
+        let b = rect_layer(&mut s, Rect::new(90, 70, 140, 120));
+        select_all(&mut s, &[a, b]);
+        let g = LayerId(s.execute("layer.groupLayers", json!({})).unwrap()["layer"].as_u64().unwrap());
+        s.execute("layer.mergeGroup", json!({"layer": g.0})).unwrap();
+        assert_eq!(layer_bounds(doc(&s).layer(g).unwrap()).unwrap(), Rect::new(-30, -20, 140, 120));
     }
 
     #[test]
