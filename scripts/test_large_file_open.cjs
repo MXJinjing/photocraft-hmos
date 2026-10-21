@@ -7,8 +7,6 @@ const handles = new Map();
 const calls = [];
 let nextFd = 10, failNative = false, changeGeneration = false;
 let selected = ['file:///Download/large.bmp'];
-const choice = { source: 'files' };
-let gallerySelected = ['file:///Download/gallery.png'];
 let host;
 const io = {
   OpenMode: { READ_ONLY: 0 },
@@ -36,11 +34,6 @@ class FileUri {
 const picker = {
   DocumentSelectOptions: class {},
   DocumentViewPicker: class { async select() { return selected; } }
-};
-const photoAccessHelper = {
-  PhotoSelectOptions: class {},
-  PhotoViewMIMETypes: { IMAGE_TYPE: 'image' },
-  PhotoViewPicker: class { async select() { return { photoUris: gallerySelected }; } }
 };
 const native = {
   openFile(name, fd) {
