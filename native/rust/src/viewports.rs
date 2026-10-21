@@ -186,6 +186,7 @@ impl Registry {
                     input: {
                         let mut state = input::State::default();
                         state.feed = self.feed.clone();
+                        state.viewport = id;
                         state
                     },
                     events: Vec::new(),

@@ -3,6 +3,50 @@ use egui::{ViewportClass, ViewportCommand};
 
 const ROOT_SIZE: egui::Vec2 = egui::vec2(1000., 800.);
 
+#[test]
+fn stylus_debug_uses_native_viewport_with_shared_pen_feed_and_system_close() {
+    use photocraft_ui_egui::{PhotocraftApp, stylus::PointerSource};
+    let ctx = egui::Context::default();
+    // HarmonyOS normally embeds non-document viewports. The monitor opts in only for itself.
+    assert!(ctx.embed_viewports());
+    PhotocraftApp::setup_context(&ctx, Default::default());
+    let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), Default::default());
+    app.native_doc_windows = true;
+    app.ui.stylus_debug.set_open(true, &app.stylus.feed.diagnostics());
+    let registry = Rc::new(RefCell::new(Registry::new(1., app.stylus.feed.clone())));
+    install(registry.clone());
+    let mut render = |time| {
+        registry.borrow_mut().begin_frame(time, None, 1.);
+        let output = ctx.run_ui(egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, ROOT_SIZE)), ..Default::default() }, |ui| {
+            photocraft_ui_egui::stylus_debug::window(&mut app, ui.ctx());
+        });
+        assert!(ctx.embed_viewports(), "other UI retains its embedding preference");
+        let mut finished = registry.borrow_mut().finish_frame(&output.viewport_output);
+        finished.textures.clear();
+        finished
+    };
+    assert_eq!(render(0.).frames.len(), 1);
+    assert!(matches!(registry.borrow_mut().take_outbox().as_slice(), [Command::Open {key:1, title, width:600, height:720, ..}] if title == "Stylus Debug"));
+    registry.borrow_mut().attach(1, 600, 720);
+    registry.borrow_mut().push_input(
+        1,
+        serde_json::from_str(r#"{"kind":"pointer","source":"pen","action":0,"x":50,"y":540,"sample":{"pressure":0.4,"tiltX":30,"tiltY":-20}}"#).unwrap(),
+        1.,
+    );
+    render(0.1);
+    registry.borrow_mut().request_close(1);
+    render(0.2);
+    assert_eq!(render(0.3).closed, [1]);
+    drop(render);
+    assert!(!app.ui.stylus_debug.open, "one system close click closes the monitor");
+    assert!(!app.ui.stylus_debug.open);
+    let d = app.stylus.feed.diagnostics();
+    assert_eq!(d.samples, 1);
+    assert_eq!(d.last_pen.unwrap().tilt_x, 30.);
+    assert_eq!(app.stylus.feed.source(), PointerSource::Pen);
+    assert!(app.session.journal.is_empty(), "testing in a sub-window never edits a document");
+}
+
 fn context() -> egui::Context {
     let ctx = egui::Context::default();
     ctx.set_embed_viewports(false);

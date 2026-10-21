@@ -3918,7 +3918,34 @@ curves	Smooth	Εξομάλυνση
 	Double-tap pen body	Διπλό πάτημα στο σώμα της γραφίδας
 	Current tool and Eraser	Τρέχον εργαλείο και Γόμα
 	Previous tool	Προηγούμενο εργαλείο
-	Long-press pen body	Παρατεταμένο πάτημα στο σώμα της γραφίδας
+	Squeeze pen body	Πίεση του σώματος της γραφίδας
+
+# Stylus diagnostics
+	Hovering	Αιώρηση
+	Stylus Debug…	Διάγνωση γραφίδας…
+	Stylus Debug	Διάγνωση γραφίδας
+	Use a real Pad and a pen that supports tilt, double-tap and squeeze.	Χρησιμοποιήστε πραγματικό tablet και γραφίδα με κλίση, διπλό άγγιγμα και πίεση σώματος.
+	No connection reported	Δεν αναφέρθηκε σύνδεση
+	Latest pen sample	Τελευταίο δείγμα γραφίδας
+	Tilt from vertical	Κλίση από την κατακόρυφο
+	Screen bearing	Κατεύθυνση στην οθόνη
+	Waiting for pen input	Αναμονή εισόδου γραφίδας
+	Samples	Δείγματα
+	Pen contact	Επαφή γραφίδας
+	No pen contact — values are retained	Χωρίς επαφή — οι τιμές διατηρούνται
+	Arrow: screen-projected tilt direction, not barrel rotation. Upright: no direction.	Βέλος: προβολή κλίσης στην οθόνη, όχι περιστροφή γραφίδας. Κατακόρυφα: χωρίς κατεύθυνση.
+	Zero tilt may mean an upright pen or unavailable hardware data.	Μηδενική κλίση μπορεί να σημαίνει κατακόρυφη γραφίδα ή μη διαθέσιμα δεδομένα υλικού.
+	HarmonyOS contact input does not currently report barrel rotation.	Η είσοδος επαφής HarmonyOS δεν αναφέρει προς το παρόν περιστροφή γραφίδας.
+	Received	Ελήφθη
+	Test gestures only (do not run shortcuts)	Μόνο δοκιμή χειρονομιών (χωρίς εκτέλεση συντομεύσεων)
+	No indicator means no event received, not necessarily unsupported hardware.	Χωρίς ένδειξη σημαίνει ότι δεν ελήφθη συμβάν, όχι απαραίτητα μη υποστηριζόμενο υλικό.
+	Test area — does not change the document	Περιοχή δοκιμής — δεν αλλάζει το έγγραφο
+	Draw here with the pen	Σχεδιάστε εδώ με τη γραφίδα
+	Reset test	Επαναφορά δοκιμής
+	Readings are before the pressure curve and remain available with tablet pressure off.	Τιμές πριν από την καμπύλη πίεσης, διαθέσιμες και με απενεργοποιημένη πίεση tablet.
+	Eraser end	Άκρο γόμας
+	Pen tip	Μύτη γραφίδας
+	Connected	Συνδεδεμένο
 	Show or hide context menu	Εμφάνιση ή απόκρυψη μενού περιβάλλοντος
 	Choose printer, copies and duplex in the system print dialog.	Επιλέξτε εκτυπωτή, αντίγραφα και εκτύπωση διπλής όψης στο παράθυρο εκτύπωσης του συστήματος.
 	System print preview opened	Άνοιξε η προεπισκόπηση εκτύπωσης του συστήματος

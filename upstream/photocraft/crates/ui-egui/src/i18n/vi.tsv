@@ -3658,7 +3658,34 @@ curves	Smooth	Làm mượt
 	Choose printer, copies and duplex in the system print dialog.	Chọn máy in, số bản sao và in hai mặt trong hộp thoại in của hệ thống.
 	Connected pen	Bút đã kết nối
 	Double-tap pen body	Chạm hai lần vào thân bút
-	Long-press pen body	Nhấn giữ thân bút
+	Squeeze pen body	Bóp thân bút
+
+# Stylus diagnostics
+	Hovering	Đang lơ lửng
+	Stylus Debug…	Chẩn đoán bút…
+	Stylus Debug	Chẩn đoán bút
+	Use a real Pad and a pen that supports tilt, double-tap and squeeze.	Dùng máy tính bảng thật và bút hỗ trợ độ nghiêng, chạm đúp và bóp thân bút.
+	No connection reported	Chưa báo kết nối
+	Latest pen sample	Mẫu bút mới nhất
+	Tilt from vertical	Góc nghiêng so với phương thẳng đứng
+	Screen bearing	Hướng trên màn hình
+	Waiting for pen input	Đang chờ đầu vào bút
+	Samples	Số mẫu
+	Pen contact	Bút đang chạm
+	No pen contact — values are retained	Không chạm — giữ lại giá trị
+	Arrow: screen-projected tilt direction, not barrel rotation. Upright: no direction.	Mũi tên: hướng nghiêng chiếu lên màn hình, không phải xoay thân bút. Thẳng đứng: không có hướng.
+	Zero tilt may mean an upright pen or unavailable hardware data.	Độ nghiêng bằng không có thể là bút thẳng đứng hoặc không có dữ liệu phần cứng.
+	HarmonyOS contact input does not currently report barrel rotation.	Đầu vào tiếp xúc HarmonyOS hiện không báo góc xoay thân bút.
+	Received	Đã nhận
+	Test gestures only (do not run shortcuts)	Chỉ thử cử chỉ (không chạy lối tắt)
+	No indicator means no event received, not necessarily unsupported hardware.	Không có đèn báo nghĩa là chưa nhận sự kiện, không nhất thiết phần cứng không hỗ trợ.
+	Test area — does not change the document	Vùng thử — không thay đổi tài liệu
+	Draw here with the pen	Vẽ bằng bút tại đây
+	Reset test	Đặt lại thử nghiệm
+	Readings are before the pressure curve and remain available with tablet pressure off.	Giá trị trước đường cong lực nhấn, vẫn hiển thị khi tắt lực nhấn máy tính bảng.
+	Eraser end	Đầu tẩy
+	Pen tip	Đầu bút
+	Connected	Đã kết nối
 	No pen connected	Chưa kết nối bút
 	Only show canvas	Chỉ hiện vùng vẽ
 	Right sidebar	Thanh bên phải

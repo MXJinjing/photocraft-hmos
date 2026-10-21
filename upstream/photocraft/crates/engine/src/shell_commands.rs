@@ -93,6 +93,14 @@ pub const SHELL_COMMANDS: &[(&str, &str, &[&str], Option<&str>)] = &[
     ("help.github", "PhotoCraft on GitHub", &["Help"], None),
     ("help.reportIssue", "Report an Issue…", &["Help"], None),
     ("help.systemInfo", "System Info…", &["Help"], None),
+    ("help.stylusDebug", "Stylus Debug…", &["Help"], None),
+    ("help.restore.brushes", "Brushes", &["Help", "Restore Defaults"], None),
+    ("help.restore.swatches", "Swatches", &["Help", "Restore Defaults"], None),
+    ("help.restore.patterns", "Patterns", &["Help", "Restore Defaults"], None),
+    ("help.restore.gradients", "Gradients", &["Help", "Restore Defaults"], None),
+    ("help.restore.styles", "Styles", &["Help", "Restore Defaults"], None),
+    ("help.restore.shapes", "Shapes", &["Help", "Restore Defaults"], None),
+    ("help.restore.toolPresets", "Tool Presets", &["Help", "Restore Defaults"], None),
     ("help.about", "About PhotoCraft", &["Help"], None),
 ];
 

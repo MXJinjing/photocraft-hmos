@@ -3192,7 +3192,34 @@ curves	Smooth	Сгладить
 	Double-tap pen body	Двойное нажатие на корпус пера
 	Current tool and Eraser	Текущий инструмент и ластик
 	Previous tool	Предыдущий инструмент
-	Long-press pen body	Долгое нажатие на корпус пера
+	Squeeze pen body	Сжатие корпуса пера
+
+# Stylus diagnostics
+	Hovering	Наведение
+	Stylus Debug…	Диагностика пера…
+	Stylus Debug	Диагностика пера
+	Use a real Pad and a pen that supports tilt, double-tap and squeeze.	Используйте настоящий планшет и перо с наклоном, двойным касанием и сжатием.
+	No connection reported	Подключение не сообщено
+	Latest pen sample	Последние данные пера
+	Tilt from vertical	Наклон от вертикали
+	Screen bearing	Направление на экране
+	Waiting for pen input	Ожидание ввода пером
+	Samples	Отсчёты
+	Pen contact	Перо касается экрана
+	No pen contact — values are retained	Нет контакта — значения сохранены
+	Arrow: screen-projected tilt direction, not barrel rotation. Upright: no direction.	Стрелка: проекция наклона на экран, не вращение пера. Вертикально: направления нет.
+	Zero tilt may mean an upright pen or unavailable hardware data.	Нулевой наклон означает вертикальное перо или отсутствие данных оборудования.
+	HarmonyOS contact input does not currently report barrel rotation.	Контактный ввод HarmonyOS пока не сообщает вращение пера.
+	Received	Получено
+	Test gestures only (do not run shortcuts)	Только проверка жестов (без выполнения быстрых команд)
+	No indicator means no event received, not necessarily unsupported hardware.	Нет индикатора — событие не получено; это не обязательно означает несовместимое оборудование.
+	Test area — does not change the document	Область проверки — не изменяет документ
+	Draw here with the pen	Рисуйте здесь пером
+	Reset test	Сбросить проверку
+	Readings are before the pressure curve and remain available with tablet pressure off.	Данные до кривой нажима, доступны и при отключённом нажиме планшета.
+	Eraser end	Конец с ластиком
+	Pen tip	Кончик пера
+	Connected	Подключено
 	Show or hide context menu	Показать или скрыть контекстное меню
 	Choose printer, copies and duplex in the system print dialog.	Выберите принтер, копии и двустороннюю печать в системном диалоге.
 	System print preview opened	Открыт системный предпросмотр печати

@@ -4091,7 +4091,34 @@ cameraRaw	Yellow	Sárga
 	Choose printer, copies and duplex in the system print dialog.	Válasszon nyomtatót, példányszámot és kétoldalas nyomtatást a rendszer nyomtatási párbeszédablakában.
 	Connected pen	Csatlakoztatott toll
 	Double-tap pen body	Dupla koppintás a toll testén
-	Long-press pen body	Hosszú nyomás a toll testén
+	Squeeze pen body	A toll testének összenyomása
+
+# Stylus diagnostics
+	Hovering	Lebegés
+	Stylus Debug…	Tolldiagnosztika…
+	Stylus Debug	Tolldiagnosztika
+	Use a real Pad and a pen that supports tilt, double-tap and squeeze.	Valódi táblagépet és döntést, dupla koppintást, illetve összenyomást támogató tollat használjon.
+	No connection reported	Nincs jelentett kapcsolat
+	Latest pen sample	Legutóbbi tollminta
+	Tilt from vertical	Dőlés a függőlegestől
+	Screen bearing	Képernyőirány
+	Waiting for pen input	Várakozás tollbevitelre
+	Samples	Minták
+	Pen contact	Tollérintkezés
+	No pen contact — values are retained	Nincs érintkezés — az értékek megmaradnak
+	Arrow: screen-projected tilt direction, not barrel rotation. Upright: no direction.	Nyíl: a dőlés képernyőre vetített iránya, nem tollforgatás. Függőlegesen nincs irány.
+	Zero tilt may mean an upright pen or unavailable hardware data.	A nulla dőlés függőleges tollat vagy hiányzó hardveradatot is jelenthet.
+	HarmonyOS contact input does not currently report barrel rotation.	A HarmonyOS érintéses bevitele jelenleg nem jelenti a toll forgatását.
+	Received	Fogadva
+	Test gestures only (do not run shortcuts)	Csak kézmozdulatok tesztelése (gyorsműveletek nélkül)
+	No indicator means no event received, not necessarily unsupported hardware.	A jelzés hiánya nem fogadott eseményt jelent, nem feltétlenül nem támogatott hardvert.
+	Test area — does not change the document	Tesztterület — nem módosítja a dokumentumot
+	Draw here with the pen	Rajzoljon ide a tollal
+	Reset test	Teszt visszaállítása
+	Readings are before the pressure curve and remain available with tablet pressure off.	Nyomásgörbe előtti értékek, kikapcsolt táblagépnyomás mellett is elérhetők.
+	Eraser end	Radírvég
+	Pen tip	Tollhegy
+	Connected	Csatlakoztatva
 	No pen connected	Nincs csatlakoztatott toll
 	Only show canvas	Csak a vászon megjelenítése
 	Right sidebar	Jobb oldalsáv

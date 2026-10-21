@@ -69,14 +69,21 @@ const inbox = compile(fs.readFileSync('entry/src/main/ets/openInbox.ets', 'utf8'
 const page = fs.readFileSync('entry/src/main/ets/pages/Index.ets', 'utf8');
 const drain = page.slice(page.indexOf('  private drainOpens()'), page.indexOf('  aboutToAppear()'));
 const open = page.slice(page.indexOf('  private async openFile('), page.indexOf('  private async selectSave('));
+let gallery = ['file:///Photo/gallery.png'];
+const photoAccessHelper = {
+  PhotoViewMIMETypes: { IMAGE_TYPE: 'image/*' },
+  PhotoSelectOptions: class {},
+  PhotoViewPicker: class { async select() { return { photoUris: gallery }; } }
+};
 const { Harness } = compile(`export class Harness {
   alive = true; generation = 1; context = {}; failure = ''; focused = 0;
-  ime = { stop() {} }; cursor = { reset() {} };
+  source = 'files'; ime = { stop() {} }; cursor = { reset() {} };
   documents = { owns: (path: string) => path.startsWith('/Download/owned/') };
   restoreEditorFocus() { this.focused++; }
   ${drain} ${open}
-  chooseOpenSource() { return Promise.resolve(choice.source); }
-}`, { fileIo: io, fileUri: { FileUri }, picker, photoAccessHelper, choice, native, takeOpens: inbox.takeOpens });
+}`, { fileIo: io, fileUri: { FileUri }, picker, photoAccessHelper, native, takeOpens: inbox.takeOpens });
+// The centered ArkUI source dialog needs a UIContext; the harness answers it directly.
+Harness.prototype.chooseOpenSource = async function () { return this.source; };
 
 (async () => {
   host = new Harness();
@@ -113,19 +120,24 @@ const { Harness } = compile(`export class Harness {
   assert.equal(handles.size, 0);
   changeGeneration = false;
 
+  // Dismissing the source dialog cancels before any picker or descriptor opens.
+  host.source = '';
+  await host.openFile(47);
+  assert.deepEqual(calls.at(-1), ['reply', 47, false, 'cancelled']);
+  assert.equal(handles.size, 0);
+  // Gallery goes through PhotoViewPicker and keeps the same descriptor handoff.
+  host.source = 'gallery';
+  await host.openFile(48);
+  assert.deepEqual(calls.at(-1).slice(0, 3), ['replyFile', 48, 'gallery.png']);
+  assert.equal(handles.size, 0);
+  host.source = 'files';
+
   failNative = true;
   await host.openFile(46);
   assert.deepEqual(calls.at(-1), ['reply', 46, false, 'native failure']);
   inbox.acceptOpenWant({ uri: 'file:///Download/failure.bmp' });
   assert.equal(host.failure, 'native failure');
   assert.equal(handles.size, 0);
-  failNative = false;
-  choice.source = 'gallery';
-  await host.openFile(47);
-  assert.deepEqual(calls.at(-1).slice(0, 3), ['replyFile', 47, 'gallery.png']);
-  choice.source = '';
-  await host.openFile(48);
-  assert.deepEqual(calls.at(-1), ['reply', 48, false, 'cancelled']);
   assert.equal(host.focused, 7);
-  console.log('PASS: large file descriptor handoff, cold/warm Wants, source names, cancellation, errors and handle cleanup.');
+  console.log('PASS: large file descriptor handoff, cold/warm Wants, source dialog (files/gallery/cancel), source names, cancellation, errors and handle cleanup.');
 })().catch(error => { console.error(error); process.exitCode = 1; });

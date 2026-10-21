@@ -1100,7 +1100,7 @@ fn humanize(key: &str) -> String {
     match key {
         "blockFingerInputConfigured" => return "Block finger input".into(),
         "stylusDoubleTap" => return "Double-tap pen body".into(),
-        "stylusLongPress" => return "Long-press pen body".into(),
+        "stylusLongPress" => return "Squeeze pen body".into(),
         "appearanceMode" => return "Appearance Mode".into(),
         "exrAcesCg" => return "Open color-less EXR as ACEScg".into(),
         "darkTheme" => return "Dark Theme".into(),
@@ -1774,7 +1774,7 @@ fn stylus_fields(ui: &mut egui::Ui, obj: &mut Map<String, Value>) {
         crate::widgets::dropdown(ui, "pref-tools.stylusDoubleTap", &mut double, &options, 240.0);
         obj.insert("stylusDoubleTap".into(), json!(double));
         ui.end_row();
-        ui.label(tl!("Long-press pen body"));
+        ui.label(tl!("Squeeze pen body"));
         let mut long = obj.get("stylusLongPress").and_then(Value::as_str).unwrap_or("contextMenu").to_string();
         let options: Vec<_> = crate::chrome_ui::STYLUS_LONG_PRESS_OPTIONS.iter().map(|(mode, label)| (mode.name().to_string(), tl!(label))).collect();
         crate::widgets::dropdown(ui, "pref-tools.stylusLongPress", &mut long, &options, 240.0);
@@ -3679,7 +3679,7 @@ mod tests {
         assert_eq!(draft["stylusDoubleTap"], "previous");
         assert_eq!(draft["stylusLongPress"], "off");
         assert!(h.query_by_label("Double-tap pen body").is_some());
-        assert!(h.query_by_label("Long-press pen body").is_some());
+        assert!(h.query_by_label("Squeeze pen body").is_some());
         assert!(h.query_by_label("Stylus hover preview").is_some());
         h.get_by_label("Block finger input").scroll_to_me();
         h.run_steps(3);

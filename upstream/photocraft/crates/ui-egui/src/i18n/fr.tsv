@@ -3227,7 +3227,34 @@ curves	Smooth	Lisser
 	Double-tap pen body	Double-clic sur le corps du stylet
 	Current tool and Eraser	Outil actuel et gomme
 	Previous tool	Outil précédent
-	Long-press pen body	Appui long sur le corps du stylet
+	Squeeze pen body	Pincement du corps du stylet
+
+# Stylus diagnostics
+	Hovering	Survol
+	Stylus Debug…	Diagnostic du stylet…
+	Stylus Debug	Diagnostic du stylet
+	Use a real Pad and a pen that supports tilt, double-tap and squeeze.	Utilisez une tablette réelle et un stylet prenant en charge l’inclinaison, le double toucher et le pincement.
+	No connection reported	Aucune connexion signalée
+	Latest pen sample	Dernière mesure du stylet
+	Tilt from vertical	Inclinaison par rapport à la verticale
+	Screen bearing	Direction à l’écran
+	Waiting for pen input	En attente du stylet
+	Samples	Mesures
+	Pen contact	Stylet en contact
+	No pen contact — values are retained	Aucun contact — valeurs conservées
+	Arrow: screen-projected tilt direction, not barrel rotation. Upright: no direction.	Flèche : direction de l’inclinaison projetée à l’écran, pas rotation du stylet. Vertical : aucune direction.
+	Zero tilt may mean an upright pen or unavailable hardware data.	Une inclinaison nulle peut indiquer un stylet vertical ou des données matérielles indisponibles.
+	HarmonyOS contact input does not currently report barrel rotation.	Les contacts HarmonyOS ne signalent actuellement pas la rotation du stylet.
+	Received	Reçu
+	Test gestures only (do not run shortcuts)	Tester uniquement les gestes (sans exécuter les raccourcis)
+	No indicator means no event received, not necessarily unsupported hardware.	Un voyant éteint signifie qu’aucun événement n’a été reçu, pas forcément un matériel incompatible.
+	Test area — does not change the document	Zone de test — ne modifie pas le document
+	Draw here with the pen	Dessinez ici avec le stylet
+	Reset test	Réinitialiser le test
+	Readings are before the pressure curve and remain available with tablet pressure off.	Mesures avant la courbe de pression, disponibles même si la pression de la tablette est désactivée.
+	Eraser end	Extrémité gomme
+	Pen tip	Pointe du stylet
+	Connected	Connecté
 	Show or hide context menu	Afficher ou masquer le menu contextuel
 	Choose printer, copies and duplex in the system print dialog.	Choisissez l’imprimante, les copies et le recto verso dans la boîte de dialogue système.
 	System print preview opened	Aperçu d’impression système ouvert

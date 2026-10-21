@@ -239,7 +239,7 @@ pub(crate) fn invoke_unguarded(app: &mut PhotocraftApp, ctx: &egui::Context, id:
                 None if app.services.default_save.is_some() => app.save(None),
                 None => {
                     let own = app.session.active().and_then(|d| d.path.clone().map(|p| (photocraft_engine::file_cmds::holds_at(&d.doc, &p), p, d)));
-                    let own = own.filter(|(_, path, _)| !path.starts_with("save-as/"));
+                    let own = own.filter(|(_, path, _)| !crate::file_open::is_ephemeral_save_token(path));
                     match own {
                         Some((true, path, d)) => {
                             if let Some(r) = crate::disk_change_prompt::intercept(app, d.doc.id, &path, false) {
@@ -356,6 +356,18 @@ pub(crate) fn invoke_unguarded(app: &mut PhotocraftApp, ctx: &egui::Context, id:
             Ok(Value::Null)
         }
         "help.about" => Ok(json!({"dialog": app.ui.open_dialog(DialogKind::About, Default::default())})),
+        "help.stylusDebug" => {
+            let show = match params.get("show") {
+                None => true,
+                Some(value) => value.as_bool().ok_or("show must be a boolean")?,
+            };
+            app.ui.stylus_debug.set_open(show, &app.stylus.feed.diagnostics());
+            Ok(json!({"visible": app.ui.stylus_debug.open, "input": app.stylus.feed.diagnostics()}))
+        }
+        id if id.starts_with("help.restore.") => {
+            let kind = id.trim_start_matches("help.restore.");
+            app.run("presets.restoreDefaults", json!({"kind": kind}))
+        }
         "help.systemInfo" => {
             let mut fields = serde_json::Map::new();
             fields.insert("systemInfo".into(), json!(true));
@@ -694,8 +706,9 @@ pub fn is_enabled(app: &PhotocraftApp, id: &str) -> bool {
     match id {
         "window.panel.activate" | "window.panel.layout" => true,
         "window.panel.group" | "window.panel.move" | "window.panel.float" | "window.panel.dock" | "window.panel.close" => !app.session.prefs().workspace_locked,
-        "file.open" | "file.exit" | "file.clearRecent" | "file.removeRecent" | "help.about" | "help.systemInfo" | "edit.search"
+        "file.open" | "file.exit" | "file.clearRecent" | "file.removeRecent" | "help.about" | "help.systemInfo" | "help.stylusDebug" | "edit.search"
         | "view.darkenInterface" | "view.lightenInterface" => true,
+        i if i.starts_with("help.restore.") => true,
         i if i.starts_with("file.openRecent.") => true,
         i if i.starts_with(DOCUMENT_ITEM) => true,
         i if crate::links::url_for(i).is_some() => true,
@@ -1189,6 +1202,12 @@ pub fn menu_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui, budget: f32) -> f32 
         v.widgets.inactive.bg_stroke = egui::Stroke::NONE;
         v.widgets.inactive.fg_stroke = egui::Stroke::new(1.0, t.text_dim);
         v.widgets.hovered.bg_stroke = egui::Stroke::NONE;
+        if matches!(t.kind, crate::theme::ThemeKind::ArkuiLight | crate::theme::ThemeKind::ArkuiProLight) {
+            for widget in [&mut v.widgets.hovered, &mut v.widgets.open, &mut v.widgets.active] {
+                widget.bg_fill = t.menu_hover();
+                widget.weak_bg_fill = t.menu_hover();
+            }
+        }
         egui::MenuBar::new().ui(ui, |ui| {
             // egui lays the bar out left to right; a right-to-left UI starts it at the right.
             let mut mirrored = rtl.then(|| ui.new_child(egui::UiBuilder::new().layout(crate::direction::row())));
@@ -2195,6 +2214,31 @@ mod open_recent_tests {
         invoke(&mut app, &ctx, "file.removeRecent", json!({"path": "/tmp/not-listed.png"})).unwrap();
         assert_eq!(app.ui.recent_files.len(), 2, "a path that isn't listed changes nothing");
         assert!(invoke(&mut app, &ctx, "file.removeRecent", json!({})).is_err(), "needs a path");
+    }
+
+    /// HarmonyOS ordinary Save / Save As use session-scoped `save-default/…` and `save-as/…`
+    /// tokens. Those must never land in Open Recent (Home › Recent would otherwise try to reopen
+    /// a path the host can no longer resolve after restart).
+    #[test]
+    fn ephemeral_save_tokens_are_not_listed_in_recent() {
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        app.push_recent("/docs/real.psd");
+        app.push_recent("save-default/10/untitled.psd");
+        app.push_recent("save-as/15/export.psd");
+        assert_eq!(app.ui.recent_files, vec!["/docs/real.psd".to_string()]);
+        assert_eq!(app.session.prefs().file_handling.recent_files, app.ui.recent_files);
+
+        // Leftovers from older builds are scrubbed on sync.
+        app.session.prefs.edit(|p| {
+            p.file_handling.recent_files = vec![
+                "save-default/1/a.psd".into(),
+                "/docs/keep.psd".into(),
+                "save-as/2/b.psd".into(),
+            ];
+        });
+        app.sync_recent();
+        assert_eq!(app.ui.recent_files, vec!["/docs/keep.psd".to_string()]);
+        assert_eq!(app.session.prefs().file_handling.recent_files, app.ui.recent_files);
     }
 
     #[cfg(not(target_arch = "wasm32"))]

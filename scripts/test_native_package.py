@@ -19,8 +19,8 @@ class NativePackageTests(unittest.TestCase):
         with zipfile.ZipFile(path, 'w') as archive:
             archive.writestr('module.json', json.dumps(config))
             archive.writestr('resources/base/profile/main_pages.json',
-                             json.dumps(pages) if pages is not None else
-                             (ROOT / 'entry/src/main/resources/base/profile/main_pages.json').read_text())
+                             json.dumps({'src': pages if pages is not None else
+                                         ['pages/Index', 'pages/SubWindow']}))
             archive.writestr('resources/rawfile/arkdata/utd/utd.json5',
                              (ROOT / 'entry/src/main/resources/rawfile/arkdata/utd/utd.json5').read_text())
             for abi, machine in libraries:
@@ -53,13 +53,14 @@ class NativePackageTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'unexpected ABIs'):
                 verify(path)
 
-    def test_unexpected_page_fails(self):
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / 'native.hap'
-            self.package(path, [('arm64-v8a', 183)],
-                         {'src': ['pages/Index', 'pages/SubWindow', 'pages/Web']})
-            with self.assertRaisesRegex(ValueError, 'non-native pages remain'):
-                verify(path)
+    def test_unexpected_or_missing_native_page_fails(self):
+        for pages in [['pages/Index'],
+                      ['pages/Index', 'pages/SubWindow', 'pages/Web']]:
+            with self.subTest(pages=pages), tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / 'native.hap'
+                self.package(path, [('arm64-v8a', 183)], pages=pages)
+                with self.assertRaisesRegex(ValueError, 'non-native pages remain'):
+                    verify(path)
 
 
 if __name__ == '__main__':

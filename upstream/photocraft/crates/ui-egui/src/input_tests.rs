@@ -471,7 +471,7 @@ fn open_stylus_menu(h: &mut Harness<'static, PhotocraftApp>, tool: crate::state:
     h.state_mut().ui.tool = tool;
     h.state_mut().session.edit_prefs(|p| p.tools.block_finger_input = true);
     h.state_mut().session.edit_prefs(|p| p.tools.stylus_long_press = crate::chrome_ui::StylusLongPress::ContextMenu);
-    h.state_mut().stylus.feed.push_gesture(crate::stylus::PenGesture::LongPress, 1_000.0);
+    h.state_mut().stylus.feed.push_gesture(crate::stylus::PenGesture::Squeeze, 1_000.0);
     let ctx = h.ctx.clone();
     crate::chrome_ui::drain_stylus_gestures(h.state_mut(), &ctx);
     h.run_steps(3);
