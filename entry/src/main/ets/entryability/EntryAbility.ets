@@ -49,6 +49,9 @@ export default class EntryAbility extends UIAbility {
 
   onConfigurationUpdate(newConfig: Configuration): void {
     this.syncSystemTheme(newConfig.colorMode);
+    // A system light/dark flip resets 2in1 caption buttons to the system mode; re-apply ours.
+    applySystemBars(this.context, AppStorage.get<string>('photocraftChrome') ?? LOADING_CHROME);
+    this.windowChrome?.refresh();
   }
 
   onForeground(): void {

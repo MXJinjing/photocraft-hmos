@@ -1,6 +1,6 @@
 import { window } from '@kit.ArkUI';
 import { BusinessError, deviceInfo } from '@kit.BasicServicesKit';
-import { LOADING_CHROME, paintWindow } from './SystemBars';
+import { LOADING_CHROME, paintDecorForChrome, paintWindow } from './SystemBars';
 
 const TITLE_HEIGHT: number = 38;
 
@@ -46,7 +46,13 @@ export class WindowChrome {
     // Window status, size and caption geometry can arrive in separate transactions.
     // Freeform entry may need longer than a size change before the three-button rect is ready.
     for (let delay of [50, 200, 600, 1200]) {
-      this.retries.push(setTimeout((): void => { if (this.watching) { this.readRect(); } }, delay));
+      this.retries.push(setTimeout((): void => {
+        if (!this.watching) { return; }
+        this.readRect();
+        // 2in1 starts floating and its caption may not accept setDecorButtonStyle until the
+        // window is shown (1300002); a later system theme flip also resets it. Re-assert.
+        this.repaintDecor();
+      }, delay));
     }
   }
 
@@ -63,6 +69,10 @@ export class WindowChrome {
     // theme chrome when layout changes so tablet → freeform matches a cold freeform start.
     let color = AppStorage.get<string>('photocraftChrome') ?? LOADING_CHROME;
     paintWindow(this.win, color);
+  }
+
+  private repaintDecor(): void {
+    paintDecorForChrome(this.win, AppStorage.get<string>('photocraftChrome') ?? LOADING_CHROME);
   }
 
   private applyDecor(): void {

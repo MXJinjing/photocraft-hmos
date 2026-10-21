@@ -1,3 +1,4 @@
+const decorPaints = [];
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
@@ -50,7 +51,8 @@ function runScenario(options = {}) {
       if (name === './SystemBars') {
         return {
           LOADING_CHROME: '#FF262626',
-          paintWindow: (paintedWin, color) => { paintCalls.push({ win: paintedWin, color }); }
+          paintWindow: (paintedWin, color) => { paintCalls.push({ win: paintedWin, color }); },
+          paintDecorForChrome: (paintedWin, color) => { decorPaints.push({ win: paintedWin, color }); }
         };
       }
       return { deviceInfo: { deviceType: options.deviceType ?? 'tablet' }, BusinessError: Error };
@@ -160,3 +162,14 @@ function runScenario(options = {}) {
 }
 
 console.log('Passed: title geometry transitions, freeform-entry recovery after fullscreen start, theme chrome re-paint on freeform entry, distinct status/size callbacks and cleanup.');
+
+// --- 2in1 cold floating start: delayed retries re-assert caption button style ---
+{
+  const s = runScenario({ deviceType: '2in1', status: WindowStatusType.FLOATING, rect: { width: 120, height: 38 } });
+  const before = decorPaints.length;
+  s.chrome.start();
+  s.flushTimers();
+  assert.ok(decorPaints.length > before, '2in1 retries repaint decor buttons');
+  s.chrome.stop();
+  console.log('2in1 decor retry ok');
+}

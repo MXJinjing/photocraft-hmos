@@ -1,6 +1,7 @@
 import { display, window } from '@kit.ArkUI';
 import { BusinessError, deviceInfo } from '@kit.BasicServicesKit';
 import { toggleWindowMaximize } from './WindowChrome';
+import { LOADING_CHROME, paintDecorForChrome, setChromeListener } from './SystemBars';
 
 // Floating document windows (upstream 0.9.0 `show_viewport_immediate`) are native HarmonyOS
 // sub-windows: each has system decoration and its own XComponent surface. Rust emits
@@ -110,6 +111,8 @@ export class SubWindowHost {
   private restoreRects: Map<number, window.Rect> = new Map<number, window.Rect>();
 
   attach(stage: window.WindowStage, send: (message: string) => void): void {
+    // Theme chrome changes repaint every sub-window caption (2in1 otherwise keeps system mode).
+    setChromeListener((argb: string): void => { this.windows.forEach((w: window.Window): void => { paintDecorForChrome(w, argb); }); });
     this.stage = stage;
     this.send = send;
   }
@@ -212,12 +215,15 @@ export class SubWindowHost {
     } catch (error) {
       console.info(`Sub-window decor buttons: ${(error as BusinessError).code} ${(error as BusinessError).message}`);
     }
+    this.paintDecor(win);
     const storage = new LocalStorage();
     storage.setOrCreate(SUB_WINDOW_KEY, key);
     // Must be set before loadContent so aboutToAppear sees a non-zero key.
     setPendingSubWindowKey(key);
     await win.loadContent(SUB_WINDOW_PAGE, storage);
     await win.showWindow();
+    // Caption style may only stick once the sub-window is visible.
+    this.paintDecor(win);
     // A close that raced with showWindow.
     if (this.closed.delete(key)) {
       this.close(key);
@@ -243,7 +249,13 @@ export class SubWindowHost {
     }
   }
 
+  private paintDecor(win: window.Window): void {
+    paintDecorForChrome(win, AppStorage.get<string>('photocraftChrome') ?? LOADING_CHROME);
+  }
+
   private onStatusChange(key: number, status: window.WindowStatusType): void {
+    const statusWin = this.windows.get(key);
+    if (statusWin !== undefined) { this.paintDecor(statusWin); }
     const win = this.windows.get(key);
     const stage = this.stage;
     if (win === undefined || stage === undefined) { return; }
