@@ -68,13 +68,24 @@ const photoAccessHelper = {
   PhotoSelectOptions: class {},
   PhotoViewPicker: class { async select() { return { photoUris: gallery }; } }
 };
+const persistCalls = [];
+function isFileUri(uri) { return typeof uri === 'string' && uri.startsWith('file://') && uri.length > 'file://'.length; }
+async function persistUri(uri, write) {
+  persistCalls.push(['persist', uri, !!write]);
+  return isFileUri(uri);
+}
+async function activateUri(uri, write) {
+  persistCalls.push(['activate', uri, !!write]);
+  return isFileUri(uri);
+}
 const { Harness } = compile(`export class Harness {
   alive = true; generation = 1; context = {}; failure = ''; focused = 0;
   source = 'files'; ime = { stop() {} }; cursor = { reset() {} };
   documents = { owns: (path: string) => path.startsWith('/Download/owned/') };
   restoreEditorFocus() { this.focused++; }
   ${drain} ${open}
-}`, { fileIo: io, fileUri: { FileUri }, picker, photoAccessHelper, native, takeOpens: inbox.takeOpens });
+}`, { fileIo: io, fileUri: { FileUri }, picker, photoAccessHelper, native, takeOpens: inbox.takeOpens,
+  isFileUri, persistUri, activateUri });
 // The centered ArkUI source dialog needs a UIContext; the harness answers it directly.
 Harness.prototype.chooseOpenSource = async function () { return this.source; };
 
@@ -89,15 +100,15 @@ Harness.prototype.chooseOpenSource = async function () { return this.source; };
   host.drainOpens();
   assert.equal(handles.size, 0);
   assert.deepEqual(calls.map(call => call.slice(0, 2)), [
-    ['openFile', 'large.bmp'], ['openFile', '/Download/owned/second.bmp']
+    ['openFile', 'file:///Download/large.bmp'], ['openFile', '/Download/owned/second.bmp']
   ]);
   inbox.setOpenListener(() => host.drainOpens());
   inbox.acceptOpenWant({ uri: 'file:///Download/warm.bmp' });
-  assert.equal(calls.at(-1)[1], 'warm.bmp');
+  assert.equal(calls.at(-1)[1], 'file:///Download/warm.bmp');
   assert.equal(handles.size, 0);
 
   await host.openFile(42);
-  assert.deepEqual(calls.at(-1).slice(0, 3), ['replyFile', 42, 'large.bmp']);
+  assert.deepEqual(calls.at(-1).slice(0, 3), ['replyFile', 42, 'file:///Download/large.bmp']);
   assert.equal(handles.size, 0);
   selected = ['file:///Download/owned/project.psd'];
   await host.openFile(43);
@@ -121,7 +132,7 @@ Harness.prototype.chooseOpenSource = async function () { return this.source; };
   // Gallery goes through PhotoViewPicker and keeps the same descriptor handoff.
   host.source = 'gallery';
   await host.openFile(48);
-  assert.deepEqual(calls.at(-1).slice(0, 3), ['replyFile', 48, 'gallery.png']);
+  assert.deepEqual(calls.at(-1).slice(0, 3), ['replyFile', 48, 'file:///Photo/gallery.png']);
   assert.equal(handles.size, 0);
   host.source = 'files';
 
