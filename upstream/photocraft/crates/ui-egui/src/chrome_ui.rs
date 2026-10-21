@@ -246,6 +246,16 @@ pub fn stylus_menu(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let resp = resp.on_hover_text(tl!("Stylus"));
     egui::Popup::menu(&resp).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
         let t = Tokens::get(ui.ctx());
+        // These persistent settings should keep the hover treatment when pressed or selected,
+        // rather than inheriting the global selection accent (too dark in ArkUI Pro Light).
+        let v = &mut ui.style_mut().visuals;
+        if matches!(t.kind, crate::theme::ThemeKind::ArkuiLight | crate::theme::ThemeKind::ArkuiProLight) {
+            v.widgets.hovered.bg_fill = t.menu_hover();
+            v.widgets.hovered.weak_bg_fill = t.menu_hover();
+        }
+        v.widgets.active = v.widgets.hovered;
+        v.selection.bg_fill = v.widgets.hovered.weak_bg_fill;
+        v.selection.stroke = v.widgets.hovered.fg_stroke;
         ui.set_min_width(240.0);
         if device.connected {
             ui.label(RichText::new(device.name.as_deref().unwrap_or(tl!("Connected pen"))).color(t.text));
@@ -828,6 +838,56 @@ mod tests {
         h.get_by_label("Block finger input").click();
         h.run_steps(2);
         assert!(h.state().session.prefs().tools.block_finger_input, "settings work while disconnected");
+    }
+
+    #[test]
+    fn stylus_menu_selected_buttons_keep_hover_fill() {
+        use egui_kittest::{Harness, kittest::Queryable};
+
+        fn row_fill(h: &Harness<'_, PhotocraftApp>, rect: egui::Rect) -> egui::Color32 {
+            h.output()
+                .shapes
+                .iter()
+                .find_map(|shape| match &shape.shape {
+                    egui::Shape::Rect(r)
+                        if r.rect.contains(rect.center()) && (r.rect.height() - rect.height()).abs() < 3.0 && r.fill != egui::Color32::TRANSPARENT =>
+                    {
+                        Some(r.fill)
+                    }
+                    _ => None,
+                })
+                .expect("button background is painted")
+        }
+
+        for kind in crate::theme::ThemeKind::ALL {
+            let app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+            let mut h = Harness::builder().with_size(vec2(640.0, 520.0)).build_ui_state(|ui, app| super::stylus_menu(app, ui), app);
+            PhotocraftApp::setup_context(&h.ctx, kind);
+            h.run_steps(3);
+            h.get_by_label("Stylus").click();
+            h.run_steps(3);
+            h.get_by_label("Block finger input").hover();
+            h.run_steps(12);
+            let rect = h.get_by_label("Block finger input").rect();
+            let hover = row_fill(&h, rect);
+            if matches!(kind, crate::theme::ThemeKind::ArkuiLight | crate::theme::ThemeKind::ArkuiProLight) {
+                assert_eq!(hover, egui::Color32::from_rgb(225, 237, 255), "{kind:?}: pale blue hover");
+            }
+            h.get_by_label("Block finger input").click();
+            h.run_steps(12);
+            assert!(h.state().session.prefs().tools.block_finger_input);
+            h.event(egui::Event::PointerMoved(egui::pos2(600.0, 500.0)));
+            h.run_steps(12);
+            assert_eq!(row_fill(&h, h.get_by_label("Block finger input").rect()), hover, "{kind:?}: selected matches hover after pointer leaves");
+            if matches!(kind, crate::theme::ThemeKind::ArkuiLight | crate::theme::ThemeKind::ArkuiProLight)
+                && let Some(dir) = std::env::var_os("PHOTOCRAFT_STYLUS_STATE_SCREENSHOTS")
+            {
+                h.render()
+                    .expect("render stylus settings")
+                    .save(std::path::PathBuf::from(dir).join(format!("{}-stylus-selected.png", kind.id())))
+                    .expect("save screenshot");
+            }
+        }
     }
 
     #[test]
