@@ -53,6 +53,15 @@ class NativePackageTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'unexpected ABIs'):
                 verify(path)
 
+    def test_expected_bundle_is_checked(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'native.hap'
+            self.package(path, [('arm64-v8a', 183)])
+            bundle = json.loads((ROOT / 'AppScope/app.json5').read_text())['app']['bundleName']
+            verify(path, expected_bundle=bundle)
+            with self.assertRaisesRegex(ValueError, 'unexpected bundle'):
+                verify(path, expected_bundle='invalid.bundle')
+
     def test_unexpected_or_missing_native_page_fails(self):
         for pages in [['pages/Index'],
                       ['pages/Index', 'pages/SubWindow', 'pages/Web']]:
