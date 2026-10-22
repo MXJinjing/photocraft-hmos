@@ -72,7 +72,7 @@ Use `--phase before` only with a baseline library: it requires finger drift and
 stable pen/mouse controls. `--verify-existing` rechecks saved evidence without
 operating the emulator. The script requires an emulator and an independent bundle.
 
-## Build and suite results
+## Original branch validation (PhotoCraft 0.9)
 
 - Native Rust suite: 98 passed, including all 135 transform combinations.
 - Touch navigation suite: 10 passed.
@@ -92,3 +92,21 @@ operating the emulator. The script requires an emulator and an independent bundl
   with `No adapter found`; all three pass with GPU access. These remaining UI
   failures and strict Clippy errors are outside the touch-transform changes and
   have not been altered in this fix. Logs: `work/transform-touch/ui-tests-gpu.log`.
+
+## PR validation on current main (PhotoCraft 0.12)
+
+PR #75 applies only this fix to `ad1658b6`, preserving main's newer physical
+right-button guard and pen-hover regression. The original working branch and its
+unrelated uncommitted work remain untouched.
+
+- Native Rust suite: 101 passed, including all 135 transform combinations.
+- Touch navigation suite: 10 passed (default test framework plus HarmonyOS UI).
+- Offline dependency metadata and 31-crate layering check: passed.
+- ARM64 release library and independent emulator HAP/test-HAP: built successfully;
+  `verify_native.py --expected-bundle ...transformtest`: passed.
+- The simulator helper defaults to the independent public-identity-derived test
+  bundle `io.github.storytold.photocraft.hmos.transformtest`.
+- Final emulator replay on this main base: passed. Touch/pen/mouse each changed
+  zero red fixture pixels after movement stopped; purely stationary cases retained
+  their original geometry. Evidence: `work/transform-touch/pr/after/` in the
+  original local workspace. No real device was operated.

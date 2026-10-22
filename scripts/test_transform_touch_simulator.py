@@ -14,7 +14,7 @@ from PIL import Image, ImageChops
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--hdc', default='/Applications/DevEco-Studio.app/Contents/sdk/default/openharmony/toolchains/hdc')
 parser.add_argument('--target', default='127.0.0.1:5555')
-parser.add_argument('--bundle', default='io.github.mxjinjing.photocraft.transformtest')
+parser.add_argument('--bundle', default='io.github.storytold.photocraft.hmos.transformtest')
 parser.add_argument('--phase', choices=('before', 'after'), default='after')
 parser.add_argument('--output-dir', type=Path, required=True)
 parser.add_argument('--verify-existing', action='store_true')
