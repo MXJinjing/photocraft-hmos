@@ -3859,7 +3859,10 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
         // and a click (or a long press that never moved) just ends it.
         let physical_right = app.services.right_button_down.as_ref().is_some_and(|f| f());
         let right_down = ui.input(|i| i.pointer.secondary_down()) || physical_right;
-        if strokes_live(tool)
+        // The transform keeps its own gesture, not app.drag. A brush's early/deferred
+        // press would restart that gesture against the already transformed box.
+        if !transform_owns_pointer
+            && strokes_live(tool)
             && !right_down
             && app.drag.is_none()
             && response.is_pointer_button_down_on()
