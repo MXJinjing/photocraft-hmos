@@ -86,7 +86,7 @@ pub fn invoke(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str, params: Va
 /// [`invoke`] without the unsaved-changes prompt, for once the user has already answered it.
 pub(crate) fn invoke_unguarded(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str, params: Value) -> Result<Value, String> {
     if let Some(tool) = crate::tool_shortcuts::tool(id) {
-        app.ui.tool = tool;
+        crate::tool_memory::select(app, tool);
         return Ok(json!({"tool": tool}));
     }
     if id == "ui.symmetryTransform" {
@@ -233,6 +233,9 @@ pub(crate) fn invoke_unguarded(app: &mut PhotocraftApp, ctx: &egui::Context, id:
         "file.import.videoFramesToLayers" if params.get("path").and_then(Value::as_str).is_none() => {
             app.ask_folder(|app, path| app.run("file.import.videoFramesToLayers", json!({"path": path})).map_err(|e| e.to_string()))
         }
+        "file.export.renderVideo" if params.get("dir").and_then(Value::as_str).is_none() => {
+            app.ask_folder(|app, dir| app.run("file.export.renderVideo", json!({"dir": dir})).map_err(|e| e.to_string()))
+        }
         "file.save" => {
             // Writes back only to a layered file that holds the whole document; anything else
             // goes through Save As, so the original is never overwritten with less (#3806).
@@ -242,7 +245,7 @@ pub(crate) fn invoke_unguarded(app: &mut PhotocraftApp, ctx: &egui::Context, id:
                 None if app.services.default_save.is_some() => app.save(None),
                 None => {
                     let own = app.session.active().and_then(|d| d.path.clone().map(|p| (photocraft_engine::file_cmds::holds_at(&d.doc, &p), p, d)));
-                    let own = own.filter(|(_, path, _)| !path.starts_with("save-as/"));
+                    let own = own.filter(|(_, path, _)| !crate::file_open::is_ephemeral_save_token(path));
                     match own {
                         Some((true, path, d)) => {
                             // Another app changed the file since it was opened or saved: ask first (#6596).
@@ -300,12 +303,21 @@ pub(crate) fn invoke_unguarded(app: &mut PhotocraftApp, ctx: &egui::Context, id:
             app.save_as_with(params.get("path").and_then(Value::as_str).map(str::to_string), choices)
         }
         "view.zoomIn" | "view.zoomOut" | "view.fitOnScreen" | "view.actualPixels" => app.run(id, params),
+        "view.darkenInterface" => crate::prefs_ui::step_brightness(app, ctx, false).map(|()| Value::Null),
+        "view.lightenInterface" => crate::prefs_ui::step_brightness(app, ctx, true).map(|()| Value::Null),
         "window.newWindowForDocument" => {
             let doc = app.session.active_index().ok_or("no document")?;
             let wid = app.ui.alloc_id();
             let view = app.ui.views[doc].clone();
             app.ui.windows.push(crate::state::DocWindow { id: wid, document: doc, view, open: true, position: None });
             Ok(json!({"window": wid}))
+        }
+        crate::window_fullscreen::COMMAND => {
+            if !crate::window_fullscreen::available(app) {
+                return Err("full screen is not available on this host".into());
+            }
+            crate::window_fullscreen::toggle(app);
+            Ok(Value::Null)
         }
         "window.theme.toggle" => {
             crate::prefs_ui::cycle_appearance(app, ctx);
@@ -329,7 +341,11 @@ pub(crate) fn invoke_unguarded(app: &mut PhotocraftApp, ctx: &egui::Context, id:
         | "window.theme.breezeLight"
         | "window.theme.breezeDark"
         | "window.theme.softLight"
-        | "window.theme.softDark" => {
+        | "window.theme.softDark"
+        | "window.theme.arkuiLight"
+        | "window.theme.arkuiDark"
+        | "window.theme.arkuiProLight"
+        | "window.theme.arkuiProDark" => {
             let k = crate::theme::ThemeKind::from_name(&id["window.theme.".len()..]).unwrap_or_default();
             app.set_theme(ctx, k);
             Ok(Value::Null)
@@ -347,6 +363,18 @@ pub(crate) fn invoke_unguarded(app: &mut PhotocraftApp, ctx: &egui::Context, id:
             Ok(Value::Null)
         }
         "help.about" => Ok(json!({"dialog": app.ui.open_dialog(DialogKind::About, Default::default())})),
+        "help.stylusDebug" => {
+            let show = match params.get("show") {
+                None => true,
+                Some(value) => value.as_bool().ok_or("show must be a boolean")?,
+            };
+            app.ui.stylus_debug.set_open(show, &app.stylus.feed.diagnostics());
+            Ok(json!({"visible": app.ui.stylus_debug.open, "input": app.stylus.feed.diagnostics()}))
+        }
+        id if id.starts_with("help.restore.") => {
+            let kind = id.trim_start_matches("help.restore.");
+            app.run("presets.restoreDefaults", json!({"kind": kind}))
+        }
         "help.systemInfo" => {
             let mut fields = serde_json::Map::new();
             fields.insert("systemInfo".into(), json!(true));
@@ -448,6 +476,9 @@ pub(crate) fn invoke_unguarded(app: &mut PhotocraftApp, ctx: &egui::Context, id:
         // the engine directly).
         photocraft_engine::pattern_fill_cmds::CREATE if params.as_object().is_none_or(|o| o.is_empty()) => {
             Ok(json!({"dialog": crate::pattern_fill_ui::open_new(app)?}))
+        }
+        "layer.newFillLayer.solidColor" if params.as_object().is_none_or(|o| o.is_empty()) => {
+            Ok(json!({"dialog": crate::solid_fill_ui::open_new(app).ok_or("no document is open")?}))
         }
         // Edit › Fill… from the menu or its shortcuts: the Fill dialog (with params: the engine).
         crate::fill_ui::COMMAND if params.as_object().is_none_or(|o| o.is_empty()) => {
@@ -682,11 +713,14 @@ pub fn is_enabled(app: &PhotocraftApp, id: &str) -> bool {
     match id {
         "window.panel.activate" | "window.panel.layout" => true,
         "window.panel.group" | "window.panel.move" | "window.panel.float" | "window.panel.dock" | "window.panel.close" => !app.session.prefs().workspace_locked,
-        "file.open" | "file.exit" | "file.clearRecent" | "file.removeRecent" | "help.about" | "help.systemInfo" | "edit.search" => true,
+        "file.open" | "file.exit" | "file.clearRecent" | "file.removeRecent" | "help.about" | "help.systemInfo" | "help.stylusDebug" | "edit.search"
+        | "view.darkenInterface" | "view.lightenInterface" => true,
+        i if i.starts_with("help.restore.") => true,
         i if i.starts_with("file.openRecent.") => true,
         i if i.starts_with(DOCUMENT_ITEM) => true,
         i if crate::links::url_for(i).is_some() => true,
         i if i.starts_with("window.theme.") => true,
+        crate::window_fullscreen::COMMAND => crate::window_fullscreen::available(app),
         "file.save" | "file.saveAs" | "file.export.exportAs" | "file.export.quickExportAsPng" => {
             app.session.active().is_some() && app.services.export.is_some()
         }
@@ -914,6 +948,9 @@ pub fn menu_items(app: &PhotocraftApp) -> Vec<MenuItem> {
     // 2) Our commands that Photoshop's tree doesn't list (or lists under another id).
     let mut extra: Vec<MenuItem> = Vec::new();
     for &(id, label, path, sc) in UI_COMMANDS {
+        if cfg!(feature = "harmonyos-ui") && matches!(id, "help.discord" | "help.website" | "help.artcraftWebsite") {
+            continue;
+        }
         extra.push(MenuItem {
             id: id.into(),
             label: label.into(),
@@ -1020,6 +1057,24 @@ pub fn menu_items(app: &PhotocraftApp) -> Vec<MenuItem> {
             MenuItem { id: "---".into(), label: "---".into(), path: vec!["Help".into()], shortcut: None, enabled: false, checked: None, color: None },
         );
     }
+    // Window › Enter / Exit Full Screen, right below the Theme submenu (HarmonyOS host service).
+    if crate::window_fullscreen::available(app)
+        && let Some(theme_end) = items.iter().rposition(|i| i.path.as_slice() == ["Window", "Theme"])
+    {
+        let on = crate::window_fullscreen::active(app);
+        items.insert(
+            theme_end + 1,
+            MenuItem {
+                id: crate::window_fullscreen::COMMAND.into(),
+                label: crate::window_fullscreen::label(on).into(),
+                path: vec!["Window".into()],
+                shortcut: None,
+                enabled: true,
+                checked: None,
+                color: None,
+            },
+        );
+    }
     // Window: the open documents in tab order, after a separator, the active one checked.
     if let Some(last) = items.iter().rposition(|i| i.path.first().map(String::as_str) == Some("Window")) {
         let window = || vec!["Window".to_string()];
@@ -1049,7 +1104,7 @@ pub fn menu_items(app: &PhotocraftApp) -> Vec<MenuItem> {
         }
     }
     if !prefs.menus.hidden.is_empty() {
-        items.retain(|i| !prefs.menus.hidden.contains(&i.id));
+        items.retain(|i| matches!(i.id.as_str(), "edit.menus" | "file.exit") || !prefs.menus.hidden.contains(&i.id));
     }
     if prefs.interface.show_menu_colors {
         for it in &mut items {
@@ -1144,6 +1199,9 @@ pub fn menu_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui, budget: f32) -> f32 
     let mut clicked: Option<String> = None;
     let t = crate::theme::Tokens::get(ui.ctx());
     let mut nav = crate::menu_nav::Nav::load(ui.ctx());
+    let mut keys = crate::menu_keys::Keys::load(ui.ctx());
+    nav.underline = keys.show_underlines(ui.ctx());
+    keys.take_first_row(&mut nav);
     ui.scope(|ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
         let v = &mut ui.style_mut().visuals;
@@ -1151,6 +1209,12 @@ pub fn menu_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui, budget: f32) -> f32 
         v.widgets.inactive.bg_stroke = egui::Stroke::NONE;
         v.widgets.inactive.fg_stroke = egui::Stroke::new(1.0, t.text_dim);
         v.widgets.hovered.bg_stroke = egui::Stroke::NONE;
+        if matches!(t.kind, crate::theme::ThemeKind::ArkuiLight | crate::theme::ThemeKind::ArkuiProLight) {
+            for widget in [&mut v.widgets.hovered, &mut v.widgets.open, &mut v.widgets.active] {
+                widget.bg_fill = t.menu_hover();
+                widget.weak_bg_fill = t.menu_hover();
+            }
+        }
         egui::MenuBar::new().ui(ui, |ui| {
             // egui lays the bar out left to right; a right-to-left UI starts it at the right.
             let mut mirrored = rtl.then(|| ui.new_child(egui::UiBuilder::new().layout(crate::direction::row())));
@@ -1158,6 +1222,9 @@ pub fn menu_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui, budget: f32) -> f32 
             ui.spacing_mut().button_padding = egui::vec2(6.0, 3.0);
             nav.bar_bottom = Some(ui.max_rect().bottom());
             let collapse = menu_bar_collapses(menu_bar_needed_width(ui), budget);
+            let labels: Vec<&str> = TOP_MENUS.iter().map(|top| crate::i18n::tr(lang, top)).collect();
+            let preferred: Vec<Option<char>> = crate::menu_keys::TOP_PREFERRED.iter().map(|(_, c)| Some(*c)).collect();
+            let mnemonics = crate::menu_keys::assign(&labels, &preferred);
             let mut buttons = Vec::with_capacity(if collapse { 1 } else { TOP_MENUS.len() });
             if collapse {
                 // Three-line (align-justify) SVG: opens a secondary menu of File…Help.
@@ -1226,10 +1293,16 @@ pub fn menu_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui, budget: f32) -> f32 
                     });
                 buttons.push(title);
             } else {
-                for top in TOP_MENUS {
+                for (index, &top) in TOP_MENUS.iter().enumerate() {
                     // egui's menu_button toggles on release; these titles open on the press (one
                     // gesture can press, drag to an item and release), so each drives its popup.
-                    let title = ui.add(egui::Button::new(egui::RichText::new(crate::i18n::tr(lang, top)).color(t.text_dim)));
+                    let label = crate::i18n::tr(lang, top);
+                    let label = if keys.show_underlines(ui.ctx()) {
+                        crate::menu_keys::mnemonic_text(ui, "", label, mnemonics[index], Some(t.text_dim))
+                    } else {
+                        egui::RichText::new(label).color(t.text_dim).into()
+                    };
+                    let title = ui.add(egui::Button::new(label));
                     // The bar's close behaviour and style, as a menu (not bar) config so submenus inside
                     // render as submenus.
                     let bar = egui::containers::menu::MenuConfig::find(ui);
@@ -1293,10 +1366,16 @@ pub fn menu_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui, budget: f32) -> f32 
             if rtl {
                 tops.reverse();
             }
+            let mut mnemonics = if collapse { vec![None] } else { mnemonics };
+            if rtl {
+                mnemonics.reverse();
+            }
+            keys.keys(ui.ctx(), &tops, &mnemonics, &mut nav, &mut clicked);
             nav.keys(ui.ctx(), &tops, &mut clicked);
         });
     });
     nav.store(ui.ctx());
+    keys.store(ui.ctx());
     // No menu open this frame: nothing is kept.
     app.menu_cache = built.into_inner();
     // The press-drag gesture ends with the button (its release was handled by the rows above).
@@ -2217,6 +2296,31 @@ mod open_recent_tests {
         assert!(invoke(&mut app, &ctx, "file.removeRecent", json!({})).is_err(), "needs a path");
     }
 
+    /// HarmonyOS ordinary Save / Save As use session-scoped `save-default/…` and `save-as/…`
+    /// tokens. Those must never land in Open Recent (Home › Recent would otherwise try to reopen
+    /// a path the host can no longer resolve after restart).
+    #[test]
+    fn ephemeral_save_tokens_are_not_listed_in_recent() {
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        app.push_recent("/docs/real.psd");
+        app.push_recent("save-default/10/untitled.psd");
+        app.push_recent("save-as/15/export.psd");
+        assert_eq!(app.ui.recent_files, vec!["/docs/real.psd".to_string()]);
+        assert_eq!(app.session.prefs().file_handling.recent_files, app.ui.recent_files);
+
+        // Leftovers from older builds are scrubbed on sync.
+        app.session.prefs.edit(|p| {
+            p.file_handling.recent_files = vec![
+                "save-default/1/a.psd".into(),
+                "/docs/keep.psd".into(),
+                "save-as/2/b.psd".into(),
+            ];
+        });
+        app.sync_recent();
+        assert_eq!(app.ui.recent_files, vec!["/docs/keep.psd".to_string()]);
+        assert_eq!(app.session.prefs().file_handling.recent_files, app.ui.recent_files);
+    }
+
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn opening_a_file_records_it_as_recent() {
@@ -2237,7 +2341,8 @@ mod open_recent_tests {
         assert_eq!(app.ui.recent_files.first().map(String::as_str), Some(p.as_str()));
         // Re-open via the recent entry.
         invoke(&mut app, &ctx, "file.openRecent.0", json!({})).unwrap();
-        assert_eq!(app.session.documents().len(), 2);
+        assert_eq!(app.session.documents().len(), 1, "an already open file is focused instead of duplicated");
+        assert_eq!(app.session.active().and_then(|st| st.path.as_deref()), Some(p.as_str()));
         let _ = std::fs::remove_file(&path);
     }
 }

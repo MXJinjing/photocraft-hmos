@@ -467,6 +467,10 @@
 	Soft light	Lágy világos
 	Soft Dark Theme	Lágy sötét téma
 	Soft Light Theme	Lágy világos téma
+	ArkUI Light Theme	ArkUI világos téma
+	ArkUI Dark Theme	ArkUI sötét téma
+	ArkUI Pro Light Theme	ArkUI Pro világos téma
+	ArkUI Pro Dark Theme	ArkUI Pro sötét téma
 	Brush Preview	Ecset előnézete
 	Brush Settings	Ecsetbeállítások
 	Brushes	Ecsetek
@@ -4106,6 +4110,53 @@ cameraRaw	Yellow	Sárga
 	Button Mode	Gomb mód
 	Button Mode On	Gomb mód be
 
+# HarmonyOS native controls
+	Block finger input	Ujjal történő bevitel tiltása
+	Stylus hover preview	Toll lebegtetési előnézete
+	Choose printer, copies and duplex in the system print dialog.	Válasszon nyomtatót, példányszámot és kétoldalas nyomtatást a rendszer nyomtatási párbeszédablakában.
+	Connected pen	Csatlakoztatott toll
+	Double-tap pen body	Dupla koppintás a toll testén
+	Squeeze pen body	A toll testének összenyomása
+
+# Stylus diagnostics
+	Hovering	Lebegés
+	Stylus Debug…	Tolldiagnosztika…
+	Stylus Debug	Tolldiagnosztika
+	Use a real Pad and a pen that supports tilt, double-tap and squeeze.	Valódi táblagépet és döntést, dupla koppintást, illetve összenyomást támogató tollat használjon.
+	No connection reported	Nincs jelentett kapcsolat
+	Latest pen sample	Legutóbbi tollminta
+	Tilt from vertical	Dőlés a függőlegestől
+	Screen bearing	Képernyőirány
+	Waiting for pen input	Várakozás tollbevitelre
+	Samples	Minták
+	Pen contact	Tollérintkezés
+	No pen contact — values are retained	Nincs érintkezés — az értékek megmaradnak
+	Arrow: screen-projected tilt direction, not barrel rotation. Upright: no direction.	Nyíl: a dőlés képernyőre vetített iránya, nem tollforgatás. Függőlegesen nincs irány.
+	Zero tilt may mean an upright pen or unavailable hardware data.	A nulla dőlés függőleges tollat vagy hiányzó hardveradatot is jelenthet.
+	HarmonyOS contact input does not currently report barrel rotation.	A HarmonyOS érintéses bevitele jelenleg nem jelenti a toll forgatását.
+	Received	Fogadva
+	Test gestures only (do not run shortcuts)	Csak kézmozdulatok tesztelése (gyorsműveletek nélkül)
+	No indicator means no event received, not necessarily unsupported hardware.	A jelzés hiánya nem fogadott eseményt jelent, nem feltétlenül nem támogatott hardvert.
+	Test area — does not change the document	Tesztterület — nem módosítja a dokumentumot
+	Draw here with the pen	Rajzoljon ide a tollal
+	Reset test	Teszt visszaállítása
+	Readings are before the pressure curve and remain available with tablet pressure off.	Nyomásgörbe előtti értékek, kikapcsolt táblagépnyomás mellett is elérhetők.
+	Eraser end	Radírvég
+	Pen tip	Tollhegy
+	Connected	Csatlakoztatva
+	No pen connected	Nincs csatlakoztatott toll
+	Only show canvas	Csak a vászon megjelenítése
+	Right sidebar	Jobb oldalsáv
+	Stylus	Digitális toll
+	System print preview opened	A rendszer nyomtatási előnézete megnyílt
+	Current tool and Eraser	Aktuális eszköz és radír
+	Previous tool	Előző eszköz
+	Show or hide context menu	Helyi menü megjelenítése vagy elrejtése
+
+# Window full screen (HarmonyOS host)
+	Enter Full Screen	Váltás teljes képernyőre
+	Exit Full Screen	Kilépés a teljes képernyőből
+
 # Darken / Lighten Interface (⇧⌘F1 / ⇧⌘F2)
 	Darken Interface	Felület sötétítése
 	Lighten Interface	Felület világosítása
@@ -4193,3 +4244,8 @@ cameraRaw	Yellow	Sárga
 
 # Graphics Adapter preference (#1885)
 	GPU adapter	GPU-adapter
+
+# Icon-only toolbar controls
+	Show tools in one column	Eszközök megjelenítése egy oszlopban
+	Show tools in two columns	Eszközök megjelenítése két oszlopban
+	Open the Color Picker	Színválasztó megnyitása

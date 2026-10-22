@@ -1,6 +1,5 @@
 {
   "string": [
-    { "name": "module_description", "value": "PhotoCraft For HarmonyOS 离线绘图应用" },
-    { "name": "stylus_bluetooth_reason", "value": "用于显示已连接笔的名称和电量" }
+    { "name": "module_description", "value": "PhotoCraft For HarmonyOS 离线绘图应用" }
   ]
 }

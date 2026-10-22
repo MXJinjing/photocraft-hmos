@@ -14,13 +14,36 @@ Decor setup is now best-effort and separate from listening. Status and size chan
 
 2026-10-11 (compile fix): PR #4 briefly typed the shared layout callback as `WindowStatusType` and reused it for `windowSizeChange`. ArkTS overload resolution then rejected `on/off('windowSizeChange', …)` (error mentioning `freeWindowModeChange`). Status and size now use separate callbacks (`Callback<WindowStatusType>` vs `Callback<Size>`) that both re-apply decor and refresh geometry.
 
+2026-10-17: fixed caption-button colours staying black after tablet → freeform.
+
+`setDecorButtonStyle` (via `paintWindow` / `applySystemBars`) is applied at cold start, on theme chrome changes, and on foreground. Outside freeform it often fails or does not stick. Entering freeform later re-applied decor height/visibility and geometry, but did not re-paint the theme chrome, so the three system caption buttons stayed black until the user manually switched theme. `WindowChrome` now re-calls `paintWindow` with the current `photocraftChrome` on start and on every status/size layout signal, matching cold freeform / manual theme behaviour.
+
 Validation:
 
-- `scripts/test_window_chrome.cjs`: passed mocked transition-zero, query-error, delayed-recovery, visible-caption/lagging-status, non-floating empty geometry, lifecycle cleanup, and freeform-entry-after-fullscreen (decor-throw and size-driven) regressions.
+- `scripts/test_window_chrome.cjs`: passed mocked transition-zero, query-error, delayed-recovery, visible-caption/lagging-status, non-floating empty geometry, lifecycle cleanup, freeform-entry-after-fullscreen (decor-throw and size-driven), and theme-chrome re-paint on freeform entry regressions.
 - Dual-target Rust release build and signed HAP build passed; `verify_native.py` passed (2026-10-10 validation).
 - Installed on real device `3GLUN25314G05064` after confirming the app had no open documents (2026-10-10).
 - Floating-window and restored foreground large-window screenshots show workspace/stylus controls clear of the native caption buttons. Device log reports a 139×37 vp caption rectangle and 147 vp reserved width.
-- The attempted maximize-button interaction returned to the desktop; this does not establish a complete maximize/recover interaction test. Intermittent failures across repeated transitions remain to be observed.
-- 2026-10-11 freeform-entry fix: CLI unit tests only; real-device verification deferred to the user.
+- The 2026-10-10 maximize-button attempt returned to the desktop; that attempt alone did not establish a complete maximize/recover interaction test. See the later user validation below.
+- 2026-10-11 freeform-entry fix: CLI unit tests passed; device validation was initially deferred to the user.
+
+## Real-device validation, 2026-10-14
+
+- The user confirmed that freeform mode works on their Pad. A captured 2800×1840 frame shows the desktop behind PhotoCraft, native caption buttons, and the resize affordance. `WindowManagerService` reported `photocraft0` at `[234,145,2345,1579]`, visible and focusable, with `DecoStatus: true`.
+- The user also tested maximization and window resizing successfully, and supplied the two screenshots below, taken at 16:06:27 and 16:06:36 (Asia/Shanghai). This closes the earlier pending manual acceptance for maximization and resizing. These are user-run tests; the screenshots document their resulting states rather than an automated transition sequence.
+- The maximized view renders the editor across the available display area. The smaller floating view renders within the new window bounds and keeps native caption buttons clear of workspace controls. The smaller view also shows clipping of the large start-page heading and the wide brush toolbar; this layout limitation remains visible in the evidence and is not a GPU recovery failure.
+- Repeated transition stress testing and fault injection during a resize are not established by these screenshots.
+
+### Captured floating window
+
+![PhotoCraft in HarmonyOS freeform mode](titlebar-recovery-freeform.jpeg)
+
+### User-tested maximized window
+
+![PhotoCraft maximized on the Pad at 16:06:27](titlebar-recovery-maximized.jpg)
+
+### User-tested resized floating window
+
+![PhotoCraft after resizing on the Pad at 16:06:36](titlebar-recovery-resized.jpg)
 
 Local evidence (not committed): `work/titlebar-recovery-after.jpeg`, `work/titlebar-recovery-restored.jpeg`, `work/titlebar-recovery-hilog.log`, `work/titlebar-recovery-build.log`.

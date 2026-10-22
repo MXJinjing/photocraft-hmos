@@ -24,13 +24,39 @@
 
 # Guide layout dialog
 # HarmonyOS native controls
-	Battery unavailable	Podaci o bateriji nisu dostupni
-	Battery: {percent}%	Baterija: {percent}%
 	Block finger input	Blokiraj unos prstom
+	Stylus hover preview	Pregled olovke pri lebdenju
 	Choose printer, copies and duplex in the system print dialog.	Izaberite štampač, broj kopija i dvostranu štampu u sistemskom dijalogu za štampanje.
 	Connected pen	Povezana olovka
 	Double-tap pen body	Dvostruki dodir tela olovke
-	Long-press pen body	Dugi pritisak na telo olovke
+	Squeeze pen body	Stiskanje tela olovke
+
+# Stylus diagnostics
+	Hovering	Olovka iznad površine
+	Stylus Debug…	Dijagnostika olovke…
+	Stylus Debug	Dijagnostika olovke
+	Use a real Pad and a pen that supports tilt, double-tap and squeeze.	Koristite pravi tablet i olovku koja podržava nagib, dvostruki dodir i stiskanje.
+	No connection reported	Veza nije prijavljena
+	Latest pen sample	Poslednji uzorak olovke
+	Tilt from vertical	Nagib od vertikale
+	Screen bearing	Smer na ekranu
+	Waiting for pen input	Čekanje na unos olovkom
+	Samples	Uzorci
+	Pen contact	Kontakt olovke
+	No pen contact — values are retained	Bez kontakta — vrednosti su sačuvane
+	Arrow: screen-projected tilt direction, not barrel rotation. Upright: no direction.	Strelica: nagib projektovan na ekran, ne rotacija olovke. Uspravno: bez smera.
+	Zero tilt may mean an upright pen or unavailable hardware data.	Nulti nagib može značiti uspravnu olovku ili nedostupne hardverske podatke.
+	HarmonyOS contact input does not currently report barrel rotation.	Kontaktni unos HarmonyOS trenutno ne prijavljuje rotaciju olovke.
+	Received	Primljeno
+	Test gestures only (do not run shortcuts)	Testiraj samo gestove (bez izvršavanja prečica)
+	No indicator means no event received, not necessarily unsupported hardware.	Bez indikatora znači da događaj nije primljen, ne nužno da hardver nije podržan.
+	Test area — does not change the document	Probna površina — ne menja dokument
+	Draw here with the pen	Crtajte ovde olovkom
+	Reset test	Poništi test
+	Readings are before the pressure curve and remain available with tablet pressure off.	Očitavanja pre krive pritiska, dostupna i kada je pritisak tableta isključen.
+	Eraser end	Kraj sa gumicom
+	Pen tip	Vrh olovke
+	Connected	Povezano
 	No pen connected	Olovka nije povezana
 	Only show canvas	Prikaži samo platno
 	Right sidebar	Desna bočna traka
@@ -756,6 +782,10 @@
 	Soft Dark Theme	Meka tamna tema
 	Soft light	Meka svetla
 	Soft Light Theme	Meka svetla tema
+	ArkUI Light Theme	ArkUI svetla tema
+	ArkUI Dark Theme	ArkUI tamna tema
+	ArkUI Pro Light Theme	ArkUI Pro svetla tema
+	ArkUI Pro Dark Theme	ArkUI Pro tamna tema
 	Next Theme	Sledeća tema
 	Actions	Radnje
 	Brush Settings	Podešavanja četkice
@@ -4266,6 +4296,12 @@ shape	Appearance	Izgled
 	Mirror	Preslikavanje
 	Output Settings	Podešavanja izlaza
 	Output To	Izlaz u
+
+
+# Window full screen (HarmonyOS host)
+	Enter Full Screen	Uđi u pun ekran
+	Exit Full Screen	Izađi iz punog ekrana
+
 	Response curve	Kriva odziva
 # Embedded Profile Mismatch: profile names beside the choices, Remember this choice
 	Use the embedded profile ({profile})	Koristi ugrađeni profil ({profile})
@@ -4363,3 +4399,8 @@ shape	Appearance	Izgled
 
 # Graphics Adapter preference (#1885)
 	GPU adapter	GPU adapter
+
+# Icon-only toolbar controls
+	Show tools in one column	Prikaži alatke u jednoj koloni
+	Show tools in two columns	Prikaži alatke u dve kolone
+	Open the Color Picker	Otvori birač boje

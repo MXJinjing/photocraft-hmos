@@ -745,6 +745,10 @@
 	Soft light	Suave claro
 	Soft Dark Theme	Tema suave escuro
 	Soft Light Theme	Tema suave claro
+	ArkUI Light Theme	Tema ArkUI Claro
+	ArkUI Dark Theme	Tema ArkUI Escuro
+	ArkUI Pro Light Theme	Tema ArkUI Pro Claro
+	ArkUI Pro Dark Theme	Tema ArkUI Pro Escuro
 	Next Theme	Próximo tema
 	Actions	Ações
 	Brush Settings	Configurações do pincel
@@ -4071,10 +4075,38 @@ layerLabel	No Color	Sem cor
 # HarmonyOS host additions retained during upstream sync
 	Stylus	Caneta
 	Block finger input	Bloquear entrada por dedo
+	Stylus hover preview	Visualização da caneta ao pairar
 	Double-tap pen body	Toque duplo no corpo da caneta
 	Current tool and Eraser	Ferramenta atual e borracha
 	Previous tool	Ferramenta anterior
-	Long-press pen body	Pressionar o corpo da caneta
+	Squeeze pen body	Apertar o corpo da caneta
+
+# Stylus diagnostics
+	Hovering	Pairando
+	Stylus Debug…	Diagnóstico da caneta…
+	Stylus Debug	Diagnóstico da caneta
+	Use a real Pad and a pen that supports tilt, double-tap and squeeze.	Use um tablet real e uma caneta com inclinação, toque duplo e aperto do corpo.
+	No connection reported	Nenhuma conexão informada
+	Latest pen sample	Última amostra da caneta
+	Tilt from vertical	Inclinação em relação à vertical
+	Screen bearing	Direção na tela
+	Waiting for pen input	Aguardando entrada da caneta
+	Samples	Amostras
+	Pen contact	Caneta em contato
+	No pen contact — values are retained	Sem contato — valores mantidos
+	Arrow: screen-projected tilt direction, not barrel rotation. Upright: no direction.	Seta: inclinação projetada na tela, não rotação da caneta. Vertical: sem direção.
+	Zero tilt may mean an upright pen or unavailable hardware data.	Inclinação zero pode indicar uma caneta vertical ou dados de hardware indisponíveis.
+	HarmonyOS contact input does not currently report barrel rotation.	A entrada de contato do HarmonyOS ainda não informa a rotação da caneta.
+	Received	Recebido
+	Test gestures only (do not run shortcuts)	Testar apenas gestos (sem executar atalhos)
+	No indicator means no event received, not necessarily unsupported hardware.	Sem indicador significa nenhum evento recebido, não necessariamente hardware incompatível.
+	Test area — does not change the document	Área de teste — não altera o documento
+	Draw here with the pen	Desenhe aqui com a caneta
+	Reset test	Redefinir teste
+	Readings are before the pressure curve and remain available with tablet pressure off.	Leituras anteriores à curva de pressão, disponíveis mesmo com a pressão do tablet desativada.
+	Eraser end	Extremidade da borracha
+	Pen tip	Ponta da caneta
+	Connected	Conectado
 	Show or hide context menu	Mostrar ou ocultar o menu de contexto
 	Choose printer, copies and duplex in the system print dialog.	Escolha impressora, cópias e frente e verso na janela de impressão do sistema.
 	System print preview opened	Pré-visualização de impressão do sistema aberta
@@ -4082,5 +4114,12 @@ layerLabel	No Color	Sem cor
 	Right sidebar	Barra lateral direita
 	Connected pen	Caneta conectada
 	No pen connected	Nenhuma caneta conectada
-	Battery unavailable	Bateria indisponível
-	Battery: {percent}%	Bateria: {percent}%
+
+# Window full screen (HarmonyOS host)
+	Enter Full Screen	Entrar em tela cheia
+	Exit Full Screen	Sair da tela cheia
+
+# Icon-only toolbar controls
+	Show tools in one column	Mostrar ferramentas em uma coluna
+	Show tools in two columns	Mostrar ferramentas em duas colunas
+	Open the Color Picker	Abrir o seletor de cores
