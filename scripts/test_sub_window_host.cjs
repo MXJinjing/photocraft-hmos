@@ -5,6 +5,8 @@ const ts = require(process.argv[2] || 'typescript');
 
 const WindowEventType = { WINDOW_SHOWN: 1, WINDOW_ACTIVE: 2, WINDOW_DESTROYED: 7 };
 
+const decorCalls = [];
+const chromeListener = { fn: undefined };
 function load() {
   const compiled = ts.transpileModule(fs.readFileSync('entry/src/main/ets/SubWindowHost.ets', 'utf8'), {
     compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.CommonJS }
@@ -17,7 +19,10 @@ function load() {
   vm.runInNewContext(compiled.outputText, {
     module: moduleObject, exports: moduleObject.exports, console: { info() {}, error() {} },
     LocalStorage, Promise, Map, Set, Array,
-    require: name => name === '@kit.ArkUI'
+    AppStorage: { get: () => '#FF262626' },
+    require: name => name === './SystemBars'
+      ? { LOADING_CHROME: '#FF262626', paintDecorForChrome: (w, c) => { decorCalls.push({ w, c }); }, setChromeListener: l => { chromeListener.fn = l; } }
+      : name === '@kit.ArkUI'
       ? { window: { WindowEventType } }
       : name === '@kit.BasicServicesKit'
         ? { BusinessError: Error, deviceInfo: { deviceType: 'tablet' } }
@@ -155,3 +160,11 @@ const openRequest = (extra = {}) => Object.assign(
   }
   console.log('Passed: native sub-window centering, decoration, close/veto/destroy/race handling and input tagging.');
 })().catch(error => { console.error(error); process.exit(1); });
+
+// 2in1 sub-window captions follow the app chrome, not the system colour mode.
+(async () => {
+  await new Promise(r => setTimeout(r, 50));
+  assert.ok(decorCalls.length > 0, 'sub-window decor buttons painted');
+  assert.equal(typeof chromeListener.fn, 'function', 'chrome listener registered');
+  console.log('sub-window decor theme ok');
+})();

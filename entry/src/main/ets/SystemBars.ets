@@ -43,7 +43,7 @@ export function isDarkChrome(argb: string): boolean {
 
 // HarmonyOS 2-in-1 caption buttons can follow the app chrome when the API is available.
 // Older devices keep their system-selected button style.
-function paintDecorButtons(win: window.Window, dark: boolean): void {
+export function paintDecorButtons(win: window.Window, dark: boolean): void {
   try {
     win.setDecorButtonStyle({
       colorMode: dark ? ConfigurationConstant.ColorMode.COLOR_MODE_DARK : ConfigurationConstant.ColorMode.COLOR_MODE_LIGHT
@@ -81,10 +81,29 @@ export function paintWindow(win: window.Window, color: string): void {
   });
 }
 
+// Caption buttons for a chrome colour: light buttons (COLOR_MODE_DARK) on a dark chrome.
+export function paintDecorForChrome(win: window.Window, color: string): void {
+  let argb: string = normalizeChrome(color);
+  if (argb.length === 0) {
+    return;
+  }
+  paintDecorButtons(win, isDarkChrome(argb));
+}
+
+// Sub-windows (and anything else with its own caption) follow chrome changes through this hook.
+// Without it, 2in1 sub-window caption buttons stay on the system colour mode.
+let chromeListener: ((argb: string) => void) | undefined = undefined;
+export function setChromeListener(listener: ((argb: string) => void) | undefined): void {
+  chromeListener = listener;
+}
+
 export function applySystemBars(ctx: common.UIAbilityContext, color: string): void {
   let argb: string = normalizeChrome(color);
   if (argb.length === 0) {
     return;
+  }
+  if (chromeListener !== undefined) {
+    try { chromeListener(argb); } catch (error) { console.info('Chrome listener failed'); }
   }
   window.getLastWindow(ctx).then((win: window.Window) => {
     paintWindow(win, argb);
