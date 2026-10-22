@@ -243,7 +243,8 @@ pub fn resolved_json(doc: &Document, r: &ResolvedSlice) -> Value {
         "number": r.number,
         "id": r.id,
         "origin": r.origin.id(),
-        "name": r.name,
+        // A covered slice's later pieces show as `<name>-NN`; the slice itself keeps its name.
+        "name": s.map(|s| s.name.as_str()).filter(|n| !n.is_empty()).unwrap_or(&r.name),
         "rect": [r.rect.x0, r.rect.y0, r.rect.width(), r.rect.height()],
         "kind": r.kind.id(),
         "layer": s.and_then(|s| s.layer).map(|l| l.0),
@@ -321,16 +322,24 @@ fn set_slice(s: &mut Session, p: &Value) -> Result<Value> {
     // nothing is committed unless every option is valid and the slice stays on the canvas.
     let id = s.edit("Slice Options", |doc, _| {
         let id = store(doc, t)?;
+        let canvas = doc.bounds();
         let sl = doc.slices.get_mut(id).ok_or_else(|| bad(cmd, "slice vanished"))?;
         apply_options(sl, p, cmd)?;
-        if !slices::resolve(doc).iter().any(|r| r.id == Some(id)) {
+        if sl.rect.intersect(&canvas).is_empty() {
             return Err(bad(cmd, "slice is off the canvas"));
         }
         Ok(id)
     })?;
     let d = s.active().ok_or(EngineError::NoDocument)?;
-    let r = slices::resolve(&d.doc).into_iter().find(|r| r.id == Some(id)).ok_or_else(|| bad(cmd, "slice is off the canvas"))?;
-    Ok(resolved_json(&d.doc, &r))
+    if let Some(r) = slices::resolve(&d.doc).into_iter().find(|r| r.id == Some(id)) {
+        return Ok(resolved_json(&d.doc, &r));
+    }
+    // Wholly under later slices: it has no visible piece, so no number.
+    let sl = d.doc.slices.get(id).ok_or_else(|| bad(cmd, "slice vanished"))?;
+    let r = ResolvedSlice { number: 0, id: Some(id), origin: sl.origin, rect: sl.rect.intersect(&d.doc.bounds()), name: sl.name.clone(), kind: sl.kind };
+    let mut v = resolved_json(&d.doc, &r);
+    v["number"] = Value::Null;
+    Ok(v)
 }
 
 fn promote(s: &mut Session, p: &Value) -> Result<Value> {

@@ -22,11 +22,12 @@ pub fn import_flat(name: &str, bytes: &[u8]) -> Result<ImportResult, IoError> {
         return import_tiff_page(name, bytes, None);
     }
     let img = codecs::decode_as(format.ok_or(codecs::CodecError::UnknownFormat)?, bytes)?;
-    // A palette BMP or PNG opens in Indexed Color mode with its colour table, as in Photoshop
-    // (#3802, #4804).
+    // A palette BMP, PNG or GIF opens in Indexed Color mode with its colour table, as in
+    // Photoshop (#3802, #4804, #7886). A GIF is always palette-based: the first frame's table.
     let palette = match format {
         Some(Format::Bmp) => codecs::bmp_palette(bytes).ok().flatten().map(|c| (c, None)),
         Some(Format::Png) => codecs::png_palette(bytes).ok().flatten().map(|p| (p.colors, p.transparent)),
+        Some(Format::Gif) => codecs::gif_palette(bytes),
         _ => None,
     };
     let mut r = image_to_document(name, &img)?;

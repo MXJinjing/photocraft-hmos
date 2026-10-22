@@ -2092,6 +2092,11 @@
 	Mixer Brush Tool	Karıştırıcı Fırça Aracı
 	Color Replacement Tool	Renk Değiştirme Aracı
 	Wet	Islaklık
+	Current Brush Load	Geçerli Fırça Yükü
+	Load Brush	Fırçayı Yükle
+	Clean Brush	Fırçayı Temizle
+	Load the brush after each stroke	Her vuruştan sonra fırçayı yükle
+	Clean the brush after each stroke	Her vuruştan sonra fırçayı temizle
 	Mix	Karışım
 	Wetness Jitter	Islaklık Titreme
 	Mix Jitter	Karıştırma Titreşimi
@@ -2176,6 +2181,8 @@
 	Burn	Yanık
 	Quick Selection	Hızlı Seçim
 	History Brush	Tarih Fırçası
+	Paints from the History panel's source state	Tarih panelinin kaynak durumundan boyar
+	Sets the source for the history brush	Tarih fırçasının kaynağını ayarlar
 	Color Replacement	Renk Değiştirme
 	New Group	Yeni Grup
 	Layer Comp	Katman Kompozisyonu
@@ -2682,6 +2689,8 @@ cameraRaw	Color	Renk
 	Create Snapshot	Anlık Görüntü Oluştur
 	Delete Snapshot	Anlık Görüntüyü Sil
 	New Snapshot	Yeni Anlık Görüntü
+	New Snapshot…	Yeni Anlık Görüntü…
+	History Options…	Geçmiş Seçenekleri…
 	Snapshot 1	Anlık Görüntü 1
 	Nonlinear History	Doğrusal Olmayan Geçmiş
 	Set New Snapshot as Default	Yeni Anlık Görüntüyü Varsayılan Olarak Ayarla
@@ -3920,6 +3929,9 @@ cameraData	Lens	Lens
 # View › Guides › right-click a guide
 	Edit Selected Guides	Seçili Kılavuzları Düzenle
 	Clear Selected Guides	Seçili Kılavuzları Temizle
+	Bicubic Automatic	Bikübik Otomatik
+	Bicubic Smoother	Bikübik Pürüzsüzleştirici
+	Bicubic Sharper	Bikübik Daha Keskin
 	Pasting from other apps is unavailable	Diğer uygulamalardan yapıştırma kullanılamıyor
 	PhotoCraft can't reach the system clipboard in this session. On Wayland, a Flatpak sandbox hides the protocol that images from other apps are read through.	PhotoCraft bu oturumda sistem panosuna erişemiyor. Wayland'de Flatpak korumalı alanı, diğer uygulamalardaki görüntülerin okunduğu protokolü gizler.
 	To paste from other apps, start PhotoCraft under XWayland: `{command}`	Diğer uygulamalardan yapıştırmak için PhotoCraft'ı XWayland altında başlatın: `{command}`
@@ -3939,6 +3951,17 @@ cameraData	Lens	Lens
 	set name	küme adı
 	{set} (modified)	{set} (değiştirildi)
 	Show file name in title	Başlıkta dosya adını göster
+
+# Image › Mode › Bitmap (#5559)
+	50% Threshold	%50 Eşik
+	Pattern Dither	Desen Titreklik
+	Diffusion Dither	Difüzyon Titreklik
+	Halftone Screen	Yarım Ton Tarama
+	Custom Pattern	Özel Desen
+	Frequency:	Frekans:
+	Lines/Inch	Çizgi/İnç
+	Lines/Centimeter	Çizgi/Santimetre
+	Ellipse	Elips
 	Accept and Go to Conflict	Kabul Et ve Çakışmaya Git
 	Changes undone.	Değişiklikler geri alındı.
 	Choose a new shortcut for this command, or leave it without one.	Bu komut için yeni bir kısayol seçin veya kısayolsuz bırakın.
@@ -3974,3 +3997,10 @@ cameraData	Lens	Lens
 	Use	Kullan
 	In Front	Önde
 	Behind	Arkada
+
+# DDS Options (#1327)
+	DDS Options	DDS Seçenekleri
+	Generate Mipmaps	Mipmap oluştur
+
+# Graphics Adapter preference (#1885)
+	GPU adapter	GPU bağdaştırıcısı

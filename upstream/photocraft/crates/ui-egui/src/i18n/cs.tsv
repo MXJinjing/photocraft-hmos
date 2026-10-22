@@ -2171,6 +2171,11 @@
 	Color Replacement Tool	Nástroj Nahrazení barvy
 	Color Replacement	Nahrazení barvy
 	Wet	Vlhkost
+	Current Brush Load	Aktuální náplň štětce
+	Load Brush	Naplnit štětec
+	Clean Brush	Vyčistit štětec
+	Load the brush after each stroke	Naplnit štětec po každém tahu
+	Clean the brush after each stroke	Vyčistit štětec po každém tahu
 	Mix	Míchání
 	Wetness Jitter	Kolísání vlhkosti
 	Mix Jitter	Kolísání míchání
@@ -3546,6 +3551,12 @@ curves	Smooth	Vyhladit
 	Click to place · Alt-click or drag off-canvas to remove	Kliknutím umístíte · Alt-kliknutím nebo přetažením mimo plátno odeberete
 	No document open	Není otevřen žádný dokument
 	{n} of {max} sample points	{n} z {max} bodů měření
+
+# History panel menu (#2966)
+	Step Forward	Krok vpřed
+	Clear History	Vymazat historii
+	New Snapshot…	Nový snímek…
+	History Options…	Volby historie…
 	Drag (lasso) or click points (polygonal) · {add} add · {sub} subtract	Táhněte (laso) nebo klikejte na body (mnohoúhelník) · {add} přidat · {sub} odečíst
 	The current gradient (pick one in Window › Gradients)	Aktuální přechod (vyberte v Okno › Přechody)
 # Canvas context menus, Channels panel menu, Layer Style blending page (labels rendered through a variable).
@@ -3778,6 +3789,9 @@ navigator	Zoom	Zvětšení
 	Sent to {printer}	Odesláno do {printer}
 	set in Print Settings…	nastavuje se v nastavení tisku…
 	ICO is limited to 256 × 256 pixels	ICO je omezen na 256 × 256 pixelů
+# History panel › History Brush source (#2966)
+	Paints from the History panel's source state	Maluje ze zdrojového stavu panelu Historie
+	Sets the source for the history brush	Nastaví zdroj pro štětec historie
 # Embedded Profile Mismatch: profile names beside the choices, Remember this choice
 	Use the embedded profile ({profile})	Použít vložený profil ({profile})
 	Convert to the working space ({profile})	Převést do pracovního prostoru barev ({profile})
@@ -3798,6 +3812,9 @@ navigator	Zoom	Zvětšení
 # View › Guides › right-click a guide
 	Edit Selected Guides	Upravit vybraná vodítka
 	Clear Selected Guides	Vymazat vybraná vodítka
+	Bicubic Automatic	Bikubická automatická
+	Bicubic Smoother	Bikubická hladší
+	Bicubic Sharper	Bikubická ostřejší
 	Pasting from other apps is unavailable	Vkládání z jiných aplikací není k dispozici
 	PhotoCraft can't reach the system clipboard in this session. On Wayland, a Flatpak sandbox hides the protocol that images from other apps are read through.	PhotoCraft v této relaci nemá přístup k systémové schránce. Na Waylandu sandbox Flatpaku skrývá protokol, přes který se čtou obrázky z jiných aplikací.
 	To paste from other apps, start PhotoCraft under XWayland: `{command}`	Chcete-li vkládat z jiných aplikací, spusťte PhotoCraft pod XWaylandem: `{command}`
@@ -3817,6 +3834,17 @@ navigator	Zoom	Zvětšení
 	set name	název sady
 	{set} (modified)	{set} (změněno)
 	Show file name in title	Zobrazit název souboru v titulu
+
+# Image › Mode › Bitmap (#5559)
+	50% Threshold	50% práh
+	Pattern Dither	Rozptyl se vzorkem
+	Diffusion Dither	Difuzní rozptyl
+	Halftone Screen	Polotónový rastr
+	Custom Pattern	Vlastní vzorek
+	Frequency:	Frekvence:
+	Lines/Inch	Linky/palec
+	Lines/Centimeter	Linky/centimetr
+	Ellipse	Elipsa
 	Accept and Go to Conflict	Přijmout a přejít ke konfliktu
 	Changes undone.	Změny vráceny.
 	Choose a new shortcut for this command, or leave it without one.	Zvolte pro tento příkaz novou zkratku, nebo ho nechte bez ní.
@@ -3852,6 +3880,14 @@ navigator	Zoom	Zvětšení
 	Use	Použít
 	In Front	Vpředu
 	Behind	Vzadu
+
+# DDS Options (#1327)
+	DDS Options	Možnosti DDS
+	Generate Mipmaps	Generovat mipmapy
+
+# Graphics Adapter preference (#1885)
+	GPU adapter	Adaptér GPU
+
 # HarmonyOS host additions retained during upstream sync
 	Stylus	Stylus
 	Block finger input	Blokovat zadávání prstem

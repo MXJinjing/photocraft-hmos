@@ -978,7 +978,23 @@ pub(crate) fn draw_handle(painter: &egui::Painter, anchor: Pos2, handle: Pos2, a
     painter.circle_filled(handle, 3.0, accent);
 }
 
-/// Work path / active shape path outlines, anchors, and the pen path in progress.
+/// Does `tool` draw the anchor squares of the paths it can edit? Path Selection does, and so do
+/// the Pen tools: as in Photoshop, a path finished with Enter or by closing it keeps its anchors
+/// on screen, so it can still be edited (⌘/Ctrl-drag, Auto Add/Delete) (#6884, #4716).
+pub(crate) fn shows_anchors(tool: Tool) -> bool {
+    // Add/Delete Anchor Point and Convert Point draw Direct Selection's overlay instead.
+    matches!(tool, Tool::PathSelection | Tool::Pen | Tool::FreeformPen | Tool::CurvaturePen)
+}
+
+/// The saved path selected in the Paths panel: Photoshop's target path, drawn on the canvas with
+/// any tool (#6550). `None` when the panel selects the work path, a layer's path or nothing.
+pub(crate) fn selected_saved_path(app: &PhotocraftApp) -> Option<&Path> {
+    let sel = app.ui.selected_path.as_deref().filter(|s| !matches!(*s, "work" | "layer"))?;
+    app.session.active()?.doc.paths.iter().find(|p| p.name == sel).map(|p| &p.path)
+}
+
+/// Work path / active shape path / selected saved path outlines, anchors, and the pen path in
+/// progress.
 pub fn draw_overlay(app: &PhotocraftApp, painter: &egui::Painter, xf: &ViewXform, doc: &Document) {
     let tool = app.ui.tool;
     let accent = Tokens::get(painter.ctx()).accent;
@@ -998,23 +1014,32 @@ pub fn draw_overlay(app: &PhotocraftApp, painter: &egui::Painter, xf: &ViewXform
         // Direct Selection (or the Pen with ⌘/Ctrl held) draws the paths it edits (#790).
         crate::direct_select::draw_overlay(app, painter, &to_scr, accent, paths);
         if paths {
+            // The selected saved path shows too, though Direct Selection doesn't edit it yet.
+            if let Some(p) = selected_saved_path(app) {
+                draw_path(p, true);
+            }
             crate::anchor_tools::draw_hover(app, painter, &to_scr, accent, painter.ctx().input(|i| i.modifiers));
         }
     } else if paths {
-        // Paths remain visible as outlines with any tool. Path Selection adds anchor squares; Direct
-        // Selection has its own overlay above.
+        // Paths remain visible as outlines with any tool. Path Selection and the Pen tools add
+        // anchor squares; Direct Selection has its own overlay above.
+        let anchors = shows_anchors(tool);
         if let Some(wp) = &doc.work_path {
-            draw_path(wp, tool == Tool::PathSelection);
+            draw_path(wp, anchors);
+        }
+        // The saved path selected in the Paths panel is the target path (#6550).
+        if let Some(p) = selected_saved_path(app) {
+            draw_path(p, anchors);
         }
         let st = app.session.active();
         if let Some(l) = st.and_then(|s| s.active_layer.and_then(|id| s.doc.layer(id)))
             && let LayerContent::Shape(sh) = &l.content
         {
-            draw_path(&sh.path, tool == Tool::PathSelection);
+            draw_path(&sh.path, anchors);
         }
         // A targeted vector mask shows its path with any tool (#196).
         if let Some((_, p)) = targeted_vector_mask(app) {
-            draw_path(&p, tool == Tool::PathSelection);
+            draw_path(&p, anchors);
         }
         crate::corner_radius::draw(app, painter, &to_scr, accent);
     }
@@ -1687,6 +1712,19 @@ fn footer_id() -> egui::Id {
     egui::Id::new("paths-footer")
 }
 
+/// A Paths panel row being dragged, for a drop on the trash (#6553): its name and the command
+/// that deletes it.
+#[derive(Clone, Debug)]
+struct PathDrag {
+    name: String,
+    cmd: &'static str,
+    params: Value,
+}
+
+fn path_drag_key() -> egui::Id {
+    egui::Id::new("paths-drag")
+}
+
 fn ctx_data_footer(ctx: &egui::Context, r: Rect) {
     ctx.data_mut(|d| d.insert_temp(footer_id(), r));
 }
@@ -1697,8 +1735,9 @@ pub fn paths_footer(ctx: &egui::Context) -> Option<Rect> {
 }
 
 /// Commands offered by a Paths row's context menu. The row's path is passed explicitly so a
-/// right-click acts on that row even when another path is selected in the panel.
-fn path_context_actions(entry: &PathEntry, doc: &Document) -> Vec<(&'static str, &'static str, Value)> {
+/// right-click acts on that row even when another path is selected in the panel. `layer` is the
+/// layer a `PathRow::Layer` row belongs to (the active layer).
+fn path_context_actions(entry: &PathEntry, doc: &Document, layer: Option<photocraft_doc::LayerId>) -> Vec<(&'static str, &'static str, Value)> {
     let key = match entry.kind {
         PathRow::Work => "work".to_string(),
         PathRow::Layer => "layer".to_string(),
@@ -1733,6 +1772,9 @@ fn path_context_actions(entry: &PathEntry, doc: &Document) -> Vec<(&'static str,
         actions.push(("Delete Path", "path.delete", json!({"name": key})));
     } else if entry.name.ends_with(" Vector Mask") {
         actions.push(("Delete Vector Mask", "layer.vectorMask.delete", json!({})));
+    } else if let Some(id) = layer {
+        // A shape layer's path is the shape: Photoshop's Delete Path deletes the layer (#6552).
+        actions.push(("Delete Path", "layer.delete", json!({"layer": id.0})));
     }
     actions
 }
@@ -1744,10 +1786,18 @@ pub fn paths_panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         return;
     };
     let doc = st.doc.clone();
-    let rows = path_rows(&doc, st.active_layer);
+    let st_layer = st.active_layer;
+    let rows = path_rows(&doc, st_layer);
     let has_layer_path = rows.iter().any(|r| r.kind == PathRow::Layer);
     let mut action: Option<(&str, Value)> = None;
     let mut stroke_dialog: Option<String> = None;
+    // A row dragged onto the trash is deleted (#6553); a drag that never saw its release must not
+    // outlive it.
+    let ctx = ui.ctx().clone();
+    if !ctx.input(|i| i.pointer.primary_down() || i.pointer.any_released()) {
+        ctx.data_mut(|d| d.remove::<PathDrag>(path_drag_key()));
+    }
+    let drag = ctx.data(|d| d.get_temp::<PathDrag>(path_drag_key()));
     // The buttons sit in a footer at the panel's bottom, like Photoshop's.
     let footer = crate::widgets::footer_height(ui) + ui.spacing().item_spacing.y;
     let fill = ui.available_height() > footer + 60.0;
@@ -1759,12 +1809,26 @@ pub fn paths_panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                 ui.label(egui::RichText::new(tl!("Draw with the Pen tool (P) or make a work path from a selection.")).color(t.text_faint).size(11.5));
             }
             for PathEntry { name, path, kind } in &rows {
-                let (r, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 36.0), Sense::click());
+                // What dropping the row on the trash runs; a shape layer's path is not dragged.
+                let delete = match kind {
+                    PathRow::Work => Some(("path.delete", json!({"name": "work"}))),
+                    PathRow::Saved => Some(("path.delete", json!({"name": name}))),
+                    PathRow::Layer if name.ends_with(" Vector Mask") => Some(("layer.vectorMask.delete", json!({}))),
+                    PathRow::Layer => None,
+                };
+                let sense = if delete.is_some() { Sense::click_and_drag() } else { Sense::click() };
+                let (r, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 36.0), sense);
                 let key = match kind {
                     PathRow::Work => "work".to_string(),
                     PathRow::Layer => "layer".to_string(),
                     PathRow::Saved => name.clone(),
                 };
+                if resp.drag_started()
+                    && let Some((cmd, params)) = delete
+                {
+                    let name = if *kind == PathRow::Work { tl!(name).to_string() } else { name.clone() };
+                    ui.ctx().data_mut(|d| d.insert_temp(path_drag_key(), PathDrag { name, cmd, params }));
+                }
                 // Rows are painted: name them for screen readers and UI tests.
                 resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::SelectableLabel, true, name));
                 let sel = app.ui.selected_path.as_deref() == Some(key.as_str());
@@ -1807,7 +1871,7 @@ pub fn paths_panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                         ui.set_min_width(190.0);
                         let entry = PathEntry { name: name.clone(), path: path.clone(), kind: *kind };
                         let can_paint = app.session.active().and_then(|s| s.active_layer.and_then(|id| s.doc.layer(id))).is_some_and(|l| l.surface().is_some());
-                        for (label, cmd, params) in path_context_actions(&entry, &doc) {
+                        for (label, cmd, params) in path_context_actions(&entry, &doc, st_layer) {
                             let enabled = !matches!(cmd, "path.fill" | "path.stroke") || can_paint;
                             if ui.add_enabled(enabled, egui::Button::new(tl!(label))).clicked() {
                                 if cmd == "path.stroke" {
@@ -1832,6 +1896,12 @@ pub fn paths_panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
             }
         },
     );
+    // The dragged row follows the cursor.
+    if let Some(drag) = &drag
+        && let Some(p) = ctx.input(|i| i.pointer.interact_pos())
+    {
+        crate::layer_transfer::ghost(&ctx, p, &drag.name);
+    }
     let sel = app.ui.selected_path.clone().filter(|s| s != "layer" || has_layer_path).unwrap_or_else(|| "work".into());
     let buttons = crate::widgets::panel_footer(ui, |ui| {
         let fg = hex(app.session.tools.foreground);
@@ -1867,11 +1937,21 @@ pub fn paths_panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                     action = Some((cmd, p));
                 }
             }
+            // A row dropped on the trash deletes that row's path, selected or not (#6553).
+            if matches!(cmd, "path.delete" | "layer.vectorMask.delete")
+                && let Some(drag) = &drag
+                && crate::panels::dropped_on(ui, &b)
+            {
+                action = Some((drag.cmd, drag.params.clone()));
+            }
             buttons = buttons.union(b.rect);
         }
         buttons
     });
     ctx_data_footer(ui.ctx(), buttons);
+    if ctx.input(|i| i.pointer.any_released()) {
+        ctx.data_mut(|d| d.remove::<PathDrag>(path_drag_key()));
+    }
     if let Some(name) = stroke_dialog {
         crate::canvas_tool_menu::stroke_path_dialog(app, &name);
     }
@@ -1992,7 +2072,7 @@ mod tests {
         app.run("path.set", json!({"name": "Second", "path": path})).unwrap();
         let doc = &app.session.active().unwrap().doc;
         let first = path_rows(doc, None).into_iter().find(|r| r.name == "First").unwrap();
-        let entries = path_context_actions(&first, doc);
+        let entries = path_context_actions(&first, doc, None);
         assert_eq!(entries[0].1, "path.toSelection");
         assert_eq!(entries[0].2["name"], "First");
         assert!(entries.iter().all(|(_, id, _)| photocraft_engine::commands::find(id).is_some()));
@@ -2004,7 +2084,7 @@ mod tests {
         app.run("path.set", json!({"name": "First copy 1", "path": path})).unwrap();
         let doc = &app.session.active().unwrap().doc;
         let first = path_rows(doc, None).into_iter().find(|r| r.name == "First").unwrap();
-        let (_, _, duplicate) = path_context_actions(&first, doc).into_iter().find(|(_, id, _)| *id == "path.set").unwrap();
+        let (_, _, duplicate) = path_context_actions(&first, doc, None).into_iter().find(|(_, id, _)| *id == "path.set").unwrap();
         assert_eq!(duplicate["name"], "First copy 2", "duplicate must not overwrite an existing path");
     }
 
@@ -2015,12 +2095,33 @@ mod tests {
         app.run("path.set", json!({"name": "work", "path": path})).unwrap();
         let doc = &app.session.active().unwrap().doc;
         let work = path_rows(doc, None).into_iter().find(|r| r.kind == PathRow::Work).unwrap();
-        let entries = path_context_actions(&work, doc);
+        let entries = path_context_actions(&work, doc, None);
         assert!(entries.iter().any(|(_, id, _)| *id == "path.rename"));
         assert!(!entries.iter().any(|(_, id, _)| *id == "path.set"));
         let layer = PathEntry { kind: PathRow::Layer, ..work };
-        let entries = path_context_actions(&layer, doc);
+        let entries = path_context_actions(&layer, doc, None);
         assert!(!entries.iter().any(|(_, id, _)| *id == "path.delete"));
+    }
+
+    /// #6552: a shape layer's "<Layer> Shape Path" row offers Delete Path, and it deletes the
+    /// shape layer, as Photoshop's Delete Path does (measured: one "Delete Layer" step).
+    #[test]
+    fn shape_path_row_delete_path_deletes_the_shape_layer() {
+        let mut app = app();
+        app.run("shape.create", json!({"kind": "ellipse", "rect": [20, 20, 100, 70]})).unwrap();
+        let st = app.session.active().unwrap();
+        let (doc, shape) = (st.doc.clone(), st.active_layer);
+        let layers = doc.layers.len();
+        let row = path_rows(&doc, shape).into_iter().find(|r| r.kind == PathRow::Layer).unwrap();
+        assert!(row.name.ends_with(" Shape Path"), "{}", row.name);
+        let (_, id, params) =
+            path_context_actions(&row, &doc, shape).into_iter().find(|(label, _, _)| *label == "Delete Path").expect("Delete Path is offered");
+        app.run(id, params).unwrap();
+        let doc = &app.session.active().unwrap().doc;
+        assert_eq!(doc.layers.len(), layers - 1);
+        assert!(shape.and_then(|id| doc.layer(id)).is_none(), "the shape layer is gone");
+        app.run("edit.undo", json!({})).unwrap();
+        assert!(shape.and_then(|id| app.session.active().unwrap().doc.layer(id)).is_some(), "one undo step brings it back");
     }
 
     /// How many shapes the path overlay paints for `app` this frame.
@@ -2034,6 +2135,30 @@ mod tests {
         });
         out.textures_delta.clear();
         out.shapes.len()
+    }
+
+    #[test]
+    fn pen_keeps_anchors_of_a_finished_path() {
+        // #6884: a path finished with Enter, or by closing it, lost its anchor squares while the
+        // Pen stayed active, so it looked gone and could not be edited.
+        let ctx = egui::Context::default();
+        let mut app = app();
+        app.ui.tool = Tool::Pen;
+        let knots = vec![[[10.0, 10.0]; 3], [[80.0, 10.0]; 3], [[80.0, 80.0]; 3]];
+        app.ui.pen = Some(PenPath { knots, ..Default::default() });
+        pen_commit(&mut app, true);
+        assert!(app.ui.pen.is_none());
+        assert!(app.session.active().unwrap().doc.work_path.is_some());
+        let with_pen = overlay_shapes(&app, &ctx);
+        app.ui.tool = Tool::Brush;
+        let outline_only = overlay_shapes(&app, &ctx);
+        assert!(outline_only > 0, "the outline is drawn with any tool");
+        // Each of the three anchors adds its square (fill and stroke).
+        assert!(with_pen >= outline_only + 3, "Pen draws the anchors: {with_pen} vs {outline_only}");
+        for tool in [Tool::Pen, Tool::FreeformPen, Tool::CurvaturePen, Tool::PathSelection] {
+            assert!(shows_anchors(tool), "{tool:?}");
+        }
+        assert!(!shows_anchors(Tool::Brush) && !shows_anchors(Tool::Move));
     }
 
     #[test]
@@ -2070,6 +2195,44 @@ mod tests {
         app.ui.pen = Some(PenPath { knots: vec![[[20.0, 20.0]; 3], [[60.0, 40.0]; 3]], ..Default::default() });
         toggle(&mut app, "view.show.targetPath");
         assert!(overlay_shapes(&app, &ctx) > 0, "the pen path in progress is still drawn");
+    }
+
+    #[test]
+    fn the_saved_path_selected_in_the_paths_panel_is_drawn() {
+        // #6550: selecting a saved path in the Paths panel drew nothing on the canvas.
+        let ctx = egui::Context::default();
+        let mut app = app();
+        let tri = |o: f64| {
+            json!({"subpaths": [{"closed": true, "knots": [
+                {"anchor": [20.0 + o, 20], "in": [20.0 + o, 20], "out": [20.0 + o, 20]},
+                {"anchor": [90.0 + o, 20], "in": [90.0 + o, 20], "out": [90.0 + o, 20]},
+                {"anchor": [90.0 + o, 90], "in": [90.0 + o, 90], "out": [90.0 + o, 90]}
+            ]}]})
+        };
+        app.run("path.set", json!({"name": "Path 1", "path": tri(0.0)})).unwrap();
+        app.run("path.set", json!({"name": "Path 2", "path": tri(10.0)})).unwrap();
+        assert!(app.session.active().unwrap().doc.work_path.is_none());
+        for tool in [Tool::Move, Tool::Brush, Tool::Pen, Tool::PathSelection, Tool::DirectSelection] {
+            app.ui.tool = tool;
+            app.ui.selected_path = None;
+            assert_eq!(overlay_shapes(&app, &ctx), 0, "{tool:?}: nothing selected, nothing drawn");
+            app.ui.selected_path = Some("Path 1".into());
+            assert_eq!(selected_saved_path(&app).map(|p| p.subpaths[0].knots[0].anchor.x), Some(20.0));
+            assert!(overlay_shapes(&app, &ctx) > 0, "{tool:?}: the selected saved path is drawn");
+            app.ui.selected_path = Some("Path 2".into());
+            assert_eq!(selected_saved_path(&app).map(|p| p.subpaths[0].knots[0].anchor.x), Some(30.0));
+            app.ui.selected_path = Some("Gone".into());
+            assert_eq!(overlay_shapes(&app, &ctx), 0, "{tool:?}: a missing path draws nothing");
+            app.ui.selected_path = Some("Path 1".into());
+            app.ui.view.show.target_path = false;
+            assert_eq!(overlay_shapes(&app, &ctx), 0, "{tool:?}: View > Show > Target Path off");
+            app.ui.view.show.target_path = true;
+        }
+        // Path Selection adds its anchor squares (the outline plus three anchors, two shapes each).
+        app.ui.tool = Tool::Move;
+        let plain = overlay_shapes(&app, &ctx);
+        app.ui.tool = Tool::PathSelection;
+        assert!(overlay_shapes(&app, &ctx) > plain);
     }
 
     #[test]
@@ -2714,6 +2877,65 @@ mod tests {
         h.state_mut().run("layer.new.layer", json!({})).unwrap();
         h.run_steps(2);
         assert!(h.query_all(egui_kittest::kittest::by().label("Fill:").include_labels()).next().is_none());
+    }
+
+    /// #6553: a Paths row dragged onto the footer's trash is deleted, whichever row is selected,
+    /// and a shape layer's path row does not start a drag.
+    #[test]
+    fn path_rows_dragged_onto_the_trash_are_deleted() {
+        use egui_kittest::kittest::Queryable;
+        let mut app = app();
+        let path = json!({"subpaths": [{"closed": true, "knots": [
+            {"anchor": [10, 10], "in": [10, 10], "out": [10, 10]},
+            {"anchor": [80, 10], "in": [80, 10], "out": [80, 10]},
+            {"anchor": [80, 80], "in": [80, 80], "out": [80, 80]}
+        ]}]});
+        app.run("path.set", json!({"name": "Path 1", "path": path})).unwrap();
+        app.run("path.set", json!({"name": "work", "path": path})).unwrap();
+        app.ui.selected_path = Some("work".into());
+        let mut h = egui_kittest::Harness::builder().with_size(vec2(300.0, 400.0)).build_ui_state(|ui, app: &mut PhotocraftApp| paths_panel(app, ui), app);
+        h.run_steps(3);
+        let trash = |h: &egui_kittest::Harness<'_, PhotocraftApp>| {
+            let buttons: Vec<Rect> = h
+                .ctx
+                .viewport(|v| v.prev_pass.widgets.layers().flat_map(|(_, w)| w.iter()).filter(|w| w.rect.size() == vec2(26.0, 26.0)).map(|w| w.rect).collect());
+            buttons.into_iter().max_by(|a, b| a.center().x.total_cmp(&b.center().x)).unwrap().center()
+        };
+        let drag = |h: &mut egui_kittest::Harness<'_, PhotocraftApp>, from: Pos2, to: Pos2| {
+            h.event(egui::Event::PointerMoved(from));
+            h.event(egui::Event::PointerButton { pos: from, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE });
+            h.step();
+            for k in 1..=10 {
+                h.event(egui::Event::PointerMoved(from + (to - from) * (k as f32 / 10.0)));
+                h.step();
+            }
+            h.event(egui::Event::PointerButton { pos: to, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::NONE });
+            h.run_steps(3);
+        };
+        // The saved path, while the work path is selected: only the dragged row goes.
+        let (row, to) = (h.get_by_label("Path 1").rect().center(), trash(&h));
+        drag(&mut h, row, to);
+        let doc = &h.state().session.active().unwrap().doc;
+        assert!(doc.paths.is_empty(), "the dragged saved path is deleted");
+        assert!(doc.work_path.is_some(), "the selected work path is kept");
+        // The work path.
+        let (row, to) = (h.get_by_label("Work Path").rect().center(), trash(&h));
+        drag(&mut h, row, to);
+        assert!(h.state().session.active().unwrap().doc.work_path.is_none(), "the dragged work path is deleted");
+        // A drop elsewhere deletes nothing.
+        h.state_mut().run("path.set", json!({"name": "Path 2", "path": path})).unwrap();
+        h.run_steps(2);
+        let row = h.get_by_label("Path 2").rect().center();
+        drag(&mut h, row, row + vec2(0.0, 120.0));
+        assert_eq!(h.state().session.active().unwrap().doc.paths.len(), 1, "a drop off the trash keeps the path");
+        // A shape layer's path row is not dragged onto the trash (its deletion is #6552's).
+        h.state_mut().run("shape.create", json!({"kind": "ellipse", "rect": [20, 20, 100, 70]})).unwrap();
+        h.run_steps(2);
+        let layers = h.state().session.active().unwrap().doc.layers.len();
+        let (row, to) = (h.get_by_label("Ellipse 1 Shape Path").rect().center(), trash(&h));
+        drag(&mut h, row, to);
+        let doc = &h.state().session.active().unwrap().doc;
+        assert_eq!((doc.layers.len(), doc.paths.len()), (layers, 1), "nothing is deleted");
     }
 }
 

@@ -2118,6 +2118,11 @@
 	Mixer Brush Tool	Mengpenseelgereedschap
 	Color Replacement Tool	Kleurvervangingsgereedschap
 	Wet	Nat
+	Current Brush Load	Huidige penseellading
+	Load Brush	Penseel laden
+	Clean Brush	Penseel reinigen
+	Load the brush after each stroke	Penseel laden na elke streek
+	Clean the brush after each stroke	Penseel reinigen na elke streek
 	Mix	Mengen
 	Wetness Jitter	Nattigheidsvariatie
 	Mix Jitter	Mengvariatie
@@ -3854,6 +3859,10 @@ curves	Smooth	Vloeiend maken
 # Color Sampler (added with the i18n coverage repair)
 	Click to place · Alt-click or drag off-canvas to remove	Klik om te plaatsen · Alt-klik of sleep buiten het canvas om te verwijderen
 	{n} of {max} sample points	{n} van {max} steekproefpunten
+
+# History panel menu (#2966)
+	New Snapshot…	Nieuwe momentopname…
+	History Options…	Geschiedenisopties…
 # Print dialog (#2697)
 	Emulsion Down	Emulsie omlaag
 	Functions	Functies
@@ -3930,6 +3939,9 @@ curves	Smooth	Vloeiend maken
 	Sent to {printer}	Verzonden naar {printer}
 	set in Print Settings…	instellen in de afdrukinstellingen…
 	ICO is limited to 256 × 256 pixels	ICO is beperkt tot 256 × 256 pixels
+# History panel › History Brush source (#2966)
+	Paints from the History panel's source state	Schildert vanuit de bronstatus van het deelvenster Geschiedenis
+	Sets the source for the history brush	Stelt de bron voor het historiepenseel in
 # Embedded Profile Mismatch: profile names beside the choices, Remember this choice
 	Use the embedded profile ({profile})	Het ingesloten profiel gebruiken ({profile})
 	Convert to the working space ({profile})	Omzetten naar de werkruimte ({profile})
@@ -3950,6 +3962,9 @@ curves	Smooth	Vloeiend maken
 # View › Guides › right-click a guide
 	Edit Selected Guides	Geselecteerde hulplijnen bewerken
 	Clear Selected Guides	Geselecteerde hulplijnen wissen
+	Bicubic Automatic	Bicubisch automatisch
+	Bicubic Smoother	Bicubisch vloeiender
+	Bicubic Sharper	Bicubisch scherper
 	Pasting from other apps is unavailable	Plakken vanuit andere apps is niet beschikbaar
 	PhotoCraft can't reach the system clipboard in this session. On Wayland, a Flatpak sandbox hides the protocol that images from other apps are read through.	PhotoCraft heeft in deze sessie geen toegang tot het systeemklembord. Onder Wayland verbergt een Flatpak-sandbox het protocol waarmee afbeeldingen uit andere apps worden gelezen.
 	To paste from other apps, start PhotoCraft under XWayland: `{command}`	Om vanuit andere apps te plakken, start je PhotoCraft onder XWayland: `{command}`
@@ -3969,6 +3984,17 @@ curves	Smooth	Vloeiend maken
 	set name	naam van de set
 	{set} (modified)	{set} (gewijzigd)
 	Show file name in title	Bestandsnaam in titel weergeven
+
+# Image › Mode › Bitmap (#5559)
+	50% Threshold	50% drempel
+	Pattern Dither	Patroondithering
+	Diffusion Dither	Diffusiedithering
+	Halftone Screen	Halftoonraster
+	Custom Pattern	Aangepast patroon
+	Frequency:	Frequentie:
+	Lines/Inch	Lijnen/inch
+	Lines/Centimeter	Lijnen/centimeter
+	Ellipse	Ellips
 	Accept and Go to Conflict	Accepteren en naar conflict
 	Changes undone.	Wijzigingen ongedaan gemaakt.
 	Choose a new shortcut for this command, or leave it without one.	Kies een nieuwe sneltoets voor deze opdracht of laat hem zonder.
@@ -4004,6 +4030,14 @@ curves	Smooth	Vloeiend maken
 	Use	Gebruiken
 	In Front	Voor
 	Behind	Achter
+
+# DDS Options (#1327)
+	DDS Options	DDS-opties
+	Generate Mipmaps	Mipmaps genereren
+
+# Graphics Adapter preference (#1885)
+	GPU adapter	GPU-adapter
+
 # HarmonyOS host additions retained during upstream sync
 	Double-tap pen body	Dubbeltik op de pen
 	Current tool and Eraser	Huidig gereedschap en Gum

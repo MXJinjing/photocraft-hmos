@@ -940,6 +940,46 @@ fn a_pulled_string_brush_takes_the_pose_along_the_string() {
 }
 
 #[test]
+fn a_smoothed_brush_catches_up_with_a_pen_lifted_in_place() {
+    // #7747: only the pressure changes while the pointer stands still. The brush lags in pose,
+    // so catch-up must keep running and the stroke end at the pen's last pressure.
+    let cfg = Smoothing { amount: 0.8, ..Default::default() };
+    let mut s = Smoother::new(&cfg, 1.0);
+    let mut out = Vec::new();
+    s.push(StrokePoint::new(50.0, 50.0, 1.0), &mut out);
+    s.push(StrokePoint { time: 32.0, ..StrokePoint::new(50.0, 50.0, 0.0) }, &mut out);
+    assert!(out.last().unwrap().pressure > 0.5, "the brush trails in pressure: {:?}", out.last());
+    assert!(s.lagging(), "a pose behind the pointer is still catching up");
+    // Held long enough, the brush arrives and stops asking for time.
+    for i in 1..=200 {
+        s.push(StrokePoint { time: 32.0 + f64::from(i) * 16.0, ..StrokePoint::new(50.0, 50.0, 0.0) }, &mut out);
+    }
+    assert!(!s.lagging(), "{:?}", out.last());
+    s.finish(&mut out);
+    assert_eq!(out.last().unwrap().pressure, 0.0);
+}
+
+#[test]
+fn catch_up_on_stroke_end_finishes_the_pose_of_a_still_pen() {
+    // #7747: tilt, rotation and wheel changed in place; the end catch-up lands on all of them.
+    let cfg = Smoothing { amount: 0.8, ..Default::default() };
+    let a = StrokePoint { rotation: 350.0, ..StrokePoint::new(50.0, 50.0, 1.0) };
+    let b = StrokePoint { time: 16.0, tilt_x: 40.0, tilt_y: -20.0, rotation: 10.0, wheel: 0.5, ..StrokePoint::new(50.0, 50.0, 1.0) };
+    let mut s = Smoother::new(&cfg, 1.0);
+    let mut out = Vec::new();
+    s.push(a, &mut out);
+    s.push(b, &mut out);
+    assert!(s.lagging());
+    s.finish(&mut out);
+    let p = out.last().unwrap();
+    assert_eq!((p.tilt_x, p.tilt_y, p.rotation, p.wheel), (40.0, -20.0, 10.0, 0.5));
+    // Nothing left to catch up: no extra point.
+    let n = out.len();
+    s.finish(&mut out);
+    assert_eq!(out.len(), n);
+}
+
+#[test]
 fn pose_overrides_stylus_values() {
     let b = BrushSettings {
         size: 40.0,

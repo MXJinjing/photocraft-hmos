@@ -69,7 +69,7 @@ fn gradient(p: &Value) -> Gradient {
         stops: gradient_stops(p, color(p, "from", [0.0; 3]), color(p, "to", [1.0; 3])),
         style: gradient_style(p.get("style").and_then(Value::as_str).unwrap_or("linear")),
         angle: f(p, "angle", 90.0),
-        scale: f(p, "scale", 100.0) / 100.0,
+        scale: (f(p, "scale", 100.0) / 100.0).clamp(0.1, 1.5),
         reverse: b(p, "reverse", false),
         ..Gradient::default()
     }
@@ -91,7 +91,7 @@ pub fn effect_defaults(kind: &str) -> Value {
         "innerGlow" => {
             json!({"blend": "Screen", "opacity": 75, "color": "#ffffbe", "source": "edge", "choke": 0, "size": 5, "contour": "Linear", "antiAlias": false, "noise": 0})
         }
-        "stroke" => json!({"size": 3, "position": "outside", "blend": "Normal", "opacity": 100, "color": "#000000"}),
+        "stroke" => json!({"size": 1, "position": "inside", "blend": "Normal", "opacity": 100, "color": "#000000"}),
         "colorOverlay" => json!({"blend": "Normal", "color": "#ff0000", "opacity": 100}),
         "gradientOverlay" => {
             json!({"blend": "Normal", "opacity": 100, "from": "#000000", "to": "#ffffff", "reverse": false, "style": "linear", "angle": 90, "scale": 100})
@@ -507,9 +507,9 @@ fn fresh_effect(kind: &str) -> Option<Effect> {
         "innerGlow" => Effect::InnerGlow(glow()),
         "stroke" => Effect::Stroke(StrokeFx {
             common: FxCommon::new(BlendMode::Normal, 1.0),
-            size: 3.0,
-            position: StrokePosition::Outside,
-            paint: FxPaint::Color(Color::rgb(1.0, 0.0, 0.0)),
+            size: 1.0,
+            position: StrokePosition::Inside,
+            paint: FxPaint::Color(Color::BLACK),
         }),
         "colorOverlay" => Effect::ColorOverlay { common: FxCommon::new(BlendMode::Normal, 1.0), color: Color::rgb(1.0, 0.0, 0.0) },
         "gradientOverlay" => Effect::GradientOverlay { common: FxCommon::new(BlendMode::Normal, 1.0), gradient: Gradient::default(), dither: false },
@@ -582,7 +582,7 @@ fn overlay_gradient(g: &mut Gradient, p: &Value) {
         g.angle = x;
     }
     if let Some(x) = f_of(p, "scale") {
-        g.scale = (x / 100.0).clamp(0.01, 10.0);
+        g.scale = (x / 100.0).clamp(0.1, 1.5);
     }
     if let Some(x) = b_of(p, "reverse") {
         g.reverse = x;
@@ -1012,7 +1012,7 @@ pub fn specs() -> Vec<CommandSpec> {
         style_cmd!(
             "stroke",
             "Stroke…",
-            r##"{"size":px=3,"position":"outside|inside|center","color":"#rrggbb","from":"#rrggbb","to":"#rrggbb","method":"classic|perceptual|linear|smooth"?,"smoothness":0..100=100,"style":str,"angle":deg,"opacity":0..100,"blend":str,"add":bool}"##
+            r##"{"size":px=1,"position":"inside|outside|center","color":"#rrggbb","from":"#rrggbb","to":"#rrggbb","method":"classic|perceptual|linear|smooth"?,"smoothness":0..100=100,"style":str,"angle":deg,"opacity":0..100,"blend":str,"add":bool}"##
         ),
         style_cmd!("colorOverlay", "Color Overlay…", r##"{"color":"#rrggbb","opacity":0..100=100,"blend":str,"add":bool}"##),
         style_cmd!(
@@ -1203,6 +1203,34 @@ mod tests {
         assert_eq!(effects(&s).len(), 2, "adds a second instance");
         s.execute("layer.layerStyle.dropShadow", json!({"blend": "normal", "distance": 12})).unwrap();
         assert!(matches!(&effects(&s)[2], Effect::DropShadow(sh) if sh.common.blend == BlendMode::Normal && sh.distance == 12.0));
+    }
+
+    /// The gradient overlay and the gradient stroke keep their scale in Photoshop's 10-150 %.
+    #[test]
+    fn gradient_overlay_and_stroke_scale_stay_in_range() {
+        let scale = |s: &Session| match &effects(s)[0] {
+            Effect::GradientOverlay { gradient, .. } => gradient.scale,
+            Effect::Stroke(st) => match &st.paint {
+                FxPaint::Gradient(g) => g.scale,
+                other => panic!("{other:?}"),
+            },
+            other => panic!("{other:?}"),
+        };
+        for (cmd, p, want) in [
+            ("gradientOverlay", json!({"scale": 1000}), 1.5),
+            ("gradientOverlay", json!({"scale": 1}), 0.1),
+            ("gradientOverlay", json!({"scale": 80}), 0.8),
+            ("stroke", json!({"from": "#000000", "to": "#ffffff", "scale": -50}), 0.1),
+            ("stroke", json!({"from": "#000000", "to": "#ffffff", "scale": 0}), 0.1),
+            ("stroke", json!({"from": "#000000", "to": "#ffffff", "scale": 400}), 1.5),
+        ] {
+            let mut s = session();
+            s.execute(&format!("layer.layerStyle.{cmd}"), p.clone()).unwrap();
+            assert!((scale(&s) - want).abs() < 1e-6, "{cmd} {p}: {}", scale(&s));
+        }
+        // Beyond f32 range is refused before any edit (commands.rs), not clamped.
+        let err = session().execute("layer.layerStyle.gradientOverlay", json!({"scale": 1e39})).unwrap_err();
+        assert!(format!("{err:?}").contains("finite 32-bit"), "{err:?}");
     }
 
     #[test]
@@ -1518,7 +1546,7 @@ mod tests {
         // Factory default first: Reset without a saved default gives the factory set.
         let r = s.execute("layer.layerStyle.defaultFor", json!({"kind": "stroke"})).unwrap();
         assert_eq!(r["user"], json!(false));
-        assert_eq!(r["params"]["size"], json!(3));
+        assert_eq!(r["params"]["size"], json!(1));
         s.execute(
             "layer.layerStyle.makeDefault",
             json!({"kind": "stroke", "params": {"size": 9, "position": "inside", "blend": "Normal", "opacity": 100, "color": "#000000"}}),
@@ -1531,6 +1559,22 @@ mod tests {
         assert!(s.execute("layer.layerStyle.makeDefault", json!({"kind": "nope", "params": {}})).is_err());
         assert!(s.execute("layer.layerStyle.makeDefault", json!({"kind": "stroke", "params": "x"})).is_err());
         assert!(s.execute("layer.layerStyle.defaultFor", json!({"kind": "nope"})).is_err());
+    }
+
+    /// #7765: a stroke built without params was red, while the dialog's factory default was
+    /// black. Both now give Photoshop's Reset to Default: 1 px, inside, Normal, 100 %, black.
+    #[test]
+    fn fresh_effects_match_the_dialog_factory_defaults() {
+        for kind in
+            ["dropShadow", "innerShadow", "outerGlow", "innerGlow", "stroke", "colorOverlay", "gradientOverlay", "patternOverlay", "satin", "bevelEmboss"]
+        {
+            let bare = effect_from_params(kind, &json!({})).unwrap();
+            let dialog = effect_from_params(kind, &effect_defaults(kind)).unwrap();
+            assert_eq!(bare, dialog, "{kind}");
+        }
+        let Some(Effect::Stroke(st)) = effect_from_params("stroke", &json!({})) else { panic!("no stroke") };
+        assert_eq!((st.size, st.position, st.common.blend, st.common.opacity), (1.0, StrokePosition::Inside, BlendMode::Normal, 1.0));
+        assert_eq!(st.paint, FxPaint::Color(Color::BLACK));
     }
 
     #[test]
