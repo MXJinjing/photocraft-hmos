@@ -1555,7 +1555,7 @@ impl PhotocraftApp {
             }
             let target = select(doc, active.path.as_deref())?;
             // Ordinary Save must journal `file.save`, not Save As, once the host picked a target.
-            return self.save_in_place(target);
+            return self.save_in_place(target, FormatChoices::default());
         }
         self.save_as(path)
     }
