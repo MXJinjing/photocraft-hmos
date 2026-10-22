@@ -494,6 +494,32 @@ fn right_click_with_painting_tools_pref() {
 }
 
 #[test]
+fn gpu_adapter_round_trips_and_defaults_to_automatic() {
+    let mut s = session();
+    assert_eq!(s.prefs().performance.gpu_adapter, "");
+    s.execute("prefs.set", json!({"path": "performance.gpuAdapter", "value": "NVIDIA"})).unwrap();
+    assert_eq!(s.prefs().performance.gpu_adapter, "NVIDIA");
+    assert!(s.execute("prefs.set", json!({"path": "performance.gpuAdapter", "value": 3})).is_err());
+    assert_eq!(s.prefs().performance.gpu_adapter, "NVIDIA");
+    let mut t = Session::new();
+    t.load_prefs_json(&s.prefs_to_json()).unwrap();
+    assert_eq!(t.prefs().performance.gpu_adapter, "NVIDIA");
+    let mut u = Session::new();
+    u.load_prefs_json(r#"{"performance": {"useGpu": true}}"#).unwrap();
+    assert_eq!(u.prefs().performance.gpu_adapter, "");
+}
+
+#[test]
+fn gpu_adapter_names_match_by_word_ignoring_case() {
+    let arc = "Intel(R) Arc(tm) A370M Graphics (DG2)";
+    assert!(gpu_adapter_matches("NVIDIA GeForce RTX 5060 Ti", "nvidia"));
+    assert!(gpu_adapter_matches(arc, " ARC A370M "));
+    assert!(!gpu_adapter_matches(arc, "arc a380"));
+    assert!(!gpu_adapter_matches(arc, ""));
+    assert!(!gpu_adapter_matches(arc, "   "));
+}
+
+#[test]
 fn gpu_backend_round_trips_and_validates() {
     let mut s = session();
     assert_eq!(s.prefs().performance.gpu_backend, GpuBackend::Auto);
@@ -603,7 +629,9 @@ fn linux_only_preferences_show_only_on_desktop_linux() {
     assert!(!is_hidden_for("performance.linuxDisplayServer", true));
     assert!(!is_hidden("performance.gpuBackend"));
     assert!(!is_hidden_for("performance.gpuBackend", false));
-    assert!(LINUX_ONLY.iter().all(|p| choices(p).is_some()), "every Linux-only preference is a real one");
+    assert!(LINUX_ONLY.contains(&"performance.gpuAdapter"));
+    let free_text = ["performance.gpuAdapter"];
+    assert!(LINUX_ONLY.iter().all(|p| free_text.contains(p) || choices(p).is_some()), "every Linux-only preference is a real one");
     assert_eq!("performance.linuxDisplayServer", LINUX_ONLY[0]);
 }
 
@@ -965,4 +993,51 @@ fn a_stranded_backup_is_named_in_the_error() {
     assert_eq!(std::fs::read_to_string(&backup[0]).unwrap(), "old A");
     assert_eq!(std::fs::read_to_string(&b).unwrap(), "old B");
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_wrongly_typed_value_resets_only_that_field() {
+    // #6611: one bad value used to reset every preference.
+    let mut s = Session::new();
+    let invalid = s
+        .load_prefs_json(
+            r#"{"general": {"beepWhenDone": true}, "fileHandling": {"recentFileCount": "ten", "autosaveMinutes": 5},
+                "performance": {"historyStates": 20}, "shortcuts": {"edit.fill": "Cmd+Shift+F", "file.open": 7}}"#,
+        )
+        .unwrap();
+    assert!(s.prefs().general.beep_when_done);
+    assert_eq!(s.prefs().file_handling.autosave_minutes, 5, "a sibling in the same section survives");
+    assert_eq!(s.prefs().file_handling.recent_file_count, 20, "the bad value takes the default");
+    assert_eq!(s.prefs().performance.history_states, 20);
+    assert_eq!(s.prefs().shortcuts.get("edit.fill").map(String::as_str), Some("Cmd+Shift+F"));
+    assert!(!s.prefs().shortcuts.contains_key("file.open"));
+    let paths: Vec<String> = invalid.iter().map(InvalidPref::path).collect();
+    assert_eq!(paths, ["fileHandling.recentFileCount", "shortcuts.file.open"]);
+    assert_eq!(invalid[0].value, json!("ten"));
+    assert_eq!(invalid[1].keys, ["shortcuts", "file.open"]);
+}
+
+#[test]
+fn a_wrongly_typed_section_or_colour_setting_resets_only_that_part() {
+    let mut s = Session::new();
+    let invalid = s
+        .load_prefs_json(
+            r#"{"general": "loud", "performance": {"historyStates": 20},
+                "colorSettings": {"workingRgb": "display-p3", "askOnMismatch": "yes"}}"#,
+        )
+        .unwrap();
+    assert_eq!(s.prefs().general, General::default());
+    assert_eq!(s.prefs().performance.history_states, 20);
+    assert_eq!(s.color.settings.working_rgb, "display-p3", "the rest of the colour settings load");
+    let paths: Vec<String> = invalid.iter().map(InvalidPref::path).collect();
+    assert_eq!(paths, ["general", "colorSettings.askOnMismatch"]);
+    // A valid file reports nothing; one that isn't an object still fails as a whole.
+    assert!(s.load_prefs_json(&s.prefs_to_json()).unwrap().is_empty());
+    for bad in ["[1, 2]", "42", "\"prefs\"", "null", "{", ""] {
+        assert!(s.load_prefs_json(bad).is_err(), "{bad}");
+    }
+    // Deep nesting and odd values don't panic.
+    let deep = format!("{{\"general\": {}1{}}}", "{\"a\":".repeat(100), "}".repeat(100));
+    assert!(s.load_prefs_json(&deep).is_ok());
+    assert!(s.load_prefs_json(r#"{"interface": {"theme": 3, "uiScale": [1]}, "workspaces": {"x": 1}, "menus": 1}"#).is_ok());
 }

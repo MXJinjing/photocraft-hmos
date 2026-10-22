@@ -435,21 +435,29 @@ pub fn insert_stop_confirm(app: &mut PhotocraftApp, fields: &serde_json::Map<Str
 pub const RESUME: &str = "__resumeAction";
 
 /// A step dialog confirmed: continue the action after it (`dialogs::confirm` calls this).
-pub fn resume(app: &mut PhotocraftApp, fields: &serde_json::Map<String, Value>) {
-    let Some(r) = fields.get(RESUME) else { return };
+pub fn resume(app: &mut PhotocraftApp, fields: &serde_json::Map<String, Value>) -> Result<(), String> {
+    let Some(r) = fields.get(RESUME) else { return Ok(()) };
     // The dialog's command may run as a background job; the next step needs its result.
     if let Some(doc) = app.session.active().map(|d| d.doc.id)
         && let Some(job) = app.session.job_on(doc)
+        && let Err(e) = app.session.wait_job(job.id)
     {
-        let _ = app.session.wait_job(job.id);
+        let template = "Action playback failed: {error}";
+        app.ui.status = crate::i18n::fmt(tl!(template), &[("error", &e.to_string())]);
+        app.ui.status_error = true;
+        return Err(e.to_string());
     }
     let params = json!({"action": r.get("action").cloned().unwrap_or(Value::Null), "from": r.get("from").cloned().unwrap_or(Value::Null)});
     match play(app, &params) {
-        Ok(v) => report_play(app, &v),
+        Ok(v) => {
+            report_play(app, &v);
+            Ok(())
+        }
         Err(e) => {
             let template = "Action playback failed: {error}";
             app.ui.status = crate::i18n::fmt(tl!(template), &[("error", &e)]);
             app.ui.status_error = true;
+            Err(e)
         }
     }
 }
@@ -822,16 +830,28 @@ pub fn panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                     app.ui.actions.expanded[i] = !expanded;
                 }
             }
-            resp.context_menu(|ui| {
+            // Clicks inside stay open, so Shift and Command can both be ticked; every item that
+            // finishes closes the menu itself.
+            egui::Popup::context_menu(&resp).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
                 ui.label(tl!("Keyboard Shortcuts"));
                 let current = app.session.prefs().shortcuts.get(&shortcut_id(name)).cloned().unwrap_or_default();
-                for key in std::iter::once(String::new()).chain((1..=12).map(|n| format!("F{n}"))) {
-                    let label = if key.is_empty() { tl!("None").to_string() } else { key.clone() };
-                    if ui.selectable_label(current == key, label).clicked() {
-                        let _ = assign_shortcut(app, name, &key);
+                // Photoshop's Action Options: a function key, with Shift and Command (#7646).
+                let (key, mut shift, mut command) = photocraft_engine::atn_cmds::parse_function_key(&current).unwrap_or((0, false, false));
+                for n in std::iter::once(0).chain(1..=12) {
+                    let label = if n == 0 { tl!("None").to_string() } else { format!("F{n}") };
+                    if ui.selectable_label(key == n, label).clicked() {
+                        let chosen = if n == 0 { String::new() } else { photocraft_engine::atn_cmds::function_key_name(n, shift, command) };
+                        let _ = assign_shortcut(app, name, &chosen);
                         ui.close();
                     }
                 }
+                ui.add_enabled_ui(key > 0, |ui| {
+                    let command_label = if cfg!(target_os = "macos") { tl!("Command") } else { tl!("Ctrl") };
+                    let toggled = ui.checkbox(&mut shift, tl!("Shift")).changed() | ui.checkbox(&mut command, command_label).changed();
+                    if toggled {
+                        let _ = assign_shortcut(app, name, &photocraft_engine::atn_cmds::function_key_name(key, shift, command));
+                    }
+                });
                 ui.separator();
                 ui.menu_button(tl!("Color"), |ui| {
                     for (id, label) in [
@@ -1036,6 +1056,44 @@ mod tests {
         };
         assert!(bottom(700.0) - bottom(300.0) > 350.0, "list uses the additional panel height instead of stopping at 320 px");
         assert!(crate::dock::Group::History.scrolls_itself(1));
+    }
+
+    /// #7646: an action's function key can take Shift and Command, as in Photoshop's Action
+    /// Options, and only that combination plays it.
+    #[test]
+    fn a_function_key_with_shift_and_command_plays_its_action() {
+        use egui::{Event, Key, Modifiers};
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        app.run("file.new", json!({"width": 32, "height": 32})).unwrap();
+        app.session.actions.list.push(Action {
+            name: "Action 1".into(),
+            steps: vec![("layer.new.layer".into(), json!({}))],
+            disabled: Default::default(),
+            ..Default::default()
+        });
+        let key = photocraft_engine::atn_cmds::function_key_name(2, true, true);
+        assert_eq!(key, "Cmd+Shift+F2");
+        assign_shortcut(&mut app, "Action 1", &key).unwrap();
+        let ctx = egui::Context::default();
+        let press = |app: &mut PhotocraftApp, modifiers| {
+            ctx.begin_pass(egui::RawInput {
+                events: vec![
+                    Event::ModifiersChanged(modifiers),
+                    Event::Key { key: Key::F2, physical_key: None, pressed: true, repeat: false, modifiers },
+                    Event::Key { key: Key::F2, physical_key: None, pressed: false, repeat: false, modifiers },
+                ],
+                ..Default::default()
+            });
+            crate::shortcuts::handle(app, &ctx);
+            ctx.end_pass().textures_delta.clear();
+        };
+        let layers = |app: &PhotocraftApp| app.session.active().unwrap().doc.layers.len();
+        let before = layers(&app);
+        press(&mut app, Modifiers::NONE);
+        press(&mut app, Modifiers::SHIFT);
+        assert_eq!(layers(&app), before, "F2 and Shift+F2 alone don't play it");
+        press(&mut app, Modifiers::SHIFT | Modifiers::COMMAND);
+        assert_eq!(layers(&app), before + 1, "Cmd+Shift+F2 plays it");
     }
 
     #[test]
@@ -1553,6 +1611,43 @@ mod tests {
         assert_eq!(app.ui.dialog_mut(id).unwrap().fields["at"], 3);
         crate::dialogs::cancel(&mut app, id).unwrap();
         assert_eq!(app.session.actions.list[0].steps.len(), 3);
+    }
+
+    #[test]
+    fn dialog_worker_failure_stops_action_before_following_steps() {
+        for (background, locked) in [(true, true), (false, true), (true, false)] {
+            let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+            app.run("file.new", json!({"width": 8, "height": 6, "background": "#203040"})).unwrap();
+            let mut action = Action::new(
+                "Worker Result",
+                vec![
+                    ("layer.setProps".into(), json!({"name": "Prefix", "locks": {"pixels": locked}})),
+                    ("filter.blur.gaussianBlur".into(), json!({"radius": 1.5})),
+                    ("layer.new.layer".into(), json!({"name": "Suffix"})),
+                ],
+            );
+            action.dialogs.insert(1);
+            app.session.actions.list.push(action);
+            app.background_jobs = background;
+            let paused = play(&mut app, &json!({"action": "Worker Result"})).unwrap();
+            let dialog = paused["paused"]["dialog"].as_u64().unwrap();
+            let result = crate::dialogs::confirm(&mut app, dialog);
+            let suffix = app.session.active().unwrap().doc.walk().iter().any(|(_, _, layer)| layer.name == "Suffix");
+
+            assert_eq!(suffix, !locked, "background={background}, locked={locked}: {result:?}");
+            if locked && background {
+                assert!(result.as_ref().is_err_and(|e| e.contains("locked")), "failed worker must fail the dialog confirmation: {result:?}");
+                assert!(app.ui.status_error, "the action must report the worker failure");
+                assert!(app.ui.status.contains("locked"), "{}", app.ui.status);
+                assert_eq!(app.session.jobs_with_recent()[0].state, "failed");
+            } else if locked {
+                assert!(result.is_err(), "the foreground command rejects the locked layer");
+            } else {
+                assert!(result.is_ok(), "the successful worker lets the action continue: {result:?}");
+            }
+            assert_eq!(app.session.actions.playing, 0);
+            assert!(app.session.actions.playback_stack.is_empty());
+        }
     }
 
     #[test]

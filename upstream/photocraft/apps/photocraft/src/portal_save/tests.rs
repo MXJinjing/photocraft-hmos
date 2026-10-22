@@ -36,17 +36,22 @@ fn mock_portal(script: Script) -> Option<(zbus::blocking::Connection, Seen, std:
 /// once the user is done with it (here after 300 ms).
 fn mock_portal_with(script: Script, own_paths: bool) -> Option<(zbus::blocking::Connection, Seen, std::process::Child)> {
     use std::io::BufRead;
+    let spawns = crate::CHILD_SPAWNS.read().unwrap_or_else(std::sync::PoisonError::into_inner);
     let mut daemon =
         std::process::Command::new("dbus-daemon").args(["--session", "--nofork", "--print-address=1"]).stdout(std::process::Stdio::piped()).spawn().ok()?;
+    drop(spawns);
     let mut address = String::new();
     std::io::BufReader::new(daemon.stdout.take()?).read_line(&mut address).ok()?;
     let address = address.trim().to_string();
     let server = zbus::blocking::connection::Builder::address(address.as_str()).unwrap().name("org.freedesktop.portal.Desktop").unwrap().build().unwrap();
     let seen: Seen = Arc::default();
     let log = seen.clone();
+    // A stream only gets the messages that arrive after it exists: made in the thread, it could
+    // miss a `SaveFile` sent before the thread got going, and the call would wait forever.
+    let messages = zbus::blocking::MessageIterator::from(&server);
     std::thread::spawn(move || {
         let mut script = script.into_iter();
-        for msg in zbus::blocking::MessageIterator::from(&server) {
+        for msg in messages {
             let Ok(msg) = msg else { break };
             let header = msg.header();
             if header.message_type() != zbus::message::Type::MethodCall || header.member().map(|m| m.as_str()) != Some("SaveFile") {

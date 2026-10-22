@@ -294,6 +294,10 @@ pub struct Interface {
     /// own one-row title bar (tiling window managers, desktops that draw their own decorations;
     /// #1271, #1316). Read when the app starts. macOS always uses the system's.
     pub system_title_bar: bool,
+    /// Show the active document's file name in the title bar and the OS window title. The tabs
+    /// already name the file, so this can be turned off for a plain "PhotoCraft" title (#5037).
+    /// The unsaved-changes mark stays either way.
+    pub show_file_name_in_title: bool,
     /// Notices (the lower-right cards) hide themselves after
     /// [`Interface::notification_duration_seconds`] unless the pointer rests on them (#2022).
     pub notification_auto_hide: bool,
@@ -325,6 +329,7 @@ impl Default for Interface {
             enable_animations: true,
             show_bounding_box_when_dragging_layer: false,
             system_title_bar: false,
+            show_file_name_in_title: true,
             notification_auto_hide: true,
             notification_duration_seconds: 6,
         }
@@ -461,6 +466,8 @@ impl Default for HistoryLog {
 pub struct FileHandling {
     pub image_previews: Ask,
     pub lowercase_extension: bool,
+    /// Saves run in the background while you keep working (on), or in the foreground under a
+    /// modal progress dialog that blocks the app until the file is written (off).
     pub save_in_background: bool,
     /// Save recovery information (crash recovery autosave).
     pub autosave: bool,
@@ -547,6 +554,11 @@ pub struct Performance {
     pub rendering_mode: Option<RenderingMode>,
     /// Graphics backend (applies at next launch; see [`GpuBackend`]).
     pub gpu_backend: GpuBackend,
+    /// Which graphics adapter the window and canvas use on a machine with several (applies at
+    /// next launch): part of the adapter's name, matched case-insensitively ("nvidia", "arc"). Empty
+    /// is automatic. `PHOTOCRAFT_GPU_ADAPTER` overrides it for one launch. If nothing matches or the
+    /// match can't present to the window, startup falls back to automatic and says so.
+    pub gpu_adapter: String,
     /// Live previews of large documents (adjustment and filter dialogs, an adjustment layer's
     /// sliders while they drag) render on a reduced copy: fast, but blocky when zoomed in. Off:
     /// they render at full resolution.
@@ -592,6 +604,7 @@ impl Default for Performance {
             use_gpu: true,
             rendering_mode: None,
             gpu_backend: GpuBackend::Auto,
+            gpu_adapter: String::new(),
             low_resolution_previews: true,
             low_latency_drawing: false,
             linux_display_server: LinuxDisplayServer::Auto,
@@ -1004,6 +1017,12 @@ pub struct Preferences {
     /// differ from their defaults, saved as the user changes them and restored at launch, as
     /// Photoshop remembers each tool's options between sessions. JSON owned by the shell.
     pub tool_options: Value,
+    /// Each painting tool's own brush (the Brush, the Eraser, the retouching tools…; see the
+    /// shell's `paint_mouse::sync_tool_brush`), saved as the user changes them and restored at
+    /// launch, as Photoshop keeps every tool's brush between sessions (#6212): `{"owner": tool,
+    /// "brushes": {tool: brush}}`, where `owner` is the tool whose brush `last_brush` holds and
+    /// the brushes are shaped by `brush_cmds::remembered_settings`. JSON owned by the shell.
+    pub tool_brushes: Value,
     /// Last selected tool, restored at launch. A tool-name string owned and validated by the
     /// shell; null in older files. Kept separate from tool options so neither overwrites the other.
     pub selected_tool: Value,
@@ -1045,11 +1064,9 @@ pub const SECTIONS: [(&str, &str); 18] = [
 /// preference is read anywhere outside `prefs.rs`, and while an unlisted one is read nowhere.
 pub const HIDDEN_UNTIL_IMPLEMENTED: &[&str] = &[
     "general.colorPicker",
-    "general.animatedZoom",
     "general.zoomResizesWindows",
     "workspace.autoShowHiddenPanels",
     "workspace.enableFloatingDocumentWindowDocking",
-    "fileHandling.saveInBackground",
     "performance.cacheLevels",
     "performance.effectCacheMb",
     "performance.legacyCompositing",
@@ -1062,7 +1079,6 @@ pub const HIDDEN_UNTIL_IMPLEMENTED: &[&str] = &[
     "type.textEngine",
     "type.recentFonts",
     "enhancedControls.scrubbySliderAcceleration",
-    "enhancedControls.touchGestures",
     "rawDefaults.colorSpace",
     "rawDefaults.bitDepth",
     "rawDefaults.resolution",
@@ -1096,7 +1112,16 @@ pub fn is_hidden_for(path: &str, desktop_linux: bool) -> bool {
 
 /// Preferences that only do something on desktop Linux; the dialog doesn't show them on
 /// Windows, macOS, wasm, or OHOS/HarmonyOS. They still load, save and round-trip everywhere.
-pub const LINUX_ONLY: &[&str] = &["performance.linuxDisplayServer"];
+pub const LINUX_ONLY: &[&str] = &["performance.linuxDisplayServer", "performance.gpuAdapter"];
+
+/// Whether a graphics adapter called `name` is the one `performance.gpuAdapter` (`wanted`) asks
+/// for: every whitespace-separated word of `wanted` appears in the name, ignoring case ("nvidia",
+/// "arc a370m"). An empty `wanted` matches nothing. Startup and Preferences share this.
+pub fn gpu_adapter_matches(name: &str, wanted: &str) -> bool {
+    let name = name.to_lowercase();
+    let mut words = wanted.split_whitespace().peekable();
+    words.peek().is_some() && words.all(|w| name.contains(&w.to_lowercase()))
+}
 
 /// Choices of an enumerated preference (dotted path, e.g. `"cursors.painting"`).
 pub fn choices(path: &str) -> Option<&'static [&'static str]> {
@@ -1643,6 +1668,100 @@ impl PrefsStore {
     }
 }
 
+/// A saved preference [`Session::load_prefs_json`] couldn't read (a wrong type, an unknown
+/// choice) and left at its default.
+#[derive(Clone, Debug, PartialEq)]
+pub struct InvalidPref {
+    /// JSON keys from the top of the preferences file (`["fileHandling", "recentFileCount"]`),
+    /// kept apart because keys such as command ids contain dots.
+    pub keys: Vec<String>,
+    /// The value the file held there.
+    pub value: Value,
+}
+
+impl InvalidPref {
+    /// The dotted path, as `prefs.get` and `prefs.set` take it.
+    pub fn path(&self) -> String {
+        self.keys.join(".")
+    }
+}
+
+/// How deep [`read_lenient`] looks for the readable parts of an unreadable value.
+const LENIENT_DEPTH: usize = 32;
+
+/// Read `v` as a `T`. When that fails, start from `T::default()` and lay the file's values over
+/// it one at a time, keeping each one the whole still reads with and descending into objects
+/// that don't, so one bad value resets only itself. The values left out are added to
+/// `invalid`, their keys after `prefix`.
+fn read_lenient<T>(v: Value, prefix: &[&str], invalid: &mut Vec<InvalidPref>) -> T
+where
+    T: Default + Serialize + for<'de> Deserialize<'de>,
+{
+    if let Ok(t) = T::deserialize(&v) {
+        return t;
+    }
+    let prefix: Vec<String> = prefix.iter().map(|k| (*k).to_string()).collect();
+    let mut acc = serde_json::to_value(T::default()).unwrap_or(Value::Null);
+    let fits = |root: &Value| T::deserialize(root).is_ok();
+    match v {
+        Value::Object(file) if acc.is_object() && fits(&acc) => {
+            lay_over(&mut acc, &mut Vec::new(), file, &fits, &prefix, invalid);
+            T::deserialize(&acc).unwrap_or_default()
+        }
+        value => {
+            invalid.push(InvalidPref { keys: prefix, value });
+            T::default()
+        }
+    }
+}
+
+/// [`read_lenient`]'s walk: lay `file` over the object at `at` inside `root`, key by key, so that
+/// `root` always reads (`fits`).
+fn lay_over(
+    root: &mut Value,
+    at: &mut Vec<String>,
+    file: Map<String, Value>,
+    fits: &dyn Fn(&Value) -> bool,
+    prefix: &[String],
+    invalid: &mut Vec<InvalidPref>,
+) {
+    for (k, fv) in file {
+        let Some(obj) = object_at(root, at) else { return };
+        let old = obj.insert(k.clone(), fv.clone());
+        if fits(root) {
+            continue;
+        }
+        // Back to the default. An object keeps its parts that read, and so does a new map entry
+        // (a shortcut set, a workspace) when it reads from an empty object.
+        let Some(obj) = object_at(root, at) else { return };
+        let mut descend = fv.is_object() && at.len() < LENIENT_DEPTH && matches!(old, None | Some(Value::Object(_)));
+        match old {
+            Some(o) => obj.insert(k.clone(), o),
+            None if descend => obj.insert(k.clone(), Value::Object(Map::new())),
+            None => obj.remove(&k),
+        };
+        at.push(k);
+        if descend && !fits(root) {
+            descend = false;
+            if let Some((key, parent)) = at.split_last()
+                && let Some(obj) = object_at(root, parent)
+            {
+                obj.remove(key);
+            }
+        }
+        match fv {
+            Value::Object(m) if descend => lay_over(root, at, m, fits, prefix, invalid),
+            value => invalid.push(InvalidPref { keys: prefix.iter().chain(at.iter()).cloned().collect(), value }),
+        }
+        at.pop();
+    }
+}
+
+/// The JSON object at `path` inside `root`.
+fn object_at<'a>(root: &'a mut Value, path: &[String]) -> Option<&'a mut Map<String, Value>> {
+    path.iter().try_fold(root, |cur, k| cur.get_mut(k.as_str()))?.as_object_mut()
+}
+
 impl Session {
     /// The current preferences.
     pub fn prefs(&self) -> &Preferences {
@@ -1691,8 +1810,14 @@ impl Session {
 
     /// Restore preferences saved by [`Session::prefs_to_json`]. Missing keys keep their
     /// defaults and unknown keys are ignored, so files from older and newer versions load.
-    pub fn load_prefs_json(&mut self, s: &str) -> std::result::Result<(), String> {
+    /// A value of the wrong type (a hand-edited `"recentFileCount": "ten"`) keeps its default
+    /// and everything else still loads (#6611); the returned list names those values. Only
+    /// text that isn't a JSON object fails as a whole.
+    pub fn load_prefs_json(&mut self, s: &str) -> std::result::Result<Vec<InvalidPref>, String> {
         let mut v: Value = serde_json::from_str(s).map_err(|e| format!("preferences: {e}"))?;
+        if !v.is_object() {
+            return Err("preferences: expected a JSON object".into());
+        }
         // Older settings did not record whether finger blocking was explicitly chosen.
         // Preserve a saved policy rather than overriding a possible user opt-out.
         if let Some(tools) = v.get_mut("tools").and_then(Value::as_object_mut)
@@ -1720,9 +1845,10 @@ impl Session {
         }
         let color = v.as_object_mut().and_then(|m| m.remove("colorSettings"));
         let presets = v.as_object_mut().and_then(|m| m.remove("presets"));
-        let prefs: Preferences = serde_json::from_value(v).map_err(|e| format!("preferences: {e}"))?;
+        let mut invalid = Vec::new();
+        let prefs: Preferences = read_lenient(v, &[], &mut invalid);
         if let Some(c) = color {
-            self.color.settings = serde_json::from_value(c).unwrap_or_default();
+            self.color.settings = read_lenient(c, &["colorSettings"], &mut invalid);
             photocraft_compose::psblend::set_text_gamma(self.color.settings.blend_text_gamma);
         }
         self.prefs.edit(|p| *p = prefs);
@@ -1730,7 +1856,7 @@ impl Session {
             self.load_presets_json(v);
         }
         self.apply_prefs();
-        Ok(())
+        Ok(invalid)
     }
 
     /// Full JSON view used by `prefs.get`: preferences plus `colorSettings`.

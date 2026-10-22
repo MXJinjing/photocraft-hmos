@@ -207,6 +207,79 @@ fn printer_commands_answer_without_a_document_and_reject_bad_settings() {
     assert!(s.execute("file.print", json!({"printer": "Anything", "printerSettings": "0102", "send": true})).is_err());
 }
 
+/// Synthetic driver settings: a DEVMODEW of `size` bytes plus `extra` private driver bytes, every
+/// byte a pattern so a stray write shows, with `dmFields` saying only the paper size is set.
+fn devmode(size: u16, extra: u16) -> Vec<u8> {
+    let mut b: Vec<u8> = (0..usize::from(size) + usize::from(extra)).map(|i| (i % 251) as u8).collect();
+    b[68..70].copy_from_slice(&size.to_le_bytes());
+    b[70..72].copy_from_slice(&extra.to_le_bytes());
+    b[72..76].copy_from_slice(&0x2u32.to_le_bytes()); // DM_PAPERSIZE
+    b
+}
+
+/// Photoshop's Layout buttons: driver settings turned to landscape or portrait set `dmOrientation`
+/// and its `dmFields` bit, and keep every other byte, the driver's private settings included.
+#[test]
+fn turned_settings_set_the_orientation_and_keep_the_rest() {
+    for (size, extra) in [(220u16, 0u16), (220, 48)] {
+        let before = devmode(size, extra);
+        let dm = craft_print::rgb::DevMode::from_bytes(before.clone()).unwrap();
+        for (landscape, orient) in [(true, 2i16), (false, 1i16)] {
+            let after = turned_settings(&dm, landscape).unwrap().as_bytes().to_vec();
+            assert_eq!(after.len(), before.len());
+            assert_eq!(i16::from_le_bytes([after[76], after[77]]), orient, "{size}+{extra} landscape={landscape}");
+            assert_eq!(u32::from_le_bytes([after[72], after[73], after[74], after[75]]), 0x3, "DM_ORIENTATION added, DM_PAPERSIZE kept");
+            for (i, (a, b)) in after.iter().zip(&before).enumerate() {
+                if !(72..76).contains(&i) && !(76..78).contains(&i) {
+                    assert_eq!(a, b, "byte {i} changed");
+                }
+            }
+        }
+    }
+}
+
+/// The driver's paper is turned only when it is the layout's paper the other way round (within
+/// the 2 pt a driver's paper may differ by): not for the same paper, another paper or a square one.
+#[test]
+fn only_the_same_paper_the_other_way_round_is_turned() {
+    let (a3, a3_wide) = ((842.29, 1191.14), (1190.55, 841.89));
+    assert!(turned_paper(a3, a3_wide), "portrait driver, landscape layout");
+    assert!(turned_paper((1191.14, 842.29), (841.89, 1190.55)), "landscape driver, portrait layout");
+    assert!(!turned_paper(a3, (841.89, 1190.55)), "same orientation");
+    assert!(!turned_paper((595.32, 841.92), a3_wide), "an A4 driver for an A3 layout");
+    assert!(!turned_paper((612.0, 612.0), (612.0, 612.0)), "square");
+}
+
+/// `file.print.page` takes an orientation and refuses any other value before asking a printer, so
+/// the error is the same with or without one.
+#[test]
+fn printer_page_refuses_an_unknown_orientation() {
+    let mut s = Session::new();
+    for bad in [json!("sideways"), json!(2), json!(true)] {
+        let e = s.execute("file.print.page", json!({"printer": "Anything", "orientation": bad})).unwrap_err().to_string();
+        assert!(e.contains("orientation"), "{bad}: {e}");
+    }
+}
+
+/// A real driver turns: Windows' "Microsoft Print to PDF" on its default (portrait) settings, for a
+/// landscape A4 layout, gets settings turned to landscape and a wide page; a portrait layout keeps
+/// the driver's own settings. Needs that printer, so it runs by hand:
+/// `cargo test -p photocraft-engine --lib a_portrait_driver -- --ignored`.
+#[cfg(windows)]
+#[test]
+#[ignore]
+fn a_portrait_driver_turns_for_a_landscape_layout() {
+    let printer = "Microsoft Print to PDF";
+    let defaults = craft_print::rgb::default_settings(printer).unwrap();
+    let a4 = craft_print::rgb::page(printer, Some(&defaults)).unwrap().paper;
+    let (settings, page) = settings_for_layout(printer, None, (a4.1, a4.0)).unwrap();
+    assert!(settings.is_some(), "turned settings come back");
+    assert!((page.paper.0 - a4.1).abs() <= 2.0 && (page.paper.1 - a4.0).abs() <= 2.0, "wide: {:?}", page.paper);
+    let (settings, page) = settings_for_layout(printer, None, a4).unwrap();
+    assert!(settings.is_none(), "nothing to turn");
+    assert!((page.paper.0 - a4.0).abs() <= 2.0, "{:?}", page.paper);
+}
+
 #[test]
 fn printer_profile_can_be_an_installed_icc_file() {
     let dir = tmp("icc");
@@ -224,6 +297,48 @@ fn printer_profile_can_be_an_installed_icc_file() {
     assert!(s.execute("file.print", json!({"dryRun": true, "colorHandling": "photocraftManages", "printerProfile": format!("{dir}/missing.icc")})).is_err());
     let _ = std::fs::remove_file(r["pdf"].as_str().unwrap());
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// #7410: the settings of the last print survive a relaunch, as Photoshop's do. They are kept in
+/// the preferences (without the output, dry-run and send choices), and a new session with those
+/// preferences, before printing anything, repeats them with Print One Copy.
+#[test]
+fn the_last_print_settings_survive_a_relaunch() {
+    let mut s = session("rgb", 8);
+    assert!(last_print(&s).is_none());
+    s.execute("file.print", json!({"dryRun": true, "copies": 3, "paper": "a5", "scale": 50, "intent": "perceptual"})).unwrap();
+    let kept = s.prefs().dialogs.get(REMEMBERED).cloned().expect("kept in the preferences");
+    assert_eq!((&kept["paper"], &kept["scale"], &kept["intent"]), (&json!("a5"), &json!(50), &json!("perceptual")));
+    assert!(kept.get("dryRun").is_none() && kept.get("output").is_none() && kept.get("send").is_none(), "{kept}");
+    // A relaunch: a new session with these preferences, nothing printed in it yet.
+    let mut t = session("rgb", 8);
+    t.prefs.edit(|p| {
+        p.dialogs.insert(REMEMBERED.into(), kept.clone());
+    });
+    assert_eq!(last_print(&t), Some(kept));
+    let r = t.execute("file.printOneCopy", json!({"dryRun": true})).unwrap();
+    assert_eq!(r["copies"], 1);
+    assert_eq!(r["paper"], json!([419.53, 595.28]));
+    assert_eq!(r["scale"], 50.0);
+}
+
+/// #7410: a printer remembered from an earlier session that the print server no longer lists is
+/// dropped before Print One Copy repeats the settings (with its driver settings), so the default
+/// printer takes the job; a listed one (in any case) stays, and an empty list can't tell.
+#[test]
+fn a_vanished_remembered_printer_falls_back_to_the_default() {
+    let settings = || json!({"printer": "Office", "printerSettings": "00ff", "paper": "a5"});
+    let mut q = settings();
+    drop_vanished_printer(&mut q, &["Studio", "Lab"]);
+    assert_eq!(q, json!({"paper": "a5"}), "gone: the default printer takes it");
+    for listed in [&["Studio", "office"][..], &[][..]] {
+        let mut q = settings();
+        drop_vanished_printer(&mut q, listed);
+        assert_eq!(q, settings(), "{listed:?}");
+    }
+    let mut q = json!({"printer": "", "paper": "a5"});
+    drop_vanished_printer(&mut q, &["Studio"]);
+    assert_eq!(q, json!({"printer": "", "paper": "a5"}), "the default printer stays the default");
 }
 
 #[test]
@@ -780,4 +895,28 @@ mod cups {
         let jobs = std::iter::from_fn(|| rx.try_recv().ok()).filter(|(op, _, _)| *op == OP_PRINT_JOB).count();
         assert_eq!(jobs, 2, "both prints reached the fake CUPS");
     }
+}
+
+#[cfg(target_os = "windows")]
+#[test]
+fn windows_pdf_component_is_detected_by_loading_its_dll() {
+    // #5884: a Windows image without a loadable Windows.Data.Pdf.dll reports an error instead of
+    // aborting at the delay-load stub.
+    let dir = tempfile::tempdir().unwrap();
+    let dll = windows_pdf_dll(dir.path());
+    assert!(!windows_pdf_loads(&dll));
+    // Present but not loadable counts as missing.
+    std::fs::create_dir(dir.path().join("System32")).unwrap();
+    std::fs::write(&dll, b"MZ").unwrap();
+    assert!(!windows_pdf_loads(&dll));
+    let root = std::env::var_os("SystemRoot").unwrap();
+    // The real DLL may be missing or unloadable on a stripped image; the check follows the loader.
+    let system = windows_pdf_dll(std::path::Path::new(&root));
+    assert_eq!(require_windows_pdf().is_ok(), windows_pdf_loads(&system));
+}
+
+#[cfg(not(target_os = "windows"))]
+#[test]
+fn the_windows_pdf_check_is_a_no_op_elsewhere() {
+    assert!(require_windows_pdf().is_ok());
 }

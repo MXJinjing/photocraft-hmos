@@ -68,10 +68,11 @@ pub fn pointer(app: &mut PhotocraftApp, ev: ToolEvent, _mods: egui::Modifiers) -
             } else {
                 let hit = slice_at(&doc, x, y);
                 app.ui.slices.selected = hit.as_ref().map(|r| r.number);
+                // The whole slice moves, also when the press hits one piece of a covered slice.
                 if let Some(r) = hit
-                    && let Some(id) = r.id.filter(|_| !locked && r.origin == SliceOrigin::User)
+                    && let Some(sl) = r.id.and_then(|id| doc.slices.get(id)).filter(|_| !locked && r.origin == SliceOrigin::User)
                 {
-                    app.ui.slices.drag = Some(SliceDrag::Move { id, start: [x, y], cur: [x, y], rect: r.rect });
+                    app.ui.slices.drag = Some(SliceDrag::Move { id: sl.id, start: [x, y], cur: [x, y], rect: sl.rect });
                 }
             }
         }
@@ -321,6 +322,20 @@ mod tests {
         crate::dialogs::confirm(&mut app, id).unwrap();
         let doc = app.session.active().unwrap().doc.clone();
         assert!(doc.slices.list.iter().any(|s| s.name == "footer"));
+    }
+
+    #[test]
+    fn dragging_a_piece_moves_the_whole_covered_slice() {
+        // #7770: the slice under a later one is drawn as pieces; dragging one moves all of it.
+        let mut app = app();
+        app.run("slice.new", json!({"rect": [0, 0, 60, 60]})).unwrap();
+        app.run("slice.new", json!({"rect": [40, 40, 20, 20]})).unwrap();
+        app.ui.tool = Tool::SliceSelect;
+        let m = egui::Modifiers::NONE;
+        pointer(&mut app, ToolEvent::Down { x: 10.0, y: 50.0, pressure: 1.0 }, m);
+        pointer(&mut app, ToolEvent::Up { x: 15.0, y: 50.0 }, m);
+        let doc = app.session.active().unwrap().doc.clone();
+        assert_eq!(doc.slices.list[0].rect, photocraft_geom::Rect::new(5, 0, 65, 60));
     }
 
     #[test]

@@ -105,15 +105,22 @@ fn older_dialog_above(ctx: &egui::Context, live: egui::LayerId, dialogs: &[Dialo
     ctx.memory(|m| m.layer_ids().skip_while(|l| *l != live).skip(1).any(|l| others.contains(&l)))
 }
 
-fn resizable_dialog(fields: &serde_json::Map<String, Value>) -> bool {
-    fields.contains_key("__web") || crate::prefs_ui::is_preferences(fields)
+/// The size a resizable dialog opens at, or `None` for a dialog sized by its contents.
+fn resizable_dialog(fields: &serde_json::Map<String, Value>) -> Option<egui::Vec2> {
+    if crate::prefs_ui::is_preferences(fields) {
+        Some(crate::prefs_ui::PREFERENCES_SIZE)
+    } else if fields.contains_key("__web") {
+        Some(egui::vec2(960.0, 900.0))
+    } else {
+        None
+    }
 }
 
 fn show_modal<T>(
     modal: egui::Modal,
     ctx: &egui::Context,
     id: egui::Id,
-    resizable: bool,
+    resizable: Option<egui::Vec2>,
     interactive: bool,
     contents: impl FnOnce(&mut egui::Ui) -> T,
 ) -> egui::ModalResponse<T> {
@@ -122,14 +129,9 @@ fn show_modal<T>(
         if !interactive {
             ui.disable();
         }
-        if resizable {
+        if let Some(size) = resizable {
             let max = (ctx.content_rect().size() - egui::vec2(40.0, 40.0)).max(egui::vec2(560.0, 400.0));
-            egui::Resize::default()
-                .id(id.with("resize"))
-                .default_size(egui::vec2(960.0, 900.0).min(max))
-                .min_size(egui::vec2(560.0, 400.0))
-                .max_size(max)
-                .show(ui, contents)
+            egui::Resize::default().id(id.with("resize")).default_size(size.min(max)).min_size(egui::vec2(560.0, 400.0)).max_size(max).show(ui, contents)
         } else {
             contents(ui)
         }
@@ -209,7 +211,8 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
         // Photoshop doesn't dim the window behind dialogs: previews must be judged at true contrast.
         let web = fields.contains_key("__web");
         let web_popup_open = web && egui::Popup::is_any_open(ctx);
-        let modal = show_modal(modal, ctx, id, resizable_dialog(&fields), interactive, |ui| {
+        let resizable = resizable_dialog(&fields);
+        let modal = show_modal(modal, ctx, id, resizable, interactive, |ui| {
             sizing = ui.is_sizing_pass();
             let available = ui.available_size();
             // A dialog of a few short fields (`__compact`, Fit Image) is narrower (#4673): the title
@@ -220,7 +223,9 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
             if !compact {
                 ui.set_min_width(if curves { 300.0 } else { 380.0 });
             }
-            let wide = crate::prefs_ui::width(&d.fields, (ctx.content_rect().width() - 48.0).max(380.0));
+            // A resizable dialog's contents fill its resizable area (#7420), the others the window.
+            let room = if resizable.is_some() { available.x } else { (ctx.content_rect().width() - 48.0).max(380.0) };
+            let wide = crate::prefs_ui::width(&d.fields, room);
             if let Some(w) = wide {
                 ui.set_min_width(w.min(460.0));
             }
@@ -337,7 +342,7 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
                 DialogKind::Command if crate::tool_reset::owns(&fields) => crate::tool_reset::body(ui),
                 DialogKind::Command if crate::crop_presets::owns(&fields) => crate::crop_presets::body(app, ui, &mut fields),
                 DialogKind::Command if crate::variables_ui::owns(&fields) => crate::variables_ui::body(app, ui, &mut fields),
-                DialogKind::Command if crate::file_ui::owns(&fields) => crate::file_ui::body(app, ui, &mut fields),
+                DialogKind::Command if crate::file_ui::owns(&fields) => crate::file_ui::body(app, ui, &mut fields, d.id),
                 DialogKind::Command if crate::color_picker_ui::owns(&fields) => {
                     outcome = crate::color_picker_ui::body(ui, &mut fields);
                     crate::color_picker_ui::take_add_swatch(app, &mut fields);
@@ -362,7 +367,13 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
                     // parameters reserves its own space (#3769).
                     let room = (ctx.content_rect().height() - DIALOG_CHROME - crate::filter_preview_ui::reserved_height(&fields)).max(120.0);
                     let body = |ui: &mut egui::Ui, fields: &mut serde_json::Map<String, Value>| {
-                        egui::ScrollArea::vertical().id_salt(id.with("body")).max_height(room).show(ui, |ui| crate::filter_dialog::body(ui, fields));
+                        egui::ScrollArea::vertical().id_salt(id.with("body")).max_height(room).show(ui, |ui| {
+                            if crate::bitmap_dialog::owns(fields) {
+                                crate::bitmap_dialog::body(app, ui, fields);
+                            } else {
+                                crate::filter_dialog::body(ui, fields);
+                            }
+                        });
                         // The in-dialog preview window sits under the scrolling parameters (#3769),
                         // so it never shifts them.
                         crate::filter_preview_ui::window(app, d.id, ui, fields);
@@ -690,7 +701,7 @@ pub fn confirm(app: &mut PhotocraftApp, id: u64) -> Result<Value, String> {
             if result.is_ok() {
                 crate::filter_dialog::remember(app, &cmd, &d.fields);
                 // A step dialog of a playing action: the action continues after it.
-                crate::actions::resume(app, &d.fields);
+                crate::actions::resume(app, &d.fields)?;
             }
             result
         }
@@ -1163,9 +1174,68 @@ mod preference_resize_tests {
         let ordinary = json!({});
         let web = json!({"__web": true});
 
-        assert!(resizable_dialog(prefs.as_object().unwrap()));
-        assert!(!resizable_dialog(shortcuts.as_object().unwrap()));
-        assert!(!resizable_dialog(ordinary.as_object().unwrap()));
-        assert!(resizable_dialog(web.as_object().unwrap()));
+        assert_eq!(resizable_dialog(prefs.as_object().unwrap()), Some(crate::prefs_ui::PREFERENCES_SIZE));
+        assert_eq!(resizable_dialog(shortcuts.as_object().unwrap()), None);
+        assert_eq!(resizable_dialog(ordinary.as_object().unwrap()), None);
+        assert_eq!(resizable_dialog(web.as_object().unwrap()), Some(egui::vec2(960.0, 900.0)));
+    }
+
+    /// Drags the dialog's resize grip (its frame's bottom-right corner) by `by`.
+    fn drag_corner(h: &mut egui_kittest::Harness<'_, PhotocraftApp>, by: egui::Vec2) {
+        let corner = frame(h).max - egui::vec2(14.0, 14.0);
+        h.event(egui::Event::PointerMoved(corner));
+        h.step();
+        h.event(egui::Event::PointerButton { pos: corner, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE });
+        h.step();
+        h.event(egui::Event::PointerMoved(corner + by));
+        h.step();
+        h.event(egui::Event::PointerButton { pos: corner + by, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::NONE });
+        h.run_steps(4);
+    }
+
+    fn frame(h: &egui_kittest::Harness<'_, PhotocraftApp>) -> egui::Rect {
+        let rects: Vec<egui::Rect> = h.ctx.data(|m| m.get_temp(egui::Id::new(RECTS))).unwrap();
+        rects[0]
+    }
+
+    /// The button row sits in the frame's bottom-right corner (its order follows the platform):
+    /// the contents fill the dialog, no empty space.
+    fn assert_buttons_in_corner(h: &egui_kittest::Harness<'_, PhotocraftApp>, when: &str) {
+        use egui_kittest::kittest::Queryable;
+        let f = frame(h);
+        let row = ["OK", "Cancel", "Apply"].map(|l| h.get_by_label(l).rect()).into_iter().reduce(|a, b| a.union(b)).unwrap();
+        // Inside the frame (not past its edge) and near it.
+        let near = |gap: f32| (0.0..24.0).contains(&gap);
+        assert!(near(f.bottom() - row.bottom()) && near(f.right() - row.right()), "{when}: frame {f:?}, buttons {row:?}");
+    }
+
+    #[test]
+    fn preferences_contents_follow_the_dialog_when_it_is_resized() {
+        // #7420: the dialog resized but its contents kept a size from the window, leaving the
+        // buttons part-way up a dialog that opened, or was dragged, larger than them.
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        crate::prefs_ui::open_preferences(&mut app, "interface");
+        let mut h = egui_kittest::Harness::builder().with_size(egui::vec2(1600.0, 1000.0)).build_ui_state(
+            |ui, app| {
+                if ui.ctx().fonts(|f| f.families().contains(&egui::FontFamily::Name("semibold".into()))) {
+                    show(app, ui.ctx());
+                }
+            },
+            app,
+        );
+        PhotocraftApp::setup_context(&h.ctx, Default::default());
+        h.run_steps(5);
+        assert_buttons_in_corner(&h, "on open");
+        let opened = frame(&h);
+        drag_corner(&mut h, egui::vec2(220.0, 80.0));
+        assert!(frame(&h).width() > opened.width() + 150.0 && frame(&h).height() > opened.height() + 50.0, "wider: {:?}", frame(&h));
+        assert_buttons_in_corner(&h, "wider");
+        drag_corner(&mut h, egui::vec2(-500.0, -300.0));
+        let smaller = frame(&h);
+        assert!(smaller.width() < opened.width() - 200.0 && smaller.height() < opened.height() - 150.0, "smaller: {smaller:?}");
+        assert_buttons_in_corner(&h, "smaller");
+        // The contents never ask for more than the dialog gives them, so it keeps its size.
+        h.run_steps(10);
+        assert_eq!(frame(&h), smaller);
     }
 }

@@ -2122,6 +2122,11 @@
 	Mixer Brush Tool	Mengpenseelgereedschap
 	Color Replacement Tool	Kleurvervangingsgereedschap
 	Wet	Nat
+	Current Brush Load	Huidige penseellading
+	Load Brush	Penseel laden
+	Clean Brush	Penseel reinigen
+	Load the brush after each stroke	Penseel laden na elke streek
+	Clean the brush after each stroke	Penseel reinigen na elke streek
 	Mix	Mengen
 	Wetness Jitter	Nattigheidsvariatie
 	Mix Jitter	Mengvariatie
@@ -3794,6 +3799,22 @@ cameraData	Lens	Lens
 	Search settings…	Instellingen zoeken…
 	No matching settings	Geen overeenkomende instellingen
 	PhotoCraft — Screen Color Picker	PhotoCraft — Schermkleurkiezer
+# Edit › Content-Aware Fill workspace
+	Sampling Brush Tool	Gereedschap Monsterpenseel
+	Sampling Area Overlay	Overlay van monstergebied
+	Show Sampling Area	Monstergebied tonen
+	Indicates	Geeft aan
+	Sampling Area	Monstergebied
+	Excluded Area	Uitgesloten gebied
+	Sampling Area Options	Opties voor monstergebied
+	Rectangular	Rechthoekig
+	Fill Settings	Vulinstellingen
+	Rotation Adaptation	Rotatieaanpassing
+	Very High	Zeer hoog
+	Full	Volledig
+	Mirror	Spiegelen
+	Output Settings	Uitvoerinstellingen
+	Output To	Uitvoer naar
 	Loading fonts…	Lettertypen laden…
 	Response curve	Responscurve
 	Simulate Pressure	Druk simuleren
@@ -3842,6 +3863,10 @@ curves	Smooth	Vloeiend maken
 # Color Sampler (added with the i18n coverage repair)
 	Click to place · Alt-click or drag off-canvas to remove	Klik om te plaatsen · Alt-klik of sleep buiten het canvas om te verwijderen
 	{n} of {max} sample points	{n} van {max} steekproefpunten
+
+# History panel menu (#2966)
+	New Snapshot…	Nieuwe momentopname…
+	History Options…	Geschiedenisopties…
 # Print dialog (#2697)
 	Emulsion Down	Emulsie omlaag
 	Functions	Functies
@@ -3918,6 +3943,9 @@ curves	Smooth	Vloeiend maken
 	Sent to {printer}	Verzonden naar {printer}
 	set in Print Settings…	instellen in de afdrukinstellingen…
 	ICO is limited to 256 × 256 pixels	ICO is beperkt tot 256 × 256 pixels
+# History panel › History Brush source (#2966)
+	Paints from the History panel's source state	Schildert vanuit de bronstatus van het deelvenster Geschiedenis
+	Sets the source for the history brush	Stelt de bron voor het historiepenseel in
 # Embedded Profile Mismatch: profile names beside the choices, Remember this choice
 	Use the embedded profile ({profile})	Het ingesloten profiel gebruiken ({profile})
 	Convert to the working space ({profile})	Omzetten naar de werkruimte ({profile})
@@ -3938,6 +3966,13 @@ curves	Smooth	Vloeiend maken
 # View › Guides › right-click a guide
 	Edit Selected Guides	Geselecteerde hulplijnen bewerken
 	Clear Selected Guides	Geselecteerde hulplijnen wissen
+	Bicubic Automatic	Bicubisch automatisch
+	Bicubic Smoother	Bicubisch vloeiender
+	Bicubic Sharper	Bicubisch scherper
+	Pasting from other apps is unavailable	Plakken vanuit andere apps is niet beschikbaar
+	PhotoCraft can't reach the system clipboard in this session. On Wayland, a Flatpak sandbox hides the protocol that images from other apps are read through.	PhotoCraft heeft in deze sessie geen toegang tot het systeemklembord. Onder Wayland verbergt een Flatpak-sandbox het protocol waarmee afbeeldingen uit andere apps worden gelezen.
+	To paste from other apps, start PhotoCraft under XWayland: `{command}`	Om vanuit andere apps te plakken, start je PhotoCraft onder XWayland: `{command}`
+	Nothing to paste: PhotoCraft can't read the system clipboard here	Niets om te plakken: PhotoCraft kan het systeemklembord hier niet lezen
 	Delete this set	Deze set verwijderen
 	New Set…	Nieuwe set…
 	PhotoCraft Defaults	PhotoCraft-standaard
@@ -3952,6 +3987,18 @@ curves	Smooth	Vloeiend maken
 	There are too many sets: delete one first.	Er zijn te veel sets: verwijder er eerst een.
 	set name	naam van de set
 	{set} (modified)	{set} (gewijzigd)
+	Show file name in title	Bestandsnaam in titel weergeven
+
+# Image › Mode › Bitmap (#5559)
+	50% Threshold	50% drempel
+	Pattern Dither	Patroondithering
+	Diffusion Dither	Diffusiedithering
+	Halftone Screen	Halftoonraster
+	Custom Pattern	Aangepast patroon
+	Frequency:	Frequentie:
+	Lines/Inch	Lijnen/inch
+	Lines/Centimeter	Lijnen/centimeter
+	Ellipse	Ellips
 	Accept and Go to Conflict	Accepteren en naar conflict
 	Changes undone.	Wijzigingen ongedaan gemaakt.
 	Choose a new shortcut for this command, or leave it without one.	Kies een nieuwe sneltoets voor deze opdracht of laat hem zonder.
@@ -3974,6 +4021,27 @@ curves	Smooth	Vloeiend maken
 	GPU Memory (MB, 0 = Automatic)	GPU-geheugen (MB, 0 = Automatisch)
 	{name} was changed by another app after it was opened or saved here.	{name} is door een andere app gewijzigd nadat het hier is geopend of bewaard.
 	Replace it with this document, or cancel and use File › Save As to keep both.	Vervang het door dit document, of annuleer en gebruik Bestand › Opslaan als om beide te houden.
+	Decrease Brush Size	Penseelgrootte verkleinen
+	Increase Brush Size	Penseelgrootte vergroten
+	Decrease Brush Hardness	Penseelhardheid verlagen
+	Increase Brush Hardness	Penseelhardheid verhogen
+	Memory Usage	Geheugengebruik
+	Per-document RAM limit (MB)	RAM-limiet per document (MB)
+	Installed RAM: {ram} MB; this limit: {percent}%	Geïnstalleerd RAM: {ram} MB; deze limiet: {percent}%
+	Limits each open document's pixels plus History. Oldest undo states are discarded when the limit is exceeded.	Beperkt pixels plus Geschiedenis van elk geopend document. Oudste herstelstappen verdwijnen als de limiet wordt overschreden.
+	Applies immediately when saved. Memory is not reserved in advance.	Geldt meteen na opslaan. Geheugen wordt niet vooraf gereserveerd.
+	With GPU Memory set to Automatic, this also limits the GPU layer budget. That budget is capped at one quarter of installed RAM and, when known, three eighths of the graphics card's memory, with a 512 MB minimum. Raising this limit beyond those caps does not increase the GPU budget.	Bij GPU-geheugen Automatisch beperkt dit ook het GPU-laagbudget. Maximum is een kwart RAM en, indien bekend, drie achtste van het videogeheugen, minstens 512 MB. Hoger zetten vergroot het GPU-budget niet.
+	Use	Gebruiken
+	In Front	Voor
+	Behind	Achter
+
+# DDS Options (#1327)
+	DDS Options	DDS-opties
+	Generate Mipmaps	Mipmaps genereren
+
+# Graphics Adapter preference (#1885)
+	GPU adapter	GPU-adapter
+
 # HarmonyOS host additions retained during upstream sync
 	Double-tap pen body	Dubbeltik op de pen
 	Current tool and Eraser	Huidig gereedschap en Gum

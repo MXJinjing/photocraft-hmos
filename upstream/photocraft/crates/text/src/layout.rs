@@ -22,7 +22,7 @@ use parley::{
     PositionedLayoutItem, StyleProperty,
 };
 use photocraft_doc::TextLayer;
-use photocraft_doc::text::{Caps, CharStyle, Kerning, Orientation, TextAlign, TextDirection, TextShape};
+use photocraft_doc::text::{Caps, CharStyle, FontBaseline, Kerning, Orientation, TextAlign, TextDirection, TextShape};
 use skrifa::raw::types::Tag;
 
 use crate::fonts::FontDb;
@@ -30,6 +30,23 @@ use crate::fonts::FontDb;
 /// Photoshop synthesizes small caps for faces without an OpenType `smcp` table. Keep the same
 /// readable hierarchy for every font instead of silently rendering lowercase text unchanged.
 const SYNTHETIC_SMALL_CAPS_SCALE: f32 = 0.7;
+
+/// Photoshop's default superscript / subscript size and position (Type preferences, stored in a
+/// PSD's text resources as `SuperscriptSize` .583, `SuperscriptPosition` .333 and their
+/// `Subscript` twins): the run is drawn at 58.3% of its size and moved by 33.3% of its size.
+const SCRIPT_SIZE: f32 = 0.583;
+const SCRIPT_POSITION: f32 = 0.333;
+
+/// The style a run is drawn with: superscript and subscript shrink it and shift its baseline.
+fn drawn_style(s: &mut CharStyle) {
+    let dir = match s.baseline {
+        FontBaseline::Normal => return,
+        FontBaseline::Superscript => 1.0,
+        FontBaseline::Subscript => -1.0,
+    };
+    s.baseline_shift_pt += dir * SCRIPT_POSITION * s.size_pt;
+    s.size_pt *= SCRIPT_SIZE;
+}
 
 /// Photoshop's default tab stops: every half inch, measured from the anchor of point text or the
 /// left edge of a paragraph box. PSD type carries no custom tab stops, so these are the only ones.
@@ -480,6 +497,7 @@ impl Layouter {
                 crate::served::request(&s.font_family);
             }
             fonts.select_named_face(&mut s);
+            drawn_style(&mut s);
             out.styles.push(s);
         }
         let run_starts: Vec<usize> = runs
@@ -636,6 +654,11 @@ impl Layouter {
                 }
                 for (range, size) in &synthetic_small_caps {
                     b.push(StyleProperty::FontSize(*size), range.clone());
+                }
+                // Korean breaks lines at spaces, between words, as Photoshop sets it; Unicode's
+                // default rules break between any two Hangul syllables, mid-word (#5959).
+                for range in hangul_runs(&ptext) {
+                    b.push(StyleProperty::WordBreak(parley::WordBreak::KeepAll), range);
                 }
                 for (&at, &spacing) in tabs.iter().zip(tab_spacing) {
                     b.push(StyleProperty::LetterSpacing(spacing), at..at + 1);
@@ -1413,6 +1436,23 @@ fn first_ascent(line: &parley::Line<'_, RunBrush>) -> Option<f32> {
         }
     }
     best
+}
+
+/// Hangul (syllables and jamo).
+fn is_hangul(c: char) -> bool {
+    matches!(c, '\u{1100}'..='\u{11FF}' | '\u{3130}'..='\u{318F}' | '\u{A960}'..='\u{A97F}' | '\u{AC00}'..='\u{D7AF}' | '\u{D7B0}'..='\u{D7FF}')
+}
+
+/// The byte ranges of `text` made of Hangul, each as long as it runs.
+pub(crate) fn hangul_runs(text: &str) -> Vec<std::ops::Range<usize>> {
+    let mut runs: Vec<std::ops::Range<usize>> = Vec::new();
+    for (i, c) in text.char_indices().filter(|&(_, c)| is_hangul(c)) {
+        match runs.last_mut() {
+            Some(r) if r.end == i => r.end = i + c.len_utf8(),
+            _ => runs.push(i..i + c.len_utf8()),
+        }
+    }
+    runs
 }
 
 #[cfg(test)]

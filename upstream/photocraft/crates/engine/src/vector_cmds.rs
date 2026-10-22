@@ -1091,9 +1091,25 @@ fn path_rename(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn path_to_selection(s: &mut Session, p: &Value) -> Result<Value> {
     let path = resolve_path(s, p.get("name").and_then(Value::as_str))?;
-    let feather = f64p(p, "feather").unwrap_or(0.0) as f32;
-    let aa = p.get("antiAlias").and_then(Value::as_bool).unwrap_or(true);
-    let mode = SelectionMode::parse(p.get("mode").and_then(Value::as_str).unwrap_or("replace"));
+    // Validate before rasterizing or touching selection history. An unchecked feather value
+    // could silently become zero (negative/string), or expand into an excessive blur.
+    let feather = match p.get("feather") {
+        None => 0.0,
+        Some(v) => v
+            .as_f64()
+            .filter(|n| n.is_finite() && (0.0..=1000.0).contains(n))
+            .ok_or_else(|| bad("path.toSelection", "`feather` must be a finite number within 0..1000"))? as f32,
+    };
+    let aa = match p.get("antiAlias") {
+        None => true,
+        Some(Value::Bool(v)) => *v,
+        _ => return Err(bad("path.toSelection", "`antiAlias` must be a boolean")),
+    };
+    let mode = match p.get("mode") {
+        None => SelectionMode::Replace,
+        Some(Value::String(v)) if matches!(v.as_str(), "replace" | "add" | "subtract" | "intersect") => SelectionMode::parse(v),
+        _ => return Err(bad("path.toSelection", "`mode` must be replace, add, subtract or intersect")),
+    };
     let area = s.active().ok_or(EngineError::NoDocument)?.doc.bounds();
     let mut mask = vector::fill_rasterizer(&path, vector::DEFAULT_TOLERANCE).render(area);
     if !aa {
@@ -1369,11 +1385,15 @@ fn path_stroke(s: &mut Session, p: &Value) -> Result<Value> {
 fn vector_mask_info(s: &Session, id: LayerId) -> Result<Value> {
     let d = s.active().ok_or(EngineError::NoDocument)?;
     let l = d.doc.layer(id).ok_or(EngineError::NoLayer(id))?;
-    Ok(match &l.vector_mask {
-        Some(v) => {
+    Ok(match (&l.vector_mask, &l.content) {
+        (Some(v), _) => {
             json!({ "layer": id.0, "path": path_json(&v.path), "enabled": v.enabled, "linked": v.linked, "density": v.density * 100.0, "feather": v.feather })
         }
-        None => json!({ "layer": id.0, "vectorMask": null }),
+        // A shape layer's path is its vector mask.
+        (None, LayerContent::Shape(sh)) => {
+            json!({ "layer": id.0, "path": path_json(&sh.path), "enabled": true, "linked": true, "shape": true, "density": sh.density * 100.0, "feather": sh.feather })
+        }
+        (None, _) => json!({ "layer": id.0, "vectorMask": null }),
     })
 }
 
@@ -1425,6 +1445,35 @@ fn vector_mask_edit(s: &mut Session, p: &Value) -> Result<Value> {
                 .ok_or_else(|| bad(CMD, "`feather` must be a finite number within 0..1000"))
         })
         .transpose()?;
+    let density = p
+        .get("density")
+        .map(|v| {
+            v.as_f64()
+                .filter(|n| n.is_finite() && (0.0..=100.0).contains(n))
+                .map(|n| (n / 100.0) as f32)
+                .ok_or_else(|| bad(CMD, "`density` must be a finite number within 0..100 (%)"))
+        })
+        .transpose()?;
+    // A shape layer's path is its vector mask (Photoshop's Properties › Masks): Density and
+    // Feather soften its fill; the path itself is edited with the shape and path commands.
+    if s.active().and_then(|d| d.doc.layer(id)).is_some_and(|l| matches!(l.content, LayerContent::Shape(_)) && l.vector_mask.is_none()) {
+        if let Some(k) = ["path", "enabled", "linked", "invert"].into_iter().find(|k| p.get(*k).is_some()) {
+            return Err(bad(CMD, format!("`{k}`: a shape layer's vector mask is its path; only `density` and `feather` apply")));
+        }
+        if density.is_none() && feather.is_none() {
+            return vector_mask_info(s, id);
+        }
+        with_shape(s, id, "Edit Vector Mask", |sh, _| {
+            if let Some(d) = density {
+                sh.density = d;
+            }
+            if let Some(f) = feather {
+                sh.feather = f;
+            }
+            Ok(())
+        })?;
+        return vector_mask_info(s, id);
+    }
     s.edit("Edit Vector Mask", |doc, _| {
         let l = doc.layer_mut(id).ok_or(EngineError::NoLayer(id))?;
         let vm = l.vector_mask.as_mut().ok_or_else(|| EngineError::Other("layer has no vector mask".into()))?;
@@ -1437,8 +1486,8 @@ fn vector_mask_edit(s: &mut Session, p: &Value) -> Result<Value> {
         if let Some(b) = p.get("linked").and_then(Value::as_bool) {
             vm.linked = b;
         }
-        if let Some(d) = f64p(p, "density") {
-            vm.density = (d / 100.0).clamp(0.0, 1.0) as f32;
+        if let Some(d) = density {
+            vm.density = d;
         }
         if let Some(f) = feather {
             vm.feather = f;
@@ -1832,7 +1881,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Edit Vector Mask",
             [],
             leak(format!(
-                r##"{{"layer":id?,"path":{{…}}?,"enabled":bool?,"linked":bool?,"density":0..100?,"feather":0..1000? (pixels),"invert":true?}}. {PATH_FORM}"##
+                r##"{{"layer":id?,"path":{{…}}?,"enabled":bool?,"linked":bool?,"density":0..100?,"feather":0..1000? (pixels),"invert":true?}}. On a shape layer (whose path is its vector mask) only density and feather apply: they soften its fill, which shows beyond the path at 100 − density %. {PATH_FORM}"##
             )),
             has_layer,
             vector_mask_edit

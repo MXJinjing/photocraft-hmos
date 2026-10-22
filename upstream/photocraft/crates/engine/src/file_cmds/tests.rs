@@ -65,6 +65,33 @@ fn camera_raw_opens_as_16_bit_with_notes() {
     assert!(open_bytes_as(&mut s, "bad.dng", &bad, None, None).is_err());
 }
 
+/// #5799: Batch with Format "Same" over a folder of camera raws saved nothing (every output was
+/// a raw PhotoCraft can't write). Raws are saved as PSD; other inputs keep their format.
+#[test]
+fn batch_same_format_saves_camera_raws_as_psd() {
+    use photocraft_raw::testgen::{DngSpec, mosaic, scene};
+    let dir = tmp("batch-same-raw");
+    let (w, h) = (24, 16);
+    std::fs::write(join(&dir, "IMG_0001.dng"), DngSpec::cfa(w, h, mosaic(&scene(w, h), w, [0, 1, 1, 2], 0, 65535)).build()).unwrap();
+    png(&dir, "b.png", 8, 8, "#ff0000");
+    // Also with a file naming template, which picks the output extension separately.
+    for (out, naming) in [("out", None), ("named", Some("{name}_{serial}"))] {
+        let out = join(&dir, out);
+        let mut p = json!({"steps": [["image.adjustments.invert", {}]], "input": dir, "output": out, "format": "same"});
+        if let Some(naming) = naming {
+            p["naming"] = json!(naming);
+        }
+        let r = Session::new().execute("file.automate.batch", p).unwrap();
+        assert!(r["errors"].as_array().unwrap().is_empty(), "{naming:?}: {r}");
+        let mut files: Vec<String> = r["files"].as_array().unwrap().iter().map(|f| f.as_str().unwrap().replace('\\', "/")).collect();
+        files.sort();
+        assert_eq!(files.len(), 2, "{r}");
+        assert!(files[0].contains("/IMG_0001") && files[0].ends_with(".psd") && files[1].contains("/b") && files[1].ends_with(".png"), "{files:?}");
+        let psd = photocraft_io::import("IMG_0001.psd", &std::fs::read(&files[0]).unwrap()).unwrap().document;
+        assert_eq!((psd.size.width, psd.size.height), (w as u32, h as u32));
+    }
+}
+
 #[test]
 fn revert_reloads_as_one_undoable_step() {
     let dir = tmp("revert");
@@ -135,6 +162,44 @@ fn save_a_copy_keeps_path_and_dirty_state() {
     assert!(s.execute("file.saveACopy", json!({})).is_err());
 }
 
+/// A copy over the document's own file, however the path is spelt, would replace it (a lossy
+/// re-encode can't be undone), so it is refused unless `overwrite` is passed (#7437).
+#[test]
+fn save_a_copy_refuses_the_documents_own_file() {
+    let dir = tmp("copy-own");
+    let path = png(&dir, "own.png", 6, 4, "#ff0000");
+    let bytes = std::fs::read(&path).unwrap();
+    let mut s = Session::new();
+    open_bytes_as(&mut s, &path, &bytes, None, Some(path.clone())).unwrap();
+    s.execute("layer.new.layer", json!({})).unwrap();
+    s.execute("edit.fill", json!({"color": "#00ff00"})).unwrap();
+    let link = join(&dir, "link.png");
+    std::fs::hard_link(&path, &link).unwrap();
+    let rev = s.active().unwrap().revision;
+    for p in [path.clone(), format!("{dir}/./own.png"), link] {
+        let r = s.execute("file.saveACopy", json!({"path": p}));
+        assert!(r.as_ref().is_err_and(|e| e.to_string().contains("overwrite")), "{p}: {r:?}");
+        assert!(s.execute("file.saveACopy", json!({"path": p, "overwrite": false})).is_err(), "{p}");
+        assert_eq!(std::fs::read(&path).unwrap(), bytes, "{p}");
+        let st = s.active().unwrap();
+        assert_eq!(st.path.as_deref(), Some(path.as_str()), "{p}");
+        assert_eq!(st.revision, rev, "{p}");
+        assert!(st.is_dirty(), "{p}");
+    }
+    let other = join(&dir, "other.png");
+    s.execute("file.saveACopy", json!({"path": other})).unwrap();
+    assert!(std::fs::metadata(&other).unwrap().len() > 0);
+    s.execute("file.saveACopy", json!({"path": path, "overwrite": true})).unwrap();
+    assert_ne!(std::fs::read(&path).unwrap(), bytes);
+    assert_eq!(s.active().unwrap().path.as_deref(), Some(path.as_str()));
+    assert!(s.active().unwrap().is_dirty());
+
+    // A document that was never saved has no file of its own: it copies anywhere, as before.
+    let mut fresh = session(4, 4, 8);
+    fresh.execute("file.saveACopy", json!({"path": path})).unwrap();
+    assert_eq!(fresh.active().unwrap().path, None);
+}
+
 /// `tgaBits` picks the Targa's bits per pixel (byte 16 of the header); unset, a document with an
 /// alpha channel is written as 32-bit, with the channel as the alpha.
 #[test]
@@ -179,6 +244,53 @@ fn save_a_copy_writes_the_dpx_bits_asked_for() {
         assert!(matches!(r, Err(EngineError::BadParams { .. })), "{bad}: {r:?}");
         assert!(!std::path::Path::new(&out).exists(), "{bad}: nothing written");
     }
+}
+
+/// `ddsCompression` picks the DDS FourCC (or none, uncompressed) and `ddsMipmaps` the mip count
+/// in the header; unset, an uncompressed texture without mipmaps. Bad values are refused before
+/// anything is written.
+#[test]
+fn save_a_copy_writes_the_dds_options_asked_for() {
+    let dir = tmp("dds-options");
+    let le32 = |b: &[u8], at: usize| u32::from_le_bytes(b[at..at + 4].try_into().unwrap());
+    for (params, fourcc, mips) in [
+        (json!({}), [0; 4], 1),
+        (json!({"ddsCompression": "none", "ddsMipmaps": true}), [0; 4], 5),
+        (json!({"ddsCompression": "bc1"}), *b"DXT1", 1),
+        (json!({"ddsCompression": "DXT3", "ddsMipmaps": false}), *b"DXT3", 1),
+        (json!({"ddsCompression": "bc3", "ddsMipmaps": true}), *b"DXT5", 5),
+        (json!({"ddsCompression": null, "ddsMipmaps": null}), [0; 4], 1),
+    ] {
+        let mut s = session(16, 12, 8);
+        let out = join(&dir, "a.dds");
+        let mut p = params.clone();
+        p["path"] = json!(out);
+        s.execute("file.saveACopy", p).unwrap();
+        let bytes = std::fs::read(&out).unwrap();
+        assert_eq!((&bytes[..4], &bytes[84..88], le32(&bytes, 28)), (&b"DDS "[..], &fourcc[..], mips), "{params}");
+        assert_eq!(photocraft_io::import("a.dds", &bytes).unwrap().document.size, photocraft_geom::Size::new(16, 12), "{params}");
+    }
+    let mut s = session(8, 8, 8);
+    let state = |s: &Session| s.active().map(|st| (st.revision, st.path.clone(), st.is_dirty()));
+    let before = state(&s);
+    for bad in [json!({"ddsCompression": "bc7"}), json!({"ddsCompression": 1}), json!({"ddsMipmaps": "yes"}), json!({"ddsMipmaps": 1})] {
+        let out = join(&dir, "bad.dds");
+        let mut p = bad.clone();
+        p["path"] = json!(out);
+        let r = s.execute("file.saveACopy", p);
+        assert!(matches!(r, Err(EngineError::BadParams { .. })), "{bad}: {r:?}");
+        assert!(!std::path::Path::new(&out).exists(), "{bad}: nothing written");
+        assert_eq!(state(&s), before, "{bad}: the document is untouched");
+    }
+}
+
+#[test]
+fn dds_params_are_none_until_one_is_given() {
+    use photocraft_io::{DdsCompression, DdsOptions};
+    assert_eq!(dds_param(&json!({}), "file.saveAs").unwrap(), None);
+    assert_eq!(dds_param(&json!({"ddsCompression": null}), "file.saveAs").unwrap(), None);
+    assert_eq!(dds_param(&json!({"ddsMipmaps": true}), "file.saveAs").unwrap(), Some(DdsOptions { compression: DdsCompression::None, mipmaps: true }));
+    assert_eq!(dds_param(&json!({"ddsCompression": "bc2"}), "file.saveAs").unwrap(), Some(DdsOptions { compression: DdsCompression::Bc2, mipmaps: false }));
 }
 
 /// A `tgaBits` other than 24 or 32 is a bad parameter, reported before anything is written.
@@ -542,6 +654,36 @@ fn fit_image_and_conditional_mode_change() {
 }
 
 #[test]
+fn fit_image_zero_or_negative_side_is_unconstrained() {
+    // Dialogs send 0 for an empty field: that side is not a limit, not a 1 px box.
+    let mut s = session(1000, 800, 8);
+    s.execute("file.automate.fitImage", json!({"width": 0, "height": 400})).unwrap();
+    assert_eq!((doc(&s).size.width, doc(&s).size.height), (500, 400));
+    s.execute("file.automate.fitImage", json!({"width": 250, "height": -5})).unwrap();
+    assert_eq!((doc(&s).size.width, doc(&s).size.height), (250, 200));
+    let r = s.execute("file.automate.fitImage", json!({"width": 0, "height": 0})).unwrap();
+    assert_eq!(r["changed"], false);
+    assert_eq!((doc(&s).size.width, doc(&s).size.height), (250, 200));
+}
+
+#[test]
+fn conditional_mode_change_single_gray_source_matches_grayscale() {
+    // A single `"from"` string is normalised like the array form: "gray" names Grayscale (#7042).
+    let mut s = session(4, 4, 8);
+    s.execute("image.mode.grayscale", json!({})).unwrap();
+    let r = s.execute("file.automate.conditionalModeChange", json!({"from": "rgb", "to": "rgb"})).unwrap();
+    assert_eq!(r["changed"], false);
+    assert_eq!(doc(&s).mode, ColorMode::Grayscale);
+    let r = s.execute("file.automate.conditionalModeChange", json!({"from": "gray", "to": "rgb"})).unwrap();
+    assert_eq!(r["changed"], true, "{r}");
+    assert_eq!(doc(&s).mode, ColorMode::Rgb);
+    s.execute("image.mode.grayscale", json!({})).unwrap();
+    let r = s.execute("file.automate.conditionalModeChange", json!({"from": "Gray", "to": "rgb"})).unwrap();
+    assert_eq!(r["changed"], true, "{r}");
+    assert_eq!(doc(&s).mode, ColorMode::Rgb);
+}
+
+#[test]
 fn conditional_mode_change_cannot_run_a_mode_change_the_gate_denies() {
     fn deny_mode(id: &str, _: &Value) -> Result<()> {
         if id.starts_with("image.mode.") { Err(EngineError::Other(format!("automation command `{id}` is disabled"))) } else { Ok(()) }
@@ -706,6 +848,74 @@ fn flatten_all_layer_effects_keeps_masks() {
         let layers: Vec<_> = doc(&s2).walk().into_iter().map(|(_, _, l)| l).collect();
         assert!(layers.iter().any(|l| l.mask == m1 && l.vector_mask == v1), "the raster and vector masks survive .pcraft");
         assert!(layers.iter().any(|l| l.mask == m2), "the disabled mask survives .pcraft");
+    }
+}
+
+/// Flattens all layer effects on a red square carrying `fx` (in a document prepared by `setup`)
+/// and asserts the composite did not change: the bake uses the document's own context (#5719).
+fn assert_flatten_effects_is_a_no_op(depth: u32, setup: impl FnOnce(&mut Document), fx: photocraft_doc::Effect) {
+    let mut s = session(40, 40, depth);
+    s.execute("layer.new.layer", json!({})).unwrap();
+    s.execute("select.rect", json!({"x": 14, "y": 14, "width": 12, "height": 12})).unwrap();
+    s.execute("edit.fill", json!({"color": "#ff0000"})).unwrap();
+    s.execute("select.deselect", json!({})).unwrap();
+    let id = s.active().unwrap().active_layer.unwrap();
+    s.edit("fx", |doc, _| {
+        setup(doc);
+        let l = doc.layer_mut(id).unwrap();
+        l.effects.enabled = true;
+        l.effects.items.push(fx);
+        Ok(())
+    })
+    .unwrap();
+    let before = photocraft_compose::flatten(doc(&s));
+    assert_eq!(s.execute("file.scripts.flattenAllLayerEffects", json!({})).unwrap()["flattened"], 1);
+    let after = photocraft_compose::flatten(doc(&s));
+    for (i, (a, b)) in after.px.iter().zip(&before.px).enumerate() {
+        for k in 0..4 {
+            assert!((a[k] - b[k]).abs() < 0.02, "depth {depth}: pixel ({}, {}) changed: {b:?} -> {a:?}", i % 40, i / 40);
+        }
+    }
+}
+
+/// A Drop Shadow that uses Global Light is baked at the document's angle, not the default 120°.
+#[test]
+fn flatten_all_layer_effects_uses_the_documents_global_light() {
+    for depth in [8, 16, 32] {
+        let shadow = photocraft_doc::Effect::DropShadow(photocraft_doc::effects::Shadow {
+            common: photocraft_doc::effects::FxCommon::new(photocraft_color::BlendMode::Normal, 1.0),
+            color: photocraft_color::Color::rgb(0.0, 0.0, 1.0),
+            angle: 120.0,
+            use_global_light: true,
+            distance: 10.0,
+            spread: 0.0,
+            size: 0.0,
+            contour: photocraft_doc::effects::Contour::Linear,
+            anti_alias: false,
+            noise: 0.0,
+            knocks_out: true,
+        });
+        assert_flatten_effects_is_a_no_op(depth, |d| d.global_light.angle = 0.0, shadow);
+    }
+}
+
+/// A Pattern Overlay of a document pattern survives the bake instead of vanishing.
+#[test]
+fn flatten_all_layer_effects_keeps_a_pattern_overlay() {
+    for depth in [8, 16, 32] {
+        let mut tile = photocraft_raster::Surface::new(PixelFormat::new(ColorMode::Rgb, photocraft_color::SampleType::U8, true));
+        tile.fill_rect(Rect::new(0, 0, 2, 2), &[0.0, 1.0, 0.0, 1.0]);
+        let pat = photocraft_doc::Pattern::new("green", tile, 2, 2);
+        let overlay = photocraft_doc::Effect::PatternOverlay {
+            common: photocraft_doc::effects::FxCommon::new(photocraft_color::BlendMode::Normal, 1.0),
+            name: pat.name.clone(),
+            id: pat.id.clone(),
+            scale: 1.0,
+            angle: 0.0,
+            link: true,
+            phase: (0.0, 0.0),
+        };
+        assert_flatten_effects_is_a_no_op(depth, |d| d.patterns.push(pat), overlay);
     }
 }
 

@@ -1023,6 +1023,11 @@
 	Mix	Смешивание
 	Auto Clean Brush	Автоочистка кисти
 	Wet	Влага
+	Current Brush Load	Текущая загрузка кисти
+	Load Brush	Загрузить кисть
+	Clean Brush	Очистить кисть
+	Load the brush after each stroke	Загружать кисть после каждого штриха
+	Clean the brush after each stroke	Очищать кисть после каждого штриха
 	Rate	Скорость
 	Airbrush: keeps depositing paint while the pointer rests.	Аэрограф: продолжает наносить краску, пока курсор неподвижен.
 	Pulled String Mode	Режим натянутой нити
@@ -2979,6 +2984,24 @@ cameraData	Lens	Объектив
 	Rasterize Layer Style	Растрировать стиль слоя
 	Search settings…	Поиск настроек…
 	No matching settings	Нет подходящих настроек
+# Edit › Content-Aware Fill workspace
+	Sampling Brush Tool	Кисть области выборки
+	Sampling Area Overlay	Наложение области выборки
+	Show Sampling Area	Показать область выборки
+	Indicates	Обозначает
+	Sampling Area	Область выборки
+	Excluded Area	Исключённая область
+	Sampling Area Options	Параметры области выборки
+	Rectangular	Прямоугольная
+	Fill Settings	Параметры заливки
+	Rotation Adaptation	Адаптация поворота
+	Very High	Очень высокая
+	Full	Полная
+	Mirror	Отражение
+	Output Settings	Параметры вывода
+	Output To	Вывод в
+	Duplicate Layer	Дубликат слоя
+	Contract	Сжать
 	Loading fonts…	Загрузка шрифтов…
 	Response curve	Кривая отклика
 	Tool	Инструмент
@@ -3030,6 +3053,10 @@ curves	Smooth	Сгладить
 	Click to place · Alt-click or drag off-canvas to remove	Щёлкните, чтобы разместить · Alt-щелчок или перетаскивание за пределы холста для удаления
 	No document open	Документ не открыт
 	{n} of {max} sample points	{n} из {max} точек замера
+
+# History panel menu (#2966)
+	New Snapshot…	Новый снимок…
+	History Options…	Параметры истории…
 # Print dialog (#2697)
 	Emulsion Down	Эмульсией вниз
 	Functions	Функции
@@ -3107,6 +3134,9 @@ curves	Smooth	Сгладить
 	Sent to {printer}	Отправлено на {printer}
 	set in Print Settings…	задаётся в параметрах печати…
 	ICO is limited to 256 × 256 pixels	ICO ограничен размером 256 × 256 пикселей
+# History panel › History Brush source (#2966)
+	Paints from the History panel's source state	Рисует из исходного состояния панели «История»
+	Sets the source for the history brush	Задаёт источник для кисти истории
 
 # Dynamic selection context menu and appearance favorites
 	Select Inverse	Инвертировать выделение
@@ -3147,6 +3177,13 @@ curves	Smooth	Сгладить
 # View › Guides › right-click a guide
 	Edit Selected Guides	Изменить выбранные направляющие
 	Clear Selected Guides	Удалить выбранные направляющие
+	Bicubic Automatic	Бикубическая, автоматически
+	Bicubic Smoother	Бикубическая, глаже
+	Bicubic Sharper	Бикубическая, чётче
+	Pasting from other apps is unavailable	Вставка из других приложений недоступна
+	PhotoCraft can't reach the system clipboard in this session. On Wayland, a Flatpak sandbox hides the protocol that images from other apps are read through.	В этом сеансе PhotoCraft не может получить доступ к системному буферу обмена. В Wayland песочница Flatpak скрывает протокол, через который читаются изображения из других приложений.
+	To paste from other apps, start PhotoCraft under XWayland: `{command}`	Чтобы вставлять из других приложений, запустите PhotoCraft под XWayland: `{command}`
+	Nothing to paste: PhotoCraft can't read the system clipboard here	Нечего вставить: здесь PhotoCraft не может прочитать системный буфер обмена
 	Delete this set	Удалить этот набор
 	New Set…	Новый набор…
 	PhotoCraft Defaults	Стандартные PhotoCraft
@@ -3162,6 +3199,20 @@ curves	Smooth	Сгладить
 	set name	имя набора
 	{set} (modified)	{set} (изменён)
 	Random	Случайно
+	Show file name in title	Показывать имя файла в заголовке
+
+# Image › Mode › Bitmap (#5559)
+	50% Threshold	Порог 50%
+	Pattern Dither	Регулярный дизеринг
+	Diffusion Dither	Диффузионный дизеринг
+	Halftone Screen	Полутоновый растр
+	Custom Pattern	Свой узор
+	Frequency:	Линиатура:
+	Lines/Inch	Линий/дюйм
+	Lines/Centimeter	Линий/см
+	Ellipse	Эллипс
+	Diamond	Ромб
+	Cross	Крест
 	Accept and Go to Conflict	Принять и перейти к конфликту
 	Changes undone.	Изменения отменены.
 	Choose a new shortcut for this command, or leave it without one.	Выберите новую комбинацию для этой команды или оставьте её без комбинации.
@@ -3185,6 +3236,29 @@ curves	Smooth	Сгладить
 	Replace	Заменить
 	{name} was changed by another app after it was opened or saved here.	Файл {name} был изменён другим приложением после того, как его открыли или сохранили здесь.
 	Replace it with this document, or cancel and use File › Save As to keep both.	Замените его этим документом или отмените и используйте Файл › Сохранить как, чтобы сохранить оба.
+	Decrease Brush Size	Уменьшить размер кисти
+	Increase Brush Size	Увеличить размер кисти
+	Decrease Brush Hardness	Уменьшить жёсткость кисти
+	Increase Brush Hardness	Увеличить жёсткость кисти
+	Memory Usage	Использование памяти
+	Per-document RAM limit (MB)	Лимит ОЗУ на документ (МБ)
+	Installed RAM: {ram} MB; this limit: {percent}%	Установлено ОЗУ: {ram} МБ; этот лимит: {percent}%
+	Limits each open document's pixels plus History. Oldest undo states are discarded when the limit is exceeded.	Ограничивает пиксели и историю каждого открытого документа. Старые состояния отмены удаляются при превышении лимита.
+	Applies immediately when saved. Memory is not reserved in advance.	Применяется сразу после сохранения. Память заранее не резервируется.
+	With GPU Memory set to Automatic, this also limits the GPU layer budget. That budget is capped at one quarter of installed RAM and, when known, three eighths of the graphics card's memory, with a 512 MB minimum. Raising this limit beyond those caps does not increase the GPU budget.	При GPU-памяти «Авто» это также ограничивает бюджет GPU. Потолок — четверть ОЗУ и, если известно, три восьмых памяти карты, минимум 512 МБ. Больший лимит GPU-бюджет не увеличивает.
+	Command	Command
+	Use	Использовать
+	In Front	Спереди
+	Behind	Сзади
+
+# DDS Options (#1327)
+	DDS Options	Параметры DDS
+	Compression	Сжатие
+	Generate Mipmaps	Создать MIP-карты
+
+# Graphics Adapter preference (#1885)
+	GPU adapter	Адаптер GPU
+
 # HarmonyOS host additions retained during upstream sync
 	Stylus	Стилус
 	Block finger input	Блокировать ввод пальцем

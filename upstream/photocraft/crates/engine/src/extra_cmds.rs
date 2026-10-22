@@ -135,7 +135,7 @@ fn map_pixels(s: &mut Session, label: &str, p: &Value, f: impl FnOnce(Rect, &mut
 fn stroke(s: &mut Session, p: &Value) -> Result<Value> {
     // Whole pixels, rounded up, as in Photoshop (0.5 px strokes 1 px).
     let width = p.get("width").and_then(Value::as_f64).filter(|w| w.is_finite()).unwrap_or(1.0).clamp(1.0, 250.0).ceil() as usize;
-    let color = color_param(p, "color", s.tools.foreground);
+    let color = color_param("edit.stroke", p, "color", s.tools.foreground)?;
     // A colour picked as CMYK strokes a CMYK document with the picked inks (#4196).
     let picked = s.tools.picked_cmyk([color[0], color[1], color[2]]);
     let mode = match p.get("mode") {
@@ -335,15 +335,18 @@ fn clouds(s: &mut Session, p: &Value, difference: bool) -> Result<Value> {
 const TRANSFORM_TARGET: &str =
     r#"{"target":"pixels"|"mask"|"quickMask"|{"channel":i}=Channels panel target (an unlinked mask, an alpha channel or the Quick Mask turns alone)}"#;
 
+/// Flips and turns about the centre of the box Free Transform would open: with a selection
+/// limiting the transform it is the selection's own bounds, as in Photoshop, so Select All
+/// mirrors across the canvas (#6928); otherwise the content's bounds.
 fn transform_preset(s: &mut Session, p: &Value, kind: &str) -> Result<Value> {
     let d = s.active().ok_or(EngineError::NoDocument)?;
     // A targeted alpha channel, the Quick Mask or an unlinked layer mask turns by itself (#2835).
     let (b, mut params) = match crate::transform_cmds::lone_target(&d.doc, d.active_layer, p)? {
-        Some(surf) => (crate::transform_cmds::target_bounds(&d.doc, surf), json!({"target": p.get("target")})),
+        Some(surf) => (crate::transform_cmds::target_frame(&d.doc, surf), json!({"target": p.get("target")})),
         None => {
             let id = d.active_layer.ok_or(EngineError::Other("no active layer".into()))?;
             let l = d.doc.layer(id).ok_or(EngineError::NoLayer(id))?;
-            (crate::transform_cmds::transform_bounds(&d.doc, l), json!({"layer": id.0}))
+            (crate::transform_cmds::transform_frame(&d.doc, l), json!({"layer": id.0}))
         }
     };
     if b.is_empty() {
@@ -869,7 +872,9 @@ pub fn specs() -> Vec<CommandSpec> {
             if all == d.doc.bounds() {
                 return Ok(json!({"changed": false}));
             }
-            s.execute("image.crop", json!({"x": all.x0, "y": all.y0, "width": all.width(), "height": all.height(), "deleteCroppedPixels": false}))?;
+            // One History step named as in Photoshop, not the crop's "Crop".
+            let p = json!({"x": all.x0, "y": all.y0, "width": all.width(), "height": all.height(), "deleteCroppedPixels": false});
+            crate::analysis_cmds::compound(s, "Reveal All", |s| s.execute("image.crop", p))?;
             Ok(json!({"changed": true}))
         }),
         spec!(
@@ -1469,6 +1474,49 @@ mod tests {
         assert_eq!(pixel(&s, 10, 10), vec![0.0, 1.0, 0.0, 1.0]);
     }
 
+    /// #6928: with a selection, the presets flip and turn about the selection's own bounds, as
+    /// in Photoshop: Select All mirrors across the canvas, a marquee across its own centre.
+    /// Without a selection they keep turning about the content (above).
+    #[test]
+    fn transform_presets_turn_about_the_selection() {
+        let mut s = session(8);
+        paint_square(&mut s, Rect::new(10, 10, 20, 14), [1.0, 0.0, 0.0, 1.0]);
+        paint_square(&mut s, Rect::new(10, 10, 11, 11), [0.0, 1.0, 0.0, 1.0]);
+        let green = vec![0.0, 1.0, 0.0, 1.0];
+        // Select All on the 40 × 30 canvas: across the canvas's centre lines.
+        s.execute("select.all", json!({})).unwrap();
+        let past = s.active().unwrap().history.past_len();
+        s.execute("edit.transform.flipHorizontal", json!({})).unwrap();
+        assert_eq!(active(&s).surface().unwrap().content_bounds(), Rect::new(20, 10, 30, 14));
+        assert_eq!(pixel(&s, 29, 10), green);
+        assert_eq!(s.active().unwrap().history.past_len(), past + 1, "one undo step");
+        s.execute("edit.transform.flipVertical", json!({})).unwrap();
+        assert_eq!(active(&s).surface().unwrap().content_bounds(), Rect::new(20, 16, 30, 20));
+        assert_eq!(pixel(&s, 29, 19), green);
+        s.execute("edit.transform.rotate180", json!({})).unwrap();
+        assert_eq!(active(&s).surface().unwrap().content_bounds(), Rect::new(10, 10, 20, 14));
+        assert_eq!(pixel(&s, 10, 10), green);
+        // A marquee (0, 0)–(24, 30) holding the whole square: across x = 12.
+        s.execute("select.rect", json!({"x": 0, "y": 0, "width": 24, "height": 30})).unwrap();
+        s.execute("edit.transform.flipHorizontal", json!({})).unwrap();
+        assert_eq!(active(&s).surface().unwrap().content_bounds(), Rect::new(4, 10, 14, 14));
+        assert_eq!(pixel(&s, 13, 10), green);
+        // Undo puts it back where it was.
+        s.undo();
+        assert_eq!(active(&s).surface().unwrap().content_bounds(), Rect::new(10, 10, 20, 14));
+        // A targeted alpha channel turns about the selection's bounds too.
+        s.execute("channel.new", json!({})).unwrap();
+        s.edit("paint channel", |doc, _| {
+            doc.channels[0].surface.fill_rect(Rect::new(10, 10, 20, 20), &[1.0]);
+            Ok(())
+        })
+        .unwrap();
+        s.execute("channel.target", json!({"channel": 0})).unwrap();
+        s.execute("select.all", json!({})).unwrap();
+        s.execute("edit.transform.flipHorizontal", json!({})).unwrap();
+        assert_eq!(s.active().unwrap().doc.channels[0].surface.content_bounds(), Rect::new(20, 10, 30, 20));
+    }
+
     #[test]
     fn reselect_restores_the_last_selection() {
         let mut s = session(8);
@@ -1714,8 +1762,12 @@ mod tests {
         s.execute("layer.translate", json!({"dx": 0, "dy": 0})).ok();
         paint_square(&mut s, Rect::new(-5, 0, 10, 10), [1.0, 0.0, 0.0, 1.0]);
         assert_eq!(reveal_all_bounds(doc(&s)), Rect::new(-5, 0, 40, 30));
+        let steps = s.active().unwrap().history.past_len();
         s.execute("image.revealAll", json!({})).unwrap();
         assert_eq!((doc(&s).size.width, doc(&s).size.height), (45, 30));
+        let history = &s.active().unwrap().history;
+        assert_eq!(history.past_len(), steps + 1, "one step");
+        assert_eq!(history.entries().last().map(String::as_str), Some("Reveal All"), "named as in Photoshop, not Crop");
         assert_eq!(s.execute("image.revealAll", json!({})).unwrap()["changed"], false);
     }
 

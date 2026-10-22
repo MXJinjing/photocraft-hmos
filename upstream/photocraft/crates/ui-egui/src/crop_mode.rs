@@ -212,10 +212,11 @@ fn remap(p: [f64; 2], from: PressView, to: PressView, flip: bool) -> [f64; 2] {
 }
 
 /// A pointer point `p` the canvas mapped through the view as it is now, read in the press-time
-/// view `press` (unchanged without one).
+/// view `press` (unchanged without one, or while the view hasn't moved: the `f32` round trip
+/// would nudge a click).
 pub fn to_press(app: &PhotocraftApp, press: Option<PressView>, p: [f64; 2]) -> [f64; 2] {
     match (press, press_view(app)) {
-        (Some(press), Some(now)) => remap(p, now, press, app.ui.view.flip_horizontal),
+        (Some(press), Some(now)) if press != now => remap(p, now, press, app.ui.view.flip_horizontal),
         _ => p,
     }
 }
@@ -239,7 +240,7 @@ pub fn control_point(app: &PhotocraftApp, p: [f64; 2]) -> [f64; 2] {
         _ => None,
     };
     match (press, press_view(app)) {
-        (Some(press), Some(now)) if app.ui.tool == Tool::Crop => remap(p, press, now, app.ui.view.flip_horizontal),
+        (Some(press), Some(now)) if app.ui.tool == Tool::Crop && press != now => remap(p, press, now, app.ui.view.flip_horizontal),
         _ => p,
     }
 }
@@ -424,6 +425,42 @@ mod tests {
         assert!(r.iter().zip([20.0, 30.0, 80.0, 70.0]).all(|(a, b)| (a - b).abs() < 1e-3), "{r:?}");
     }
 
+    /// #7088: the box's own Undo/Redo of a move (or a turn) in default mode puts the frame back
+    /// and moves the image, not the box: it stays put on screen (Auto Center Preview off) or goes
+    /// to the middle of the canvas (on).
+    #[test]
+    fn box_undo_and_redo_keep_the_box_put() {
+        for auto in [false, true] {
+            let mut app = app();
+            app.ui.tool_options.crop_shield.auto_center_preview = auto;
+            with_frame(&mut app);
+            // A quarter turn, then a move inside: two box steps.
+            screen_drag(&mut app, &[pos2(450.0, 300.0), pos2(370.0, 380.0)], NONE);
+            let turned = app.ui.crop_rect;
+            screen_drag(&mut app, &[pos2(370.0, 300.0), pos2(380.0, 305.0), pos2(390.0, 310.0)], NONE);
+            let moved = app.ui.crop_rect;
+            assert_ne!(moved, turned);
+            let want = if auto { pos2(400.0, 300.0) } else { pos2(370.0, 300.0) };
+            let check = |app: &PhotocraftApp, what: &str| {
+                let q = screen_box(app);
+                assert_upright(q);
+                assert!(mid_of(q).distance(want) < 0.05, "auto={auto} {what}: the box moved on screen to {:?}", mid_of(q));
+            };
+            app.run("edit.undo", json!({})).unwrap();
+            assert_eq!(app.ui.crop_rect, turned, "auto={auto}: the move is undone");
+            check(&app, "undo move");
+            app.run("edit.undo", json!({})).unwrap();
+            assert_eq!(app.ui.crop_rect, Some([40.0, 30.0, 100.0, 70.0]));
+            assert!(crate::crop_ui::angle(&app).abs() < 1e-9, "the turn is undone");
+            check(&app, "undo turn");
+            app.run("edit.redo", json!({})).unwrap();
+            check(&app, "redo turn");
+            app.run("edit.redo", json!({})).unwrap();
+            assert_eq!(app.ui.crop_rect, moved, "auto={auto}: the move is redone");
+            check(&app, "redo move");
+        }
+    }
+
     fn mid_of(q: [Pos2; 4]) -> Pos2 {
         pos2((q[0].x + q[2].x) / 2.0, (q[0].y + q[2].y) / 2.0)
     }
@@ -450,6 +487,30 @@ mod tests {
         assert!((img(&app) - origin - vec2(30.0, 0.0)).length() < 0.05, "the image moved 30 right on screen");
         let c1 = crate::crop_ui::center(app.ui.crop_rect.unwrap());
         assert!(((c1[0] - c0[0]).hypot(c1[1] - c0[1]) - 30.0).abs() < 1e-3);
+    }
+
+    /// A `ui.pointer` click (down and up at the same point, no move) changes nothing, upright or
+    /// turned: reading the point in the press view used to round it through `f32` and the view,
+    /// nudging the frame by a hair and pushing a box Undo step that undid nothing visible.
+    #[test]
+    fn a_ui_pointer_click_changes_nothing() {
+        let ctx = egui::Context::default();
+        for deg in [0.0, -30.0, 41.5] {
+            let mut app = app();
+            with_frame(&mut app);
+            app.ui.crop_angle = deg;
+            sync_frame(&mut app);
+            let (rect, angle) = (app.ui.crop_rect, app.ui.crop_angle);
+            // Inside the frame (moves the image) and outside it (turns the image).
+            for p in [[70.3, 50.7], [55.17, 41.9], [83.01, 59.33], [150.3, 50.7], [10.9, 90.1]] {
+                let ev = json!([{"kind": "down", "x": p[0], "y": p[1]}, {"kind": "up", "x": p[0], "y": p[1]}]);
+                let (req, _rx) = crate::control::ControlRequest::new("ui.pointer", json!({"events": ev}));
+                let crate::control::Outcome::Done(v) = crate::control::handle(&mut app, &ctx, &req) else { panic!("ui.pointer didn't finish") };
+                assert_eq!(v["ok"], true, "{v}");
+                assert_eq!((app.ui.crop_rect, app.ui.crop_angle), (rect, angle), "click at {p:?}, frame at {deg}°");
+                assert_eq!(crate::crop_ui::is_enabled(&app, "edit.undo"), None, "click at {p:?}, frame at {deg}°: a box Undo step");
+            }
+        }
     }
 
     #[test]

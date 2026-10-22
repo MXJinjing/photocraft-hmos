@@ -88,9 +88,19 @@ fn selected_real_mask(rec: &LayerRecord) -> Option<photocraft_psd::RealMask> {
     rec.layer_mask()?.real
 }
 
+/// The (density, feather) a shape layer's mask parameters give its path, which is its vector
+/// mask: (1, 0) without them.
+fn shape_mask_params(rec: &LayerRecord) -> (f32, f32) {
+    let p = rec.layer_mask().and_then(|m| m.parameters);
+    let density = p.and_then(|p| p.vector_density).map_or(1.0, |d| f32::from(d) / 255.0);
+    let feather = p.and_then(|p| p.vector_feather).filter(|f| f.is_finite()).map_or(0.0, |f| (f as f32).clamp(0.0, 1000.0));
+    (density, feather)
+}
+
 /// The fill of a plain shape layer (fill block + vector path, no stroke) to import as a fill layer
-/// with a vector mask: when its mask parameters give the vector mask a density below 100 % or a
-/// feather (`.1` true), or when it fills with a pattern.
+/// with a vector mask: when it fills with a pattern, which the shape renderer can't draw (`.1`
+/// true when its vector mask is also soft: a density below 100 % or a feather). Other soft
+/// shapes stay shapes with that density and feather.
 fn soft_shape_fill(rec: &LayerRecord, has_vector: bool, fill_key: Option<&[u8; 4]>) -> Option<(photocraft_doc::Fill, bool)> {
     if !has_vector || rec.block(b"vstk").is_some() || rec.block(b"vscg").is_some() {
         return None;
@@ -104,7 +114,7 @@ fn soft_shape_fill(rec: &LayerRecord, has_vector: bool, fill_key: Option<&[u8; 4
     // (our own export writes fill layers so, #1907): it is a pattern fill layer seen through
     // its vector mask.
     let pattern = matches!(fill, photocraft_doc::Fill::Pattern { .. });
-    (soft || pattern).then_some((fill, soft))
+    pattern.then_some((fill, soft))
 }
 
 /// Where a placed layer's source goes: read from `SoLd`/`SoLE`, or from a CS2 `PlLd` record.
@@ -431,10 +441,9 @@ impl Ctx<'_> {
                 perspective,
             })
         } else if let Some((f, soft)) = soft_shape_fill(rec, vector_key.is_some(), fill_key) {
-            // A shape whose vector mask has a density or feather is a fill layer seen through a
-            // soft vector mask: the fill shows beyond the path, which the stored pixels (the
-            // shape alone) lack. Import it as exactly that. A pattern fill keeps the stored
-            // pixels as its rendering (a soft mask's pixels lack the fill beyond the path).
+            // A pattern-filled shape is a pattern fill layer seen through its vector mask (soft
+            // or not). Unless that mask is soft, the stored pixels stay its rendering (a soft
+            // mask's pixels lack the fill beyond the path).
             if !soft && matches!(f, photocraft_doc::Fill::Pattern { .. }) && !rec.rect.is_empty() {
                 fill_cache = Some(FillCache { fill: f.clone(), surface: self.record_surface(rec, &name) });
             }
@@ -444,9 +453,13 @@ impl Ctx<'_> {
             let mut sh = ShapeLayer { fill, cache: Some(self.record_surface(rec, &name)), psd_raw: vector_key.and_then(principal), ..Default::default() };
             let lookup = |k: &[u8; 4]| rec.block(k).map(|b| b.data.clone());
             crate::vector_map::shape_from_blocks(&mut sh, &lookup, self.file.header.width, self.file.header.height, self.dpi);
+            (sh.density, sh.feather) = shape_mask_params(rec);
             // No stored pixels (32-bit documents, files saved without layer pixels): render the
-            // shape from its path and fill, as Photoshop does when it opens the file.
-            if (rec.rect.is_empty() || rec.rect.size().is_err()) && (!sh.path.subpaths.is_empty() || sh.path.inverted) {
+            // shape from its path and fill, as Photoshop does when it opens the file. A soft
+            // shape's stored pixels hold the shape alone, without the fill its density and feather
+            // show beyond the path: render it too.
+            let soft = sh.has_soft_mask() && sh.fill.is_some();
+            if soft || ((rec.rect.is_empty() || rec.rect.size().is_err()) && (!sh.path.subpaths.is_empty() || sh.path.inverted)) {
                 let canvas = Rect::new(0, 0, self.file.header.width as i32, self.file.header.height as i32);
                 sh.cache = Some(photocraft_vector::render_shape(&sh, self.fmt, canvas));
             }
@@ -465,6 +478,15 @@ impl Ctx<'_> {
                     LayerContent::Raster(self.record_surface(rec, &name))
                 }
             }
+        } else if let Some(k) = unknown_adjustment_key(rec) {
+            // An adjustment type no mapper knows: kept verbatim like an unreadable one, not
+            // opened as an empty pixel layer without a word (#6575).
+            let key = String::from_utf8_lossy(&k).into_owned();
+            self.warn(format!(
+                "layer \"{name}\": its adjustment settings could not be read (unknown adjustment type \"{key}\"); the layer is kept as saved but has no effect"
+            ));
+            let raw = rec.block(&k).map(|b| b.data.clone()).unwrap_or_default();
+            LayerContent::Adjustment(photocraft_doc::Adjustment::Unsupported { psd_key: key, raw })
         } else {
             LayerContent::Raster(self.record_surface(rec, &name))
         };
@@ -595,6 +617,33 @@ pub(crate) fn group_depth(file: &PsdFile) -> usize {
     depth
 }
 
+/// Additional-layer-information keys (Adobe PSD spec, plus `cust`, `vowv` and `SoLE` seen in
+/// Photoshop's files) that are not an adjustment of their own: names, ids, locks, effects,
+/// masks, metadata, and the fill, type, placed and shape content read before.
+const LAYER_INFO_KEYS: [&[u8; 4]; 50] = [
+    b"luni", b"lyid", b"lnsr", b"lsct", b"lsdk", b"lspf", b"lclr", b"iOpa", b"clbl", b"infx", b"knko", b"tsly", b"lmgm", b"vmgm", b"brst", b"shmd", b"fxrp",
+    b"lfx2", b"lfxs", b"lmfx", b"lrFX", b"lyvr", b"sn2P", b"cust", b"CgEd", b"vmsk", b"vsms", b"vogk", b"vowv", b"vstk", b"vscg", b"artb", b"artd", b"abdd",
+    b"FMsk", b"PxSc", b"PxSD", b"cinf", b"ffxi", b"shpa", b"anFX", b"SoCo", b"GdFl", b"PtFl", b"TySh", b"tySh", b"SoLd", b"SoLE", b"PlLd", b"plLd",
+];
+
+/// The key of an adjustment layer whose type no mapper knows (#6575), e.g. Photoshop 4's
+/// `hue ` or a type newer than PhotoCraft. Photoshop writes every adjustment layer without
+/// pixels and with "pixel data irrelevant" set (every one in the corpus; pixel, type and smart
+/// layers never have it). Such a record that is not a group and carries exactly one block that
+/// is neither a known layer-information key nor a known adjustment is that adjustment. More than
+/// one candidate is a guess, so the layer stays an (empty) pixel layer, as before; either way no
+/// pixels can be lost and the block is saved back verbatim.
+fn unknown_adjustment_key(rec: &LayerRecord) -> Option<[u8; 4]> {
+    let marked = rec.flags.bit4_useful() && rec.flags.pixel_data_irrelevant();
+    if !marked || !rec.rect.is_empty() || rec.block(b"lsct").is_some() || rec.block(b"lsdk").is_some() {
+        return None;
+    }
+    let mut unknown = rec.blocks.iter().filter(|b| !LAYER_INFO_KEYS.contains(&&b.key) && !ADJUSTMENT_KEYS.contains(&&b.key));
+    let only = unknown.next()?;
+    // A key that isn't four printable ASCII bytes names no adjustment (nor saves back as one).
+    (unknown.next().is_none() && only.key.iter().all(|c| c.is_ascii_graphic() || *c == b' ')).then_some(only.key)
+}
+
 fn preserved_blocks(rec: &LayerRecord) -> Vec<([u8; 4], Arc<Vec<u8>>)> {
     rec.blocks.iter().filter(|b| !REGENERATED.contains(&&b.key)).map(|b| (b.key, Arc::new(b.data.clone()))).collect()
 }
@@ -686,7 +735,7 @@ fn write_rgba8(s: &mut Surface, canvas: Rect, data: &[u8]) {
     }
 }
 
-fn parse_guides(data: &[u8], doc: &mut Document) {
+pub(crate) fn parse_guides(data: &[u8], doc: &mut Document) {
     let rd = |at: usize| data.get(at..at + 4).map(|b| u32::from_be_bytes([b[0], b[1], b[2], b[3]]));
     let Some(count) = rd(12) else { return };
     for i in 0..count as usize {
@@ -836,6 +885,7 @@ pub(crate) fn psd_to_document_decoded(
             id => doc.metadata.psd_resources.push((id, String::from_utf8_lossy(&r.name).into_owned(), Arc::new(r.data.clone()))),
         }
     }
+    crate::guides_map::apply_colors(&mut doc);
     for b in &file.global_blocks {
         doc.metadata.psd_global_blocks.push((b.signature, b.key, Arc::new(b.data.clone())));
     }
@@ -1000,8 +1050,12 @@ pub(crate) fn psd_to_document_decoded(
         if h.color_mode == PsdMode::Indexed && file.color_mode_data.len() >= 768 {
             // Planar palette: 256 reds, 256 greens, 256 blues (the Color Table).
             let m = &file.color_mode_data;
-            let colors = (0..256).map(|i| [m[i], m[256 + i], m[512 + i]]).collect();
-            doc.color_table = Some(photocraft_doc::ColorTable { colors, transparent: None });
+            // Resource 1046 says how many entries are used, 1047 which one is transparent.
+            let u16_of = |id: u16| file.resource(id).and_then(|r| r.data.get(..2)).map(|b| u16::from_be_bytes([b[0], b[1]]));
+            let count = u16_of(crate::palette_map::COLOR_TABLE_COUNT).map_or(256, usize::from).clamp(1, 256);
+            let colors = (0..count).map(|i| [m[i], m[256 + i], m[512 + i]]).collect();
+            let transparent = u16_of(crate::palette_map::TRANSPARENCY_INDEX).filter(|&i| usize::from(i) < count).map(|i| i as u8);
+            doc.color_table = Some(photocraft_doc::ColorTable { colors, transparent });
         } else if h.color_mode == PsdMode::Duotone && !file.color_mode_data.is_empty() {
             // The duotone ink block is undocumented: keep it raw; the image shows as its gray plate.
             doc.duotone =
@@ -1011,7 +1065,19 @@ pub(crate) fn psd_to_document_decoded(
             cx.warn("color mode data is not preserved");
         }
         match flat_composite(file, merged.as_ref(), photocraft_psd::compression::MAX_DECODED_BYTES) {
-            Ok(img) => {
+            Ok(mut img) => {
+                // Resource 1047: pixels of the transparent entry are transparent.
+                if h.color_mode == PsdMode::Indexed
+                    && let Some(t) = doc.color_table.as_ref().and_then(|t| t.transparent)
+                    && let Some(Ok(all)) = &merged
+                    && let Some(indices) = sizes.and_then(|(_, plane)| merged_plane(all, 0, plane))
+                {
+                    for (px, &i) in img.data.as_chunks_mut::<4>().0.iter_mut().zip(indices) {
+                        if i == t {
+                            px[3] = 0;
+                        }
+                    }
+                }
                 let mut s = Surface::new(fmt);
                 write_rgba8(&mut s, canvas, &img.data);
                 drop(img);

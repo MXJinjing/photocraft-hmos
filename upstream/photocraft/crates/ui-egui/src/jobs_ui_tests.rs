@@ -84,6 +84,21 @@ fn frames_for_at_least(h: &mut Harness<'_, PhotocraftApp>, ms: u64, min_frames: 
     (n, worst)
 }
 
+/// Step at least `min` frames and until `ready` holds; returns (frames, slowest frame in ms).
+/// The test fails when `ready` still does not hold after 60 s.
+fn frames_until(h: &mut Harness<'_, PhotocraftApp>, min: u64, ready: impl Fn(&Harness<'_, PhotocraftApp>) -> bool) -> (u64, f64) {
+    let t = Instant::now();
+    let (mut n, mut worst) = (0, 0.0f64);
+    while n < min || !ready(h) {
+        assert!(t.elapsed() < Duration::from_secs(60), "not ready after {n} frames");
+        let f = Instant::now();
+        h.step();
+        worst = worst.max(f.elapsed().as_secs_f64() * 1000.0);
+        n += 1;
+    }
+    (n, worst)
+}
+
 #[test]
 fn the_frame_loop_keeps_running_during_a_slow_job_and_esc_cancels_it() {
     let mut h = app_harness();
@@ -91,7 +106,9 @@ fn the_frame_loop_keeps_running_during_a_slow_job_and_esc_cancels_it() {
     let doc_before = h.state().session.active().unwrap().doc.clone();
     let job = slow_job(h.state_mut(), &gate);
     let frame0 = h.state().frame;
-    let (n, worst) = frames_for_at_least(&mut h, 400, 10);
+    // The worker thread reports "Filtering tiles" when it starts, which can be after the dialog appears.
+    let (n, worst) = frames_until(&mut h, 10, |h| h.query_by_label("Filtering tiles").is_some());
+    assert!(h.state().session.job(job).is_some(), "the job is still running");
     assert!(h.state().frame - frame0 >= 10, "the UI kept rendering ({n} frames)");
     eprintln!("{n} frames during the job, slowest {worst:.1} ms");
     // The status bar shows the job, and after the delay the modal progress dialog.
@@ -430,11 +447,15 @@ fn saves_run_in_the_background_and_are_recorded_when_they_end() {
     let st = h.state().session.active().unwrap();
     assert!(st.is_dirty() && st.path.is_none());
     assert!(h.state_mut().run("layer.new.layer", json!({})).is_err(), "the saving document is locked");
-    // The progress dialog names the save and shows its stage; the status bar reads "Saving 0%"
-    // until the encoder reports progress (#3389).
-    assert_eq!(h.query_all_by_label("Saving big.psd").count(), 1);
-    h.get_by_label("Encoding");
+    // Save in Background is on by default: no modal dialog, so the rest of the app stays usable
+    // (#6207); the status bar reads "Saving 0%" until the encoder reports progress (#3389).
+    assert!(h.query_by_label("Esc to cancel").is_none() && h.query_by_label("Encoding").is_none(), "no progress dialog");
     h.get_by_label("Saving 0%");
+    assert!(crate::jobs_ui::foreground_save(h.state()).is_none());
+    h.state_mut().ui.tool = crate::state::Tool::Move;
+    h.key_press(egui::Key::B);
+    h.run_steps(2);
+    assert_eq!(h.state().ui.tool, crate::state::Tool::Brush, "shortcuts still work while it saves");
 
     gates.encode.store(true, Ordering::Relaxed);
     step_until(&mut h, |a| !a.saving());
@@ -446,6 +467,86 @@ fn saves_run_in_the_background_and_are_recorded_when_they_end() {
     assert_eq!(h.state().ui.status, "Saved big.psd: a warning");
     assert!(noticed(h.state(), "a warning"), "the export warnings are shown");
     assert!(h.state_mut().run("layer.new.layer", json!({})).is_ok(), "unlocked again");
+}
+
+/// Save in Background off (#6207): the same worker writes the file, but the app waits for it
+/// like Photoshop's foreground save. The progress dialog shows at once, shortcuts don't reach the
+/// app, and a close asked for meanwhile happens only once the file is complete.
+#[test]
+fn save_in_background_off_blocks_the_app_until_the_file_is_written() {
+    let mut h = app_harness();
+    h.state_mut().run("prefs.set", json!({"path": "fileHandling.saveInBackground", "value": false})).unwrap();
+    let gates = Gates { write: Arc::new(AtomicBool::new(true)), ..Gates::default() };
+    h.state_mut().services.save_file = Some(gates.save(None));
+    h.state_mut().ui.tool = crate::state::Tool::Move;
+    let r = h.state_mut().save_as(Some("/tmp/photocraft-test/fg.psd".into())).unwrap();
+    assert_eq!(r["pending"], true, "the same background job does the work");
+    h.run_steps(1);
+    // The dialog is up from the first frame (no delay), titled with the save, then its stage.
+    h.get_by_label("Saving fg.psd");
+    h.get_by_label("Esc to cancel");
+    let t = Instant::now();
+    while h.query_by_label("Encoding").is_none() && t.elapsed() < Duration::from_secs(30) {
+        h.step();
+    }
+    h.get_by_label("Encoding");
+    assert!(crate::jobs_ui::foreground_save(h.state()).is_some());
+    h.key_press(egui::Key::B);
+    h.run_steps(2);
+    assert_eq!(h.state().ui.tool, crate::state::Tool::Move, "no shortcut reaches the app while it saves");
+    assert!(h.state_mut().run("layer.new.layer", json!({})).is_err(), "the saving document is locked");
+    // Quitting now waits for the file.
+    let st = h.state_mut().session.active_mut().unwrap();
+    st.saved_revision = st.revision;
+    assert!(press_window_close(h.state_mut()), "the close waits for the save");
+    assert!(h.state().jobs.close_after_saves);
+
+    gates.encode.store(true, Ordering::Relaxed);
+    let t = Instant::now();
+    while h.state().jobs.close_after_saves && t.elapsed() < Duration::from_secs(30) {
+        h.step();
+        if h.state().jobs.close_after_saves {
+            assert!(h.query_by_label("Esc to cancel").is_some(), "the dialog stays up until the save ends");
+        }
+    }
+    assert_eq!(gates.written(), ["/tmp/photocraft-test/fg.psd"], "the file is complete before the close goes on");
+    assert!(!h.state().jobs.close_after_saves, "then the held close is repeated");
+    h.run_steps(2);
+    assert!(h.query_by_label("Esc to cancel").is_none(), "the dialog is gone");
+    let st = h.state().session.active().unwrap();
+    assert_eq!(st.path.as_deref(), Some("/tmp/photocraft-test/fg.psd"));
+    assert!(!st.is_dirty());
+    h.key_press(egui::Key::B);
+    h.run_steps(2);
+    assert_eq!(h.state().ui.tool, crate::state::Tool::Brush, "shortcuts work again");
+}
+
+/// A failing foreground save reports its error, closes its dialog and leaves the document
+/// unsaved, as a background one does; Esc still cancels one that is encoding.
+#[test]
+fn a_failed_or_cancelled_foreground_save_leaves_the_document_unsaved() {
+    let mut h = app_harness();
+    h.state_mut().run("prefs.set", json!({"path": "fileHandling.saveInBackground", "value": false})).unwrap();
+    let gates = Gates::open();
+    h.state_mut().services.save_file = Some(gates.save(Some("disk full")));
+    h.state_mut().save_as(Some("/tmp/photocraft-test/f.psd".into())).unwrap();
+    step_until(&mut h, |a| !a.saving());
+    let st = h.state().session.active().unwrap();
+    assert!(st.is_dirty() && st.path.is_none());
+    assert!(noticed(h.state(), "disk full"), "the failure is reported");
+    assert!(h.query_by_label("Esc to cancel").is_none(), "the dialog is gone");
+
+    gates.encode.store(false, Ordering::Relaxed);
+    h.state_mut().services.save_file = Some(gates.save(None));
+    h.state_mut().save_as(Some("/tmp/photocraft-test/g.psd".into())).unwrap();
+    h.run_steps(2);
+    h.key_press(egui::Key::Escape);
+    step_until(&mut h, |a| !a.saving());
+    assert!(gates.written().is_empty(), "nothing written");
+    let st = h.state().session.active().unwrap();
+    assert!(st.is_dirty() && st.path.is_none());
+    assert_eq!(h.state().ui.status, "Cancelled Saving g.psd");
+    assert!(crate::jobs_ui::foreground_save(h.state()).is_none());
 }
 
 #[test]

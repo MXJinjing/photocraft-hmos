@@ -2096,6 +2096,11 @@
 	Mixer Brush Tool	Karıştırıcı Fırça Aracı
 	Color Replacement Tool	Renk Değiştirme Aracı
 	Wet	Islaklık
+	Current Brush Load	Geçerli Fırça Yükü
+	Load Brush	Fırçayı Yükle
+	Clean Brush	Fırçayı Temizle
+	Load the brush after each stroke	Her vuruştan sonra fırçayı yükle
+	Clean the brush after each stroke	Her vuruştan sonra fırçayı temizle
 	Mix	Karışım
 	Wetness Jitter	Islaklık Titreme
 	Mix Jitter	Karıştırma Titreşimi
@@ -2180,6 +2185,8 @@
 	Burn	Yanık
 	Quick Selection	Hızlı Seçim
 	History Brush	Tarih Fırçası
+	Paints from the History panel's source state	Tarih panelinin kaynak durumundan boyar
+	Sets the source for the history brush	Tarih fırçasının kaynağını ayarlar
 	Color Replacement	Renk Değiştirme
 	New Group	Yeni Grup
 	Layer Comp	Katman Kompozisyonu
@@ -2686,6 +2693,8 @@ cameraRaw	Color	Renk
 	Create Snapshot	Anlık Görüntü Oluştur
 	Delete Snapshot	Anlık Görüntüyü Sil
 	New Snapshot	Yeni Anlık Görüntü
+	New Snapshot…	Yeni Anlık Görüntü…
+	History Options…	Geçmiş Seçenekleri…
 	Snapshot 1	Anlık Görüntü 1
 	Nonlinear History	Doğrusal Olmayan Geçmiş
 	Set New Snapshot as Default	Yeni Anlık Görüntüyü Varsayılan Olarak Ayarla
@@ -3833,6 +3842,22 @@ cameraData	Lens	Lens
 @plural	{n} step|{n} steps	{n} adım
 @plural	{warning} (+{n} more brush preset warning)|{warning} (+{n} more brush preset warnings)	{warning} (+{n} fırça ön ayarı uyarısı daha)
 @plural	{what} with {n} warning|{what} with {n} warnings	{what}, {n} uyarı ile
+# Edit › Content-Aware Fill workspace
+	Excluded Area	Hariç Tutulan Alan
+	Fill Settings	Dolgu Ayarları
+	Full	Tam
+	Indicates	Gösterir
+	Mirror	Yansıt
+	Output Settings	Çıkış Ayarları
+	Output To	Çıkış Hedefi
+	Rectangular	Dikdörtgen
+	Rotation Adaptation	Döndürme Uyarlaması
+	Sampling Area	Örnekleme Alanı
+	Sampling Area Options	Örnekleme Alanı Seçenekleri
+	Sampling Area Overlay	Örnekleme Alanı Kaplaması
+	Sampling Brush Tool	Örnekleme Fırçası Aracı
+	Show Sampling Area	Örnekleme Alanını Göster
+	Very High	Çok Yüksek
 	Response curve	Yanıt eğrisi
 	Show home recent files	Ana ekranda son dosyaları göster
 	Clear Brush Controls	Fırça Denetimlerini Temizle
@@ -3955,6 +3980,13 @@ cameraData	Lens	Lens
 # View › Guides › right-click a guide
 	Edit Selected Guides	Seçili Kılavuzları Düzenle
 	Clear Selected Guides	Seçili Kılavuzları Temizle
+	Bicubic Automatic	Bikübik Otomatik
+	Bicubic Smoother	Bikübik Pürüzsüzleştirici
+	Bicubic Sharper	Bikübik Daha Keskin
+	Pasting from other apps is unavailable	Diğer uygulamalardan yapıştırma kullanılamıyor
+	PhotoCraft can't reach the system clipboard in this session. On Wayland, a Flatpak sandbox hides the protocol that images from other apps are read through.	PhotoCraft bu oturumda sistem panosuna erişemiyor. Wayland'de Flatpak korumalı alanı, diğer uygulamalardaki görüntülerin okunduğu protokolü gizler.
+	To paste from other apps, start PhotoCraft under XWayland: `{command}`	Diğer uygulamalardan yapıştırmak için PhotoCraft'ı XWayland altında başlatın: `{command}`
+	Nothing to paste: PhotoCraft can't read the system clipboard here	Yapıştırılacak bir şey yok: PhotoCraft burada sistem panosunu okuyamıyor
 	Delete this set	Bu Kümeyi Sil
 	New Set…	Yeni Küme…
 	PhotoCraft Defaults	PhotoCraft Varsayılanları
@@ -3969,6 +4001,18 @@ cameraData	Lens	Lens
 	There are too many sets: delete one first.	Çok fazla küme var: önce birini silin.
 	set name	küme adı
 	{set} (modified)	{set} (değiştirildi)
+	Show file name in title	Başlıkta dosya adını göster
+
+# Image › Mode › Bitmap (#5559)
+	50% Threshold	%50 Eşik
+	Pattern Dither	Desen Titreklik
+	Diffusion Dither	Difüzyon Titreklik
+	Halftone Screen	Yarım Ton Tarama
+	Custom Pattern	Özel Desen
+	Frequency:	Frekans:
+	Lines/Inch	Çizgi/İnç
+	Lines/Centimeter	Çizgi/Santimetre
+	Ellipse	Elips
 	Accept and Go to Conflict	Kabul Et ve Çakışmaya Git
 	Changes undone.	Değişiklikler geri alındı.
 	Choose a new shortcut for this command, or leave it without one.	Bu komut için yeni bir kısayol seçin veya kısayolsuz bırakın.
@@ -3991,6 +4035,27 @@ cameraData	Lens	Lens
 	GPU Memory (MB, 0 = Automatic)	GPU Belleği (MB, 0 = Otomatik)
 	{name} was changed by another app after it was opened or saved here.	{name}, burada açıldıktan veya kaydedildikten sonra başka bir uygulama tarafından değiştirildi.
 	Replace it with this document, or cancel and use File › Save As to keep both.	Bu belgeyle değiştirin ya da iptal edip ikisini de korumak için Dosya › Farklı Kaydet'i kullanın.
+	Decrease Brush Size	Fırça boyutunu küçült
+	Increase Brush Size	Fırça boyutunu büyüt
+	Decrease Brush Hardness	Fırça sertliğini azalt
+	Increase Brush Hardness	Fırça sertliğini artır
+	Memory Usage	Bellek kullanımı
+	Per-document RAM limit (MB)	Belge başına RAM sınırı (MB)
+	Installed RAM: {ram} MB; this limit: {percent}%	Kurulu RAM: {ram} MB; bu sınır: {percent}%
+	Limits each open document's pixels plus History. Oldest undo states are discarded when the limit is exceeded.	Her açık belgenin piksellerini ve Geçmişini sınırlar. Sınır aşılınca en eski geri alma durumları atılır.
+	Applies immediately when saved. Memory is not reserved in advance.	Kaydedilince hemen uygulanır. Bellek önceden ayrılmaz.
+	With GPU Memory set to Automatic, this also limits the GPU layer budget. That budget is capped at one quarter of installed RAM and, when known, three eighths of the graphics card's memory, with a 512 MB minimum. Raising this limit beyond those caps does not increase the GPU budget.	GPU Belleği Otomatikken GPU katman bütçesini de sınırlar. Tavan, RAM’in dörtte biri ve biliniyorsa kart belleğinin sekizde üçü, en az 512 MB. Sınırı yükseltmek GPU bütçesini artırmaz.
+	Use	Kullan
+	In Front	Önde
+	Behind	Arkada
+
+# DDS Options (#1327)
+	DDS Options	DDS Seçenekleri
+	Generate Mipmaps	Mipmap oluştur
+
+# Graphics Adapter preference (#1885)
+	GPU adapter	GPU bağdaştırıcısı
+
 # Icon-only toolbar controls
 	Show tools in one column	Araçları tek sütunda göster
 	Show tools in two columns	Araçları iki sütunda göster

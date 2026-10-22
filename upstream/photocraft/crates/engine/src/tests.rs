@@ -636,6 +636,33 @@ fn fill_layers_and_colors() {
 }
 
 #[test]
+fn gradient_fill_layer_angles_are_finite_and_normalised() {
+    // `angle` 1e39 overflowed f32 to infinity: the render went NaN and .pcraft refused to save.
+    let mut s = session_with_doc();
+    let angle = |s: &Session| {
+        let st = s.active().unwrap();
+        match &st.doc.layer(st.active_layer.unwrap()).unwrap().content {
+            photocraft_doc::LayerContent::Fill(photocraft_doc::Fill::Gradient { angle, .. }) => *angle,
+            _ => panic!("not a gradient fill"),
+        }
+    };
+    for cmd in ["layer.newFillLayer.gradient", "gradient.presets.apply"] {
+        let layers = s.active().unwrap().doc.layers.len();
+        for bad in [json!(1e39), json!(-1e300), json!("90")] {
+            assert!(s.execute(cmd, json!({"angle": bad})).is_err(), "{cmd} {bad}");
+        }
+        assert_eq!(s.active().unwrap().doc.layers.len(), layers, "{cmd}: nothing added");
+        // Normalised to (-180, 180] like gradient.fill.set.
+        for (a, want) in [(450.0, 90.0), (-90.0, -90.0), (-180.0, 180.0)] {
+            s.execute(cmd, json!({"angle": a})).unwrap();
+            assert_eq!(angle(&s), want, "{cmd} {a}");
+        }
+        s.execute(cmd, json!({})).unwrap();
+        assert_eq!(angle(&s), 90.0, "{cmd}: default");
+    }
+}
+
+#[test]
 fn default_colors_with_mask_targeted_resets_to_mask_colors() {
     let mut s = Session::new();
     s.tools.foreground = [0.2, 0.4, 0.6, 1.0];
@@ -700,6 +727,38 @@ fn fill_layer_pixel_rewrites_refresh_the_effect_maps() {
     photocraft_compose::purge_effect_cache();
     let fresh = render(&s);
     assert_eq!(after, fresh, "the effect maps track the cache surface, not the Fill spec alone");
+}
+
+#[test]
+fn growing_the_canvas_re_renders_a_cached_fill_layer() {
+    // A PSD fill layer keeps its stored pixels as a fill cache covering only the old canvas.
+    // Canvas Size, an extending Crop and Reveal All must re-render the fill over the new area,
+    // as Photoshop does, instead of leaving the added bands transparent (#7362).
+    let grow: [(&str, Value); 2] = [
+        ("image.canvasSize", json!({"width": 100, "anchor": "left"})),
+        ("image.crop", json!({"x": 0, "y": 0, "width": 100, "height": 48, "deleteCroppedPixels": false})),
+    ];
+    for (cmd, params) in grow {
+        let mut s = Session::new();
+        s.execute("file.new", json!({"width": 64, "height": 48, "background": "transparent"})).unwrap();
+        s.execute("layer.newFillLayer.solidColor", json!({"color": "#ff0000"})).unwrap();
+        s.edit("cache", |doc, active| {
+            let fmt = doc.pixel_format();
+            let l = doc.layer_mut(active.unwrap()).unwrap();
+            let photocraft_doc::LayerContent::Fill(f) = &l.content else { return Err(EngineError::Other("not a fill layer".into())) };
+            let fill = f.clone();
+            let mut surface = photocraft_raster::Surface::new(fmt);
+            surface.fill_rect(photocraft_geom::Rect::new(0, 0, 64, 48), &[1.0, 0.0, 0.0, 1.0]);
+            l.fill_cache = Some(photocraft_doc::FillCache { fill, surface });
+            Ok(())
+        })
+        .unwrap();
+        s.execute(cmd, params).unwrap();
+        let d = &s.active().unwrap().doc;
+        assert_eq!(d.size.width, 100, "{cmd} grows the canvas");
+        let px = photocraft_compose::render(d, d.bounds()).get(90, 20);
+        assert!(px[3] > 0.99 && px[0] > 0.99 && px[1] < 0.01, "{cmd}: the fill covers the added area, got {px:?}");
+    }
 }
 
 #[test]

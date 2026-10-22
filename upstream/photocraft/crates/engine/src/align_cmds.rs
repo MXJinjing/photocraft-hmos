@@ -24,6 +24,7 @@
 use photocraft_algo::panorama::Layout;
 use photocraft_algo::pyramid;
 use photocraft_algo::transform::Interp;
+use photocraft_algo::warp::warp_mesh_gray;
 use photocraft_doc::{Document, Layer, LayerContent, LayerId, LayerMask};
 use photocraft_geom::Rect;
 use photocraft_raster::{Surface, to_rgba};
@@ -107,11 +108,13 @@ fn auto_align(s: &mut Session, p: &Value) -> Result<Value> {
             let surf = l.surface().ok_or(EngineError::NoLayer(ids[i]))?;
             let b = surf.content_bounds();
             let px = if b.is_empty() { surf.clone() } else { warp_placed(surf, b, (0.0, 0.0), pl, (0.0, 0.0), interp)? };
+            // Masks warp as masks: one grey channel whose outside keeps its default (reveal-all
+            // stays revealed), not as colour, which would come back grey + alpha reading 0 outside.
             let mask = match l.mask.as_ref() {
-                Some(m) => {
-                    let mb = m.surface.content_bounds();
-                    Some(if mb.is_empty() { m.surface.clone() } else { warp_placed(&m.surface, mb, (0.0, 0.0), pl, (0.0, 0.0), Interp::Bilinear)? })
-                }
+                Some(m) => Some(match plane_matrix(pl, (0.0, 0.0)) {
+                    Some(h) => crate::transform_cmds::warp_gray(&m.surface, &h, Interp::Bilinear)?,
+                    None => warp_mesh_gray(&m.surface, &|x, y| pl.forward(x, y), Interp::Bilinear),
+                }),
                 None => None,
             };
             Ok((ids[i], px, mask))
@@ -382,6 +385,37 @@ mod tests {
         assert!((m[2] + 6.0).abs() < 1.0 && (m[5] + 5.0).abs() < 1.0, "{r}");
         assert!(s.execute("edit.autoAlignLayers", json!({"projection": "sideways"})).is_err());
         assert!(s.execute("edit.autoAlignLayers", json!({"reference": u64::MAX})).is_err());
+    }
+
+    /// The moving layer's mask is warped as a mask: one grey channel whose outside keeps its
+    /// default (reveal-all stays revealed, hide-all stays hidden), for planar and mesh warps.
+    #[test]
+    fn auto_align_warps_layer_masks_keeping_their_default() {
+        for (projection, reveal) in [("reposition", true), ("reposition", false), ("cylindrical", true)] {
+            let mut s = Session::new();
+            s.execute("file.new", json!({"width": 300, "height": 240, "background": "transparent"})).unwrap();
+            let a = texture_layer(&mut s, "A", 20, 20);
+            let b = texture_layer(&mut s, "B", 31, 13);
+            let (inside, outside) = if reveal { (0.0, 1.0) } else { (1.0, 0.0) };
+            s.edit("mask", |doc, _| {
+                let mut m = if reveal { LayerMask::reveal_all() } else { LayerMask::hide_all() };
+                m.surface.fill_rect(Rect::new(100, 100, 110, 110), &[inside]);
+                doc.layer_mut(b).unwrap().mask = Some(m);
+                Ok(())
+            })
+            .unwrap();
+            select(&mut s, &[a, b]);
+            let r = s.execute("edit.autoAlignLayers", json!({"projection": projection})).unwrap();
+            let doc = &s.active().unwrap().doc;
+            let m = doc.layer(b).unwrap().mask.as_ref().unwrap();
+            assert_eq!(m.surface.format().channels(), 1, "{projection}: {r}");
+            assert_eq!(m.value(250, 200), outside, "{projection} reveal={reveal}: {r}");
+            assert_eq!(m.value(5, 5), outside, "{projection} reveal={reveal}: {r}");
+            if projection == "reposition" {
+                // The square moved with the layer (by about (-11, +7)).
+                assert!((m.value(94, 112) - inside).abs() < 0.01, "{r}");
+            }
+        }
     }
 
     #[test]

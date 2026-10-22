@@ -2122,6 +2122,11 @@
 	Apply the pen's tilt and rotation to the tip shape	Appliquer l'inclinaison et la rotation du stylet à la forme de la pointe
 	Mixer Brush	Pinceau mélangeur
 	Wet	Humidité
+	Current Brush Load	Charge actuelle du pinceau
+	Load Brush	Charger le pinceau
+	Clean Brush	Nettoyer le pinceau
+	Load the brush after each stroke	Charger le pinceau après chaque trait
+	Clean the brush after each stroke	Nettoyer le pinceau après chaque trait
 	Mix	Mélange
 	Wetness Jitter	Variation de l'humidité
 	Mix Jitter	Variation du mélange
@@ -3055,6 +3060,24 @@ cameraData	Lens	Objectif
 	Snap to Origin	Aligner sur l'origine
 	Search settings…	Rechercher des réglages…
 	No matching settings	Aucun réglage correspondant
+# Edit › Content-Aware Fill workspace
+	Sampling Brush Tool	Outil Pinceau d’échantillonnage
+	Sampling Area Overlay	Incrustation de la zone d’échantillonnage
+	Show Sampling Area	Afficher la zone d’échantillonnage
+	Indicates	Indique
+	Sampling Area	Zone d’échantillonnage
+	Excluded Area	Zone exclue
+	Sampling Area Options	Options de la zone d’échantillonnage
+	Rectangular	Rectangulaire
+	Fill Settings	Paramètres de remplissage
+	Rotation Adaptation	Adaptation de la rotation
+	Very High	Très élevée
+	Full	Totale
+	Mirror	Miroir
+	Output Settings	Paramètres de sortie
+	Output To	Sortie vers
+	Duplicate Layer	Dupliquer le calque
+	Contract	Contracter
 	Loading fonts…	Chargement des polices…
 	Response curve	Courbe de réponse
 	Tool	Outil
@@ -3100,6 +3123,10 @@ curves	Smooth	Lisser
 	Click to place · Alt-click or drag off-canvas to remove	Cliquez pour placer · Alt-clic ou glisser hors du canevas pour supprimer
 	No document open	Aucun document ouvert
 	{n} of {max} sample points	{n} sur {max} points d'échantillonnage
+
+# History panel menu (#2966)
+	New Snapshot…	Nouvel instantané…
+	History Options…	Options d'historique…
 # Print dialog (#2697)
 	Emulsion Down	Émulsion verso
 	Functions	Fonctions
@@ -3162,6 +3189,9 @@ curves	Smooth	Lisser
 	Sent to {printer}	Envoyé à {printer}
 	set in Print Settings…	défini dans les paramètres d’impression…
 	ICO is limited to 256 × 256 pixels	Le format ICO est limité à 256 × 256 pixels
+# History panel › History Brush source (#2966)
+	Paints from the History panel's source state	Peint à partir de l'état source du panneau Historique
+	Sets the source for the history brush	Définit la source du pinceau d'historique
 # Embedded Profile Mismatch: profile names beside the choices, Remember this choice
 	Use the embedded profile ({profile})	Utiliser le profil incorporé ({profile})
 	Convert to the working space ({profile})	Convertir vers l'espace de travail ({profile})
@@ -3182,6 +3212,13 @@ curves	Smooth	Lisser
 # View › Guides › right-click a guide
 	Edit Selected Guides	Modifier les repères sélectionnés
 	Clear Selected Guides	Effacer les repères sélectionnés
+	Bicubic Automatic	Bicubique automatique
+	Bicubic Smoother	Bicubique plus lisse
+	Bicubic Sharper	Bicubique plus net
+	Pasting from other apps is unavailable	Le collage depuis d’autres applications est indisponible
+	PhotoCraft can't reach the system clipboard in this session. On Wayland, a Flatpak sandbox hides the protocol that images from other apps are read through.	PhotoCraft ne peut pas accéder au presse-papiers du système dans cette session. Sous Wayland, le bac à sable Flatpak masque le protocole par lequel les images des autres applications sont lues.
+	To paste from other apps, start PhotoCraft under XWayland: `{command}`	Pour coller depuis d’autres applications, lancez PhotoCraft sous XWayland : `{command}`
+	Nothing to paste: PhotoCraft can't read the system clipboard here	Rien à coller : PhotoCraft ne peut pas lire ici le presse-papiers du système
 	Delete this set	Supprimer ce jeu
 	New Set…	Nouveau jeu…
 	PhotoCraft Defaults	Valeurs par défaut de PhotoCraft
@@ -3197,6 +3234,19 @@ curves	Smooth	Lisser
 	set name	nom du jeu
 	{set} (modified)	{set} (modifié)
 	Random	Aléatoire
+	Show file name in title	Afficher le nom de fichier dans le titre
+
+# Image › Mode › Bitmap (#5559)
+	50% Threshold	Seuil 50 %
+	Pattern Dither	Simulation par motif
+	Diffusion Dither	Simulation par diffusion
+	Halftone Screen	Trame de demi-teintes
+	Custom Pattern	Motif personnalisé
+	Frequency:	Fréquence :
+	Lines/Inch	Lignes/pouce
+	Lines/Centimeter	Lignes/centimètre
+	Ellipse	Ellipse
+	Cross	Croix
 	Accept and Go to Conflict	Accepter et aller au conflit
 	Changes undone.	Modifications annulées.
 	Choose a new shortcut for this command, or leave it without one.	Choisissez un nouveau raccourci pour cette commande ou laissez-la sans raccourci.
@@ -3220,6 +3270,28 @@ curves	Smooth	Lisser
 	Replace	Remplacer
 	{name} was changed by another app after it was opened or saved here.	{name} a été modifié par une autre application après avoir été ouvert ou enregistré ici.
 	Replace it with this document, or cancel and use File › Save As to keep both.	Remplacez-le par ce document, ou annulez et utilisez Fichier › Enregistrer sous pour garder les deux.
+	Decrease Brush Size	Réduire la taille du pinceau
+	Increase Brush Size	Augmenter la taille du pinceau
+	Decrease Brush Hardness	Réduire la dureté du pinceau
+	Increase Brush Hardness	Augmenter la dureté du pinceau
+	Memory Usage	Utilisation de la mémoire
+	Per-document RAM limit (MB)	Limite RAM par document (Mo)
+	Installed RAM: {ram} MB; this limit: {percent}%	RAM installée : {ram} Mo ; cette limite : {percent}%
+	Limits each open document's pixels plus History. Oldest undo states are discarded when the limit is exceeded.	Limite les pixels plus l’Historique de chaque document ouvert. Les plus anciens états d’annulation sont supprimés au-delà de la limite.
+	Applies immediately when saved. Memory is not reserved in advance.	S’applique dès l’enregistrement. La mémoire n’est pas réservée à l’avance.
+	With GPU Memory set to Automatic, this also limits the GPU layer budget. That budget is capped at one quarter of installed RAM and, when known, three eighths of the graphics card's memory, with a 512 MB minimum. Raising this limit beyond those caps does not increase the GPU budget.	Si Mémoire GPU est Automatique, cela limite aussi le budget GPU. Il est plafonné à un quart de la RAM et, si connu, aux trois huitièmes de la mémoire de la carte, minimum 512 Mo. Dépasser ces plafonds n’augmente pas le budget GPU.
+	Use	Utiliser
+	In Front	Devant
+	Behind	Derrière
+
+# DDS Options (#1327)
+	DDS Options	Options DDS
+	Compression	Compression
+	Generate Mipmaps	Générer les mipmaps
+
+# Graphics Adapter preference (#1885)
+	GPU adapter	Adaptateur GPU
+
 # HarmonyOS host additions retained during upstream sync
 	Stylus	Stylet
 	Block finger input	Bloquer la saisie au doigt

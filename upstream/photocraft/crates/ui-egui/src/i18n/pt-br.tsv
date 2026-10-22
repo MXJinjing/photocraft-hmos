@@ -2116,6 +2116,11 @@
 	Apply the pen's tilt and rotation to the tip shape	Aplicar a inclinação e a rotação da caneta à forma da ponta
 	Mixer Brush	Pincel misturador
 	Wet	Molhado
+	Current Brush Load	Carga atual do pincel
+	Load Brush	Carregar pincel
+	Clean Brush	Limpar pincel
+	Load the brush after each stroke	Carregar o pincel após cada traço
+	Clean the brush after each stroke	Limpar o pincel após cada traço
 	Mix	Mistura
 	Wetness Jitter	Variação da umidade
 	Mix Jitter	Variação da mistura
@@ -3058,6 +3063,25 @@ cameraData	Lens	Lente
 	Snap to Origin	Ajustar à origem
 	Search settings…	Pesquisar configurações…
 	No matching settings	Nenhuma configuração encontrada
+# Edit › Content-Aware Fill workspace
+	Sampling Brush Tool	Ferramenta Pincel de amostragem
+	Sampling Area Overlay	Sobreposição da área de amostragem
+	Show Sampling Area	Mostrar área de amostragem
+	Indicates	Indica
+	Sampling Area	Área de amostragem
+	Excluded Area	Área excluída
+	Sampling Area Options	Opções da área de amostragem
+	Rectangular	Retangular
+	Fill Settings	Configurações de preenchimento
+	Rotation Adaptation	Adaptação de rotação
+	Very High	Muito alta
+	Full	Completa
+	Mirror	Espelhar
+	Output Settings	Configurações de saída
+	Output To	Saída para
+	New Layer	Nova camada
+	Duplicate Layer	Duplicar camada
+	Contract	Contrair
 	Loading fonts…	Carregando fontes…
 	Response curve	Curva de resposta
 	Tool	Ferramenta
@@ -3077,7 +3101,6 @@ curves	Smooth	Suavizar
 	Smooth the curve values	Suavizar os valores da curva
 	Drag to draw the curve · {key}-click draws a straight line	Arraste para desenhar a curva · {key}-clique traça uma linha reta
 	Grid Size:	Tamanho da grade:
-	New Layer	Nova camada
 	Vanishing Point: click four corners to create a plane	Ponto de fuga: clique em quatro cantos para criar um plano
 	Vanishing Point is not active	Ponto de fuga não está ativo
 	Apply Vanishing Point ({key})	Aplicar ponto de fuga ({key})
@@ -3122,7 +3145,6 @@ layerLabel	No Color	Sem cor
 	Clear Selection	Limpar seleção
 	Invert Selection	Inverter seleção
 	Select Inverse	Inverter seleção
-	Contract	Contrair
 	Sample Size	Tamanho da amostra
 	Strength	Intensidade
 	Gamma	Gama
@@ -3149,7 +3171,6 @@ layerLabel	No Color	Sem cor
 	Workspaces	Áreas de trabalho
 	Show All	Mostrar tudo
 	Hidden	Oculto
-	Duplicate Layer	Duplicar camada
 	Ungroup	Desagrupar
 	Lock Transparent Pixels	Bloquear pixels transparentes
 	Lock Image Pixels	Bloquear pixels da imagem
@@ -3872,6 +3893,10 @@ layerLabel	No Color	Sem cor
 	Set Colors	Definir cores
 	Switch Foreground and Background Colors	Alternar cores de primeiro plano e plano de fundo
 	Target	Alvo
+
+# History panel menu (#2966)
+	New Snapshot…	Novo instantâneo…
+	History Options…	Opções de histórico…
 # Print dialog (#2697)
 	Emulsion Down	Emulsão para baixo
 	Functions	Funções
@@ -3948,6 +3973,9 @@ layerLabel	No Color	Sem cor
 	Sent to {printer}	Enviado para {printer}
 	set in Print Settings…	definido nas configurações de impressão…
 	ICO is limited to 256 × 256 pixels	ICO é limitado a 256 × 256 pixels
+# History panel › History Brush source (#2966)
+	Paints from the History panel's source state	Pinta a partir do estado de origem do painel Histórico
+	Sets the source for the history brush	Define a origem do pincel do histórico
 # Embedded Profile Mismatch: profile names beside the choices, Remember this choice
 	Use the embedded profile ({profile})	Usar o perfil incorporado ({profile})
 	Convert to the working space ({profile})	Converter para o espaço de trabalho ({profile})
@@ -3968,6 +3996,13 @@ layerLabel	No Color	Sem cor
 # View › Guides › right-click a guide
 	Edit Selected Guides	Editar guias selecionadas
 	Clear Selected Guides	Limpar guias selecionadas
+	Bicubic Automatic	Bicúbica automática
+	Bicubic Smoother	Bicúbica mais suave
+	Bicubic Sharper	Bicúbica mais nítida
+	Pasting from other apps is unavailable	Colar de outros aplicativos não está disponível
+	PhotoCraft can't reach the system clipboard in this session. On Wayland, a Flatpak sandbox hides the protocol that images from other apps are read through.	O PhotoCraft não consegue acessar a área de transferência do sistema nesta sessão. No Wayland, a sandbox do Flatpak oculta o protocolo pelo qual as imagens de outros aplicativos são lidas.
+	To paste from other apps, start PhotoCraft under XWayland: `{command}`	Para colar de outros aplicativos, execute o PhotoCraft no XWayland: `{command}`
+	Nothing to paste: PhotoCraft can't read the system clipboard here	Nada para colar: o PhotoCraft não consegue ler a área de transferência do sistema aqui
 	Delete this set	Excluir este conjunto
 	New Set…	Novo conjunto…
 	PhotoCraft Defaults	Padrões do PhotoCraft
@@ -3982,6 +4017,18 @@ layerLabel	No Color	Sem cor
 	There are too many sets: delete one first.	Há conjuntos demais: exclua um primeiro.
 	set name	nome do conjunto
 	{set} (modified)	{set} (modificado)
+	Show file name in title	Exibir nome do arquivo no título
+
+# Image › Mode › Bitmap (#5559)
+	50% Threshold	Limiar de 50%
+	Pattern Dither	Pontilhamento de padrão
+	Diffusion Dither	Pontilhamento de difusão
+	Halftone Screen	Retícula de meio-tom
+	Custom Pattern	Padrão personalizado
+	Frequency:	Frequência:
+	Lines/Inch	Linhas/polegada
+	Lines/Centimeter	Linhas/centímetro
+	Ellipse	Elipse
 	Accept and Go to Conflict	Aceitar e ir para o conflito
 	Changes undone.	Alterações desfeitas.
 	Choose a new shortcut for this command, or leave it without one.	Escolha um novo atalho para este comando ou deixe-o sem atalho.
@@ -4004,6 +4051,27 @@ layerLabel	No Color	Sem cor
 	GPU Memory (MB, 0 = Automatic)	Memória da GPU (MB, 0 = Automático)
 	{name} was changed by another app after it was opened or saved here.	{name} foi alterado por outro app depois de ser aberto ou salvo aqui.
 	Replace it with this document, or cancel and use File › Save As to keep both.	Substitua-o por este documento, ou cancele e use Arquivo › Salvar como para manter os dois.
+	Decrease Brush Size	Diminuir tamanho do pincel
+	Increase Brush Size	Aumentar tamanho do pincel
+	Decrease Brush Hardness	Diminuir dureza do pincel
+	Increase Brush Hardness	Aumentar dureza do pincel
+	Memory Usage	Uso de memória
+	Per-document RAM limit (MB)	Limite de RAM por documento (MB)
+	Installed RAM: {ram} MB; this limit: {percent}%	RAM instalada: {ram} MB; este limite: {percent}%
+	Limits each open document's pixels plus History. Oldest undo states are discarded when the limit is exceeded.	Limita os pixels mais o Histórico de cada documento aberto. Os estados de desfazer mais antigos são descartados ao exceder o limite.
+	Applies immediately when saved. Memory is not reserved in advance.	Aplica-se ao salvar. A memória não é reservada antecipadamente.
+	With GPU Memory set to Automatic, this also limits the GPU layer budget. That budget is capped at one quarter of installed RAM and, when known, three eighths of the graphics card's memory, with a 512 MB minimum. Raising this limit beyond those caps does not increase the GPU budget.	Com Memória GPU Automática, também limita o orçamento GPU. O teto é um quarto da RAM e, se conhecido, três oitavos da memória da placa, mínimo 512 MB. Aumentar o limite não aumenta o orçamento GPU.
+	Use	Usar
+	In Front	Na frente
+	Behind	Atrás
+
+# DDS Options (#1327)
+	DDS Options	Opções de DDS
+	Generate Mipmaps	Gerar mipmaps
+
+# Graphics Adapter preference (#1885)
+	GPU adapter	Adaptador de GPU
+
 # HarmonyOS host additions retained during upstream sync
 	Stylus	Caneta
 	Block finger input	Bloquear entrada por dedo

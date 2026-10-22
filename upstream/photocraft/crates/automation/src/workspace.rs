@@ -74,6 +74,13 @@ impl AuthorizedWorkspace {
     /// as [`photocraft_format::atomic_write`], through the directory capability). On failure
     /// the previous file is untouched and the temporary file is removed.
     ///
+    /// Replacing a file carries its extended attributes — macOS Finder tags, Linux `user.*` —
+    /// onto the file that takes its place (#7095), through the two open descriptors rather than
+    /// their paths, so nothing here reaches outside the write root to finish a write. The rest
+    /// of what [`photocraft_format::atomic_write`] preserves does not follow: its permission
+    /// step is tracked in #4963, and the Windows `ReplaceFileW` swap is path-based, which this
+    /// path may not use.
+    ///
     /// The parent directory must already exist. `cap-std` performs path
     /// resolution and file creation relative to the held directory handle, so
     /// a non-existent final target is supported without ambient path access.
@@ -85,10 +92,20 @@ impl AuthorizedWorkspace {
         let tmp = parent.join(photocraft_format::atomic::temp_name(&leaf));
         let mut options = OpenOptions::new();
         options.write(true).create_new(true);
-        let written = root.dir.open_with(&tmp, &options).and_then(|mut file| {
+        let written = root.dir.open_with(&tmp, &options).and_then(|file| {
+            let mut file = file.into_std();
             file.write_all(bytes)?;
+            #[cfg(unix)]
+            {
+                use std::os::fd::AsFd;
+                // Best effort, and only when there is a file being replaced: a save still
+                // succeeds for a document whose Finder tag could not come along.
+                if let Ok(old) = root.dir.open(&relative) {
+                    let _ = photocraft_format::atomic::meta::copy_xattrs(old.as_fd(), file.as_fd());
+                }
+            }
             // Falls back to a plain fsync on shares that refuse a full flush (#1336).
-            photocraft_format::atomic::sync_file(&file.into_std())
+            photocraft_format::atomic::sync_file(&file)
         });
         let renamed = written.and_then(|()| photocraft_format::atomic::retry_rename(RenameRetry::platform(), || root.dir.rename(&tmp, &root.dir, &relative)));
         if let Err(e) = renamed {
@@ -569,6 +586,32 @@ mod tests {
         std::fs::create_dir_all(inside.join("adir")).unwrap();
         assert!(workspace.write("adir", b"x").is_err());
         assert!(inside.join("adir").is_dir());
+        assert!(temp_files(&inside).is_empty());
+    }
+
+    /// #7095: replacing a file through the automation path keeps the old file's extended
+    /// attributes, the same as a save through `atomic_write` does.
+    #[cfg(any(target_os = "linux", target_os = "android", target_vendor = "apple"))]
+    #[test]
+    fn write_keeps_the_replaced_files_extended_attributes() {
+        #[cfg(target_os = "macos")]
+        const TAG: &str = "com.apple.metadata:_kMDItemUserTags";
+        #[cfg(not(target_os = "macos"))]
+        const TAG: &str = "user.photocraft.test";
+
+        let (inside, _, workspace) = roots("xattr");
+        let path = inside.join("doc.psd");
+        workspace.write("doc.psd", b"original").unwrap();
+        if rustix::fs::setxattr(&path, TAG, b"tagged", rustix::fs::XattrFlags::empty()).is_err() {
+            return; // a file system without extended attributes: nothing to assert
+        }
+
+        workspace.write("doc.psd", b"replacement, longer").unwrap();
+
+        assert_eq!(std::fs::read(&path).unwrap(), b"replacement, longer");
+        let mut buf = [0u8; 64];
+        let len = rustix::fs::getxattr(&path, TAG, buf.as_mut_slice()).expect("the attribute was dropped");
+        assert_eq!(&buf[..len], b"tagged");
         assert!(temp_files(&inside).is_empty());
     }
 

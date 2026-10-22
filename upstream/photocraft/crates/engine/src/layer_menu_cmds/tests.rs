@@ -385,6 +385,38 @@ fn export_layer_trims_to_its_pixels() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// Layer › Export As › Resample: Nearest Neighbor turns each layer pixel into an exact 2 × 2
+/// block at 200 %, an unknown method is an error (never a silent Bicubic), and the document is
+/// left as it was.
+#[test]
+fn export_layer_resamples_with_the_chosen_method() {
+    let dir = std::env::temp_dir().join(format!("pc-layer-export-resample-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    for depth in [8, 16] {
+        let mut s = session(depth, "rgb");
+        paint(&mut s, |x, y| if (x + y) % 2 == 0 { [1.0, 0.0, 0.0, 1.0] } else { [0.0, 0.0, 1.0, 1.0] });
+        let before = s.active().unwrap().doc.clone();
+        let path = dir.join(format!("nearest-{depth}.png"));
+        let path = path.to_string_lossy();
+        let r = s.execute("layer.exportAs", json!({"path": path, "scale": 200, "resample": "nearest"})).unwrap();
+        assert_eq!((r["width"].as_u64(), r["height"].as_u64()), (Some(80), Some(60)));
+        let out = photocraft_io::import("x.png", &std::fs::read(&*path).unwrap()).unwrap().document;
+        let surf = out.layers[0].surface().unwrap();
+        for y in 0..60 {
+            for x in 0..80 {
+                let want = if (x / 2 + y / 2) % 2 == 0 { [1.0, 0.0, 0.0, 1.0] } else { [0.0, 0.0, 1.0, 1.0] };
+                assert_eq!(surf.rgba(x, y), want, "{depth}-bit pixel {x},{y}");
+            }
+        }
+        for bad in [json!("lanczos"), json!("Nearest"), json!(""), json!(2)] {
+            let err = s.execute("layer.exportAs", json!({"path": path, "scale": 200, "resample": bad})).unwrap_err().to_string();
+            assert!(err.contains("resample"), "{depth}-bit {bad}: {err}");
+        }
+        assert!(std::sync::Arc::ptr_eq(&s.active().unwrap().doc, &before), "{depth}-bit: exporting never edits the document");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn stack_modes_render_from_the_nested_layers() {
     let mut s = session(8, "rgb");
@@ -515,6 +547,26 @@ fn reveal_follows_linked_paths_like_the_link_and_passes_paths_as_paths() {
     }
 }
 
+/// `xdg-open` launches a file it is given, so Reveal hands it the link's folder only when that is a
+/// folder: a link stored as `tool.jar/a.png` names a file, not a folder, as its parent.
+#[test]
+fn reveal_on_linux_never_hands_xdg_open_a_file() {
+    let dir = std::env::temp_dir().join(format!("photocraft-reveal-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("tool.jar");
+    std::fs::write(&file, b"not a folder").unwrap();
+    let (program, args) = reveal_command_on("linux", &file.join("a.png").to_string_lossy()).unwrap();
+    assert_eq!(args, vec![file.to_string_lossy().into_owned()]);
+    let err = ensure_folder(program, &args).unwrap_err();
+    assert!(err.to_string().contains("is not a folder"), "{err}");
+    let (program, args) = reveal_command_on("linux", &dir.join("a.png").to_string_lossy()).unwrap();
+    ensure_folder(program, &args).unwrap();
+    assert!(ensure_folder("xdg-open", &[]).is_err());
+    // Finder and Explorer select the file itself, whatever it is.
+    ensure_folder("open", &["-R".into(), "--".into(), file.to_string_lossy().into_owned()]).unwrap();
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
 #[test]
 fn mask_all_objects_masks_the_subject() {
     let mut s = session(8, "rgb");
@@ -529,6 +581,59 @@ fn mask_all_objects_masks_the_subject() {
         }
         // The segmentation may decline tiny images; then nothing changes.
         Err(_) => assert!(active(&s).mask.is_none()),
+    }
+}
+
+fn subject(x: i32, y: i32) -> [f32; 4] {
+    let inside = (((x - 20) * (x - 20) + (y - 15) * (y - 15)) as f32).sqrt() < 8.0;
+    if inside { [0.9, 0.2, 0.1, 1.0] } else { [0.95, 0.95, 0.95, 1.0] }
+}
+
+#[test]
+fn from_transparency_and_mask_all_objects_turn_the_background_into_a_layer() {
+    for cmd in ["layer.layerMask.fromTransparency", "layer.maskAllObjects", "layer.layerMask.hideSelection"] {
+        let mut s = Session::new();
+        s.execute("file.new", json!({"width": 40, "height": 30, "background": "white"})).unwrap();
+        let id = s.active().unwrap().active_layer.unwrap();
+        assert!(doc(&s).is_background(id));
+        paint(&mut s, subject);
+        if cmd.ends_with("hideSelection") {
+            select_left_half(&mut s);
+        }
+        s.execute(cmd, json!({})).unwrap();
+        assert!(!doc(&s).is_background(id), "{cmd}: the Background became a layer");
+        assert_eq!(active(&s).name, "Layer 0", "{cmd}");
+        assert!(active(&s).mask.is_some(), "{cmd}");
+    }
+}
+
+#[test]
+fn layer_masks_are_built_at_the_document_depth() {
+    use photocraft_color::SampleType;
+    for (depth, sample, tol) in [(8, SampleType::U8, 1.0 / 255.0), (16, SampleType::U16, 1.0 / 65535.0), (32, SampleType::F32, 1e-6)] {
+        let mut s = session(depth, "rgb");
+        paint(&mut s, |_, _| [0.2, 0.4, 0.6, 0.5003]);
+        s.execute("layer.layerMask.fromTransparency", json!({})).unwrap();
+        let m = active(&s).mask.as_ref().unwrap();
+        assert_eq!(m.surface.format().sample, sample, "From Transparency at {depth}");
+        assert!((m.value(5, 5) - 0.5003).abs() < tol, "From Transparency at {depth}: {}", m.value(5, 5));
+        assert_eq!(m.value(-50, -50), 0.0, "outside the layer stays hidden at {depth}");
+
+        let mut s = session(depth, "rgb");
+        paint(&mut s, |_, _| [0.2, 0.4, 0.6, 1.0]);
+        select_left_half(&mut s);
+        s.execute("layer.layerMask.hideSelection", json!({})).unwrap();
+        let m = active(&s).mask.as_ref().unwrap();
+        assert_eq!(m.surface.format().sample, sample, "Hide Selection at {depth}");
+        assert_eq!((m.value(5, 5), m.value(30, 5), m.value(500, 500)), (0.0, 1.0, 1.0), "Hide Selection at {depth}");
+
+        let mut s = session(depth, "rgb");
+        paint(&mut s, subject);
+        s.execute("layer.maskAllObjects", json!({})).unwrap();
+        let m = active(&s).mask.as_ref().unwrap();
+        assert_eq!(m.surface.format().sample, sample, "Mask All Objects at {depth}");
+        assert!(m.value(20, 15) > m.value(1, 1), "Mask All Objects at {depth}");
+        assert_eq!(m.value(500, 500), 0.0, "Mask All Objects at {depth}");
     }
 }
 

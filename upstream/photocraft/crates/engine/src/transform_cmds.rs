@@ -1,6 +1,6 @@
 //! Edit › Free Transform / Transform: projective transforms of layers (and the selection).
 
-use photocraft_algo::transform::{Homography, Interp, warp_output_bounds, warp_surface, warp_surface_with};
+use photocraft_algo::transform::{Homography, Interp, warp_output_size, warp_surface, warp_surface_with};
 use photocraft_color::PixelFormat;
 use photocraft_doc::{Document, Layer, LayerContent, LayerId, Locks};
 use photocraft_geom::{Affine, Rect};
@@ -54,9 +54,12 @@ fn framed_by_selection(doc: &Document, bounds: Rect) -> Rect {
 }
 
 /// A group moves all its descendants, so its frame must not clip raster children to the selection.
-fn whole_layer_bounds(layer: &Layer) -> Rect {
+pub(crate) fn whole_layer_bounds(layer: &Layer) -> Rect {
     let content = match &layer.content {
         LayerContent::Group(g) => g.children.iter().map(whole_layer_bounds).fold(Rect::EMPTY, |a, b| a.union(&b)),
+        // A soft shape (Density below 100 % or a Feather) renders past its path, over the whole
+        // canvas below 100 %: its frame follows the path and stroke, as in Photoshop (#5846).
+        LayerContent::Shape(sh) if sh.has_soft_mask() => photocraft_compose::hard_shape_bounds(sh).unwrap_or(Rect::EMPTY),
         _ => layer.surface().map_or(Rect::EMPTY, photocraft_compose::bounds::content_bounds),
     };
     if content.is_empty() { layer.mask.as_ref().map_or(Rect::EMPTY, |m| photocraft_compose::bounds::content_bounds(&m.surface)) } else { content }
@@ -273,10 +276,13 @@ const BUDGET: u64 = 1 << 20;
 /// Refuse a warp of the content inside `src` by `h` whose result would exceed the pixel budget,
 /// before anything is built. `what` names the surface in the message.
 pub(crate) fn check_budget(src: Rect, h: &Homography, what: &str) -> Result<()> {
-    let Some(b) = warp_output_bounds(src, h) else { return Ok(()) };
-    let (w, ht) = (u64::from(b.width()), u64::from(b.height()));
-    if w.saturating_mul(ht) > BUDGET {
-        let detail = format!("the transformed {what} would be {w} x {ht} px, more than the {BUDGET} px limit");
+    check_budget_with_limit(src, h, what, BUDGET)
+}
+
+fn check_budget_with_limit(src: Rect, h: &Homography, what: &str, budget: u64) -> Result<()> {
+    let Some((w, ht)) = warp_output_size(src, h) else { return Ok(()) };
+    if w.saturating_mul(ht) > budget {
+        let detail = format!("the transformed {what} would be {w} x {ht} px, more than the {budget} px limit");
         return Err(crate::allocation::error("transforming pixels", &detail));
     }
     Ok(())
@@ -375,6 +381,9 @@ fn apply_transform(
     // With a selection only the selected pixels move, and so only the same region of a linked
     // mask (#205). Groups, type, shapes and smart objects move whole.
     let mask_sel = doc_sel.filter(|_| !moves_whole(l));
+    // The masks (and so a fill's frame) move, but a fill layer's cached render isn't warped:
+    // drop it, the fill re-renders from its model (as `transform_layer_geometry` does).
+    l.fill_cache = None;
     match &mut l.content {
         LayerContent::Group(g) => {
             for c in g.children.iter_mut() {
@@ -735,6 +744,24 @@ mod tests {
 
     // ---- Pixel budget (#3773). Tests run with a 2²⁰ px budget, so nothing here comes near the real one. ----
 
+    #[test]
+    fn huge_transform_scales_exceed_the_production_budget_before_clipping() {
+        let src = Rect::new(0, 0, 24, 16);
+        for scale in [1e7, 1e28, 1e306] {
+            for (sx, sy) in [(scale, 1.0), (1.0, scale), (-scale, 1.0)] {
+                let h = Homography([sx, 0.0, 0.0, 0.0, sy, 0.0, 0.0, 0.0, 1.0]);
+                assert!(check_budget_with_limit(src, &h, "layer", MAX_TRANSFORM_PIXELS).is_err(), "{sx} x {sy} must be refused");
+            }
+        }
+    }
+
+    #[test]
+    fn an_ordinary_transform_remains_within_the_production_budget() {
+        let src = Rect::new(0, 0, 24, 16);
+        let h = Homography([10_000.0, 0.0, 900_000.0, 0.0, 1.0, -900_000.0, 0.0, 0.0, 1.0]);
+        assert!(check_budget_with_limit(src, &h, "layer", MAX_TRANSFORM_PIXELS).is_ok());
+    }
+
     /// A 16 x 16 document whose active layer is a 1 x 8 column at x = 10.
     fn column() -> Session {
         let mut s = Session::new();
@@ -969,6 +996,57 @@ mod tests {
         let LayerContent::Shape(sh) = &st.doc.layer(st.active_layer.unwrap()).unwrap().content else { panic!("still a shape layer") };
         assert!(sh.path.subpaths[0].knots.len() > 4, "{}", sh.path.subpaths[0].knots.len());
         assert!(!active_bounds(&s).is_empty());
+    }
+
+    /// A gradient fill layer whose mask (a selection when it was made) frames the gradient over
+    /// 10..40, with the cached render a PSD import gives it: exactly the pixels the fill renders.
+    fn cached_gradient_fill() -> Session {
+        let mut s = session();
+        s.execute("select.rect", json!({"x": 10, "y": 10, "width": 30, "height": 30})).unwrap();
+        s.execute("layer.newFillLayer.gradient", json!({"from": "#ff0000", "to": "#0000ff", "angle": 0})).unwrap();
+        s.execute("select.deselect", json!({})).unwrap();
+        s.edit("cache", |doc, active| {
+            let (fmt, canvas) = (doc.pixel_format(), doc.bounds());
+            let l = doc.layer_mut(active.unwrap()).unwrap();
+            let LayerContent::Fill(f) = &l.content else { panic!("a fill layer") };
+            let buf = photocraft_compose::render_fill_content(l, f, canvas, &[]);
+            let mut surface = Surface::new(fmt);
+            let vals: Vec<f32> = buf.px.iter().flat_map(|p| photocraft_raster::from_rgba(&fmt, *p)).collect();
+            surface.write_region(canvas, &vals);
+            l.fill_cache = Some(photocraft_doc::FillCache { fill: f.clone(), surface });
+            Ok(())
+        })
+        .unwrap();
+        s
+    }
+
+    /// How far the composite is from the composite with the fill re-rendered from its model
+    /// (cache dropped): the largest channel difference.
+    fn off_from_fresh(s: &Session) -> f32 {
+        let st = s.active().unwrap();
+        let mut fresh: Document = (*st.doc).clone();
+        fresh.layer_mut(st.active_layer.unwrap()).unwrap().fill_cache = None;
+        let (a, b) = (photocraft_compose::render(&st.doc, st.doc.bounds()).px, photocraft_compose::render(&fresh, fresh.bounds()).px);
+        a.iter().zip(&b).flat_map(|(p, q)| p.iter().zip(q).map(|(x, y)| (x - y).abs())).fold(0.0, f32::max)
+    }
+
+    #[test]
+    fn transforming_a_fill_layer_drops_its_stale_cached_render() {
+        let mut s = cached_gradient_fill();
+        let off = off_from_fresh(&s);
+        assert!(off < 0.01, "the cache is the fill's own render: {off}");
+        // The mask (and so the gradient's frame) moves 50 px right and doubles in height.
+        s.execute("edit.transform", json!({"matrix": [1, 0, 0, 2, 50, 0]})).unwrap();
+        let off = off_from_fresh(&s);
+        assert!(off < 0.01, "the composite shows the fill laid out in its new frame, not the old render: {off}");
+    }
+
+    #[test]
+    fn warping_a_fill_layer_drops_its_stale_cached_render() {
+        let mut s = cached_gradient_fill();
+        s.execute("edit.transform.warp", json!({"style": "arc", "bend": 50})).unwrap();
+        let off = off_from_fresh(&s);
+        assert!(off < 0.01, "the composite shows the fill laid out in its new frame, not the old render: {off}");
     }
 
     #[test]
@@ -1422,5 +1500,43 @@ mod tests {
         for bad in [json!({"scaleX": 0}), json!({"rotate": "x"}), json!({"dx": f64::NAN})] {
             assert!(s.execute("edit.transform", bad.clone()).is_err(), "{bad}");
         }
+    }
+
+    /// #5846: a shape's Density and Feather render past its path (over the whole canvas below
+    /// 100 %), but its transform frame follows the path, as in Photoshop: the same box as the hard
+    /// shape for Free Transform, the Move tool's controls and snapping, never the canvas.
+    #[test]
+    fn a_soft_shapes_frame_follows_its_path() {
+        let mut s = Session::new();
+        s.execute("file.new", json!({"width": 200, "height": 200})).unwrap();
+        let id = s.execute("shape.create", json!({"kind": "rect", "rect": [20, 30, 60, 40], "fill": "#000000"})).unwrap()["layer"].as_u64().unwrap();
+        let id = photocraft_doc::LayerId(id);
+        let boxes = |s: &Session| {
+            let st = s.active().unwrap();
+            let l = st.doc.layer(id).unwrap();
+            (transform_bounds(&st.doc, l), transform_frame(&st.doc, l), crate::snap::layer_rect(&st.doc, id))
+        };
+        let hard = boxes(&s);
+        assert_eq!(hard.0, Rect::new(20, 30, 80, 70), "the hard shape's frame");
+        s.execute("layer.vectorMask.edit", json!({"density": 60, "feather": 20})).unwrap();
+        {
+            let st = s.active().unwrap();
+            let LayerContent::Shape(sh) = &st.doc.layer(id).unwrap().content else { panic!("a shape") };
+            let painted = photocraft_compose::bounds::content_bounds(sh.cache.as_ref().unwrap());
+            assert_eq!(painted, st.doc.bounds(), "the soft fill renders over the whole canvas");
+        }
+        let soft = boxes(&s);
+        assert_eq!(soft, hard, "the frame ignores Density and Feather");
+        assert_ne!(soft.1, s.active().unwrap().doc.bounds());
+        // Feather alone (density 100 %) leaves the frame on the path too, not grown by the blur.
+        s.execute("layer.vectorMask.edit", json!({"density": 100, "feather": 20})).unwrap();
+        assert_eq!(boxes(&s), hard);
+        // Free Transform scales about the path's centre, not the canvas's.
+        s.execute("edit.transform", json!({"layer": id.0, "scaleX": 200})).unwrap();
+        let st = s.active().unwrap();
+        let LayerContent::Shape(sh) = &st.doc.layer(id).unwrap().content else { panic!("a shape") };
+        let (x0, y0, x1, y1) = sh.path.control_bounds().unwrap();
+        assert_eq!((x0.round(), y0.round(), x1.round(), y1.round()), (-10.0, 30.0, 110.0, 70.0));
+        assert_eq!((sh.density, sh.feather), (1.0, 20.0), "the transform keeps the soft settings");
     }
 }

@@ -1,4 +1,4 @@
-//! The Photocraft engine façade: open documents, history, and the command registry.
+//! The PhotoCraft engine façade: open documents, history, and the command registry.
 //!
 //! Every user-visible action is a command with a stable id (Photoshop-style, such as
 //! `layer.newAdjustmentLayer.invert`) and JSON parameters. Every frontend goes through the same
@@ -58,7 +58,9 @@ pub mod group_view_cmds;
 pub mod guide_layout;
 pub mod hidden_target;
 pub mod history_cmds;
+pub mod history_menu_cmds;
 pub mod history_select_cmds;
+pub mod history_source_cmds;
 pub mod image_cmds;
 pub mod inspect;
 pub mod installed_profiles;
@@ -239,6 +241,9 @@ pub struct DocState {
     pub snapshots: Vec<history_cmds::Snapshot>,
     /// The id the next snapshot gets; ids are never reused, so deleting one keeps the others.
     next_snapshot: u64,
+    /// The snapshot set as the History Brush's source (`history.setSource {snapshot}`); `None`:
+    /// the source is a state, kept by the history ([`photocraft_ops::History::brush_source`]).
+    pub(crate) source_snapshot: Option<u64>,
 }
 
 impl DocState {
@@ -282,6 +287,7 @@ impl DocState {
             color_samplers: Vec::new(),
             snapshots: Vec::new(),
             next_snapshot: 1,
+            source_snapshot: None,
         }
     }
     /// The selected layers in bottom-to-top document order, always including the active layer.
@@ -506,6 +512,9 @@ pub struct Session {
     /// The canvas-geometry map the next [`Session::edit`] applies to the Color Sampler points (crop,
     /// Canvas Size, Image Size, rotation set it just before their edit). Consumed by the edit.
     sampler_map: Option<photocraft_geom::Affine>,
+    /// The same edit's map in edge coordinates, for the painting symmetry (Image Rotation maps the
+    /// samplers' pixel centres instead). Consumed by the edit.
+    symmetry_map: Option<photocraft_geom::Affine>,
     /// Each open document's linked smart objects' files: size and modification time when last
     /// seen ([`link_watch`]).
     pub link_stamps: std::collections::HashMap<(u64, String), link_watch::Stamp>,
@@ -574,8 +583,16 @@ impl Session {
     /// Move the Color Sampler points through `a` in the next [`Session::edit`] (crop, Canvas Size,
     /// Image Size, rotation), dropping the ones that land outside the new canvas. View state: the
     /// points stay pinned to their pixels, no history step. Cleared by the edit it is set for.
+    /// The painting symmetry moves through `a` too.
     pub(crate) fn set_sampler_map(&mut self, a: photocraft_geom::Affine) {
-        self.sampler_map = Some(a);
+        self.set_canvas_map(a, a);
+    }
+
+    /// [`set_sampler_map`](Self::set_sampler_map) for an edit whose sampler map differs from its
+    /// geometry map (a flip or rotation maps pixel centres): `geometry` moves the painting symmetry.
+    pub(crate) fn set_canvas_map(&mut self, geometry: photocraft_geom::Affine, samplers: photocraft_geom::Affine) {
+        self.sampler_map = Some(samplers);
+        self.symmetry_map = Some(geometry);
     }
 
     pub fn sync_tools_mask_target(&mut self) {
@@ -803,6 +820,7 @@ impl Session {
         let _document = crate::doc_path::scope(self.active().and_then(|d| d.path.as_deref()).map(std::path::Path::new));
         let restrict = self.color_restrict;
         let sampler_map = self.sampler_map.take();
+        let symmetry_map = self.symmetry_map.take();
         let st = self.active_mut().ok_or(EngineError::NoDocument)?;
         let before = st.doc.clone();
         // Selecting layers is not a step, so the state this edit leaves behind targets what was
@@ -837,6 +855,10 @@ impl Session {
             let n = st.color_samplers.len();
             st.color_samplers.retain(|p| bounds.contains(p[0].floor() as i32, p[1].floor() as i32));
             samplers_removed = n - st.color_samplers.len();
+        }
+        // The painting symmetry stays on its pixels too (Photoshop keeps it as a path).
+        if let Some(a) = symmetry_map {
+            st.symmetry = st.symmetry.take().and_then(|sym| sym.transform(&a));
         }
         // The pixels the edit can have changed, as its undo would report them: nothing for a
         // selection, guides or a layer's name (a new lasso selection used to recomposite a large
@@ -936,6 +958,18 @@ impl Session {
         let Some(st) = self.active_mut() else { return false };
         st.coalesce = None;
         match st.history.undo(st.doc.clone()) {
+            // Undo Clear History: the list comes back, the document is the same one. Not an
+            // edit: keep a clean document clean (the revision still moves for the panels).
+            Some((d, layers)) if Arc::ptr_eq(&d, &st.doc) => {
+                restore_target(st, layers);
+                let clean = !st.is_dirty();
+                st.revision += 1;
+                if clean {
+                    st.saved_revision = st.revision;
+                }
+                st.last_damage = Some(photocraft_geom::Rect::EMPTY);
+                true
+            }
             Some((mut d, layers)) => {
                 // Save As changes file identity outside history, just like the saved path.
                 if d.name != st.doc.name {

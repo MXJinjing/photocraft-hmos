@@ -585,6 +585,23 @@ fn explicit_reveal_activates_existing_tab_and_expands_custom_group() {
     assert_eq!(app.ui.docking, before);
 }
 
+// #2455 in a custom workspace: the pro Color field fills a tall floating group, not 120 pt.
+#[test]
+fn pro_color_field_fills_a_tall_custom_group() {
+    let mut app = app();
+    app.run("window.panel.float", json!({"panel":"color","x":40,"y":60,"width":320,"height":560})).unwrap();
+    assert!(app.ui.docking.is_some());
+    let h = harness(app, vec2(1280.0, 800.0));
+    // The SV field and the 14 pt hue strip beside it are draggable, equally tall and 8 pt apart.
+    let drags: Vec<egui::Rect> =
+        h.ctx.viewport(|v| v.this_pass.widgets.layers().flat_map(|(_, w)| w).filter(|w| w.sense.senses_drag()).map(|w| w.rect).collect());
+    let field = drags
+        .iter()
+        .find(|f| drags.iter().any(|s| s.width() == 14.0 && s.top() == f.top() && s.height() == f.height() && (s.left() - f.right() - 8.0).abs() < 0.5))
+        .expect("Color field with its hue strip");
+    assert!(field.height() > 300.0, "field stays short in a 560 pt group: {field:?}");
+}
+
 // #4028: in a custom workspace too, a new adjustment layer brings Properties to the front.
 #[test]
 fn a_new_adjustment_layer_activates_properties_in_a_custom_workspace() {

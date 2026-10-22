@@ -160,6 +160,12 @@ pub(crate) fn invoke_unguarded(app: &mut PhotocraftApp, ctx: &egui::Context, id:
     if let Some(r) = crate::prefs_ui::invoke(app, ctx, id, &params) {
         return r;
     }
+    // Save for Web's dialog would export the committed document, not the open Free Transform (#6737).
+    if id == crate::transform_tool::SAVE_FOR_WEB
+        && let Some(r) = crate::transform_tool::intercept(app, id)
+    {
+        return r;
+    }
     // Save for Web, Print and the other File-menu dialogs added with slices.
     if let Some(r) = crate::file_ui::invoke(app, ctx, id, &params) {
         return r;
@@ -233,20 +239,19 @@ pub(crate) fn invoke_unguarded(app: &mut PhotocraftApp, ctx: &egui::Context, id:
         "file.save" => {
             // Writes back only to a layered file that holds the whole document; anything else
             // goes through Save As, so the original is never overwritten with less (#3806).
-            let tga_bits = crate::targa_options_ui::bits_param(&params, id)?;
+            let choices = crate::FormatChoices::from_params(&params, id)?;
             match params.get("path").and_then(Value::as_str) {
-                Some(path) => app.save_as_with(Some(path.to_string()), tga_bits),
+                Some(path) => app.save_as_with(Some(path.to_string()), choices),
                 None if app.services.default_save.is_some() => app.save(None),
                 None => {
                     let own = app.session.active().and_then(|d| d.path.clone().map(|p| (photocraft_engine::file_cmds::holds_at(&d.doc, &p), p, d)));
                     let own = own.filter(|(_, path, _)| !crate::file_open::is_ephemeral_save_token(path));
                     match own {
                         Some((true, path, d)) => {
-                            if let Some(r) = crate::disk_change_prompt::intercept(app, d.doc.id, &path, false) {
-                                r
-                            } else {
-                                app.save_in_place(path)
-                            }
+                            // Another app changed the file since it was opened or saved: ask first (#6596).
+                            let doc = d.doc.id;
+                            crate::disk_change_prompt::intercept(app, doc, &path, false)
+                                .unwrap_or_else(|| app.save_in_place(path, crate::FormatChoices::default()))
                         }
                         Some((false, path, d)) if photocraft_engine::file_cmds::saves_in_place(&path) => {
                             // Its own file is layered but can't hold what the document has now.
@@ -256,9 +261,11 @@ pub(crate) fn invoke_unguarded(app: &mut PhotocraftApp, ctx: &egui::Context, id:
                             let mut lines = losses;
                             lines.push(tl!("Choose a format that keeps it, such as Photoshop (PSD), or save a copy.").to_string());
                             crate::notices::post(app, title, lines, false, None);
-                            app.save_dialog_flow(None, tga_bits, true)
+                            app.save_as_with(None, choices)
                         }
-                        _ => app.save_dialog_flow(None, tga_bits, true),
+                        // A flat file asks for its name; confirming its own file records a
+                        // plain Save that writes the file an action is played on (#3531).
+                        _ => app.save_dialog_flow(None, choices, true),
                     }
                 }
             }
@@ -292,8 +299,8 @@ pub(crate) fn invoke_unguarded(app: &mut PhotocraftApp, ctx: &egui::Context, id:
             }
         }
         "file.saveAs" => {
-            let tga_bits = crate::targa_options_ui::bits_param(&params, id)?;
-            app.save_as_with(params.get("path").and_then(Value::as_str).map(str::to_string), tga_bits)
+            let choices = crate::FormatChoices::from_params(&params, id)?;
+            app.save_as_with(params.get("path").and_then(Value::as_str).map(str::to_string), choices)
         }
         "view.zoomIn" | "view.zoomOut" | "view.fitOnScreen" | "view.actualPixels" => app.run(id, params),
         "view.darkenInterface" => crate::prefs_ui::step_brightness(app, ctx, false).map(|()| Value::Null),
@@ -505,7 +512,7 @@ pub(crate) fn invoke_unguarded(app: &mut PhotocraftApp, ctx: &egui::Context, id:
         "edit.paste" if params.as_object().is_none_or(|o| o.is_empty()) => {
             // Photoshop: paste in place when the copied area is visible, else centred in the view;
             // images from other apps are always centred.
-            app.import_os_clipboard();
+            app.import_os_clipboard()?;
             app.clip_read_for_paste = true;
             let external = app.clip_external;
             let visible = !external
@@ -1547,18 +1554,6 @@ const MENU_SEPARATOR: f32 = 9.0;
 
 fn render_level_rows(ui: &mut egui::Ui, items: &[&MenuItem], depth: usize, clicked: &mut Option<String>, nav: &mut crate::menu_nav::Nav) {
     let lang = crate::i18n::current();
-    let mut labels = Vec::new();
-    let mut unique_subs = std::collections::HashSet::new();
-    for it in items {
-        if it.path.len() == depth && it.label != "---" {
-            labels.push(translated_menu_label(lang, it));
-        } else if it.path.len() > depth && unique_subs.insert(it.path[depth].as_str()) {
-            labels.push(crate::i18n::tr(lang, &it.path[depth]).to_string());
-        }
-    }
-    let labels_ref: Vec<&str> = labels.iter().map(String::as_str).collect();
-    let row_mnemonics = crate::menu_keys::assign(&labels_ref, &[]);
-    let mut row_mnemonics = row_mnemonics.into_iter();
     // Items never wrap: the menu widens to its longest label plus shortcut (translations can be
     // longer than the English).
     ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
@@ -1569,6 +1564,27 @@ fn render_level_rows(ui: &mut egui::Ui, items: &[&MenuItem], depth: usize, click
     crate::widgets::style_spectrum_popup_menu(ui);
     // Walk in Photoshop order: leaves and separators at this depth; a submenu appears at the position
     // of its first child.
+    // Each row's mnemonic (#4988), unique within this level, in display order: the leaves' labels
+    // and the submenus' names as shown.
+    let shown_labels: Vec<String> = {
+        let mut subs: Vec<&str> = Vec::new();
+        items
+            .iter()
+            .filter_map(|it| {
+                if it.path.len() == depth {
+                    (it.label != "---").then(|| translated_menu_label(lang, it))
+                } else {
+                    let name = it.path.get(depth).map(String::as_str)?;
+                    (!subs.contains(&name)).then(|| {
+                        subs.push(name);
+                        crate::i18n::tr(lang, name).to_string()
+                    })
+                }
+            })
+            .collect()
+    };
+    let mnemonics = crate::menu_keys::assign(&shown_labels.iter().map(String::as_str).collect::<Vec<_>>(), &[]);
+    let mut next_row = 0usize;
     let mut shown_subs: Vec<&str> = Vec::new();
     let mut last_was_sep = true;
     for (i, it) in items.iter().enumerate() {
@@ -1580,12 +1596,11 @@ fn render_level_rows(ui: &mut egui::Ui, items: &[&MenuItem], depth: usize, click
                 }
                 continue;
             }
-            let mut text = translated_menu_label(lang, it);
-            if let Some(c) = it.checked {
-                text = format!("{} {}", if c { "✔" } else { "  " }, text);
-            }
-            let mnemonic = row_mnemonics.next().flatten();
-            let text = if nav.underline { crate::menu_keys::mnemonic_text(ui, "", &text, mnemonic, None) } else { text.into() };
+            let label = translated_menu_label(lang, it);
+            let mnemonic = mnemonics.get(next_row).copied().flatten();
+            next_row += 1;
+            // Checked, unchecked and plain rows share one checkmark column (#5705).
+            let text = crate::menu_keys::menu_row_text(ui, it.checked == Some(true), &label, mnemonic.filter(|_| nav.underline));
             let mut b = egui::Button::new(text);
             if let Some(tint) = it.color.as_deref().and_then(menu_tint) {
                 b = b.fill(tint.gamma_multiply(0.55));
@@ -1614,24 +1629,51 @@ fn render_level_rows(ui: &mut egui::Ui, items: &[&MenuItem], depth: usize, click
                 continue;
             }
             shown_subs.push(name);
-            let mnemonic = row_mnemonics.next().flatten();
             let child: Vec<&MenuItem> = items.iter().copied().filter(|c| c.path.len() > depth && c.path[depth] == name).collect();
             let enabled = submenu_enabled(&child);
+            let mnemonic = mnemonics.get(next_row).copied().flatten();
+            next_row += 1;
+            let title = crate::menu_keys::menu_row_text(ui, false, crate::i18n::tr(lang, name), mnemonic.filter(|_| nav.underline));
             ui.add_enabled_ui(enabled, |ui| {
                 nav.row(ui, depth - 1, enabled, None, mnemonic, |ui, nav| {
-                    let label = crate::i18n::tr(lang, name);
-                    let label = if nav.underline { crate::menu_keys::mnemonic_text(ui, "", label, mnemonic, None) } else { label.into() };
-                    let r = ui.menu_button(label, |ui| render_level(ui, &child, depth + 1, clicked, nav));
-                    if r.inner.is_some() {
+                    let (response, inner) = submenu_row(ui, title, |ui| render_level(ui, &child, depth + 1, clicked, nav));
+                    if inner.is_some() {
                         // Where the submenu hangs from, to keep it below the menu bar (#319).
-                        nav.set_anchor(depth, r.response.rect);
+                        nav.set_anchor(depth, response.rect);
                     }
-                    (r.response, ())
+                    (response, ())
                 });
             });
             last_was_sep = false;
         }
     }
+}
+
+
+/// A submenu row, drawn as `ui.menu_button` draws it, except that a row scrolled out of view
+/// doesn't open its submenu. egui opens a submenu whenever the pointer is over its row, clipped
+/// or not: a menu reopened scrolled down (after Edit › Preferences or Window › Theme) has rows
+/// hidden above its view, over the menu bar, and the hidden one under the title opened on the
+/// press; the release on the title then counted as a click outside that submenu and closed the
+/// whole menu (#5896, #6225). An open submenu (e.g. opened from the keyboard) is drawn as usual.
+fn submenu_row<R>(ui: &mut egui::Ui, title: egui::WidgetText, content: impl FnOnce(&mut egui::Ui) -> R) -> (egui::Response, Option<R>) {
+    use egui::containers::menu::{MenuState, SubMenu, SubMenuButton};
+    let sub = SubMenu::id_from_widget_id(ui.next_auto_id());
+    let open = MenuState::from_ui(ui, |state, _| state.open_item == Some(sub));
+    let inactive = ui.style().visuals.widgets.inactive;
+    if open {
+        ui.style_mut().visuals.widgets.inactive = ui.style().visuals.widgets.open;
+    }
+    let response = ui.add(egui::Button::new(title).right_text(SubMenuButton::RIGHT_ARROW));
+    ui.style_mut().visuals.widgets.inactive = inactive;
+    // The rect egui tests the pointer against (`SubMenu::show`), against the part that can be seen.
+    let reach = response.rect.expand2(ui.spacing().item_spacing / 2.0);
+    let hidden = ui.ctx().pointer_hover_pos().is_some_and(|p| reach.contains(p) && !ui.clip_rect().contains(p));
+    if hidden && !open {
+        return (response, None);
+    }
+    let inner = SubMenu::new().show(ui, &response, content);
+    (response, inner.map(|r| r.inner))
 }
 
 /// A submenu header is enabled only while some item under it (at any depth) can run, so a
@@ -2027,6 +2069,44 @@ mod tests {
             assert!(open(&h), "typing after the click keeps Help open ({what})");
             assert!(h.query_all_by_label_contains("› Levels").next().is_some(), "and lists the matches ({what})");
         }
+    }
+
+    /// #5996: a real key press comes as a key and its text. A letter typed into Help › Search is
+    /// text for the field, not a mnemonic: "S" ran System Info and "A" the ArtCraft website.
+    #[test]
+    fn help_search_letters_are_not_mnemonics() {
+        use egui::{Event, Key, Modifiers, PointerButton};
+        use egui_kittest::{Harness, kittest::Queryable};
+        let mut h = Harness::builder().with_size(egui::vec2(1200.0, 800.0)).with_max_steps(64).build_eframe(|cc| {
+            PhotocraftApp::setup_context(&cc.egui_ctx, crate::theme::ThemeKind::ALL[0]);
+            PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default())
+        });
+        h.run_steps(4);
+        let help = h.get_by_label("Help").rect().center();
+        h.event(Event::PointerMoved(help));
+        h.run_steps(1);
+        for pressed in [true, false] {
+            h.event(Event::PointerButton { pos: help, button: PointerButton::Primary, pressed, modifiers: Modifiers::NONE });
+            h.run_steps(1);
+        }
+        h.run_steps(3);
+        assert!(h.query_by_label_contains("About PhotoCraft").is_some(), "Help opened");
+        for c in "DeSelect all".chars() {
+            let key = Key::from_name(&c.to_ascii_uppercase().to_string());
+            if let Some(key) = key {
+                h.event(Event::Key { key, physical_key: Some(key), pressed: true, repeat: false, modifiers: Modifiers::NONE });
+            }
+            h.event(Event::Text(c.to_string()));
+            h.run_steps(1);
+            if let Some(key) = key {
+                h.event(Event::Key { key, physical_key: Some(key), pressed: false, repeat: false, modifiers: Modifiers::NONE });
+            }
+        }
+        h.run_steps(3);
+        assert!(h.query_by_label_contains("About PhotoCraft").is_some(), "typing keeps Help open");
+        let query: String = h.ctx.data(|d| d.get_temp(egui::Id::new("help-menu-search"))).unwrap_or_default();
+        assert_eq!(query, "DeSelect all", "every letter reached the field");
+        assert!(h.state().ui.dialogs.is_empty(), "no menu command ran: {:?}", h.state().ui.dialogs);
     }
 
     #[test]

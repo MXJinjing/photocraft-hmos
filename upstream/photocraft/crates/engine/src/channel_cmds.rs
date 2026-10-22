@@ -1086,17 +1086,19 @@ fn indicates_param(v: Option<&Value>) -> Option<ColorIndicates> {
     }
 }
 
-fn color_value(p: &Value, key: &str) -> Option<Color> {
-    p.get(key)?;
-    let c = crate::commands::color_param(p, key, [1.0, 0.0, 0.0, 1.0]);
-    Some(Color::rgb(c[0], c[1], c[2]))
+fn color_value(cmd: &str, p: &Value, key: &str) -> Result<Option<Color>> {
+    if p.get(key).is_none() {
+        return Ok(None);
+    }
+    let c = crate::commands::color_param(cmd, p, key, [1.0, 0.0, 0.0, 1.0])?;
+    Ok(Some(Color::rgb(c[0], c[1], c[2])))
 }
 
 fn new_channel(s: &mut Session, p: &Value) -> Result<Value> {
     let fill = p.get("fill").and_then(Value::as_str).unwrap_or("black").to_string();
     let name = p.get("name").and_then(Value::as_str).map(str::to_string);
     let indicates = indicates_param(p.get("indicates"));
-    let color = color_value(p, "color");
+    let color = color_value("channel.new", p, "color")?;
     let opacity = p.get("opacity").and_then(Value::as_f64).map(|v| (v as f32 / 100.0).clamp(0.0, 1.0));
     let i = s.edit("New Channel", |doc, _| {
         let area = doc.bounds();
@@ -1125,7 +1127,7 @@ fn new_channel(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn new_spot(s: &mut Session, p: &Value) -> Result<Value> {
-    let color = color_value(p, "color").unwrap_or(Color::rgb(1.0, 0.0, 0.0));
+    let color = color_value("channel.newSpot", p, "color")?.unwrap_or(Color::rgb(1.0, 0.0, 0.0));
     let solidity = p.get("solidity").and_then(Value::as_f64).unwrap_or(0.0).clamp(0.0, 100.0) as f32 / 100.0;
     let name = p.get("name").and_then(Value::as_str).map(str::to_string);
     let from_sel = p.get("fromSelection").and_then(Value::as_bool).unwrap_or(true);
@@ -1421,7 +1423,7 @@ fn options(s: &mut Session, p: &Value) -> Result<Value> {
     let doc = &s.active().ok_or(EngineError::NoDocument)?.doc;
     let r = p.get("channel").and_then(|v| parse_ref(v, doc)).ok_or_else(|| bad(cmd, "missing or unknown `channel`"))?;
     let name = p.get("name").and_then(Value::as_str).map(str::trim).filter(|n| !n.is_empty()).map(str::to_string);
-    let color = color_value(p, "color");
+    let color = color_value(cmd, p, "color")?;
     let opacity = p.get("opacity").and_then(Value::as_f64).map(|v| (v as f32 / 100.0).clamp(0.0, 1.0));
     let solidity = p.get("solidity").and_then(Value::as_f64).map(|v| (v as f32 / 100.0).clamp(0.0, 1.0));
     let kind = p.get("indicates").and_then(Value::as_str).map(str::to_string);
@@ -1669,14 +1671,24 @@ fn apply_image(s: &mut Session, p: &Value) -> Result<Value> {
         let area = doc.bounds();
         let selection = doc.selection.as_ref().map(|m| sel::mask_from_surface(Some(m), area));
         let weight = |i: usize| opacity * mask.as_ref().map_or(1.0, |m| m[i]) * selection.as_ref().map_or(1.0, |m| m[i]);
-        if is_channel_target(p) {
+        let mask_target = target_of(p) == Target::Mask;
+        if is_channel_target(p) || mask_target {
             // A grayscale target gets the luminosity of a colour source (one plane).
             let srcp =
                 if src.len() == 1 { src[0].clone() } else { (0..src[0].len()).map(|i| src.iter().map(|pl| pl[i]).sum::<f32>() / src.len() as f32).collect() };
-            let (surf, _) = target_surface(doc, None, p)?;
+            let (surf, _) = target_surface(doc, layer, p)?;
             let base = read_plane(surf, area);
             let out: Vec<f32> = base.iter().enumerate().map(|(i, &b)| b + (blending.apply(b, srcp[i]) - b) * weight(i)).collect();
-            *surf = plane_surface(&out, area, surf.format());
+            if mask_target {
+                // A layer mask keeps its default (reveal or hide) outside the canvas.
+                if surf.channels() != 1 {
+                    return Err(EngineError::Other("the layer mask is not a grayscale surface".into()));
+                }
+                surf.write_region(area, &out);
+                surf.prune();
+            } else {
+                *surf = plane_surface(&out, area, surf.format());
+            }
             return Ok(());
         }
         let id = layer.ok_or_else(|| EngineError::Other("no active layer".into()))?;

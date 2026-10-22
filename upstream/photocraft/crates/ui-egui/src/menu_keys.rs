@@ -61,6 +61,40 @@ pub fn is_focused(ctx: &egui::Context) -> bool {
     ctx.data(|d| d.get_temp::<u64>(focus_id())).is_some_and(|seen| seen + 2 >= pass)
 }
 
+/// A command shortcut pressed while the keyboard is on the bar with no menu open (⌘D, ⌘⇧I, F7…)
+/// takes it off the bar, so the shortcut runs in the same press, as a native menu bar does
+/// (#6573). Keys the bar uses (arrows, ↩, Esc, letters, Alt+letter, F10) keep driving it, and
+/// an open menu still swallows shortcuts. True when the bar was left.
+pub fn leave_for_shortcut(ctx: &egui::Context) -> bool {
+    if !is_focused(ctx) || crate::menu_nav::is_open(ctx) {
+        return false;
+    }
+    let shortcut = ctx.input(|i| i.events.iter().any(|e| matches!(e, Event::Key { key, pressed: true, modifiers, .. } if is_command_key(*key, *modifiers))));
+    if !shortcut {
+        return false;
+    }
+    let mut keys = Keys::load(ctx);
+    keys.focus = None;
+    keys.underline = false;
+    keys.store(ctx);
+    ctx.request_repaint();
+    true
+}
+
+/// A key press that is a command shortcut rather than a key of the bar: ⌘ / Ctrl with a key
+/// (not the modifier keys themselves), or a function key other than F10 (which toggles the bar).
+fn is_command_key(key: Key, mods: Modifiers) -> bool {
+    let modifier_key = matches!(
+        key,
+        Key::ShiftLeft | Key::ShiftRight | Key::ControlLeft | Key::ControlRight | Key::AltLeft | Key::AltRight | Key::SuperLeft | Key::SuperRight
+    );
+    if modifier_key {
+        return false;
+    }
+    let function_key = key != Key::F10 && key.name().strip_prefix('F').is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()));
+    mods.command || mods.ctrl || mods.mac_cmd || function_key
+}
+
 /// The mnemonic a key press stands for: the letter or digit of a plain key.
 fn key_char(key: Key) -> Option<char> {
     let name = key.name();
@@ -114,6 +148,51 @@ pub fn mnemonic_text(ui: &Ui, prefix: &str, label: &str, mnemonic: Option<char>,
     job.append(&label[i..i + len], 0.0, underlined);
     if i + len < label.len() {
         job.append(&label[i + len..], 0.0, plain);
+    }
+    job.into()
+}
+
+/// The checkmark menu rows draw in their gutter.
+pub const CHECK_MARK: &str = "✔ ";
+
+/// Width of the checkmark column every menu row reserves (#5705): the width of [`CHECK_MARK`] in
+/// the button font, so checked, unchecked and plain rows (and submenu headers) all start their
+/// label at the same x, whatever the script of the label.
+pub fn check_gutter(ui: &Ui) -> f32 {
+    let font = egui::TextStyle::Button.resolve(ui.style());
+    ui.painter().layout_no_wrap(CHECK_MARK.to_owned(), font, Color32::PLACEHOLDER).size().x
+}
+
+/// A menu row's text (#5705): the label behind a fixed-width checkmark column ([`check_gutter`]),
+/// with ✔ in the column when `checked`, and the mnemonic underlined when given (as
+/// [`mnemonic_text`]).
+pub fn menu_row_text(ui: &Ui, checked: bool, label: &str, mnemonic: Option<char>) -> egui::WidgetText {
+    let font = egui::TextStyle::Button.resolve(ui.style());
+    let plain = egui::TextFormat { font_id: font, color: Color32::PLACEHOLDER, ..Default::default() };
+    let mut job = egui::text::LayoutJob::default();
+    job.wrap.max_width = f32::INFINITY;
+    // The label starts after the column: a checked row draws the mark in it, the others leave it
+    // empty (a leading space of the same width, not padding characters whose width varies).
+    let mut lead = check_gutter(ui);
+    if checked {
+        job.append(CHECK_MARK, 0.0, plain.clone());
+        lead = 0.0;
+    }
+    let at = mnemonic.and_then(|m| label.char_indices().find(|(_, c)| c.to_ascii_uppercase() == m).map(|(i, c)| (i, c.len_utf8())));
+    let parts = match at {
+        Some((i, len)) => [label.get(..i), label.get(i..i + len), label.get(i + len..)],
+        None => [Some(label), None, None],
+    };
+    for (k, part) in parts.into_iter().enumerate() {
+        let Some(part) = part.filter(|p| !p.is_empty()) else { continue };
+        let format =
+            if k == 1 && at.is_some() { egui::TextFormat { underline: Stroke::new(1.0, Color32::PLACEHOLDER), ..plain.clone() } } else { plain.clone() };
+        job.append(part, lead, format);
+        lead = 0.0;
+    }
+    if job.sections.is_empty() {
+        // An empty label still keeps the row as wide as its column.
+        job.append("", lead, plain);
     }
     job.into()
 }
@@ -173,7 +252,12 @@ impl Keys {
                     self.alt_down = false;
                     tap |= std::mem::take(&mut self.alt_tap);
                 }
-                Event::Key { pressed: true, .. } | Event::Text(_) | Event::PointerButton { pressed: true, .. } => self.alt_tap = false,
+                // Alt+wheel (zoom, brush size…) or Alt going to the desktop is no tap either.
+                Event::Key { pressed: true, .. }
+                | Event::Text(_)
+                | Event::PointerButton { pressed: true, .. }
+                | Event::MouseWheel { .. }
+                | Event::WindowFocused(false) => self.alt_tap = false,
                 _ => {}
             }
         }
@@ -207,8 +291,10 @@ impl Keys {
             return;
         }
         if open {
-            // A letter runs the row with that mnemonic in the level the arrows are in.
-            let letter = events.iter().find_map(|e| match e {
+            // A letter runs the row with that mnemonic in the level the arrows are in, unless it is
+            // typed into a field in the menu: Help › Search took "S" for System Info (#5996).
+            let typing = ctx.text_edit_focused();
+            let letter = events.iter().filter(|_| !typing).find_map(|e| match e {
                 Event::Key { key, pressed: true, modifiers, .. } if !modifiers.command && !modifiers.ctrl && !modifiers.alt => {
                     key_char(*key).map(|c| (*key, c))
                 }
@@ -295,6 +381,21 @@ mod tests {
         assert_eq!(key_char(Key::F10), None);
         assert_eq!(key_char(Key::ArrowDown), None);
         assert_eq!(key_char(Key::Space), None);
+    }
+
+    #[test]
+    fn command_keys_are_command_combos_and_function_keys_but_f10() {
+        assert!(is_command_key(Key::D, Modifiers::COMMAND));
+        assert!(is_command_key(Key::I, Modifiers::COMMAND | Modifiers::SHIFT));
+        assert!(is_command_key(Key::F7, Modifiers::NONE));
+        assert!(is_command_key(Key::F12, Modifiers::SHIFT));
+        assert!(!is_command_key(Key::F10, Modifiers::NONE), "F10 toggles the bar");
+        assert!(!is_command_key(Key::ControlLeft, Modifiers::CTRL), "Ctrl going down is no shortcut yet");
+        assert!(!is_command_key(Key::E, Modifiers::NONE), "a letter is a mnemonic");
+        assert!(!is_command_key(Key::E, Modifiers::ALT), "Alt+letter opens a menu");
+        assert!(!is_command_key(Key::ArrowRight, Modifiers::NONE));
+        assert!(!is_command_key(Key::Enter, Modifiers::NONE));
+        assert!(!is_command_key(Key::Escape, Modifiers::NONE));
     }
 }
 

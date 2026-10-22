@@ -151,18 +151,33 @@ pub fn playback_plan(s: &Session, p: &Value) -> Result<(Action, usize)> {
     Ok((action, from))
 }
 
-/// The actions that `steps` call through Play Action steps, followed transitively, in list order,
-/// so a droplet can run without the Actions panel that made it (#2794). Index references in
-/// `steps` and in the copies become names, which resolve without the rest of the list. A target
-/// that doesn't resolve is left alone: it fails at playback, as it would have before.
+/// The actions that `steps` call through Play Action steps and the branches of Conditional steps,
+/// followed transitively, in list order, so a droplet can run without the Actions panel that made
+/// it (#2794, #6804). Index references in `steps` and in the copies become names, which resolve
+/// without the rest of the list. A target that doesn't resolve is left alone: it fails at
+/// playback, as it would have before.
 pub fn called_actions(list: &[Action], steps: &mut [(String, Value)]) -> Vec<Action> {
     fn targets(list: &[Action], steps: &mut [(String, Value)], depth: usize, queue: &mut Vec<(usize, usize)>) {
-        for (_, params) in steps.iter_mut().filter(|(id, _)| id == "actions.play") {
-            let Ok(i) = resolve(list, params, "actions.play") else { continue };
-            if let (Some(action), Some(obj)) = (list.get(i), params.as_object_mut()) {
-                obj.insert("action".into(), json!(action.name));
+        for (id, params) in steps.iter_mut() {
+            match id.as_str() {
+                "actions.play" => {
+                    let Ok(i) = resolve(list, params, "actions.play") else { continue };
+                    if let (Some(action), Some(obj)) = (list.get(i), params.as_object_mut()) {
+                        obj.insert("action".into(), json!(action.name));
+                    }
+                    queue.push((i, depth));
+                }
+                // Conditional branches only take names, so there is nothing to rewrite.
+                "actions.conditional" => {
+                    for key in ["then", "else"] {
+                        let Some(name) = params.get(key).and_then(Value::as_str) else { continue };
+                        if let Some(i) = list.iter().position(|a| a.name == name) {
+                            queue.push((i, depth));
+                        }
+                    }
+                }
+                _ => {}
             }
-            queue.push((i, depth));
         }
     }
     let mut queue = Vec::new();
@@ -474,6 +489,13 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let name = s.actions.list.remove(idx).name;
     s.actions.touch();
+    // Its function key goes with it, or the next action given the same name would inherit it.
+    let key = format!("{PLAY_SHORTCUT_PREFIX}{name}");
+    if s.prefs().shortcuts.contains_key(&key) {
+        s.edit_prefs(|prefs| {
+            prefs.shortcuts.remove(&key);
+        });
+    }
     Ok(json!({"deleted": name}))
 }
 
@@ -519,8 +541,9 @@ fn toggle(s: &mut Session, p: &Value) -> Result<Value> {
 /// Prefix of the persisted shortcut override that plays a named action (`actions.play:<name>`).
 pub const PLAY_SHORTCUT_PREFIX: &str = "actions.play:";
 
-/// Rename an action in place. Nested `actions.play` steps that call it by name, and its
-/// function-key binding, follow the new name so nothing silently stops working.
+/// Rename an action in place. Nested `actions.play` steps and `actions.conditional` branches
+/// that call it by name, and its function-key binding, follow the new name so nothing silently
+/// stops working.
 fn rename(s: &mut Session, p: &Value) -> Result<Value> {
     not_playing(s, "actions.rename")?;
     let idx = resolve(&s.actions.list, p, "actions.rename")?;
@@ -540,8 +563,15 @@ fn rename(s: &mut Session, p: &Value) -> Result<Value> {
     let pending = s.actions.recording.map_or(s.journal.len(), |(start, _)| start);
     let calls = s.actions.list.iter_mut().flat_map(|a| a.steps.iter_mut()).chain(s.journal.iter_mut().skip(pending));
     for (id, params) in calls {
-        if id == "actions.play" && params.get("action").and_then(Value::as_str) == Some(old.as_str()) {
-            params["action"] = json!(name);
+        let keys: &[&str] = match id.as_str() {
+            "actions.play" => &["action"],
+            "actions.conditional" => &["then", "else"],
+            _ => &[],
+        };
+        for key in keys {
+            if params.get(*key).and_then(Value::as_str) == Some(old.as_str()) {
+                params[*key] = json!(name);
+            }
         }
     }
     if let Some(action) = s.actions.list.get_mut(idx) {
@@ -767,6 +797,45 @@ mod tests {
             assert!(s.execute("actions.rename", bad.clone()).is_err(), "{bad}");
         }
         assert_eq!(s.actions.list[0].name, "Sepia");
+    }
+
+    #[test]
+    fn rename_follows_conditional_branches() {
+        let mut s = Session::new();
+        s.execute("file.new", json!({"width": 8, "height": 8})).unwrap();
+        for name in ["B", "Other"] {
+            s.actions.list.push(Action { name: name.into(), steps: vec![("layer.new.layer".into(), json!({}))], ..Default::default() });
+        }
+        s.actions.list.push(Action {
+            name: "Main".into(),
+            steps: vec![
+                ("actions.conditional".into(), json!({"if": "always", "then": "B", "else": "Other"})),
+                ("actions.conditional".into(), json!({"if": "never", "then": "Other", "else": "B"})),
+            ],
+            ..Default::default()
+        });
+        s.execute("actions.rename", json!({"action": "B", "name": "C"})).unwrap();
+        let steps = &s.actions.list[2].steps;
+        assert_eq!(steps[0].1, json!({"if": "always", "then": "C", "else": "Other"}));
+        assert_eq!(steps[1].1, json!({"if": "never", "then": "Other", "else": "C"}));
+        let r = s.execute("actions.play", json!({"action": "Main"})).unwrap();
+        assert!(r.get("failed").is_none(), "{r}");
+    }
+
+    #[test]
+    fn delete_action_drops_its_function_key_but_deleting_a_step_keeps_it() {
+        let mut s = Session::new();
+        let key = format!("{PLAY_SHORTCUT_PREFIX}Action 1");
+        s.actions.list.push(Action::new("Action 1", vec![("layer.new.layer".into(), json!({})), ("layer.new.layer".into(), json!({}))]));
+        s.edit_prefs(|p| p.shortcuts.insert(key.clone(), "F2".into()));
+        s.execute("actions.delete", json!({"action": 0, "step": 0})).unwrap();
+        assert_eq!(s.prefs().shortcuts.get(&key).map(String::as_str), Some("F2"), "deleting a step keeps the key");
+        assert_eq!(s.execute("actions.delete", json!({"action": 0})).unwrap()["deleted"], "Action 1");
+        assert!(!s.prefs().shortcuts.contains_key(&key), "the deleted action's function key is gone");
+        s.execute("actions.record", json!({})).unwrap();
+        s.execute("actions.stop", json!({})).unwrap();
+        assert_eq!(s.actions.list[0].name, "Action 1");
+        assert!(!s.prefs().shortcuts.contains_key(&key), "a new action with the same name starts unbound");
     }
 
     fn record_red(s: &mut Session, depth: u32) {
