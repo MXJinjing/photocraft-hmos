@@ -236,15 +236,20 @@ pub(crate) fn invoke_unguarded(app: &mut PhotocraftApp, ctx: &egui::Context, id:
         "file.save" => {
             // Writes back only to a layered file that holds the whole document; anything else
             // goes through Save As, so the original is never overwritten with less (#3806).
-            let tga_bits = crate::targa_options_ui::bits_param(&params, id)?;
+            let choices = crate::FormatChoices::from_params(&params, id)?;
             match params.get("path").and_then(Value::as_str) {
-                Some(path) => app.save_as_with(Some(path.to_string()), tga_bits),
+                Some(path) => app.save_as_with(Some(path.to_string()), choices),
                 None if app.services.default_save.is_some() => app.save(None),
                 None => {
                     let own = app.session.active().and_then(|d| d.path.clone().map(|p| (photocraft_engine::file_cmds::holds_at(&d.doc, &p), p, d)));
                     let own = own.filter(|(_, path, _)| !path.starts_with("save-as/"));
                     match own {
-                        Some((true, path, _)) => app.save_in_place(path),
+                        Some((true, path, d)) => {
+                            // Another app changed the file since it was opened or saved: ask first (#6596).
+                            let doc = d.doc.id;
+                            crate::disk_change_prompt::intercept(app, doc, &path, false)
+                                .unwrap_or_else(|| app.save_in_place(path, crate::FormatChoices::default()))
+                        }
                         Some((false, path, d)) if photocraft_engine::file_cmds::saves_in_place(&path) => {
                             // Its own file is layered but can't hold what the document has now.
                             let losses = photocraft_engine::file_cmds::losses_at(&d.doc, &path);
@@ -253,9 +258,11 @@ pub(crate) fn invoke_unguarded(app: &mut PhotocraftApp, ctx: &egui::Context, id:
                             let mut lines = losses;
                             lines.push(tl!("Choose a format that keeps it, such as Photoshop (PSD), or save a copy.").to_string());
                             crate::notices::post(app, title, lines, false, None);
-                            app.save_as_with(None, tga_bits)
+                            app.save_as_with(None, choices)
                         }
-                        _ => app.save_as_with(None, tga_bits),
+                        // A flat file asks for its name; confirming its own file records a
+                        // plain Save that writes the file an action is played on (#3531).
+                        _ => app.save_dialog_flow(None, choices, true),
                     }
                 }
             }
@@ -289,8 +296,8 @@ pub(crate) fn invoke_unguarded(app: &mut PhotocraftApp, ctx: &egui::Context, id:
             }
         }
         "file.saveAs" => {
-            let tga_bits = crate::targa_options_ui::bits_param(&params, id)?;
-            app.save_as_with(params.get("path").and_then(Value::as_str).map(str::to_string), tga_bits)
+            let choices = crate::FormatChoices::from_params(&params, id)?;
+            app.save_as_with(params.get("path").and_then(Value::as_str).map(str::to_string), choices)
         }
         "view.zoomIn" | "view.zoomOut" | "view.fitOnScreen" | "view.actualPixels" => app.run(id, params),
         "window.newWindowForDocument" => {
@@ -474,7 +481,7 @@ pub(crate) fn invoke_unguarded(app: &mut PhotocraftApp, ctx: &egui::Context, id:
         "edit.paste" if params.as_object().is_none_or(|o| o.is_empty()) => {
             // Photoshop: paste in place when the copied area is visible, else centred in the view;
             // images from other apps are always centred.
-            app.import_os_clipboard();
+            app.import_os_clipboard()?;
             app.clip_read_for_paste = true;
             let external = app.clip_external;
             let visible = !external

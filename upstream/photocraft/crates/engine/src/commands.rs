@@ -120,7 +120,7 @@ fn turn(s: &mut Session, label: &str, t: crate::canvas_geom::Turn) -> Result<Val
         // Sampler points are pixel indices, not pixel edges: map the pixel's centre, so the point
         // lands on the same pixel `Turn::pixel_map` moves the pixels to (`w - 1 - x`).
         let half = photocraft_geom::Affine::translate(0.5, 0.5);
-        s.set_sampler_map(half.then(&a).then(&photocraft_geom::Affine::translate(-0.5, -0.5)));
+        s.set_canvas_map(a, half.then(&a).then(&photocraft_geom::Affine::translate(-0.5, -0.5)));
     }
     s.edit(label, |doc, _| {
         crate::canvas_geom::turn_canvas(doc, t);
@@ -232,9 +232,6 @@ pub(crate) fn u32_id_param(cmd: &str, p: &Value, key: &str) -> Result<Option<u32
     p.get(key).map(|v| u32_id(cmd, key, v)).transpose()
 }
 
-fn f32_or(p: &Value, key: &str, default: f32) -> f32 {
-    p.get(key).and_then(Value::as_f64).map(|v| v as f32).unwrap_or(default)
-}
 /// JSON numbers may be finite f64 values but overflow when stored in a document's f32 field.
 pub(crate) fn finite_f32(cmd: &str, key: &str, value: f64) -> Result<f32> {
     let narrowed = value as f32;
@@ -403,7 +400,7 @@ pub(crate) fn selection_mask(doc: &Document) -> Result<Option<LayerMask>> {
 /// New pixel masks use the document's depth, as PSD saves/imports do. Otherwise a later soft
 /// brush stroke quantizes differently depending on whether the document reopened as PSD or
 /// native. Converting a selection keeps its coverage and does not alter the selection itself.
-fn mask_at_depth(mut mask: LayerMask, depth: SampleType) -> Result<LayerMask> {
+pub(crate) fn mask_at_depth(mut mask: LayerMask, depth: SampleType) -> Result<LayerMask> {
     let format = mask.surface.format().with_sample(depth);
     if mask.surface.format() != format {
         mask.surface = mask.surface.try_convert(format)?;
@@ -584,7 +581,7 @@ fn build() -> Vec<CommandSpec> {
             "Fill…",
             ["Edit"],
             Some("Shift+F5"),
-            r##"{"contents":"foreground|background|color|contentAware|pattern|history|black|gray|white"="color","color":"#rrggbb|[r,g,b,a]"=foreground (contents=color),"pattern":id|name (contents=pattern),"scale":%=100,"angle":deg,"state":index? (contents=history; default the oldest state),"colorAdaptation":bool=true (contents=contentAware),"mode":"normal|multiply|…"="normal","opacity":0..100=100,"preserveTransparency":bool=false,"target":"pixels"|"mask"|"quickMask"|{"channel":i}?}"##,
+            r##"{"contents":"foreground|background|color|contentAware|pattern|history|black|gray|white"="color","color":"#rrggbb|[r,g,b,a]"=foreground (contents=color),"pattern":id|name (contents=pattern),"scale":%=100,"angle":deg,"state":row?,"snapshot":id? (contents=history: a History panel row as history.setSource, redo rows last, or a snapshot; default the History Brush source),"colorAdaptation":bool=true (contents=contentAware),"mode":"normal|multiply|…"="normal","opacity":0..100=100,"preserveTransparency":bool=false,"target":"pixels"|"mask"|"quickMask"|{"channel":i}?}"##,
             has_pixel_or_channel,
             crate::fill_cmds::fill
         ),
@@ -1052,7 +1049,7 @@ fn build() -> Vec<CommandSpec> {
             |s, p| {
                 let a = color_param("layer.newFillLayer.gradient", p, "from", s.tools.foreground)?;
                 let b = color_param("layer.newFillLayer.gradient", p, "to", s.tools.background)?;
-                let angle = f32_or(p, "angle", 90.0);
+                let angle = crate::gradient_fill_cmds::angle_param("layer.newFillLayer.gradient", p, 90.0)?;
                 let style = crate::layer_style::gradient_style(p.get("style").and_then(Value::as_str).unwrap_or("linear"));
                 let reverse = p.get("reverse").and_then(Value::as_bool).unwrap_or(false);
                 let id = s.edit("New Gradient Fill Layer", |doc, active| {
@@ -1508,6 +1505,8 @@ fn build() -> Vec<CommandSpec> {
     v.extend(crate::analysis_cmds::specs());
     v.extend(crate::notes_cmds::specs());
     v.extend(crate::history_cmds::specs());
+    v.extend(crate::history_menu_cmds::specs());
+    v.extend(crate::history_source_cmds::specs());
     v.extend(crate::history_select_cmds::specs());
     v.extend(crate::proof_sim::specs());
     v.extend(crate::presets::specs());

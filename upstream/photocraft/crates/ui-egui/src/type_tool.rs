@@ -2068,9 +2068,20 @@ fn toggle_cell(ui: &mut egui::Ui, w: f32, on: bool, tip: &str, paint: impl FnOnc
     if on {
         ui.painter().rect_stroke(r, t.radius_sm, Stroke::new(1.0, t.accent_border), egui::StrokeKind::Inside);
     }
-    paint(ui, r, if on { t.text } else { t.text_dim });
+    let enabled = ui.is_enabled();
+    paint(
+        ui,
+        r,
+        if !enabled {
+            t.text_faint
+        } else if on {
+            t.text
+        } else {
+            t.text_dim
+        },
+    );
     let tip = tip.to_string();
-    resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, on, &tip));
+    resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, enabled, on, &tip));
     resp.on_hover_text(tl!(&tip)).clicked()
 }
 
@@ -2363,14 +2374,32 @@ fn type_sections(app: &mut PhotocraftApp, ui: &mut egui::Ui, character: bool, pa
             ("justifyAll", tl!("Justify all"), A::JustifyAll),
         ];
         let cw = cell_width(full, items.len());
+        // Justification needs a paragraph box: on point text Photoshop greys the four justify
+        // buttons (#7713).
+        // The panel formats the layer being typed in, else every selected type layer.
+        let point = match formatting_params(app) {
+            Some(p) => p.get("layers").and_then(serde_json::Value::as_array).map_or_else(
+                || p.get("layer").and_then(serde_json::Value::as_u64).into_iter().collect::<Vec<_>>(),
+                |ids| ids.iter().filter_map(serde_json::Value::as_u64).collect(),
+            ),
+            None => Vec::new(),
+        }
+        .into_iter()
+        .any(|layer| box_shape(app, LayerId(layer)).is_none());
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 2.0;
             for (key, tip, a) in items {
-                let clicked = toggle_cell(ui, cw, para.align == a, tip, |ui, r, col| {
-                    // The glyph keeps its size; the cell grows around it.
-                    let g = egui::Rect::from_center_size(r.center(), egui::vec2(12.0, 10.0));
-                    align_glyph(ui.painter(), g, a, if para.align == a { col } else { t.icon });
-                });
+                let justify = !matches!(a, A::Left | A::Center | A::Right);
+                let clicked = ui
+                    .add_enabled_ui(!(point && justify), |ui| {
+                        toggle_cell(ui, cw, para.align == a, tip, |ui, r, col| {
+                            // The glyph keeps its size; the cell grows around it.
+                            let g = egui::Rect::from_center_size(r.center(), egui::vec2(12.0, 10.0));
+                            let col = if !ui.is_enabled() || para.align == a { col } else { t.icon };
+                            align_glyph(ui.painter(), g, a, col);
+                        })
+                    })
+                    .inner;
                 if clicked {
                     apply(app, ui.ctx(), json!({"align": key}));
                 }

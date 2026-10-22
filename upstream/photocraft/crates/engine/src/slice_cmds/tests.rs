@@ -52,6 +52,23 @@ fn user_slices_and_options() {
 }
 
 #[test]
+fn covered_slices_keep_their_options() {
+    // #7770: a slice under a later one shows as its visible pieces, yet stays one slice.
+    let mut s = session(8);
+    let under = s.execute("slice.new", json!({"rect": [0, 0, 60, 60], "name": "under"})).unwrap()["slice"].as_u64().unwrap();
+    s.execute("slice.new", json!({"rect": [40, 40, 60, 50], "name": "over"})).unwrap();
+    let l = s.execute("slice.list", json!({})).unwrap();
+    let pieces: Vec<&Value> = l["slices"].as_array().unwrap().iter().filter(|v| v["id"] == json!(under)).collect();
+    assert_eq!(pieces.len(), 2);
+    assert!(pieces.iter().all(|v| v["name"] == "under"), "Slice Options shows the slice's own name: {pieces:?}");
+    // Moved wholly under the later slice, it is still on the canvas.
+    let r = s.execute("slice.set", json!({"slice": under, "rect": [50, 50, 10, 10], "alt": "hidden"})).unwrap();
+    assert_eq!(r["number"], Value::Null);
+    assert_eq!(r["alt"], "hidden");
+    assert_eq!(doc(&s).slices.get(under as u32).unwrap().rect, Rect::new(50, 50, 60, 60));
+}
+
+#[test]
 fn rect_param_rejects_corner_overflow() {
     assert_eq!(rect_param(&json!({"rect": [1, 2, 3, 4]})), Some(Rect::new(1, 2, 4, 6)));
     assert_eq!(rect_param(&json!({"x": 1, "y": 2, "width": 3, "height": 4})), Some(Rect::new(1, 2, 4, 6)));
