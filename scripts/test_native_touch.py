@@ -15,11 +15,12 @@ stubs = r'''
 #include <atomic>
 #include <cmath>
 #include <iostream>
+#include <set>
 #include <string>
 #include <vector>
 enum OH_NativeXComponent_TouchPointToolType { OH_NATIVEXCOMPONENT_TOOL_TYPE_FINGER, OH_NATIVEXCOMPONENT_TOOL_TYPE_PEN, OH_NATIVEXCOMPONENT_TOOL_TYPE_RUBBER, OH_NATIVEXCOMPONENT_TOOL_TYPE_BRUSH, OH_NATIVEXCOMPONENT_TOOL_TYPE_PENCIL, OH_NATIVEXCOMPONENT_TOOL_TYPE_AIRBRUSH };
 enum { OH_NATIVEXCOMPONENT_DOWN, OH_NATIVEXCOMPONENT_UP, OH_NATIVEXCOMPONENT_MOVE, OH_NATIVEXCOMPONENT_CANCEL, OH_NATIVEXCOMPONENT_RESULT_SUCCESS=0, OH_NATIVE_XCOMPONENT_MAX_TOUCH_POINTS_NUMBER=10 };
-struct Point {int id;float x,y;bool isPressed;int type=OH_NATIVEXCOMPONENT_DOWN;};
+struct Point {int id;float x,y;bool isPressed;int type=OH_NATIVEXCOMPONENT_DOWN;double size=0;};
 struct OH_NativeXComponent_TouchEvent {int id,type;unsigned numPoints;float x,y,force;Point touchPoints[10];};
 struct OH_NativeXComponent {};
 OH_NativeXComponent_TouchEvent current{};
@@ -32,8 +33,16 @@ enum { OH_NATIVEXCOMPONENT_MOUSE_NONE, OH_NATIVEXCOMPONENT_MOUSE_PRESS, OH_NATIV
 struct OH_NativeXComponent_MouseEvent { int action,button;float x,y; };
 OH_NativeXComponent_MouseEvent currentMouse{};
 int OH_NativeXComponent_GetMouseEvent(OH_NativeXComponent*,void*,OH_NativeXComponent_MouseEvent* e){*e=currentMouse;return 0;}
-std::atomic<int> touchId(-1);
-std::atomic<bool> penContact(false),fingerContact(false);
+struct WinState {
+    std::atomic<int> touchId{-1};
+    std::atomic<bool> penContact{false},fingerContact{false};
+    std::set<int> palmIds;
+};
+WinState state;
+WinState* Enter(OH_NativeXComponent*){return &state;}
+auto& touchId=state.touchId;
+auto& penContact=state.penContact;
+auto& fingerContact=state.fingerContact;
 void Json(const std::string& s){std::cout<<s<<'\n';}
 enum ArkUI_UIInputEvent_Type {ARKUI_UIINPUTEVENT_TYPE_AXIS};
 struct ArkUI_UIInputEvent {double dx,dy,zoom;float x,y;int action;};
@@ -75,6 +84,21 @@ int main(){
     current={2,OH_NATIVEXCOMPONENT_MOVE,1,320,210,1,{{2,320,210,false,OH_NATIVEXCOMPONENT_MOVE}}};Touch(&c,nullptr);
     current.x=340;current.touchPoints[0].x=340;Touch(&c,nullptr);
     current.type=OH_NATIVEXCOMPONENT_UP;Touch(&c,nullptr);
+    // A broad palm lands over the sidebar before the pen, then rolls to a
+    // smaller area. Its ID must stay rejected until lift, while a finger works.
+    current={9,OH_NATIVEXCOMPONENT_DOWN,1,900,200,1,{{9,900,200,true,OH_NATIVEXCOMPONENT_DOWN,.85}}};Touch(&c,nullptr);
+    if(!fingerContact || !state.palmIds.count(9))return 1;
+    currentMouse={OH_NATIVEXCOMPONENT_MOUSE_PRESS,0,900,200};Mouse(&c,nullptr);
+    current={9,OH_NATIVEXCOMPONENT_MOVE,1,905,200,1,{{9,905,200,false,OH_NATIVEXCOMPONENT_MOVE,.1}}};Touch(&c,nullptr);
+    current={10,OH_NATIVEXCOMPONENT_DOWN,2,500,200,1,{{9,905,200,false,OH_NATIVEXCOMPONENT_MOVE,.1},{10,500,200,true,OH_NATIVEXCOMPONENT_DOWN,.1}}};Touch(&c,nullptr);
+    current={9,OH_NATIVEXCOMPONENT_UP,2,905,200,1,{{9,905,200,false,OH_NATIVEXCOMPONENT_UP,.1},{10,500,200,false,OH_NATIVEXCOMPONENT_MOVE,.1}}};Touch(&c,nullptr);
+    current={10,OH_NATIVEXCOMPONENT_UP,1,500,200,1,{{10,500,200,false,OH_NATIVEXCOMPONENT_UP,.1}}};Touch(&c,nullptr);
+    current={9,OH_NATIVEXCOMPONENT_DOWN,1,910,200,1,{{9,910,200,true,OH_NATIVEXCOMPONENT_DOWN,.1}}};Touch(&c,nullptr);
+    current.type=OH_NATIVEXCOMPONENT_UP;Touch(&c,nullptr);
+    // Do not turn a valid finger into a release/click when its area grows.
+    current={11,OH_NATIVEXCOMPONENT_DOWN,1,500,200,1,{{11,500,200,true,OH_NATIVEXCOMPONENT_DOWN,.1}}};Touch(&c,nullptr);
+    current={11,OH_NATIVEXCOMPONENT_MOVE,1,510,200,1,{{11,510,200,false,OH_NATIVEXCOMPONENT_MOVE,.85}}};Touch(&c,nullptr);
+    current.type=OH_NATIVEXCOMPONENT_UP;Touch(&c,nullptr);
 }
 '''
 with tempfile.TemporaryDirectory() as tmp:
@@ -95,7 +119,12 @@ assert packets[10:14]==[
     {'kind':'pointer','action':1,'button':0,'x':100,'y':200},
     {'kind':'pointer','action':3},
 ]
-assert [len(p['points']) for p in packets[-5:]] == [2,1,1,1,0]
-assert packets[-3]['points'] == [{'id':2,'x':320,'y':210}]
-assert packets[-2]['points'] == [{'id':2,'x':340,'y':210}]
-print('Passed: native contact, navigation, proximity leave and genuine mouse events; cached NONE events ignored.')
+assert [len(p['points']) for p in packets[-15:-10]] == [2,1,1,1,0]
+assert packets[-13]['points'] == [{'id':2,'x':320,'y':210}]
+assert packets[-12]['points'] == [{'id':2,'x':340,'y':210}]
+assert [p['points'] for p in packets[-10:]] == [
+    [], [], [{'id':10,'x':500,'y':200}], [{'id':10,'x':500,'y':200}],
+    [], [{'id':9,'x':910,'y':200}], [],
+    [{'id':11,'x':500,'y':200}], [{'id':11,'x':510,'y':200}], [],
+]
+print('Passed: native contact, palm rejection, navigation, proximity leave and mouse events.')

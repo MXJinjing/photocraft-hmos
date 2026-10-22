@@ -1,5 +1,6 @@
 import { window } from '@kit.ArkUI';
 import { BusinessError, deviceInfo } from '@kit.BasicServicesKit';
+import { LOADING_CHROME, paintDecorForChrome, paintWindow } from './SystemBars';
 
 const TITLE_HEIGHT: number = 38;
 
@@ -29,6 +30,7 @@ export class WindowChrome {
       this.win.on('windowSizeChange', this.sizeChanged);
       this.watching = true;
       this.applyDecor();
+      this.repaintChrome();
       this.refresh();
     } catch (error) {
       let failure = error as BusinessError;
@@ -44,14 +46,33 @@ export class WindowChrome {
     // Window status, size and caption geometry can arrive in separate transactions.
     // Freeform entry may need longer than a size change before the three-button rect is ready.
     for (let delay of [50, 200, 600, 1200]) {
-      this.retries.push(setTimeout((): void => { if (this.watching) { this.readRect(); } }, delay));
+      this.retries.push(setTimeout((): void => {
+        if (!this.watching) { return; }
+        this.readRect();
+        // 2in1 starts floating and its caption may not accept setDecorButtonStyle until the
+        // window is shown (1300002); a later system theme flip also resets it. Re-assert.
+        this.repaintDecor();
+      }, delay));
     }
   }
 
   private onLayoutSignal(): void {
-    // 切入自由多窗时系统才露出三键区；先重套 decor，再刷几何。
+    // 切入自由多窗时系统才露出三键区；先重套 decor，再刷主题色与几何。
     this.applyDecor();
+    this.repaintChrome();
     this.refresh();
+  }
+
+  private repaintChrome(): void {
+    if (!this.watching) { return; }
+    // setDecorButtonStyle often no-ops or fails outside freeform. Re-apply the current
+    // theme chrome when layout changes so tablet → freeform matches a cold freeform start.
+    let color = AppStorage.get<string>('photocraftChrome') ?? LOADING_CHROME;
+    paintWindow(this.win, color);
+  }
+
+  private repaintDecor(): void {
+    paintDecorForChrome(this.win, AppStorage.get<string>('photocraftChrome') ?? LOADING_CHROME);
   }
 
   private applyDecor(): void {

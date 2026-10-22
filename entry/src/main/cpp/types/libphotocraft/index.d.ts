@@ -1,6 +1,10 @@
 export const init: (config: string, callback: (id: number, message: string, data: ArrayBuffer) => void) => void;
 export const input: (event: string) => void;
+// Bind a sub-window XComponent (onLoad context) to its viewport key (> 0).
+export const registerWindow: (context: object, key: number) => boolean;
 export const reply: (id: number, ok: boolean, text: string, data: ArrayBuffer) => void;
+export const dropFile: (name: string, fd: number, x: number, y: number) => void;
+export const drop: (name: string, data: ArrayBuffer, x: number, y: number) => void;
 export const open: (name: string, data: ArrayBuffer) => void;
 // The native side retains a duplicate synchronously; the caller closes its File.
 export const replyFile: (id: number, name: string, fd: number) => void;

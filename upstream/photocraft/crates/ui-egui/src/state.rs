@@ -1263,6 +1263,9 @@ pub struct UiState {
     /// Modifier Keys panel, custom pixel aspect ratios, workspace dialogs (see `workspace_ui`).
     #[serde(default)]
     pub shell: crate::workspace_ui::ShellUi,
+    /// Help › Stylus Debug is session-only; never reopen a test window from saved settings.
+    #[serde(default, skip_deserializing)]
+    pub stylus_debug: crate::stylus_debug::DebugUi,
     /// View extras: rulers (⌘R), grid (⌘'), guides (⌘;), snapping (⇧⌘;), locked guides (⌥⌘;).
     #[serde(default)]
     pub extras: Extras,
@@ -1405,6 +1408,7 @@ impl Default for UiState {
             frame_tool: Default::default(),
             artboard_tool: Default::default(),
             shell: Default::default(),
+            stylus_debug: Default::default(),
             layer_filter: Vec::new(),
             layer_filter_by: Default::default(),
             layer_filter_name: String::new(),

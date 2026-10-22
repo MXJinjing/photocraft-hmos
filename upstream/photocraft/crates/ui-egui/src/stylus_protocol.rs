@@ -52,7 +52,7 @@ mod tests {
         assert!(feed.connected());
         assert_eq!(feed.source(), PointerSource::Touch);
         assert!(feed.get().is_none());
-        assert_eq!(feed.take_gestures(), [PenGesture::DoubleTap, PenGesture::LongPress]);
+        assert_eq!(feed.take_gestures(), [PenGesture::DoubleTap, PenGesture::Squeeze]);
     }
 
     #[test]
@@ -70,7 +70,7 @@ mod tests {
         assert!(feed.connected());
         assert_eq!(feed.source(), PointerSource::Pen);
         assert_eq!(feed.get(), Some(PenSample { pressure: 0.25, tilt_x: 30.0, tilt_y: -20.0, rotation: 90.0, eraser: false }));
-        assert_eq!(feed.take_gestures(), [PenGesture::DoubleTap, PenGesture::LongPress]);
+        assert_eq!(feed.take_gestures(), [PenGesture::DoubleTap, PenGesture::Squeeze]);
         let json = r#"{"version":1,"type":"pointer","source":"touch","sample":null}"#;
         feed.submit(StylusPacket::from_json(json).unwrap().input);
         assert_eq!(feed.source(), PointerSource::Touch);
@@ -84,7 +84,7 @@ mod tests {
             r#"{"version":2,"type":"connection","connected":true}"#,
             r#"{"type":"connection","connected":true}"#,
             r#"{"version":1,"type":"connection","connected":"true"}"#,
-            r#"{"version":1,"type":"gesture","gesture":"squeeze","timestampMs":1000}"#,
+            r#"{"version":1,"type":"gesture","gesture":"unknownGesture","timestampMs":1000}"#,
             r#"{"version":1,"type":"gesture","gesture":"longPress"}"#,
             r#"{"version":1,"type":"pointer","source":"unknown","sample":null}"#,
             r#"{"version":1,"type":"gesture","gesture":"doubleTap","timestampMs":1e400}"#,
@@ -100,35 +100,32 @@ mod tests {
     }
 
     #[test]
-    fn connection_metadata_is_optional_bounded_and_cleared_on_disconnect() {
+    fn connection_name_is_optional_bounded_and_cleared_on_disconnect() {
         let feed = StylusFeed::default();
         let submit = |json: &str| feed.submit(StylusPacket::from_json(json).unwrap().input);
-        assert!(submit(r#"{"version":1,"type":"connection","connected":true,"deviceName":" M-Pencil ","batteryPercent":0}"#));
+        assert!(submit(r#"{"version":1,"type":"connection","connected":true,"deviceName":" M-Pencil "}"#));
         assert_eq!(feed.device().name.as_deref(), Some("M-Pencil"));
-        assert_eq!(feed.device().battery_percent, Some(0));
-        assert!(!submit(r#"{"version":1,"type":"connection","connected":true,"deviceName":"M-Pencil","batteryPercent":0}"#));
-        assert!(submit(r#"{"version":1,"type":"connection","connected":true,"deviceName":"Other pen","batteryPercent":101}"#));
-        assert_eq!(feed.device().battery_percent, None);
-        assert!(submit(r#"{"version":1,"type":"connection","connected":false,"deviceName":"Old pen","batteryPercent":80}"#));
+        assert!(!submit(r#"{"version":1,"type":"connection","connected":true,"deviceName":"M-Pencil"}"#));
+        assert!(submit(r#"{"version":1,"type":"connection","connected":true,"deviceName":"Other pen"}"#));
+        assert!(submit(r#"{"version":1,"type":"connection","connected":false,"deviceName":"Old pen"}"#));
         assert_eq!(feed.device(), Default::default());
         assert!(submit(r#"{"version":1,"type":"connection","connected":true}"#));
         assert_eq!(feed.device().name, None);
-        assert_eq!(feed.device().battery_percent, None);
-        feed.set_device(true, Some("\0\n".into()), Some(100));
+        feed.set_device(true, Some("\0\n".into()));
         assert_eq!(feed.device().name, None);
-        feed.set_device(true, Some("笔".repeat(200)), Some(100));
+        feed.set_device(true, Some("笔".repeat(200)));
         assert_eq!(feed.device().name.unwrap().chars().count(), 128);
     }
 
     #[test]
     fn standard_side_button_and_native_actions_are_deduplicated() {
         let feed = StylusFeed::default();
-        feed.submit(StylusInput::Gesture { gesture: PenGesture::LongPress, timestamp_ms: 1000.0 });
+        feed.submit(StylusInput::Gesture { gesture: PenGesture::Squeeze, timestamp_ms: 1000.0 });
         feed.submit(StylusInput::BarrelButton { pressed: true, timestamp_ms: 600.0 });
         feed.submit(StylusInput::BarrelButton { pressed: true, timestamp_ms: 1100.0 });
-        assert_eq!(feed.take_gestures(), [PenGesture::LongPress]);
+        assert_eq!(feed.take_gestures(), [PenGesture::Squeeze]);
         feed.submit(StylusInput::BarrelButton { pressed: false, timestamp_ms: 1200.0 });
-        feed.submit(StylusInput::Gesture { gesture: PenGesture::LongPress, timestamp_ms: 2000.0 });
-        assert_eq!(feed.take_gestures(), [PenGesture::LongPress], "a later action still works");
+        feed.submit(StylusInput::Gesture { gesture: PenGesture::Squeeze, timestamp_ms: 2000.0 });
+        assert_eq!(feed.take_gestures(), [PenGesture::Squeeze], "a later action still works");
     }
 }

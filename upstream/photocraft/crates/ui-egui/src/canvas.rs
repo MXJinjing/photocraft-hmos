@@ -666,6 +666,11 @@ pub(crate) fn pencil_tip_is_round(size: f32) -> bool {
 /// Clone Stamp and Healing Brush stay an empty circle until Option is held, the source-point
 /// cursor. Other brushes follow Preferences › Cursors › Show Crosshair in Brush Tip, as in
 /// Photoshop; the Background Eraser always shows its sampling hotspot.
+/// Keep the HarmonyOS pen preference scoped to the painted brush cursor, never UI hit testing.
+fn hide_pen_hover_tip(ohos: bool, source: crate::stylus::PointerSource, preview: bool, down: bool) -> bool {
+    ohos && source == crate::stylus::PointerSource::Pen && !preview && !down
+}
+
 fn brush_tip_centre(tool: Tool, option: bool, show_crosshair: bool) -> bool {
     if tool == Tool::QuickSelection {
         return false;
@@ -1742,6 +1747,7 @@ fn ensure_gpu(app: &mut PhotocraftApp, ctx: &egui::Context, idx: usize, visible:
     // Display textures for a canvas this large would not fit the GPU: the reduced CPU canvas
     // draws it (checked before the memory budget, which walks the history, every frame).
     if !gpu.fits_canvas(&doc) {
+        app.perf.gpu_fallback = Some(crate::gpu_canvas::OVER_CANVAS_BUDGET.into());
         crate::background_redraw::cancel(app, id);
         // Drawn on the CPU canvas: no layer budget applies to it.
         if app.perf.gpu_layer_fit.is_some_and(|f| f.doc == id.0) {
@@ -1757,6 +1763,7 @@ fn ensure_gpu(app: &mut PhotocraftApp, ctx: &egui::Context, idx: usize, visible:
     if r.kind == "lost" || r.kind == crate::gpu_canvas::REFRESH_OVER_BUDGET {
         // The device is gone (`gpu_status` then drops the GPU canvas) or the canvas is over the
         // texture budget: draw this frame on the CPU path.
+        app.perf.gpu_fallback = r.fallback;
         crate::background_redraw::cancel(app, id);
         return false;
     }
@@ -4237,6 +4244,16 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
                         pipette_cursor(ui.ctx(), p)
                     }
                 }
+                t if (t.is_brushlike() || t == Tool::QuickSelection)
+                    && hide_pen_hover_tip(
+                        cfg!(target_env = "ohos"),
+                        app.stylus.feed.source(),
+                        app.session.prefs().tools.stylus_hover_preview,
+                        ui.input(|i| i.pointer.any_down()),
+                    ) =>
+                {
+                    egui::CursorIcon::None
+                }
                 t if t.is_brushlike() || t == Tool::QuickSelection => {
                     // Preferences › Cursors: brush tip outline (normal = the 50% contour, or
                     // full size), precise crosshair, or the standard pointer.
@@ -6200,6 +6217,15 @@ pub(crate) fn finish_touch_stroke(app: &mut PhotocraftApp) -> bool {
 
 /// Extra OS windows showing documents (multi-window / multi-monitor).
 pub fn extra_windows(app: &mut PhotocraftApp, ctx: &egui::Context) {
+    let embedded = ctx.embed_viewports();
+    if app.native_doc_windows {
+        ctx.set_embed_viewports(false);
+    }
+    extra_windows_in(app, ctx);
+    ctx.set_embed_viewports(embedded);
+}
+
+fn extra_windows_in(app: &mut PhotocraftApp, ctx: &egui::Context) {
     let wins = app.ui.windows.clone();
     for w in wins.into_iter().filter(|w| w.open) {
         let Some(st) = app.session.documents().get(w.document) else { continue };
@@ -6900,7 +6926,7 @@ mod tests {
         let uploaded = |ctx: &egui::Context| ctx.tex_manager().read().allocated().filter(|(_, meta)| meta.name == "canvas-dots").count();
         for kind in ThemeKind::ALL {
             let ctx = egui::Context::default();
-            let dotted = matches!(kind, ThemeKind::Studio | ThemeKind::StudioLight | ThemeKind::SolarizedDark);
+            let dotted = matches!(kind, ThemeKind::Studio | ThemeKind::StudioLight | ThemeKind::SolarizedDark | ThemeKind::ArkuiLight | ThemeKind::ArkuiDark | ThemeKind::ArkuiProLight | ThemeKind::ArkuiProDark);
             assert_eq!(tiles(&ctx, kind), dotted, "{kind:?}");
             assert_eq!(uploaded(&ctx), usize::from(dotted), "{kind:?}");
         }
@@ -9170,3 +9196,19 @@ mod display_memo_tests;
 #[cfg(test)]
 #[path = "canvas/blend_viewport_tests.rs"]
 mod blend_viewport_regression;
+
+mod pen_hover_tip_tests {
+    #[test]
+    fn preview_toggle_only_hides_an_idle_harmonyos_pen_tip() {
+        use crate::stylus::PointerSource;
+        for ohos in [false, true] {
+            for source in [PointerSource::Mouse, PointerSource::Pen, PointerSource::Touch] {
+                for preview in [false, true] {
+                    for down in [false, true] {
+                        assert_eq!(super::hide_pen_hover_tip(ohos, source, preview, down), ohos && source == PointerSource::Pen && !preview && !down);
+                    }
+                }
+            }
+        }
+    }
+}

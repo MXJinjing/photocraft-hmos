@@ -282,6 +282,7 @@ fn stroke_has_no_seams() {
 fn pressure_controls_size_with_minimum() {
     let b = BrushSettings {
         size: 40.0,
+        pressure_size: true,
         shape_dynamics: ShapeDynamics {
             enabled: true,
             size: Dynamic { control: Control::PenPressure, minimum: 0.25, ..Default::default() },
@@ -297,11 +298,80 @@ fn pressure_controls_size_with_minimum() {
 }
 
 #[test]
+fn pressure_size_off_ignores_pen_pressure_even_with_shape_dynamics() {
+    // Options-bar Pressure for Size off: Shape Dynamics › Size › Pen Pressure must not change size.
+    let b = BrushSettings {
+        size: 40.0,
+        pressure_size: false,
+        shape_dynamics: ShapeDynamics {
+            enabled: true,
+            size: Dynamic { control: Control::PenPressure, minimum: 0.25, ..Default::default() },
+            ..Default::default()
+        },
+        ..brush()
+    };
+    let pts = vec![StrokePoint::new(0.0, 0.0, 0.1), StrokePoint::new(200.0, 0.0, 1.0)];
+    let d = dabs_of(&b, &pts);
+    assert!(d.iter().all(|x| (x.radius - 20.0).abs() < 1e-3), "full size at every pressure: {:?}", d.iter().map(|x| x.radius).collect::<Vec<_>>());
+}
+
+#[test]
+fn set_size_uses_pen_pressure_off_clears_shape_dynamics_control() {
+    let mut b = BrushSettings {
+        pressure_size: true,
+        shape_dynamics: ShapeDynamics {
+            enabled: true,
+            size: Dynamic::controlled(Control::PenPressure),
+            angle: Dynamic::controlled(Control::Direction),
+            ..Default::default()
+        },
+        ..brush()
+    };
+    b.set_size_uses_pen_pressure(false);
+    assert!(!b.pressure_size);
+    assert_eq!(b.shape_dynamics.size.control, Control::Off);
+    assert_eq!(b.shape_dynamics.angle.control, Control::Direction, "other controls stay");
+}
+
+#[test]
+fn pressure_opacity_off_ignores_transfer_pen_pressure() {
+    let b = BrushSettings {
+        pressure_opacity: false,
+        transfer: Transfer { enabled: true, opacity: Dynamic::controlled(Control::PenPressure), ..Default::default() },
+        size: 10.0,
+        ..brush()
+    };
+    let pts = vec![StrokePoint::new(10.0, 10.0, 0.2), StrokePoint::new(90.0, 10.0, 0.2)];
+    let d = dabs_of(&b, &pts);
+    assert!(d.iter().all(|x| (x.opacity - 1.0).abs() < 1e-4), "full opacity when the button is off: {:?}", d.iter().map(|x| x.opacity).collect::<Vec<_>>());
+}
+
+#[test]
+fn set_opacity_uses_pen_pressure_off_clears_transfer_control() {
+    let mut b = BrushSettings {
+        pressure_opacity: true,
+        transfer: Transfer {
+            enabled: true,
+            opacity: Dynamic::controlled(Control::PenPressure),
+            flow: Dynamic::controlled(Control::PenPressure),
+            ..Default::default()
+        },
+        ..brush()
+    };
+    b.set_opacity_uses_pen_pressure(false);
+    assert!(!b.pressure_opacity);
+    assert_eq!(b.transfer.opacity.control, Control::Off);
+    assert_eq!(b.transfer.flow.control, Control::PenPressure, "flow stays");
+}
+
+#[test]
 fn each_dynamic_responds_through_its_own_curve() {
     // A hard size curve (half pressure gives a fifth of the size range) and a linear opacity.
     let curve = crate::ResponseCurve::new(&[[0.0, 0.0], [0.5, 0.2], [1.0, 1.0]]);
     let b = BrushSettings {
         size: 40.0,
+        pressure_size: true,
+        pressure_opacity: true,
         shape_dynamics: ShapeDynamics { enabled: true, size: Dynamic { curve, ..Dynamic::controlled(Control::PenPressure) }, ..Default::default() },
         transfer: Transfer { enabled: true, opacity: Dynamic::controlled(Control::PenPressure), ..Default::default() },
         ..brush()
@@ -485,8 +555,12 @@ fn color_dynamics_ranges() {
 #[test]
 fn transfer_opacity_caps_and_flow_builds() {
     // Pressure on opacity caps coverage.
-    let b =
-        BrushSettings { transfer: Transfer { enabled: true, opacity: Dynamic::controlled(Control::PenPressure), ..Default::default() }, size: 10.0, ..brush() };
+    let b = BrushSettings {
+        pressure_opacity: true,
+        transfer: Transfer { enabled: true, opacity: Dynamic::controlled(Control::PenPressure), ..Default::default() },
+        size: 10.0,
+        ..brush()
+    };
     let pts = vec![StrokePoint::new(10.0, 10.0, 0.4), StrokePoint::new(90.0, 10.0, 0.4)];
     let s = paint(&b, &pts, 100, 20);
     assert!((s.rgba(50, 10)[3] - 0.4).abs() < 0.01, "{}", s.rgba(50, 10)[3]);
@@ -983,6 +1057,7 @@ fn catch_up_on_stroke_end_finishes_the_pose_of_a_still_pen() {
 fn pose_overrides_stylus_values() {
     let b = BrushSettings {
         size: 40.0,
+        pressure_size: true,
         pose: Pose { enabled: true, pressure: 0.5, override_pressure: true, ..Default::default() },
         shape_dynamics: ShapeDynamics { enabled: true, size: Dynamic::controlled(Control::PenPressure), ..Default::default() },
         ..brush()
