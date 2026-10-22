@@ -4222,8 +4222,6 @@ navigator	Zoom	Zoom
 # Window full screen (HarmonyOS host)
 	Enter Full Screen	Entrar en pantalla completa
 	Exit Full Screen	Salir de pantalla completa
-	Choose…	Elegir…
-	Import…	Importar…
 
 # Icon-only toolbar controls
 	Show tools in one column	Mostrar herramientas en una columna
