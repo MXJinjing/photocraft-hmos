@@ -310,7 +310,11 @@ fn data_sets_page(ui: &mut egui::Ui, _t: &Tokens, state: &mut Value, fields: &mu
                     }
                     "pixelReplacement" => {
                         let mut p = values[i].get("value").and_then(Value::as_str).unwrap_or("").to_string();
-                        if ui.add(egui::TextEdit::singleline(&mut p).hint_text(tl!("image file path")).desired_width(240.0)).changed() {
+                        // Sandboxed hosts: the replacement image is chosen with the system picker.
+                        let pointer = format!("/__variables/dataSets/{cur}/values/{i}/value");
+                        let kind = crate::path_pick::kind_for("image.variables", "pixelReplacement");
+                        if crate::path_pick::locked_field(ui, kind, &pointer, &p, 300.0) {
+                        } else if ui.add(egui::TextEdit::singleline(&mut p).hint_text(tl!("image file path")).desired_width(240.0)).changed() {
                             values[i]["value"] = json!(p);
                         }
                     }

@@ -244,38 +244,48 @@ pub fn stylus_menu(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     }
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), "Stylus"));
     let resp = resp.on_hover_text(tl!("Stylus"));
-    egui::Popup::menu(&resp).show(|ui| {
+    egui::Popup::menu(&resp).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
         let t = Tokens::get(ui.ctx());
+        // These persistent settings should keep the hover treatment when pressed or selected,
+        // rather than inheriting the global selection accent (too dark in ArkUI Pro Light).
+        let v = &mut ui.style_mut().visuals;
+        if matches!(t.kind, crate::theme::ThemeKind::ArkuiLight | crate::theme::ThemeKind::ArkuiProLight) {
+            v.widgets.hovered.bg_fill = t.menu_hover();
+            v.widgets.hovered.weak_bg_fill = t.menu_hover();
+        }
+        v.widgets.active = v.widgets.hovered;
+        v.selection.bg_fill = v.widgets.hovered.weak_bg_fill;
+        v.selection.stroke = v.widgets.hovered.fg_stroke;
         ui.set_min_width(240.0);
         if device.connected {
             ui.label(RichText::new(device.name.as_deref().unwrap_or(tl!("Connected pen"))).color(t.text));
-            let battery = device
-                .battery_percent
-                .map_or_else(|| tl!("Battery unavailable").to_owned(), |p| crate::i18n::fmt(tl!("Battery: {percent}%"), &[("percent", &p.to_string())]));
-            ui.label(RichText::new(battery).color(t.text_dim));
         } else {
             ui.label(RichText::new(tl!("No pen connected")).color(t.text_dim));
         }
         ui.separator();
         let on = app.session.prefs().tools.block_finger_input;
         if ui.add(egui::Button::selectable(on, tl!("Block finger input"))).clicked() {
-            app.session.edit_prefs(|p| p.tools.block_finger_input = !on);
-            ui.close();
+            app.session.edit_prefs(|p| {
+                p.tools.block_finger_input = !on;
+                p.tools.block_finger_input_configured = true;
+            });
+        }
+        let on = app.session.prefs().tools.stylus_hover_preview;
+        if ui.add(egui::Button::selectable(on, tl!("Stylus hover preview"))).clicked() {
+            app.session.edit_prefs(|p| p.tools.stylus_hover_preview = !on);
         }
         ui.separator();
         ui.label(RichText::new(tl!("Double-tap pen body")).color(t.text_dim));
         for &(mode, label) in STYLUS_DOUBLE_TAP_OPTIONS {
             if ui.add(egui::Button::selectable(app.session.prefs().tools.stylus_double_tap == mode, tl!(label))).clicked() {
                 app.session.edit_prefs(|p| p.tools.stylus_double_tap = mode);
-                ui.close();
             }
         }
         ui.separator();
-        ui.label(RichText::new(tl!("Long-press pen body")).color(t.text_dim));
+        ui.label(RichText::new(tl!("Squeeze pen body")).color(t.text_dim));
         for &(mode, label) in STYLUS_LONG_PRESS_OPTIONS {
             if ui.add(egui::Button::selectable(app.session.prefs().tools.stylus_long_press == mode, tl!(label))).clicked() {
                 app.session.edit_prefs(|p| p.tools.stylus_long_press = mode);
-                ui.close();
             }
         }
     });
@@ -283,8 +293,19 @@ pub fn stylus_menu(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
 
 /// Apply normalised stylus actions queued by any input adapter.
 pub fn drain_stylus_gestures(app: &mut PhotocraftApp, ctx: &egui::Context) {
+    if app.stylus.feed.connected() && !app.session.prefs().tools.block_finger_input_configured {
+        app.session.edit_prefs(|p| {
+            p.tools.block_finger_input = true;
+            p.tools.block_finger_input_configured = true;
+        });
+    }
     app.stylus.note_tool(app.ui.tool);
     let gestures = app.stylus.feed.take_gestures();
+    // Diagnostics observes counters in the feed, not this action queue. Testing must not
+    // accidentally change tools or open a canvas popup; closing the window resumes shortcuts.
+    if app.ui.stylus_debug.open && app.ui.stylus_debug.suppress_actions {
+        return;
+    }
     if gestures.is_empty() {
         return;
     }
@@ -327,7 +348,7 @@ fn apply_pen_gesture(app: &mut PhotocraftApp, ctx: &egui::Context, gesture: crat
             StylusDoubleTap::Eraser => app.stylus.toggle_eraser_tool(&mut app.ui.tool),
             StylusDoubleTap::Previous => app.stylus.switch_previous_tool(&mut app.ui.tool),
         },
-        crate::stylus::PenGesture::LongPress => {
+        crate::stylus::PenGesture::Squeeze => {
             if app.session.prefs().tools.stylus_long_press == StylusLongPress::ContextMenu {
                 toggle_canvas_context_menu(app, ctx, at);
             }
@@ -442,6 +463,8 @@ mod tests {
         let d = doc();
         assert_eq!(ChromeState::default().status_info, "dimensions");
         assert!(!photocraft_engine::prefs::Tools::default().block_finger_input);
+        assert!(!photocraft_engine::prefs::Tools::default().block_finger_input_configured);
+        assert!(!photocraft_engine::prefs::Tools::default().stylus_hover_preview);
         assert_eq!(photocraft_engine::prefs::Tools::default().stylus_double_tap, StylusDoubleTap::Eraser);
         assert_eq!(photocraft_engine::prefs::Tools::default().stylus_long_press, StylusLongPress::ContextMenu);
         assert_eq!(status_info_text(&d, "dimensions", "", ""), "2400 px x 1500 px (72 ppi)");
@@ -675,11 +698,11 @@ mod tests {
     }
 
     #[test]
-    fn stylus_menu_sits_left_of_discord_in_the_title_bar_and_toggles_block_finger() {
+    fn stylus_menu_sits_left_of_discord_and_stays_open_until_an_outside_click() {
         use egui_kittest::{Harness, kittest::Queryable};
 
         let app = crate::PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
-        let mut h = Harness::builder().with_size(egui::vec2(1400.0, 80.0)).build_ui_state(
+        let mut h = Harness::builder().with_size(egui::vec2(1400.0, 500.0)).build_ui_state(
             |ui, app| {
                 if !ui.ctx().fonts(|f| f.families().contains(&egui::FontFamily::Name("medium".into()))) {
                     return;
@@ -720,21 +743,32 @@ mod tests {
         h.get_by_label("Stylus").click();
         h.run_steps(2);
         h.get_by_label("Block finger input").click();
-        h.run_steps(2);
+        h.run();
         assert!(h.state().session.prefs().tools.block_finger_input, "the stylus menu toggles block finger input");
-        h.get_by_label("Stylus").click();
-        h.run_steps(2);
+        assert!(h.state().session.prefs().tools.block_finger_input_configured);
+        assert!(!h.state().session.prefs().tools.stylus_hover_preview);
+        h.get_by_label("Stylus hover preview").click();
+        h.run();
+        assert!(h.state().session.prefs().tools.stylus_hover_preview);
+        assert!(h.query_by_label("Previous tool").is_some(), "an internal click keeps the stylus menu open");
+        h.get_by_label("Previous tool").click();
+        h.run();
+        assert_eq!(h.state().session.prefs().tools.stylus_double_tap, StylusDoubleTap::Previous);
+        assert!(h.query_by_label("Show or hide context menu").is_some(), "another option also keeps the menu open");
         h.get_by_label("Block finger input").click();
-        h.run_steps(2);
+        h.run();
         assert!(!h.state().session.prefs().tools.block_finger_input);
+        assert!(h.query_by_label("Block finger input").is_some());
+        h.get_by_label("File").click();
+        h.run();
+        assert!(h.query_by_label("Block finger input").is_none(), "a click outside closes the stylus menu");
         let zh = crate::i18n::Lang::from_code("zh-hans").expect("zh-hans registered");
         assert_eq!(crate::i18n::tr(zh, "Stylus"), "手写笔");
         assert_eq!(crate::i18n::tr(crate::i18n::Lang::EN, "Stylus"), "Stylus");
         assert_eq!(crate::i18n::tr(zh, "No pen connected"), "未连接笔");
-        assert_eq!(crate::i18n::tr(zh, "Battery unavailable"), "电量不可用");
-        assert_eq!(crate::i18n::tr(zh, "Battery: {percent}%"), "电量：{percent}%");
+        assert_eq!(crate::i18n::tr(zh, "Stylus hover preview"), "手写笔悬停预览");
         assert_eq!(crate::i18n::tr(zh, "Double-tap pen body"), "双击笔身");
-        assert_eq!(crate::i18n::tr(zh, "Long-press pen body"), "轻捏笔身");
+        assert_eq!(crate::i18n::tr(zh, "Squeeze pen body"), "轻捏笔身");
 
         let app = crate::PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
         let mut status = Harness::builder().with_size(egui::vec2(1400.0, 80.0)).build_ui_state(
@@ -749,7 +783,26 @@ mod tests {
     }
 
     #[test]
-    fn stylus_menu_reports_current_name_and_battery_and_clears_on_disconnect() {
+    fn first_connection_enables_finger_blocking_once_and_respects_a_later_user_choice() {
+        let mut app = crate::PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        assert!(!app.session.prefs().tools.block_finger_input);
+        assert!(!app.session.prefs().tools.block_finger_input_configured);
+
+        app.stylus.feed.set_connected(true);
+        drain_stylus_gestures(&mut app, &egui::Context::default());
+        assert!(app.session.prefs().tools.block_finger_input);
+        assert!(app.session.prefs().tools.block_finger_input_configured);
+
+        app.session.edit_prefs(|p| p.tools.block_finger_input = false);
+        app.stylus.feed.set_connected(false);
+        drain_stylus_gestures(&mut app, &egui::Context::default());
+        app.stylus.feed.set_connected(true);
+        drain_stylus_gestures(&mut app, &egui::Context::default());
+        assert!(!app.session.prefs().tools.block_finger_input, "a reconnect must not override the user's saved choice");
+    }
+
+    #[test]
+    fn stylus_menu_reports_current_name_and_clears_on_disconnect() {
         use egui_kittest::{Harness, kittest::Queryable};
         let app = crate::PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
         let mut h = Harness::builder().with_size(egui::vec2(1400.0, 500.0)).build_ui_state(
@@ -767,30 +820,74 @@ mod tests {
         h.run_steps(2);
         assert!(h.query_by_label("No pen connected").is_some());
         assert!(h.query_by_label("Block finger input").is_some());
-        h.state().stylus.feed.set_device(true, Some("HUAWEI M-Pencil".into()), Some(82));
+        h.state().stylus.feed.set_device(true, Some("HUAWEI M-Pencil".into()));
         h.run_steps(2);
         assert!(h.query_by_label("HUAWEI M-Pencil").is_some());
-        assert!(h.query_by_label("Battery: 82%").is_some());
         assert!(h.query_by_label("No pen connected").is_none());
         if let Some(path) = std::env::var_os("PHOTOCRAFT_STYLUS_POPUP_SCREENSHOT") {
             h.render().expect("render stylus menu").save(path).expect("save stylus menu");
         }
-        h.state().stylus.feed.set_device(true, Some("HUAWEI M-Pencil".into()), Some(0));
-        h.run_steps(2);
-        assert!(h.query_by_label("Battery: 0%").is_some(), "zero is a valid battery level");
-        h.state().stylus.feed.set_device(true, Some("Another pen".into()), None);
+        h.state().stylus.feed.set_device(true, Some("Another pen".into()));
         h.run_steps(2);
         assert!(h.query_by_label("Another pen").is_some());
-        assert!(h.query_by_label("Battery unavailable").is_some());
         assert!(h.query_by_label("HUAWEI M-Pencil").is_none());
         h.state().stylus.feed.set_connected(false);
         h.run_steps(2);
         assert!(h.query_by_label("No pen connected").is_some());
         assert!(h.query_by_label("Another pen").is_none());
-        assert!(h.query_by_label("Battery unavailable").is_none());
         h.get_by_label("Block finger input").click();
         h.run_steps(2);
         assert!(h.state().session.prefs().tools.block_finger_input, "settings work while disconnected");
+    }
+
+    #[test]
+    fn stylus_menu_selected_buttons_keep_hover_fill() {
+        use egui_kittest::{Harness, kittest::Queryable};
+
+        fn row_fill(h: &Harness<'_, PhotocraftApp>, rect: egui::Rect) -> egui::Color32 {
+            h.output()
+                .shapes
+                .iter()
+                .find_map(|shape| match &shape.shape {
+                    egui::Shape::Rect(r)
+                        if r.rect.contains(rect.center()) && (r.rect.height() - rect.height()).abs() < 3.0 && r.fill != egui::Color32::TRANSPARENT =>
+                    {
+                        Some(r.fill)
+                    }
+                    _ => None,
+                })
+                .expect("button background is painted")
+        }
+
+        for kind in crate::theme::ThemeKind::ALL {
+            let app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+            let mut h = Harness::builder().with_size(vec2(640.0, 520.0)).build_ui_state(|ui, app| super::stylus_menu(app, ui), app);
+            PhotocraftApp::setup_context(&h.ctx, kind);
+            h.run_steps(3);
+            h.get_by_label("Stylus").click();
+            h.run_steps(3);
+            h.get_by_label("Block finger input").hover();
+            h.run_steps(12);
+            let rect = h.get_by_label("Block finger input").rect();
+            let hover = row_fill(&h, rect);
+            if matches!(kind, crate::theme::ThemeKind::ArkuiLight | crate::theme::ThemeKind::ArkuiProLight) {
+                assert_eq!(hover, egui::Color32::from_rgb(225, 237, 255), "{kind:?}: pale blue hover");
+            }
+            h.get_by_label("Block finger input").click();
+            h.run_steps(12);
+            assert!(h.state().session.prefs().tools.block_finger_input);
+            h.event(egui::Event::PointerMoved(egui::pos2(600.0, 500.0)));
+            h.run_steps(12);
+            assert_eq!(row_fill(&h, h.get_by_label("Block finger input").rect()), hover, "{kind:?}: selected matches hover after pointer leaves");
+            if matches!(kind, crate::theme::ThemeKind::ArkuiLight | crate::theme::ThemeKind::ArkuiProLight)
+                && let Some(dir) = std::env::var_os("PHOTOCRAFT_STYLUS_STATE_SCREENSHOTS")
+            {
+                h.render()
+                    .expect("render stylus settings")
+                    .save(std::path::PathBuf::from(dir).join(format!("{}-stylus-selected.png", kind.id())))
+                    .expect("save screenshot");
+            }
+        }
     }
 
     #[test]
@@ -805,7 +902,7 @@ mod tests {
         assert!(app.ui.brush_picker.is_none());
 
         app.session.edit_prefs(|p| p.tools.stylus_long_press = StylusLongPress::Off);
-        super::apply_pen_gesture(&mut app, &egui::Context::default(), crate::stylus::PenGesture::LongPress, [8.0, 8.0]);
+        super::apply_pen_gesture(&mut app, &egui::Context::default(), crate::stylus::PenGesture::Squeeze, [8.0, 8.0]);
         assert!(app.ui.brush_picker.is_none());
 
         app.session.edit_prefs(|p| p.tools.stylus_double_tap = StylusDoubleTap::Off);
@@ -838,7 +935,7 @@ mod tests {
         tool_event(&mut app, ToolEvent::Down { x: 90.0, y: 80.0, pressure: 1.0 }, egui::Modifiers::NONE);
         tool_event(&mut app, ToolEvent::Up { x: 90.0, y: 80.0 }, egui::Modifiers::NONE);
         let expected = ViewXform::active(&app).unwrap().to_screen(48.0, 36.0);
-        app.stylus.feed.push_gesture(PenGesture::LongPress, 1_000.0);
+        app.stylus.feed.push_gesture(PenGesture::Squeeze, 1_000.0);
         super::drain_stylus_gestures(&mut app, &egui::Context::default());
         assert_eq!(app.ui.brush_picker, Some([expected.x, expected.y]), "menu top-left is the last pen lift, not the pen press or later mouse click");
     }

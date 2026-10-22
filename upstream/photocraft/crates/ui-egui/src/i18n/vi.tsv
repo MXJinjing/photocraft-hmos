@@ -2401,6 +2401,10 @@ shape	Appearance	Diện mạo
 	Soft light	Dịu sáng
 	Soft Dark Theme	Giao diện dịu tối
 	Soft Light Theme	Giao diện dịu sáng
+	ArkUI Light Theme	Chủ đề ArkUI sáng
+	ArkUI Dark Theme	Chủ đề ArkUI tối
+	ArkUI Pro Light Theme	Chủ đề ArkUI Pro sáng
+	ArkUI Pro Dark Theme	Chủ đề ArkUI Pro tối
 	Caps	Đầu nét
 	Center Columns	Căn giữa các cột
 	Change Panel Group	Đổi nhóm bảng
@@ -3677,6 +3681,55 @@ curves	Smooth	Làm mượt
 	Button Mode	Chế độ nút
 	Button Mode On	Chế độ nút bật
 
+# HarmonyOS native controls
+	Block finger input	Chặn thao tác bằng ngón tay
+	Stylus hover preview	Xem trước khi bút di chuột
+	Choose printer, copies and duplex in the system print dialog.	Chọn máy in, số bản sao và in hai mặt trong hộp thoại in của hệ thống.
+	Connected pen	Bút đã kết nối
+	Double-tap pen body	Chạm hai lần vào thân bút
+	Squeeze pen body	Bóp thân bút
+
+# Stylus diagnostics
+	Hovering	Đang lơ lửng
+	Stylus Debug…	Chẩn đoán bút…
+	Stylus Debug	Chẩn đoán bút
+	Use a real Pad and a pen that supports tilt, double-tap and squeeze.	Dùng máy tính bảng thật và bút hỗ trợ độ nghiêng, chạm đúp và bóp thân bút.
+	No connection reported	Chưa báo kết nối
+	Latest pen sample	Mẫu bút mới nhất
+	Tilt from vertical	Góc nghiêng so với phương thẳng đứng
+	Screen bearing	Hướng trên màn hình
+	Waiting for pen input	Đang chờ đầu vào bút
+	Samples	Số mẫu
+	Pen contact	Bút đang chạm
+	No pen contact — values are retained	Không chạm — giữ lại giá trị
+	Arrow: screen-projected tilt direction, not barrel rotation. Upright: no direction.	Mũi tên: hướng nghiêng chiếu lên màn hình, không phải xoay thân bút. Thẳng đứng: không có hướng.
+	Zero tilt may mean an upright pen or unavailable hardware data.	Độ nghiêng bằng không có thể là bút thẳng đứng hoặc không có dữ liệu phần cứng.
+	HarmonyOS contact input does not currently report barrel rotation.	Đầu vào tiếp xúc HarmonyOS hiện không báo góc xoay thân bút.
+	Received	Đã nhận
+	Test gestures only (do not run shortcuts)	Chỉ thử cử chỉ (không chạy lối tắt)
+	No indicator means no event received, not necessarily unsupported hardware.	Không có đèn báo nghĩa là chưa nhận sự kiện, không nhất thiết phần cứng không hỗ trợ.
+	Test area — does not change the document	Vùng thử — không thay đổi tài liệu
+	Draw here with the pen	Vẽ bằng bút tại đây
+	Reset test	Đặt lại thử nghiệm
+	Readings are before the pressure curve and remain available with tablet pressure off.	Giá trị trước đường cong lực nhấn, vẫn hiển thị khi tắt lực nhấn máy tính bảng.
+	Eraser end	Đầu tẩy
+	Pen tip	Đầu bút
+	Connected	Đã kết nối
+	No pen connected	Chưa kết nối bút
+	Only show canvas	Chỉ hiện vùng vẽ
+	Right sidebar	Thanh bên phải
+	Stylus	Bút cảm ứng
+	System print preview opened	Đã mở bản xem trước khi in của hệ thống
+	Current tool and Eraser	Công cụ hiện tại và Tẩy
+	Previous tool	Công cụ trước
+	Show or hide context menu	Hiện hoặc ẩn trình đơn ngữ cảnh
+
+# Window full screen (HarmonyOS host)
+	Enter Full Screen	Vào chế độ toàn màn hình
+	Exit Full Screen	Thoát chế độ toàn màn hình
+	Choose…	Chọn…
+	Import…	Nhập…
+
 # Darken / Lighten Interface (⇧⌘F1 / ⇧⌘F2)
 	Darken Interface	Làm tối giao diện
 	Lighten Interface	Làm sáng giao diện
@@ -3766,3 +3819,8 @@ curves	Smooth	Làm mượt
 
 # Graphics Adapter preference (#1885)
 	GPU adapter	Bộ điều hợp GPU
+
+# Icon-only toolbar controls
+	Show tools in one column	Hiển thị công cụ trong một cột
+	Show tools in two columns	Hiển thị công cụ trong hai cột
+	Open the Color Picker	Mở bộ chọn màu

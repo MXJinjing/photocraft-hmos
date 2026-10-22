@@ -196,7 +196,7 @@ pub fn button_with_icon_size_tip(ui: &mut egui::Ui, name: &str, box_size: f32, i
     let resp = IconButton::new(label, Vec2::splat(box_size), &style).selected(selected).show(ui, |ui, rect, tint| {
         paint(ui, rect, name, icon_size, tint);
     });
-    if tooltip.is_empty() || !show_tip { resp } else { resp.on_hover_text(label) }
+    crate::tooltips::label(resp, label, show_tip && !tooltip.is_empty())
 }
 
 /// Rail toggle: "on" gets a quiet filled background and full-strength icon (no accent).
@@ -212,7 +212,7 @@ pub fn rail_button(ui: &mut egui::Ui, name: &str, box_size: f32, on: bool, toolt
     let tint = if on || resp.hovered() { t.text } else { t.text_faint };
     paint(ui, rect, name, (box_size * 0.52).round(), tint);
     resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, ui.is_enabled(), on, tl!(tooltip)));
-    resp.on_hover_text(tl!(tooltip))
+    crate::tooltips::label(resp, tl!(tooltip), true)
 }
 
 #[cfg(test)]

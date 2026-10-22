@@ -16,6 +16,30 @@ fn custom_host_pick_bytes_propagates_contents_cancellation_and_read_errors() {
     assert_eq!(app.pick_file_bytes(|_, _, _| panic!("failed read")), Err("read failed".into()));
 }
 
+#[test]
+fn pick_file_bytes_prefers_pick_import_over_pick_open() {
+    // HarmonyOS: File › Import uses pick_import (file manager only); File › Open keeps pick_open
+    // (files-vs-gallery chooser). When both are set, single-file picks must not hit pick_open.
+    let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), Services::default());
+    app.services.pick_open = Some(Box::new(|| Some(("from-open".into(), Ok(b"open".to_vec())))));
+    app.services.pick_import = Some(Box::new(|| Some(("from-import".into(), Ok(b"import".to_vec())))));
+    let result = app.pick_file_bytes(|_, name, bytes| Ok(json!({"name": name, "bytes": bytes}))).unwrap();
+    assert_eq!(result, json!({"name": "from-import", "bytes": b"import"}));
+
+    // Place / Replace Contents may pick a photo: keep pick_open (gallery chooser).
+    let placed = app.pick_image_bytes(|_, name, _| Ok(json!(name))).unwrap();
+    assert_eq!(placed, json!("from-open"));
+    // ...and the flag does not leak into the next import.
+    let next = app.pick_file_bytes(|_, name, _| Ok(json!(name))).unwrap();
+    assert_eq!(next, json!("from-import"));
+
+    // Document Open (multiple: true, no pick_open_paths) still uses pick_open.
+    app.services.pick_import = Some(Box::new(|| panic!("import must not run for File › Open")));
+    app.services.pick_open = Some(Box::new(|| Some(("doc.png".into(), Ok(b"png".to_vec())))));
+    let opened = app.open_dialog_file().unwrap();
+    assert_eq!(opened, Value::Null);
+}
+
 /// The requests the fake dialog service was given, with their replies: dialogs the user is still in.
 type Open = Rc<RefCell<Vec<(FileDialogRequest, FileDialogReply)>>>;
 

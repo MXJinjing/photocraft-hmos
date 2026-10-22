@@ -585,6 +585,7 @@ fn wraps(id: &str) -> bool {
             | "file.saveACopy"
             | "file.placeEmbedded"
             | "file.placeLinked"
+            | "file.import.variableDataSets"
             | "layer.smartObjects.replaceContents"
             | "layer.smartObjects.exportContents"
             | "layer.smartObjects.convertToLinked"
@@ -1130,7 +1131,11 @@ pub fn form_body(ui: &mut egui::Ui, f: &mut Map<String, Value>) {
                             crate::widgets::dropdown(ui, &format!("form-{k}"), &mut s, &refs, 200.0);
                         }
                         None => {
-                            ui.add(egui::TextEdit::singleline(&mut s).desired_width(260.0));
+                            // Sandboxed hosts: input/output folders and files come from the system picker.
+                            let command = f.get("__command").and_then(Value::as_str).unwrap_or("");
+                            if !crate::path_pick::locked_field(ui, crate::path_pick::kind_for(command, &k), &format!("/{k}"), &s, 330.0) {
+                                ui.add(egui::TextEdit::singleline(&mut s).desired_width(260.0));
+                            }
                         }
                     }
                     json!(s)
@@ -1171,10 +1176,21 @@ fn camera_data(ui: &mut egui::Ui, f: &Map<String, Value>) {
     });
 }
 
-/// Folder the batch dialogs start from: next to the active document, else the working directory.
+/// Folder dialogs start from: the host's DOWNLOAD document directory on HarmonyOS, else next to
+/// the active document, else the working directory.
 fn default_dir(app: &PhotocraftApp) -> String {
-    app.session.active().and_then(|d| d.path.as_deref()).and_then(|p| p.rfind(['/', '\\']).map(|i| p[..i].to_string())).unwrap_or_else(|| ".".into())
+    crate::path_pick::documents_output_dir(app, "")
 }
+
+/// Empty on sandboxed hosts (user must Choose…); otherwise [`default_dir`].
+fn default_input_dir(app: &PhotocraftApp) -> String {
+    if app.services.path_pickers_only {
+        String::new()
+    } else {
+        default_dir(app)
+    }
+}
+
 
 fn front(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str, params: &Value) -> Option<Result<Value, String>> {
     if id == "file.closeAll" || id == "file.closeOthers" {
@@ -1206,7 +1222,7 @@ fn front(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str, params: &Value)
         return None;
     }
     let doc = app.session.active().map(|d| (d.doc.size.width, d.doc.size.height, d.doc.name.clone()));
-    let dir = default_dir(app);
+    let input_dir = default_input_dir(app);
     let label = photocraft_engine::commands::find(id).map_or(id, |c| c.label);
     let dialog = |app: &mut PhotocraftApp, fields: Value, choices: Value| Some(Ok(json!({"dialog": form(app, id, label, fields, choices)})));
     match id {
@@ -1223,7 +1239,7 @@ fn front(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str, params: &Value)
             };
             let linked = id == "file.placeLinked";
             let ctx = ctx.clone();
-            Some(app.pick_file_bytes(move |app, name, bytes| {
+            Some(app.pick_image_bytes(move |app, name, bytes| {
                 if app.ui.transform.is_some() {
                     return Err("Commit or cancel the transform first".into());
                 }
@@ -1234,10 +1250,23 @@ fn front(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str, params: &Value)
                 Ok(result)
             }))
         }
+        // File › Import › Variable Data Sets…: pick a CSV (system file manager on HarmonyOS).
+        "file.import.variableDataSets" => {
+            let doc = match app.active_doc_id() {
+                Ok(doc) => doc,
+                Err(e) => return Some(Err(e)),
+            };
+            Some(app.pick_file_bytes_filtered(&["csv", "txt"], move |app, name, bytes| {
+                app.refocus(doc)?;
+                let text = String::from_utf8(bytes).map_err(|_| format!("{name} is not a CSV"))?;
+                photocraft_engine::import_data_sets_text(&mut app.session, &text, &json!({}))
+                    .map_err(|e| e.to_string())
+            }))
+        }
         "layer.smartObjects.replaceContents" => {
             let st = app.session.active()?;
             let (doc, layer) = (st.doc.id, st.active_layer?);
-            Some(app.pick_file_bytes(move |app, name, bytes| {
+            Some(app.pick_image_bytes(move |app, name, bytes| {
                 app.with_document(doc, |app| {
                     let r = photocraft_engine::smart_cmds::replace_contents_bytes(&mut app.session, layer, &name, bytes).map_err(|e| e.to_string());
                     app.sync_views();
@@ -1302,26 +1331,29 @@ fn front(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str, params: &Value)
         "type.warpText" => Some(Ok(json!({"dialog": crate::dialogs::open_command_dialog(app, id, label)}))),
         "file.export.layersToFiles" => {
             let (_, _, name) = doc?;
+            let out = crate::path_pick::documents_output_dir(app, "exports");
             dialog(
                 app,
-                json!({"dir": dir, "prefix": name.rsplit_once('.').map_or(name.as_str(), |(a, _)| a), "format": "png", "visibleOnly": true}),
+                json!({"dir": out, "prefix": name.rsplit_once('.').map_or(name.as_str(), |(a, _)| a), "format": "png", "visibleOnly": true}),
                 json!({"format": ["png", "jpg", "psd", "tiff", "webp", "bmp"]}),
             )
         }
         "file.export.layerCompsToFiles" | "file.export.artboardsToFiles" => {
             let (_, _, name) = doc?;
             let prefix = name.rsplit_once('.').map_or(name.as_str(), |(a, _)| a).to_string();
+            let out = crate::path_pick::documents_output_dir(app, "exports");
             let fields = if id == "file.export.layerCompsToFiles" {
-                json!({"dir": dir, "prefix": prefix, "format": "png", "selectedOnly": false})
+                json!({"dir": out, "prefix": prefix, "format": "png", "selectedOnly": false})
             } else {
-                json!({"dir": dir, "prefix": prefix, "format": "png"})
+                json!({"dir": out, "prefix": prefix, "format": "png"})
             };
             dialog(app, fields, json!({"format": ["png", "jpg", "psd", "tiff", "webp", "bmp"]}))
         }
         "file.export.artboardsToPdf" => {
             let (_, _, name) = doc?;
             let stem = name.rsplit_once('.').map_or(name.as_str(), |(a, _)| a).to_string();
-            dialog(app, json!({"path": format!("{dir}/{stem}.pdf"), "quality": 10}), json!({}))
+            let out = crate::path_pick::documents_output_dir(app, "exports");
+            dialog(app, json!({"path": format!("{out}/{stem}.pdf"), "quality": 10}), json!({}))
         }
         "layer.new.artboard" => {
             let (w, h, _) = doc?;
@@ -1346,39 +1378,47 @@ fn front(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str, params: &Value)
                     })
             });
             let scope = if selected_adjustments { "selected" } else { "all" };
-            dialog(app, json!({"path": format!("{dir}/{stem}.cube"), "size": 33, "title": stem, "scope": scope}), json!({"scope": ["all", "selected"]}))
+            let out = crate::path_pick::documents_output_dir(app, "exports");
+            dialog(app, json!({"path": format!("{out}/{stem}.cube"), "size": 33, "title": stem, "scope": scope}), json!({"scope": ["all", "selected"]}))
         }
         "file.scripts.loadFilesIntoStack" => Some(Ok(json!({"dialog": crate::stack_dialog::open(app)}))),
         // Photography automation (photo_cmds / lens_cmds): a folder (or the open documents).
         "file.automate.photomerge" => dialog(
             app,
-            json!({"paths": dir, "useOpenDocuments": false, "layout": "auto", "blend": true, "vignetteRemoval": false, "geometricCorrection": false, "contentAwareFill": false}),
+            json!({"paths": input_dir, "useOpenDocuments": false, "layout": "auto", "blend": true, "vignetteRemoval": false, "geometricCorrection": false, "contentAwareFill": false}),
             json!({"layout": ["auto", "perspective", "cylindrical", "spherical", "collage", "reposition"]}),
         ),
         "file.automate.mergeToHdrPro" => dialog(
             app,
-            json!({"paths": dir, "useOpenDocuments": false, "align": true, "removeGhosts": false, "mode": "32", "method": "localAdaptation", "radius": 7.0, "strength": 0.52, "gamma": 1.0, "exposure": 0.0, "detail": 30.0, "saturation": 20.0}),
+            json!({"paths": input_dir, "useOpenDocuments": false, "align": true, "removeGhosts": false, "mode": "32", "method": "localAdaptation", "radius": 7.0, "strength": 0.52, "gamma": 1.0, "exposure": 0.0, "detail": 30.0, "saturation": 20.0}),
             json!({"mode": ["32", "16", "8"], "method": ["localAdaptation", "exposureGamma", "highlightCompression", "equalizeHistogram"]}),
         ),
-        "file.automate.lensCorrection" => dialog(
-            app,
-            json!({"input": dir, "output": format!("{dir}/corrected"), "format": "same", "profile": "auto", "correctDistortion": true, "correctVignette": true, "correctCA": true, "autoScale": true, "edge": "transparency"}),
-            json!({"format": ["same", "png", "jpg", "psd", "tiff"], "profile": ["auto", "generic", "none"], "edge": ["transparency", "edgeExtension", "black", "white"]}),
-        ),
-        "file.scripts.imageProcessor" => dialog(
-            app,
-            json!({"input": dir, "includeSubfolders": false, "__labels": subfolders_label(), "output": format!("{dir}/processed"), "format": "jpg", "quality": 8, "width": 0, "height": 0, "convertToSrgb": true}),
-            json!({"format": ["jpg", "png", "psd", "tiff", "webp"]}),
-        ),
+        "file.automate.lensCorrection" => {
+            let out = crate::path_pick::documents_output_dir(app, "corrected");
+            dialog(
+                app,
+                json!({"input": input_dir, "output": out, "format": "same", "profile": "auto", "correctDistortion": true, "correctVignette": true, "correctCA": true, "autoScale": true, "edge": "transparency"}),
+                json!({"format": ["same", "png", "jpg", "psd", "tiff"], "profile": ["auto", "generic", "none"], "edge": ["transparency", "edgeExtension", "black", "white"]}),
+            )
+        },
+        "file.scripts.imageProcessor" => {
+            let out = crate::path_pick::documents_output_dir(app, "processed");
+            dialog(
+                app,
+                json!({"input": input_dir, "includeSubfolders": false, "__labels": subfolders_label(), "output": out, "format": "jpg", "quality": 8, "width": 0, "height": 0, "convertToSrgb": true}),
+                json!({"format": ["jpg", "png", "psd", "tiff", "webp"]}),
+            )
+        },
         "file.automate.batch" => {
             let Some(action) = crate::actions::selected_action(app) else {
                 return Some(Err("record an action in the Actions panel first".into()));
             };
             let steps = crate::actions::action_steps(action);
             let name = action.name.clone();
+            let out = crate::path_pick::documents_output_dir(app, "batch");
             dialog(
                 app,
-                json!({"action": name, "steps": steps, "input": dir, "includeSubfolders": false, "__labels": subfolders_label(), "output": format!("{dir}/batch"), "format": "same", "quality": null, "__batchQuality": 8, "naming": "", "startingSerial": 1}),
+                json!({"action": name, "steps": steps, "input": input_dir, "includeSubfolders": false, "__labels": subfolders_label(), "output": out, "format": "same", "quality": null, "__batchQuality": 8, "naming": "", "startingSerial": 1}),
                 json!({"format": ["same", "png", "jpg", "psd", "tiff", "webp"]}),
             )
         }

@@ -12,7 +12,7 @@ pub use color_count::color_count_row;
 mod type_ahead;
 pub use type_ahead::list_open as dropdown_list_open;
 
-/// Match the Spectrum application-menu padding and blue/white hover state in
+/// Match the Spectrum application-menu padding and hover state in
 /// secondary menus (status bar, dock hamburger, layer context menus; #2187).
 /// The setting is local to this popup's Ui and leaves other themes unchanged.
 pub fn style_spectrum_popup_menu(ui: &mut Ui) {
@@ -20,14 +20,23 @@ pub fn style_spectrum_popup_menu(ui: &mut Ui) {
     // The 6 pt gap between rows was outside both buttons, so a drag across a menu
     // dropped the highlight (#4602). Padding stays inside the row, which is the hit target.
     ui.spacing_mut().item_spacing.y = 0.0;
+    let arkui_light = matches!(t.kind, theme::ThemeKind::ArkuiLight | theme::ThemeKind::ArkuiProLight);
+    if arkui_light {
+        let v = &mut ui.style_mut().visuals;
+        for widget in [&mut v.widgets.hovered, &mut v.widgets.open, &mut v.widgets.active] {
+            widget.bg_fill = t.menu_hover();
+            widget.weak_bg_fill = t.menu_hover();
+            widget.fg_stroke = Stroke::new(1.0, t.text);
+        }
+    }
     if !t.pro {
         return;
     }
     ui.spacing_mut().button_padding = vec2(10.0, 4.0);
     let v = &mut ui.style_mut().visuals;
-    v.widgets.hovered.weak_bg_fill = t.accent;
-    v.widgets.hovered.bg_fill = t.accent;
-    v.widgets.hovered.fg_stroke = Stroke::new(1.0, Color32::WHITE);
+    v.widgets.hovered.weak_bg_fill = if arkui_light { t.menu_hover() } else { t.accent };
+    v.widgets.hovered.bg_fill = if arkui_light { t.menu_hover() } else { t.accent };
+    v.widgets.hovered.fg_stroke = Stroke::new(1.0, if arkui_light { t.text } else { Color32::WHITE });
     v.widgets.hovered.bg_stroke = Stroke::NONE;
     v.widgets.inactive.corner_radius = CornerRadius::ZERO;
     v.widgets.hovered.corner_radius = CornerRadius::ZERO;
@@ -208,7 +217,8 @@ fn pro_panel(
     // Panel menu (hamburger); the tabs stay left of it, eliding or overflowing (#151).
     let menu = Rect::from_center_size(pos2(strip.right() - 14.0, strip.center().y), vec2(20.0, 18.0));
     let tabs_out = crate::tab_strip::pro_tabs(ui, ui.id().with((id, "tabs")), strip, menu.left(), tabs, selected, collapsed, reorderable);
-    let mresp = ui.interact(menu, ui.id().with((id, "menu")), Sense::click());
+    let mresp = crate::tooltips::label(ui.interact(menu, ui.id().with((id, "menu")), Sense::click()), tl!("Panel menu"), true);
+    mresp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tl!("Panel menu")));
     let c = if mresp.hovered() { t.text } else { t.text_faint };
     for k in 0..3 {
         let y = menu.center().y - 3.5 + k as f32 * 3.5;
@@ -241,7 +251,7 @@ pub fn panel_menu_button(ui: &mut Ui) -> Response {
     }
     let tip = tl!("Panel menu");
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tip));
-    resp.on_hover_text(tip)
+    crate::tooltips::label(resp, tip, true)
 }
 
 pub fn pill_tab(ui: &mut Ui, label: &str, selected: bool) -> Response {
@@ -1975,7 +1985,7 @@ mod tests {
 
     #[test]
     fn spectrum_popup_style_matches_main_menu_and_preserves_studio() {
-        for kind in [crate::theme::ThemeKind::Pro, crate::theme::ThemeKind::ProMedium, crate::theme::ThemeKind::Studio, crate::theme::ThemeKind::StudioLight] {
+        for kind in crate::theme::ThemeKind::ALL {
             let ctx = egui::Context::default();
             crate::theme::apply(&ctx, kind);
             let tokens = crate::theme::Tokens::for_kind(kind);
@@ -1984,7 +1994,14 @@ mod tests {
                 let original_hover = ui.visuals().widgets.hovered.fg_stroke;
                 super::style_spectrum_popup_menu(ui);
                 assert_eq!(ui.spacing().item_spacing.y, 0.0, "{kind:?}: menu rows meet so the gap is selectable");
-                if tokens.pro {
+                if matches!(kind, crate::theme::ThemeKind::ArkuiLight | crate::theme::ThemeKind::ArkuiProLight) {
+                    for widget in [ui.visuals().widgets.hovered, ui.visuals().widgets.open, ui.visuals().widgets.active] {
+                        assert_eq!(widget.bg_fill, egui::Color32::from_rgb(225, 237, 255));
+                        assert_eq!(widget.weak_bg_fill, widget.bg_fill);
+                        assert_eq!(widget.fg_stroke.color, tokens.text);
+                    }
+                    assert_eq!(ui.visuals().override_text_color, Some(tokens.text));
+                } else if tokens.pro {
                     assert_eq!(ui.spacing().button_padding, egui::vec2(10.0, 4.0));
                     assert_eq!(ui.visuals().widgets.hovered.bg_fill, tokens.accent);
                     assert_eq!(ui.visuals().widgets.hovered.fg_stroke.color, egui::Color32::WHITE);
@@ -2651,10 +2668,10 @@ pub fn color_swatch_button(ui: &mut Ui, color: Color32, label: &str) -> Response
     checker_rounded(ui.painter(), rect, 4.0, t.radius_sm);
     ui.painter().rect_filled(rect.shrink(1.0), t.radius_sm, color);
     ui.painter().rect_stroke(rect, t.radius_sm, Stroke::new(1.0, t.field_border), StrokeKind::Inside);
-    response.on_hover_text(label)
+    crate::tooltips::label(response, label, true)
 }
 fn color_edit_button(ui: &mut Ui, color: &mut Color32, alpha: egui::color_picker::Alpha) -> Response {
-    let mut response = color_swatch(ui, *color);
+    let mut response = crate::tooltips::label(color_swatch(ui, *color), tl!("Open the Color Picker"), true);
     let id = response.id.with("screen-color");
     if let Some(rgb) = crate::screen_picker::take(ui.ctx(), id) {
         *color = sampled_color(rgb, *color, alpha);
@@ -2693,7 +2710,8 @@ pub fn color_edit_button_srgb(ui: &mut Ui, rgb: &mut [u8; 3]) -> Response {
 }
 /// Like egui's float RGB widget, this entry point stores linear RGB (not encoded hex values).
 pub fn color_edit_button_rgb(ui: &mut Ui, rgb: &mut [f32; 3]) -> Response {
-    let mut response = color_swatch(ui, Color32::from(egui::Rgba::from_rgb(rgb[0], rgb[1], rgb[2])));
+    let mut response =
+        crate::tooltips::label(color_swatch(ui, Color32::from(egui::Rgba::from_rgb(rgb[0], rgb[1], rgb[2]))), tl!("Open the Color Picker"), true);
     let id = response.id.with("screen-color");
     let to_linear = |color: [f32; 3]| color.map(egui::ecolor::linear_from_gamma);
     if let Some(color) = crate::screen_picker::take(ui.ctx(), id) {

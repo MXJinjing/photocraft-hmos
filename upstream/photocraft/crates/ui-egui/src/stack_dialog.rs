@@ -99,7 +99,18 @@ fn browse(app: &mut PhotocraftApp, id: u64, folder: bool) {
     } else {
         let initial_dir = crate::file_dialog::last_used_dir(&app.ui.recent_files);
         app.ask_file(FileDialogRequest::Open { multiple: true, initial_dir, extensions: None }, move |app, answer| {
-            let FileDialogAnswer::Paths(paths) = answer else { return Err("Load Files into Stack reads files from disk".into()) };
+            let paths = match (answer, app.services.sandbox_dir.as_deref().map(std::path::PathBuf::from)) {
+                (FileDialogAnswer::Paths(paths), _) => paths,
+                // Sandboxed hosts (HarmonyOS) answer with contents: stack copies in the sandbox.
+                (FileDialogAnswer::Contents(name, bytes), Some(root)) => {
+                    vec![crate::path_pick::stage_bytes(&root, crate::path_pick::Stage::Imports, &name, &bytes)?]
+                }
+                (FileDialogAnswer::ContentsMany(files), Some(root)) => files
+                    .iter()
+                    .map(|(name, bytes)| crate::path_pick::stage_bytes(&root, crate::path_pick::Stage::Imports, name, bytes))
+                    .collect::<Result<_, _>>()?,
+                _ => return Err("Load Files into Stack reads files from disk".into()),
+            };
             let d = app.ui.dialog_mut(id).ok_or("the dialog was closed")?;
             add(&mut d.fields, paths);
             Ok(Value::Null)

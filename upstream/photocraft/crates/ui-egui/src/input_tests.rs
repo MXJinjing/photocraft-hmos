@@ -521,7 +521,7 @@ fn open_stylus_menu(h: &mut Harness<'static, PhotocraftApp>, tool: crate::state:
     h.state_mut().ui.tool = tool;
     h.state_mut().session.edit_prefs(|p| p.tools.block_finger_input = true);
     h.state_mut().session.edit_prefs(|p| p.tools.stylus_long_press = crate::chrome_ui::StylusLongPress::ContextMenu);
-    h.state_mut().stylus.feed.push_gesture(crate::stylus::PenGesture::LongPress, 1_000.0);
+    h.state_mut().stylus.feed.push_gesture(crate::stylus::PenGesture::Squeeze, 1_000.0);
     let ctx = h.ctx.clone();
     crate::chrome_ui::drain_stylus_gestures(h.state_mut(), &ctx);
     h.run_steps(3);
@@ -661,6 +661,40 @@ fn blocking_finger_input_pans_with_one_finger_and_does_not_paint() {
     assert_eq!(h.state().session.active().unwrap().revision, rev0, "a blocked finger must not paint");
     let c1 = h.state().ui.views[0].center;
     assert!((c1[0] - c0[0]).abs() > 1.0 || (c1[1] - c0[1]).abs() > 1.0, "one finger pans: {c0:?} -> {c1:?}");
+}
+
+#[test]
+fn blocking_finger_input_suppresses_native_tap_within_one_frame() {
+    for blocked in [false, true] {
+        let mut h = harness();
+        h.state_mut().ui.tool = crate::state::Tool::Brush;
+        h.state_mut().session.edit_prefs(|p| p.tools.block_finger_input = blocked);
+        h.state_mut().stylus.feed.report(crate::stylus::PointerSource::Touch, None);
+        let p = h.state().last_canvas_rect.center();
+        let revision = h.state().session.active().unwrap().revision;
+        let contact = |phase| egui::Event::Touch {
+            device_id: egui::TouchDeviceId(0),
+            id: egui::TouchId(1),
+            phase,
+            pos: p,
+            force: None,
+        };
+        h.input_mut().events.extend([
+            contact(egui::TouchPhase::Start),
+            egui::Event::PointerMoved(p),
+            pointer_button(p, true),
+            contact(egui::TouchPhase::End),
+            pointer_button(p, false),
+            egui::Event::PointerGone,
+        ]);
+        h.run_steps(1);
+        let after = h.state().session.active().unwrap().revision;
+        if blocked {
+            assert_eq!(after, revision, "a blocked same-frame touch must not paint");
+        } else {
+            assert!(after > revision, "an allowed same-frame touch must still paint");
+        }
+    }
 }
 
 #[test]
