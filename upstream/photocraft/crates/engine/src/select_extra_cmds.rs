@@ -159,6 +159,8 @@ fn affine_params(cmd: &str, p: &Value, r: [f64; 4]) -> Result<Homography> {
     Ok(t(px + dx, py + dy).mul(&rot).mul(&skew).mul(&scale).mul(&t(-px, -py)))
 }
 
+/// Select › Transform Selection: warps the selection outline by the params' matrix, quad or
+/// scale/rotate/move, refused when the result would not fit the transform budget.
 fn transform_selection(s: &mut Session, p: &Value) -> Result<Value> {
     const CMD: &str = "select.transformSelection";
     let d = s.active().ok_or(EngineError::NoDocument)?;
@@ -206,7 +208,7 @@ fn transform_selection(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let selected = s.edit("Transform Selection", |doc, _| {
         if let Some(sel) = &doc.selection {
-            crate::transform_cmds::check_budget(sel.content_bounds(), &h, "selection")?;
+            crate::transform_cmds::check_budget(sel.content_bounds(), &h, "selection", sel.format())?;
             doc.selection = Some(crate::transform_cmds::warp_gray(sel, &h, interp)?).filter(|s| !s.content_bounds().is_empty());
         }
         Ok(doc.selection.is_some())

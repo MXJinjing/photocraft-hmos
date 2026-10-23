@@ -352,6 +352,19 @@ mod tests {
     }
 
     #[test]
+    fn document_activation_reply_survives_engine_rpc() {
+        let h = session();
+        let mut g = h.lock().unwrap();
+        for _ in 0..2 {
+            g.handle("engine.execute", json!({"command": "file.new", "params": {"width": 4, "height": 4}})).unwrap();
+        }
+        let reply = g.handle("engine.execute", json!({"command": "document.activate", "params": {"offset": -1}})).unwrap();
+        assert_eq!(reply, json!({"document": 0}));
+        let reply = g.handle("engine.execute", json!({"command": "document.activate", "params": {"document": 1}})).unwrap();
+        assert_eq!(reply, json!({"document": 1}));
+    }
+
+    #[test]
     fn execute_reports_invalid_filter_parameters_without_changing_history() {
         let h = session();
         assert_eq!(respond(&h, r#"{"method":"doc.new","params":{"width":8,"height":8}}"#)["ok"], true);

@@ -273,6 +273,19 @@ pub(crate) fn check_resample_budget(cmd: &str, doc: &Document, nw: u32, nh: u32,
     Err(bad(cmd, format!("{nw} x {nh} px is {mp} megapixels; resampling at this bit depth is limited to {max_mp} megapixels. Choose a smaller size{hint}")))
 }
 
+/// Like [`check_resample_budget`] for a command that, besides resampling the document to
+/// `nw` x `nh` px, holds `work_bytes_per_px` more bytes per pixel of full-canvas working buffers
+/// (a composite, a mask, an output layer) at once.
+pub(crate) fn check_working_budget(cmd: &str, doc: &Document, nw: u32, nh: u32, work_bytes_per_px: u64, hint: &str) -> Result<()> {
+    let bpp = (doc.pixel_format().bytes_per_pixel().max(1) as u64).saturating_add(work_bytes_per_px);
+    let px = u64::from(nw).saturating_mul(u64::from(nh));
+    if px.saturating_mul(bpp) <= MAX_RESAMPLE_BYTES {
+        return Ok(());
+    }
+    let max_mp = MAX_RESAMPLE_BYTES / bpp / 1_000_000;
+    Err(bad(cmd, format!("{nw} x {nh} px is {} megapixels; this conversion is limited to {max_mp} megapixels. Choose a smaller size{hint}", px / 1_000_000)))
+}
+
 /// Resamples the whole document (pixels, masks, channels, selection, effects, vectors, guides) to
 /// `nw` x `nh` px with `filter`: the body of Image Size, shared by the Crop tool's W x H x Resolution
 /// mode. Callers check [`check_resample_budget`] first.
@@ -288,7 +301,16 @@ pub(crate) fn resample_doc(doc: &mut Document, nw: u32, nh: u32, filter: Resampl
         *surf = resize_surface_in_canvas(surf, sx, sy, if is_mask { Resample::Bilinear } else { filter }, canvas);
     });
     let k = ((sx + sy) / 2.0) as f32;
-    for_each_layer(&mut doc.layers, &mut |l| scale_effects(&mut l.effects, k));
+    for_each_layer(&mut doc.layers, &mut |l| {
+        scale_effects(&mut l.effects, k);
+        // Canvas resampling scales the whole appearance, including shape strokes (#8341).
+        // Dash lengths and offsets are already expressed in multiples of this width.
+        if let LayerContent::Shape(sh) = &mut l.content
+            && let Some(stroke) = &mut sh.stroke
+        {
+            stroke.width *= k;
+        }
+    });
     for ch in doc.channels.iter_mut().chain(doc.quick_mask.as_mut()) {
         ch.surface = resize_surface_in_canvas(&ch.surface, sx, sy, Resample::Bilinear, canvas);
     }
@@ -829,28 +851,33 @@ fn convert_depth(s: &mut Session, depth: SampleType) -> Result<Value> {
         return Ok(Value::Null);
     }
     s.edit("Bit Depth", |doc, _| {
-        // 32-bit documents hold linear light (as Photoshop's do: grey 128 becomes 0.2159, measured
-        // in Photoshop 27.11), so the colour samples cross the document's tone curve when the
-        // depth crosses 32 bits: decoded after widening, encoded before narrowing (so no linear
-        // value is quantised to 8 or 16 bits). Masks, alpha and channels are not colour.
-        let crosses = (current == SampleType::F32) != (depth == SampleType::F32) && matches!(doc.mode, ColorMode::Rgb | ColorMode::Grayscale);
-        let to_linear = depth == SampleType::F32;
-        let transfer = photocraft_compose::adjust::Transfer::for_document(doc.mode, if to_linear { current } else { depth });
-        if crosses && !to_linear {
-            for_each_surface(&mut doc.layers, false, &mut |surf, _| surf.map_color(|v| transfer.encode(v).clamp(0.0, 1.0)));
-        }
-        convert_layers_depth(&mut doc.layers, depth);
-        if crosses && to_linear {
-            for_each_surface(&mut doc.layers, false, &mut |surf, _| surf.map_color(|v| transfer.decode(v)));
-        }
-        for ch in doc.channels.iter_mut().chain(doc.quick_mask.as_mut()) {
-            let f = ch.surface.format().with_sample(depth);
-            ch.surface = ch.surface.convert(f);
-        }
-        doc.depth = depth;
+        change_depth(doc, depth);
         Ok(())
     })?;
     Ok(Value::Null)
+}
+
+pub(crate) fn change_depth(doc: &mut Document, depth: SampleType) {
+    let current = doc.depth;
+    // 32-bit documents hold linear light (as Photoshop's do: grey 128 becomes 0.2159, measured
+    // in Photoshop 27.11), so the colour samples cross the document's tone curve when the
+    // depth crosses 32 bits: decoded after widening, encoded before narrowing (so no linear
+    // value is quantised to 8 or 16 bits). Masks, alpha and channels are not colour.
+    let crosses = (current == SampleType::F32) != (depth == SampleType::F32) && matches!(doc.mode, ColorMode::Rgb | ColorMode::Grayscale);
+    let to_linear = depth == SampleType::F32;
+    let transfer = photocraft_compose::adjust::Transfer::for_document(doc.mode, if to_linear { current } else { depth });
+    if crosses && !to_linear {
+        for_each_surface(&mut doc.layers, false, &mut |surf, _| surf.map_color(|v| transfer.encode(v).clamp(0.0, 1.0)));
+    }
+    convert_layers_depth(&mut doc.layers, depth);
+    if crosses && to_linear {
+        for_each_surface(&mut doc.layers, false, &mut |surf, _| surf.map_color(|v| transfer.decode(v)));
+    }
+    for ch in doc.channels.iter_mut().chain(doc.quick_mask.as_mut()) {
+        let f = ch.surface.format().with_sample(depth);
+        ch.surface = ch.surface.convert(f);
+    }
+    doc.depth = depth;
 }
 
 /// Image → Duplicate.

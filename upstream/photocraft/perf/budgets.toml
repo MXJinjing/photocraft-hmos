@@ -64,7 +64,7 @@ note = "196 MP: open and full refresh"
 name = "large_file_bench"
 package = "photocraft-ui-egui"
 args = ["--reps", "3"]
-note = "generated 2 GB PSD and 4.4 GB PSB (6.4 GB cached in <target>/fixtures): read + decode + open; needs ~16 GB of memory"
+note = "generated 2 GB PSD and 4.4 GB PSB (6.4 GB cached in <target>/fixtures): read + decode + open; needs ~30 GB of memory (the PSB)"
 
 # Hook: the layout-document bench lands with perf/layout-documents (#125/#128). It runs (and its
 # rows are kept in results.json) as soon as the example exists; add scenarios for its rows then.

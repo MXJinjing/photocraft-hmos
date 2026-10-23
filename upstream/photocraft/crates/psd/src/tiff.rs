@@ -859,15 +859,7 @@ pub mod transcode {
                 // Type: version, transform, text version + descriptor, warp version + descriptor,
                 // and the bounds as four 32-bit values (the specification says doubles; Photoshop
                 // writes 16 bytes).
-                b"TySh" => {
-                    self.u16()?;
-                    self.f64s(6)?;
-                    self.u16()?;
-                    self.versioned_descriptor()?;
-                    self.u16()?;
-                    self.versioned_descriptor()?;
-                    self.i32s(4)?;
-                }
+                b"TySh" => self.type_layer()?,
                 b"vmsk" | b"vsms" => {
                     self.u32()?;
                     self.u32()?;
@@ -1164,6 +1156,31 @@ pub mod transcode {
         }
 
         // ---- descriptors ----
+
+        /// Photoshop's Intel-order TIFF type blocks can use PSD byte order for the
+        /// text descriptor, then container order again for warp and bounds (#4758).
+        fn type_layer(&mut self) -> Result<()> {
+            self.u16()?;
+            self.f64s(6)?;
+            self.type_descriptor(50)?;
+            self.type_descriptor(1)?;
+            self.i32s(4)
+        }
+
+        fn type_descriptor(&mut self, version: u16) -> Result<()> {
+            let [hi, lo] = version.to_be_bytes();
+            let from = if self.from.is_little() && self.r.peek_rest().starts_with(&[hi, lo, 0, 0, 0, 16]) { ByteOrder::Big } else { self.from };
+            let data = self.r.peek_rest();
+            let mut descriptor = Tx::new(data, self.version, from, self.to);
+            descriptor.depth = self.depth;
+            descriptor.u16()?;
+            descriptor.versioned_descriptor()?;
+            let used = data.len() - descriptor.remaining();
+            self.r.bytes(used)?;
+            self.warnings.append(&mut descriptor.warnings);
+            self.out.extend_from_slice(&descriptor.out);
+            Ok(())
+        }
 
         fn versioned_descriptor(&mut self) -> Result<()> {
             self.u32()?;
@@ -1836,6 +1853,39 @@ mod tests {
         let (_, little) = block_rt(*b"TySh", data);
         assert!(little[48..].starts_with(&[1, 0]));
         assert_eq!(&little[50..58], &1.0f64.to_le_bytes());
+    }
+
+    #[test]
+    fn photoshop_type_block_switches_to_big_endian_after_its_matrix() {
+        let mut data = Vec::new();
+        data.put_u16(1);
+        for v in [1.8054202887117468, 0.0, -0.143, 1.8063853899082987, 247.25, 2864.5] {
+            data.put_f64(v);
+        }
+        data.put_u16(50);
+        let text = Descriptor::new("TxLr").with("Txt ", Value::Text(UnicodeString::new_nul("Synthetic headline")));
+        data.extend(VersionedDescriptor::new(text).to_bytes());
+        data.put_u16(1);
+        data.extend(VersionedDescriptor::new(Descriptor::new("warp")).to_bytes());
+        for v in [0, 0, 120, 30] {
+            data.put_i32(v);
+        }
+        let (_, mut little) = block_rt(*b"TySh", data.clone());
+        // Photoshop uses big-endian text but returns to little-endian for warp/bounds.
+        let (_, used) = VersionedDescriptor::parse_prefix(&data[52..]).unwrap();
+        little[98..100 + used].copy_from_slice(&data[50..52 + used]);
+        let (back, warnings) = ImageSourceData::from_bytes(&little).unwrap();
+        assert!(warnings.is_empty(), "{warnings:?}");
+        assert!(!back.global_blocks[0].is_foreign_order());
+        assert_eq!(back.global_blocks[0].data, data);
+        // The normalized model remains writable in either order.
+        for order in [ByteOrder::Big, ByteOrder::Little] {
+            let (bytes, warnings) = back.to_bytes(order).unwrap();
+            assert!(warnings.is_empty());
+            let (again, warnings) = ImageSourceData::from_bytes(&bytes).unwrap();
+            assert!(warnings.is_empty());
+            assert_eq!(again.global_blocks[0].data, data);
+        }
     }
 
     #[test]

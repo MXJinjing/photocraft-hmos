@@ -213,6 +213,7 @@ fn parse_stroke(d: &Descriptor) -> StrokeFx {
             _ => StrokePosition::Outside,
         },
         paint,
+        overprint: bool_of(d, "overprint"),
     }
 }
 
@@ -239,6 +240,7 @@ fn parse_bevel(d: &Descriptor) -> Bevel {
         altitude: f(d, "Lald", 30.0),
         use_global_light: !matches!(d.get("uglg"), Some(Value::Boolean(false))),
         gloss_contour: contour(d, "TrnS"),
+        gloss_anti_alias: bool_of(d, "antialiasGloss"),
         highlight: FxCommon { enabled: true, blend: blend_of(d, "hglM", BlendMode::Screen), opacity: pct(d, "hglO", 0.75) },
         highlight_color: get_desc(d, "hglC").and_then(color_from_desc).unwrap_or(Color::WHITE),
         shadow: FxCommon { enabled: true, blend: blend_of(d, "sdwM", BlendMode::Multiply), opacity: pct(d, "sdwO", 0.75) },
@@ -404,7 +406,8 @@ fn write_one(e: &Effect) -> (&'static str, Descriptor) {
             };
             let mut d = with_common(Descriptor::new("FrFX"), &s.common)
                 .with("Styl", Value::Enumerated { type_id: Id::new("FStl"), value: Id::new(styl) })
-                .with("Sz  ", unit(b"#Pxl", s.size));
+                .with("Sz  ", unit(b"#Pxl", s.size))
+                .with("overprint", Value::Boolean(s.overprint));
             d = match &s.paint {
                 FxPaint::Color(c) => {
                     d.with("PntT", Value::Enumerated { type_id: Id::new("FrFl"), value: Id::new("SClr") }).with("Clr ", Value::Descriptor(color_to_desc(c)))
@@ -482,6 +485,7 @@ fn write_one(e: &Effect) -> (&'static str, Descriptor) {
                 .with("blur", unit(b"#Pxl", b.size))
                 .with("bvlD", Value::Enumerated { type_id: Id::new("BESs"), value: Id::new(if b.up { "In  " } else { "Out " }) })
                 .with("TrnS", contour_value(&b.gloss_contour))
+                .with("antialiasGloss", Value::Boolean(b.gloss_anti_alias))
                 .with("Sftn", unit(b"#Pxl", b.soften));
             let d = match &b.contour {
                 Some(c) => d
@@ -680,12 +684,14 @@ mod tests {
                 size: 3.0,
                 position: StrokePosition::Inside,
                 paint: FxPaint::Color(Color::rgb(0.0, 1.0, 0.0)),
+                overprint: false,
             }),
             Effect::Stroke(StrokeFx {
                 common: FxCommon::new(BlendMode::Multiply, 0.5),
                 size: 6.0,
                 position: StrokePosition::Center,
                 paint: FxPaint::Gradient(g.clone()),
+                overprint: true,
             }),
             Effect::ColorOverlay { common: FxCommon::new(BlendMode::Overlay, 0.5), color: Color::rgb(0.0, 0.0, 1.0) },
             Effect::GradientOverlay { common: FxCommon::new(BlendMode::Normal, 1.0), gradient: g, dither: true },
@@ -720,6 +726,7 @@ mod tests {
                 altitude: 40.0,
                 use_global_light: false,
                 gloss_contour: Contour::Linear,
+                gloss_anti_alias: true,
                 highlight: FxCommon::new(BlendMode::Screen, 0.75),
                 highlight_color: Color::WHITE,
                 shadow: FxCommon::new(BlendMode::Multiply, 0.6),
@@ -736,6 +743,16 @@ mod tests {
         assert_eq!(write_lfx2(true, a), write_lfx2(true, b));
     }
 
+    /// `approx` compares re-serialized bytes, so a field the writer drops looks equal on both
+    /// sides: read the Gloss Contour's Anti-aliased back directly.
+    #[test]
+    fn bevel_gloss_anti_alias_is_written() {
+        let fx: Vec<Effect> = sample_effects().into_iter().filter(|e| matches!(e, Effect::BevelEmboss(_))).collect();
+        assert!(matches!(fx.as_slice(), [Effect::BevelEmboss(b)] if b.gloss_anti_alias));
+        let (_, back) = parse_lfx2(&write_lfx2(false, &fx)).unwrap();
+        assert!(matches!(back.as_slice(), [Effect::BevelEmboss(b)] if b.gloss_anti_alias), "{back:?}");
+    }
+
     #[test]
     fn lfx2_roundtrip_all_kinds() {
         let fx = sample_effects();
@@ -746,6 +763,29 @@ mod tests {
         // Kind order is canonical: shadows first ... strokes last.
         assert!(matches!(back[0], Effect::DropShadow(_)));
         assert!(matches!(back.last().unwrap(), Effect::Stroke(_)));
+    }
+
+    #[test]
+    fn stroke_overprint_is_read_and_written() {
+        for overprint in [false, true] {
+            let fx = [Effect::Stroke(StrokeFx {
+                common: FxCommon::new(BlendMode::Normal, 1.0),
+                size: 3.0,
+                position: StrokePosition::Outside,
+                paint: FxPaint::Color(Color::BLACK),
+                overprint,
+            })];
+            let (_, back) = parse_lfx2(&write_lfx2(false, &fx)).unwrap();
+            let [Effect::Stroke(s)] = back.as_slice() else { panic!("{back:?}") };
+            assert_eq!(s.overprint, overprint);
+        }
+        // A stroke without the key (other writers) has Overprint off.
+        let d = Descriptor::new("null").with("FrFX", Value::Descriptor(Descriptor::new("FrFX").with("enab", Value::Boolean(true))));
+        let mut data = 0u32.to_be_bytes().to_vec();
+        data.extend(VersionedDescriptor::new(d).to_bytes());
+        let (_, back) = parse_lfx2(&data).unwrap();
+        let [Effect::Stroke(s)] = back.as_slice() else { panic!("{back:?}") };
+        assert!(!s.overprint);
     }
 
     #[test]

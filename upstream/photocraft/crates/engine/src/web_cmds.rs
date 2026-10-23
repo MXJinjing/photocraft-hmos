@@ -19,7 +19,7 @@ use photocraft_geom::Rect;
 use serde_json::{Value, json};
 
 use crate::commands::CommandSpec;
-use crate::file_cmds::{join, native_doc, stem, write_file};
+use crate::file_cmds::{is_windows_device_name, join, native_doc, portable_device_name, stem, write_file};
 use crate::{EngineError, Result, Session};
 
 fn bad(cmd: &str, msg: impl Into<String>) -> EngineError {
@@ -732,7 +732,7 @@ fn slice_file(name: &str) -> String {
 /// Generated filenames should remain usable on Windows even when a document or slice is named
 /// after a reserved device. Caller-supplied path components are still rejected below.
 fn portable_generated_stem(stem: String) -> String {
-    if is_windows_device_asset_name(&stem) { format!("{stem}_") } else { stem }
+    portable_device_name(stem)
 }
 
 fn html_escape(s: &str) -> String {
@@ -1086,8 +1086,25 @@ fn quick_export(s: &mut Session, p: &Value) -> Result<Value> {
             target
         }
     };
+    // The name typed in the save dialog wins over Export Preferences' format: Quick Export as PNG
+    // renamed to `photo.jpeg` must write a JPEG, not PNG bytes upload checks refuse (#8519).
+    let fmt = match crate::file_cmds::extension(&path).as_deref() {
+        None => fmt,
+        Some("jpg" | "jpeg") => "jpg".into(),
+        Some(e @ ("png" | "gif" | "webp" | "exr")) => e.into(),
+        Some(e) => return Err(bad(cmd, format!("Quick Export writes PNG, JPEG, GIF, WebP or EXR, not .{e}; use Export As"))),
+    };
     let d = s.active().ok_or(EngineError::NoDocument)?;
     let doc = d.doc.clone();
+    if fmt == "exr" {
+        // EXR keeps floating-point scene values. The ordinary exporter converts to linear
+        // light; the web/sRGB pipeline would instead clamp HDR and negative values.
+        let opts = photocraft_io::ExportOptions { xmp: photocraft_io::XmpEmbed::None, ..Default::default() };
+        let out = photocraft_io::export(&doc, "exr", &opts).map_err(other)?;
+        write_file(&path, &out.bytes)?;
+        crate::automate_cmds::fire_event(s, "export");
+        return Ok(json!({"path": path, "format": fmt, "bytes": out.bytes.len(), "warnings": out.warnings}));
+    }
     let metadata = serde_json::to_value(prefs.metadata).ok().and_then(|v| v.as_str().map(str::to_string)).unwrap_or_default();
     let mut o = serde_json::Map::new();
     o.insert(
@@ -1296,13 +1313,6 @@ fn asset_settings(spec: &AssetSpec) -> WebSettings {
     }
 }
 
-fn is_windows_device_asset_name(component: &str) -> bool {
-    let stem = component.split('.').next().unwrap_or(component).trim_end_matches(' ').to_ascii_uppercase();
-    matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL" | "CLOCK$" | "CONIN$" | "CONOUT$")
-        || stem.strip_prefix("COM").is_some_and(|n| matches!(n, "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9"))
-        || stem.strip_prefix("LPT").is_some_and(|n| matches!(n, "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9"))
-}
-
 /// Layer names and `default` folders are document data, so reject unsafe output components.
 fn asset_path_components(relative: &str) -> Result<Vec<&str>> {
     // Split both separator styles even on Unix, where a backslash would otherwise be a legal
@@ -1316,7 +1326,7 @@ fn asset_path_components(relative: &str) -> Result<Vec<&str>> {
             || part.ends_with(' ')
             || part.contains(':')
             || part.contains('\0')
-            || is_windows_device_asset_name(part)
+            || is_windows_device_name(part)
         {
             return Err(other(format!("asset path {relative:?} has an unsafe component {part:?}")));
         }
@@ -1537,7 +1547,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Export Preferences…",
             &["File", "Export"],
             None,
-            r##"{"quickExportFormat":"png|jpg|gif|webp"?,"quickExportLocation":"ask|sameFolder"?,"jpegQuality":1..100?,"webpLossless":bool?,"webpQuality":1..100?,"metadata":"none|copyright|all"?,"convertToSrgb":bool?} → {values}"##,
+            r##"{"quickExportFormat":"png|jpg|gif|webp|exr"?,"quickExportLocation":"ask|sameFolder"?,"jpegQuality":1..100?,"webpLossless":bool?,"webpQuality":1..100?,"metadata":"none|copyright|all"?,"convertToSrgb":bool?} → {values}"##,
             |_| Ok(()),
             export_preferences
         ),

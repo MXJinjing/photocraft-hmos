@@ -99,7 +99,10 @@ pub fn normalize_length(typed: &str, previous: &str) -> String {
         return String::new();
     }
     match parse_length(typed, field_unit(previous)) {
-        Some((v, u)) => format_length(v, u),
+        Some((v, u)) => {
+            let text = format_length(v, u);
+            if parse_length(&text, u).is_some() { text } else { previous.to_string() }
+        }
         None => previous.to_string(),
     }
 }
@@ -314,6 +317,15 @@ pub fn fields(o: &mut ToolOptions, ui: &mut egui::Ui) {
 mod tests {
     use super::*;
     use photocraft_doc::{Color, ColorMode, Document, SampleType, Size};
+
+    #[test]
+    fn normalize_length_keeps_previous_when_rounding_gives_zero() {
+        assert_eq!(normalize_length("0.001", "100 px"), "100 px");
+        for typed in ["0.004 in", "0.0001 cm"] {
+            let out = normalize_length(typed, "100 px");
+            assert!(parse_length(&out, Unit::Pixels).is_some(), "{typed} -> {out}");
+        }
+    }
 
     fn app(depth: SampleType) -> PhotocraftApp {
         let mut doc = Document::with_background("crop", Size::new(400, 300), ColorMode::Rgb, depth, Color::WHITE);

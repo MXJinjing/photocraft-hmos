@@ -330,6 +330,22 @@ pub(crate) fn retarget_gradient_map(data: &mut [u8], target: &Adjustment, channe
     }
 }
 
+/// `true` for a `grdm` block exactly as older PhotoCraft builds wrote it: [`write_gradient_map`]'s
+/// output without the two padding bytes, which makes Photoshop refuse the file (#8070). Blocks
+/// from other writers, whatever their length, are not matched.
+pub(crate) fn is_unpadded_photocraft_gradient_map(data: &[u8]) -> bool {
+    if data.len().is_multiple_of(4) {
+        return false;
+    }
+    match parse_gradient_map(data) {
+        Some(Adjustment::GradientMap { stops, reverse, dither }) => {
+            let padded = write_gradient_map(&stops, reverse, dither);
+            padded.len() == data.len() + 2 && padded.starts_with(data)
+        }
+        _ => false,
+    }
+}
+
 /// `grdm` version 1 for [`Adjustment::GradientMap`] (Classic interpolation, Smoothness 0, so
 /// the stops are reproduced exactly).
 fn write_gradient_map(stops: &[(f32, [f32; 3])], reverse: bool, dither: bool) -> Vec<u8> {
@@ -372,6 +388,8 @@ fn write_gradient_map(stops: &[(f32, [f32; 3])], reverse: bool, dither: bool) ->
         put16(&mut v, x);
     }
     put16(&mut v, 0);
+    // Photoshop includes the two-byte pad in the `grdm` length when the block is 2 mod 4 (#8070).
+    v.resize(v.len().next_multiple_of(4), 0);
     v
 }
 
@@ -835,7 +853,8 @@ mod tests {
         // Smoothness 100 % (4096) bends a three-stop ramp.
         let three = vec![(0.0, [0.0; 3]), (0.25, [1.0, 0.0, 0.0]), (0.75, [0.0, 0.0, 1.0]), (1.0, [1.0; 3])];
         let mut smooth = write_gradient_map(&three, false, false);
-        let at = smooth.len() - 2 - 16 - 2 - 4 - 2 - 2 - 4 - 2 - 2 - 2;
+        // v1 header/name/count + colour stops + transparency stops + expansion count.
+        let at = 48 + three.len() * 20;
         smooth[at..at + 2].copy_from_slice(&4096u16.to_be_bytes());
         let (a, b) = (at_t(&write_gradient_map(&three, false, false), 0.4), at_t(&smooth, 0.4));
         assert!((0..3).any(|k| (a[k] - b[k]).abs() > 1e-3), "{a:?} {b:?}");

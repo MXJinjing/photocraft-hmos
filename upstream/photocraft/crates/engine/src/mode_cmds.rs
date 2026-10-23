@@ -396,6 +396,10 @@ fn color_table(s: &mut Session, p: &Value) -> Result<Value> {
 /// Bitmap's Output resolution range (ppi): what a new document may have.
 const BITMAP_RESOLUTION: std::ops::RangeInclusive<f64> = 1.0..=crate::document_preset_cmds::MAX_RESOLUTION;
 
+/// Bytes per pixel of the Bitmap conversion's full-canvas working buffers at their peak (see
+/// `bitmap`), on top of the document itself.
+const BITMAP_WORK_BYTES_PER_PX: u64 = 40;
+
 /// Bitmap's Custom Pattern: a pattern's threshold map (see
 /// [`quantize::custom_pattern_thresholds`]) with its width and height.
 fn custom_pattern_map(s: &Session, cmd: &str, p: &Value) -> Result<(Vec<f32>, usize, usize)> {
@@ -427,11 +431,23 @@ fn bitmap(s: &mut Session, p: &Value) -> Result<Value> {
     let (nw, nh) = if (output - input).abs() < 1e-6 {
         (ow, oh)
     } else {
-        let side = |v: u32| (f64::from(v) * output / input).round().clamp(1.0, 300_000.0) as u32;
-        (side(ow), side(oh))
+        // Keeping the print size can ask for more pixels than a document may have: refuse that
+        // rather than clamp, which would change the print size.
+        let max = crate::document_preset_cmds::MAX_DIMENSION;
+        let side = |v: u32| {
+            let n = (f64::from(v) * output / input).round().max(1.0);
+            if n > f64::from(max) {
+                return Err(bad(CMD, format!("{n} px across at {output} pixels/inch is more than {max} px; choose a lower Output resolution")));
+            }
+            Ok(n as u32)
+        };
+        (side(ow)?, side(oh)?)
     };
     if (nw, nh) != (ow, oh) {
-        crate::image_cmds::check_resample_budget(CMD, &d.doc, nw, nh, ", or a lower Output resolution")?;
+        // Besides the resampled document, the conversion holds an RGBA f32 composite (16 B/px; 32
+        // while it is laid over white), the gray plane (4) and the RGBA f32 output (16) at the new
+        // size: budget them all before allocating, not just the resample.
+        crate::image_cmds::check_working_budget(CMD, &d.doc, nw, nh, BITMAP_WORK_BYTES_PER_PX, ", or a lower Output resolution")?;
     }
     let dpi = output as f32;
     let mut custom = None;

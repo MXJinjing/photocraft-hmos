@@ -330,6 +330,19 @@ impl Ctx<'_> {
         // Blend If lives in the layer record's blending ranges.
         l.blend_if = crate::blocks::blend_if_from_ranges(&rec.blending_ranges);
         l.psd_id = rec.layer_id();
+        // The layer's XMP packet (`shmd` › `cust` › `layerXMP`) becomes the field; the rest of
+        // `shmd` stays in `psd_blocks`, where export puts the packet back.
+        if let Some(i) = l.psd_blocks.iter().position(|(k, _)| k == b"shmd")
+            && let Some((xmp, rest)) = photocraft_psd::metadata::take_layer_xmp(&l.psd_blocks[i].1)
+        {
+            l.xmp = Some(Arc::from(xmp));
+            match rest {
+                Some(data) => l.psd_blocks[i].1 = Arc::new(data),
+                None => {
+                    l.psd_blocks.remove(i);
+                }
+            }
+        }
         let name = l.name.clone();
         l.mask = self.record_mask(rec, &name);
     }
@@ -371,28 +384,35 @@ impl Ctx<'_> {
                 ));
             }
             LayerContent::Adjustment(adj)
-        } else if rec.block(b"TySh").is_some() {
-            // Typed model from TySh/EngineData (photocraft-text); Photoshop's pixels stay the cache.
-            let data = rec.block(b"TySh").map(|b| b.data.clone()).unwrap_or_default();
-            let mut t = photocraft_text::psd::text_layer_from_tysh(&data, self.dpi).unwrap_or_else(|| {
-                let (text, transform) = blocks::parse_tysh(&data).unwrap_or_default();
-                TextLayer { text, transform, ..Default::default() }
-            });
-            if let Some(txt2) = &self.txt2 {
-                photocraft_text::psd::apply_txt2(&mut t, &data, txt2);
-                photocraft_text::psd::apply_txt2_frame(&mut t, &data, txt2);
+        } else if let Some(block) = rec.block(b"TySh") {
+            // Only canonical type data with a safe transform can become a text layer. A retained
+            // foreign-order block must never be handed to the big-endian reader (#4758). Canonical
+            // data the typed reader can't decode stays a type layer as before (usually without
+            // text), so its TySh is saved back verbatim instead of being dropped with the raster.
+            let parsed = (!block.is_foreign_order())
+                .then(|| {
+                    photocraft_text::psd::text_layer_from_tysh(&block.data, self.dpi).or_else(|| {
+                        let (text, transform) = blocks::parse_tysh(&block.data).unwrap_or_default();
+                        photocraft_text::psd::transform_is_safe(&transform).then(|| TextLayer { text, transform, ..Default::default() })
+                    })
+                })
+                .flatten();
+            if let Some(mut t) = parsed {
+                if let Some(txt2) = &self.txt2 {
+                    photocraft_text::psd::apply_txt2(&mut t, &block.data, txt2);
+                    photocraft_text::psd::apply_txt2_frame(&mut t, &block.data, txt2);
+                }
+                // Photoshop's pixels stay until edited. Writers without type pixels are
+                // rendered by text_import::prepare instead of retaining an empty cache.
+                let cache = self.record_surface(rec, &name);
+                let drawn = !cache.content_bounds().is_empty() || photocraft_text::psd::engine_text_is_blank(&block.data);
+                t.cache = drawn.then_some(cache);
+                t.psd_raw = principal(b"TySh");
+                LayerContent::Text(t)
+            } else {
+                self.warn(format!("layer \"{name}\": type data in another byte order or with unsafe type geometry; kept as pixels"));
+                LayerContent::Raster(self.record_surface(rec, &name))
             }
-            // Photoshop's pixels are the cache only when the file has some: ag-psd, GIMP and
-            // other writers leave type layers without image data (Photoshop re-renders them on
-            // open), and an empty cache would show nothing until the layer is edited; the import
-            // renders such a layer from its model instead (`text_import::prepare`). When the
-            // engine text itself is blank, Photoshop draws nothing either: keep the empty pixels
-            // (corpus: text/path-wave-open.psd).
-            let cache = self.record_surface(rec, &name);
-            let drawn = !cache.content_bounds().is_empty() || photocraft_text::psd::engine_text_is_blank(&data);
-            t.cache = drawn.then_some(cache);
-            t.psd_raw = principal(b"TySh");
-            LayerContent::Text(t)
         } else if let Some(k) = smart_key {
             let Placement { id, transform, perspective, warp } = match rec.block(k) {
                 Some(b) if k == b"PlLd" => self.plld_placement(&b.data, &name),
@@ -1057,10 +1077,17 @@ pub(crate) fn psd_to_document_decoded(
             let transparent = u16_of(crate::palette_map::TRANSPARENCY_INDEX).filter(|&i| usize::from(i) < count).map(|i| i as u8);
             doc.color_table = Some(photocraft_doc::ColorTable { colors, transparent });
         } else if h.color_mode == PsdMode::Duotone && !file.color_mode_data.is_empty() {
-            // The duotone ink block is undocumented: keep it raw; the image shows as its gray plate.
-            doc.duotone =
-                Some(photocraft_doc::Duotone { inks: vec![photocraft_doc::DuotoneInk::new("Black", [0.0; 3])], psd_raw: Some(file.color_mode_data.clone()) });
-            cx.warn("duotone inks are not interpreted (shown as grayscale)");
+            // The inks (`duotone_map`); the block is also kept raw, written back while they stay
+            // unedited. An ink whose colour is unknown (a colour book without its Lab equivalent)
+            // would show black and darken the image: the grey plate is shown instead, as before.
+            let mut unknown = false;
+            let alternate = file.resource(crate::duotone_map::ALTERNATE_DUOTONE_COLORS).map(|r| r.data.as_slice());
+            let inks = crate::duotone_map::parse(&file.color_mode_data, alternate, &mut unknown).filter(|_| !unknown);
+            if inks.is_none() {
+                cx.warn("duotone inks are not interpreted (shown as grayscale)");
+            }
+            let inks = inks.unwrap_or_else(|| vec![photocraft_doc::DuotoneInk::new("Black", [0.0; 3])]);
+            doc.duotone = Some(photocraft_doc::Duotone { inks, psd_raw: Some(file.color_mode_data.clone()) });
         } else if !file.color_mode_data.is_empty() {
             cx.warn("color mode data is not preserved");
         }

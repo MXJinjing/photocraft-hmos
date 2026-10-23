@@ -29,8 +29,8 @@ const MAX_AIRBRUSH_DABS_PER_SEGMENT: usize = 512;
 
 /// The dab centre of the pixel-grid cell holding `v` (see [`PathWalker::pixel_grid`]): the
 /// pixel's centre for `offset` 0.5, the nearest pixel corner for 0. A value within rounding
-/// noise of a cell boundary counts as on it, so a line lands on the same pixels both ways.
-fn grid_cell(v: f64, offset: f64) -> f64 {
+/// noise of a cell boundary counts as on it, so snapping and line stepping agree.
+pub(crate) fn grid_cell(v: f64, offset: f64) -> f64 {
     let w = v - offset + 0.5;
     let w = if (w - w.round()).abs() < 1e-7 { w.round() } else { w };
     w.floor() + offset
@@ -724,8 +724,10 @@ impl DualBuilder {
 pub fn apply_pose(b: &BrushSettings, mut p: StrokePoint) -> StrokePoint {
     let pose = &b.pose;
     if pose.enabled {
-        if pose.override_tilt {
+        if pose.override_tilt_x {
             p.tilt_x = pose.tilt_x;
+        }
+        if pose.override_tilt_y {
             p.tilt_y = pose.tilt_y;
         }
         if pose.override_rotation {

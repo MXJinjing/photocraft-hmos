@@ -100,6 +100,8 @@ impl Headless {
                 files::open_bytes(name, &bytes)?
             }
         };
+        // Preferences › Raw Defaults › Resolution, as the app's File › Open applies it.
+        file_cmds::raw_defaults(&self.session, &o.warnings, &mut o.document);
         let path = match file_cmds::template_name(&self.session, requested) {
             Some(untitled) => {
                 o.document.name = untitled;
