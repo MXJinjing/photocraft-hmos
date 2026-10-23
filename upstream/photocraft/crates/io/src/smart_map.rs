@@ -46,7 +46,7 @@ mod hue_sat;
 #[path = "perspective_warp_map.rs"]
 mod perspective_warp;
 
-pub use displace::embedded_map as displace_embedded_map;
+pub use displace::{embed_map as displace_embed_map, embedded_map as displace_embedded_map, without_map as displace_without_map};
 
 /// Command id of a Photoshop smart filter PhotoCraft does not implement. Its params hold the
 /// filter's name, Photoshop filter id and descriptor (`psd`, hex); it renders as a pass-through.
@@ -150,7 +150,7 @@ const fn code(c: &[u8; 4]) -> i32 {
     i32::from_be_bytes(*c)
 }
 
-const KNOWN: [Known; 41] = [
+const KNOWN: [Known; 45] = [
     Known { class: "GsnB", filter_id: code(b"GsnB"), name: "Gaussian Blur...", command: "filter.blur.gaussianBlur" },
     Known { class: "boxblur", filter_id: 840, name: "Box Blur...", command: "filter.blur.boxBlur" },
     Known { class: "MtnB", filter_id: code(b"MtnB"), name: "Motion Blur...", command: "filter.blur.motionBlur" },
@@ -198,7 +198,16 @@ const KNOWN: [Known; 41] = [
     // Smart Sharpen has a numeric filterID and a stringID class, like Box Blur.
     Known { class: SMART_SHARPEN, filter_id: 1131, name: "Smart Sharpen...", command: "filter.sharpen.smartSharpen" },
     Known { class: "DstS", filter_id: code(b"DstS"), name: "Dust & Scratches...", command: "filter.noise.dustAndScratches" },
+    Known { class: "LnsF", filter_id: code(b"LnsF"), name: "Lens Flare...", command: "filter.render.lensFlare" },
+    // These three also read the item's foreground and background colours (`coloured_params`).
+    Known { class: "Fbrs", filter_id: code(b"Fbrs"), name: "Fibers...", command: "filter.render.fibers" },
+    Known { class: "Clds", filter_id: code(b"Clds"), name: "Clouds", command: "filter.render.clouds" },
+    Known { class: "DfrC", filter_id: code(b"DfrC"), name: "Difference Clouds", command: "filter.render.differenceClouds" },
 ];
+
+/// Lens Flare's `Lns ` enum and our `lens` values. Photoshop's codes keep the old lens names:
+/// Nikon 35 mm and 105 mm primes, a Panavision movie prime.
+const LENSES: [(&[u8; 4], &str); 4] = [(b"Zm  ", "zoom"), (b"Nkn ", "prime35"), (b"Nkn1", "prime105"), (b"PnVs", "moviePrime")];
 
 /// Classes of the filters that have no options: Photoshop stores them without a `Fltr`.
 const NO_OPTIONS: [&str; 11] = ["Blr ", "BlrM", "Avrg", "Dspc", "FndE", "Fct ", "Frgm", "Shrp", "ShrM", "ShrE", "Slrz"];
@@ -278,6 +287,9 @@ const MEZZOTINT_TYPES: [(&[u8; 4], &str); 10] = [
 /// Color Halftone's `Rds ` (max radius) and `Ang1`..`Ang4` (screen angles) longs, read within
 /// the dialog's ranges; anything else is kept verbatim.
 fn color_halftone_params(f: &Descriptor) -> Option<J> {
+    if !only_keys(f, &["Rds ", "Ang1", "Ang2", "Ang3", "Ang4"]) {
+        return None;
+    }
     let radius = int(f, "Rds ").filter(|r| (4..=127).contains(r))?;
     let angle = |k: &str| int(f, k).filter(|a| (-360..=360).contains(a));
     Some(json!({"maxRadius": radius, "channel1": angle("Ang1")?, "channel2": angle("Ang2")?, "channel3": angle("Ang3")?, "channel4": angle("Ang4")?}))
@@ -305,16 +317,53 @@ fn int_in(f: &Descriptor, key: &str, lo: i32, hi: i32) -> Option<i32> {
     int(f, key).filter(|v| (lo..=hi).contains(v))
 }
 
-/// True when `f` holds only the given keys. A filter with a setting we don't know about (Radial
-/// Blur's off-centre centre, for one) is kept verbatim rather than losing that setting.
+/// True when `f` holds only the given keys, each at most once. A filter with a setting we don't
+/// know about (Radial Blur's off-centre centre, for one) or a repeated one is kept verbatim rather
+/// than losing that setting.
 fn only_keys(f: &Descriptor, keys: &[&str]) -> bool {
-    f.items.iter().all(|(k, _)| keys.iter().any(|x| k.is(x)))
+    f.items.iter().all(|(k, _)| keys.iter().any(|x| k.is(x))) && keys.iter().all(|key| f.items.iter().filter(|(k, _)| k.is(key)).count() <= 1)
 }
 
-/// Our name for enum `key`'s value in `f`, from `(PSD value, our name)` pairs.
-fn enum_name(f: &Descriptor, key: &str, table: &[(&[u8; 4], &'static str)]) -> Option<&'static str> {
-    let v = enum_of(f, key)?;
-    table.iter().find(|(c, _)| v == &c[..]).map(|(_, n)| *n)
+/// Our name for enum `key`'s value in `f` (of enum type `type_id`), from `(PSD value, our name)`
+/// pairs. An enum of another type is not one we know, so the filter stays verbatim.
+fn enum_name(f: &Descriptor, key: &str, type_id: &str, table: &[(&[u8; 4], &'static str)]) -> Option<&'static str> {
+    let Some(Value::Enumerated { type_id: t, value }) = f.get(key) else { return None };
+    if t.as_bytes() != type_id.as_bytes() {
+        return None;
+    }
+    table.iter().find(|(c, _)| value.as_bytes() == &c[..]).map(|(_, n)| *n)
+}
+
+/// True when `f` holds each of the given keys once and nothing else.
+fn exact_keys(f: &Descriptor, keys: &[&str]) -> bool {
+    only_keys(f, keys) && keys.iter().all(|x| f.items.iter().any(|(k, _)| k.is(x)))
+}
+
+/// Finite `key` of `f` stored as a plain double (the type Photoshop writes and we write back).
+fn double(f: &Descriptor, key: &str) -> Option<f64> {
+    match f.get(key)? {
+        Value::Double(v) if v.is_finite() => Some(*v),
+        _ => None,
+    }
+}
+
+/// `p[key]` (`default` when absent) when it is a number in `lo..=hi`, the range the filter opens
+/// with; anything else is an error, so a saved filter always opens as the same editable filter.
+fn pf_range(p: &J, key: &str, default: f64, lo: f64, hi: f64) -> Result<f64, String> {
+    match p.get(key) {
+        None | Some(J::Null) => Ok(default),
+        Some(v) => v.as_f64().filter(|x| (lo..=hi).contains(x)).ok_or_else(|| format!("setting `{key}` ({v}) is not a number in {lo}..={hi}")),
+    }
+}
+
+/// Integer `p[key]` (rounded; `default` when absent) in `lo..=hi`, as a PSD long.
+fn pi_range(p: &J, key: &str, default: f64, lo: i32, hi: i32) -> Result<Value, String> {
+    let v = pf_range(p, key, default, f64::from(i32::MIN), f64::from(i32::MAX))?.round();
+    let range = f64::from(lo)..=f64::from(hi);
+    if !range.contains(&v) {
+        return Err(format!("setting `{key}` ({v}) is not a number in {lo}..={hi}"));
+    }
+    Ok(Value::Integer(v as i32))
 }
 
 /// Enum `type_id` holding the PSD value of our name `p[key]` (`default` when absent).
@@ -485,6 +534,9 @@ fn long_in_range(v: Option<i32>, (lo, hi): (i32, i32)) -> Option<i32> {
 /// `filter.other.custom` params for a `Cstm` filter: `Mtrx` is 25 longs, row-major 5 × 5. Values
 /// outside Photoshop's ranges are not modelled (the filter stays verbatim).
 fn custom_params(f: &Descriptor) -> Option<J> {
+    if !only_keys(f, &["Mtrx", "Scl ", "Ofst"]) {
+        return None;
+    }
     let Some(Value::List(m)) = f.get("Mtrx") else { return None };
     if m.len() != 25 {
         return None;
@@ -520,25 +572,22 @@ fn known_params(class: &str, f: Option<&Descriptor>, item: &Descriptor) -> Optio
             json!({"amount": px(f, "Nose")?, "distribution": dist, "monochromatic": mono, "seed": int(f, "FlRs").unwrap_or(0)})
         }
         ("surfaceBlur", Some(f)) if only_keys(f, &["Rds ", "Thsh"]) => json!({
-            "radius": in_range(px(f, "Rds ")?, 1.0, 100.0)?,
+            "radius": unit_in(f, "Rds ", b"#Pxl", 1.0, 100.0)?,
             "threshold": int_in(f, "Thsh", 2, 255)?,
         }),
         ("SmrB", Some(f)) if only_keys(f, &["Rds ", "Thsh", "SmBQ", "SmBM"]) => json!({
-            "radius": in_range(px(f, "Rds ")?, 0.1, 100.0)?,
-            "threshold": in_range(px(f, "Thsh")?, 0.1, 100.0)?,
-            "quality": enum_name(f, "SmBQ", &SMART_BLUR_QUALITY)?,
-            "mode": enum_name(f, "SmBM", &SMART_BLUR_MODE)?,
+            "radius": in_range(double(f, "Rds ")?, 0.1, 100.0)?,
+            "threshold": in_range(double(f, "Thsh")?, 0.1, 100.0)?,
+            "quality": enum_name(f, "SmBQ", "SmBQ", &SMART_BLUR_QUALITY)?,
+            "mode": enum_name(f, "SmBM", "SmBM", &SMART_BLUR_MODE)?,
         }),
         ("RdlB", Some(f)) if only_keys(f, &["Amnt", "BlrM", "BlrQ"]) => json!({
             "amount": int_in(f, "Amnt", 1, 100)?,
-            "method": enum_name(f, "BlrM", &RADIAL_METHOD)?,
-            "quality": enum_name(f, "BlrQ", &RADIAL_QUALITY)?,
+            "method": enum_name(f, "BlrM", "BlrM", &RADIAL_METHOD)?,
+            "quality": enum_name(f, "BlrQ", "BlrQ", &RADIAL_QUALITY)?,
         }),
         ("Msc ", Some(f)) => json!({"cellSize": px(f, "ClSz")?}),
-        ("Mztn", Some(f)) => {
-            let t = enum_of(f, "MztT")?;
-            json!({"type": MEZZOTINT_TYPES.iter().find(|(c, _)| t == &c[..])?.1})
-        }
+        ("Mztn", Some(f)) if only_keys(f, &["MztT"]) => json!({"type": enum_name(f, "MztT", "MztT", &MEZZOTINT_TYPES)?}),
         ("ClrH", Some(f)) => color_halftone_params(f)?,
         ("Embs", Some(f)) => json!({"angle": int(f, "Angl")?, "height": int(f, "Hght")?, "amount": int(f, "Amnt")?}),
         (SMART_SHARPEN, Some(f)) => smart_sharpen_params(f)?,
@@ -572,11 +621,17 @@ fn known_params(class: &str, f: Option<&Descriptor>, item: &Descriptor) -> Optio
             "maskIncompleteBlocks": bool_at(f, "ExtM")?,
         }),
         ("Tls ", Some(f)) => tiles_params(f, item)?,
-        ("Ofst", Some(f)) => {
-            let fill = OFFSET_FILL.iter().find(|(psd, _)| enum_of(f, "Fl  ") == Some(psd.as_bytes()))?.1;
-            json!({"horizontal": int(f, "Hrzn")?, "vertical": int(f, "Vrtc")?, "undefinedAreas": fill})
+        ("Ofst", Some(f)) if only_keys(f, &["Hrzn", "Vrtc", "Fl  "]) => {
+            json!({"horizontal": int(f, "Hrzn")?, "vertical": int(f, "Vrtc")?, "undefinedAreas": enum_from(f, "Fl  ", "FlMd", &OFFSET_FILL)?})
         }
         ("Cstm", Some(f)) => custom_params(f)?,
+        // Only the settings and value types Photoshop writes (and we write back); anything else
+        // keeps the filter verbatim.
+        ("LnsF", Some(f)) if exact_keys(f, &["Brgh", "FlrC", "Lns "]) => {
+            let centre = get_desc(f, "FlrC").filter(|c| c.class_id.is("Pnt ") && exact_keys(c, &["Hrzn", "Vrtc"]))?;
+            let lens = enum_name(f, "Lns ", "Lns ", &LENSES)?;
+            json!({"brightness": int(f, "Brgh")?, "centerX": double(centre, "Hrzn")?, "centerY": double(centre, "Vrtc")?, "lens": lens})
+        }
         ("Lvls", Some(f)) => levels_params(f)?,
         ("Crvs", Some(f)) => curves_params(f)?,
         _ => return None,
@@ -615,6 +670,38 @@ const GALLERY_EFFECTS: [GalleryCode; 1] = [GalleryCode { key: "chrome", code: "C
 fn rgbc_colour(d: &Descriptor) -> Option<J> {
     let c = |k: &str| px(d, k).map(|v| (v / 255.0).clamp(0.0, 1.0));
     Some(json!([c("Rd  ")?, c("Grn ")?, c("Bl  ")?, 1.0]))
+}
+
+/// Fibers, Clouds and Difference Clouds draw with the item's foreground and background colours:
+/// their params are the `Fltr` settings plus those colours.
+fn coloured_params(class: &str, item: &Descriptor, f: &Descriptor) -> Option<(&'static str, J)> {
+    let k = KNOWN.iter().find(|k| k.class == class)?;
+    // An `RGBC` of three `doub`s in 0–255, as Photoshop writes it (and we write it back); any
+    // other colour keeps the filter verbatim.
+    let colour = |key: &str| {
+        get_desc(item, key)
+            .filter(|c| c.class_id.is("RGBC") && exact_keys(c, &["Rd  ", "Grn ", "Bl  "]))
+            .filter(|c| ["Rd  ", "Grn ", "Bl  "].iter().all(|k| double(c, k).is_some_and(|v| (0.0..=255.0).contains(&v))))
+            .and_then(rgbc_colour)
+    };
+    // Only the settings Photoshop writes; an extra or repeated one keeps the filter verbatim.
+    let keys: &[&str] = if class == "Fbrs" { &["Vrnc", "Strg", "RndS"] } else { &["FlRs"] };
+    if !exact_keys(f, keys) {
+        return None;
+    }
+    // The seeds (`RndS`, `FlRs`) are signed longs; ours is their bit pattern.
+    let mut p = match class {
+        "Fbrs" => json!({"variance": int(f, "Vrnc")?, "strength": int(f, "Strg")?, "seed": int(f, "RndS")? as u32}),
+        _ => json!({"seed": int(f, "FlRs")? as u32}),
+    };
+    let o = p.as_object_mut()?;
+    o.insert("foreground".into(), colour("FrgC")?);
+    o.insert("background".into(), colour("BckC")?);
+    Some((k.command, p))
+}
+
+fn seed_param(p: &J) -> Value {
+    Value::Integer(p.get("seed").and_then(J::as_u64).and_then(|n| u32::try_from(n).ok()).unwrap_or(0) as i32)
 }
 
 /// `filter.filterGallery` params for a `GEfc` filter item; `None` when an effect or setting is
@@ -767,6 +854,10 @@ pub fn filter_from_item(item: &Descriptor) -> SmartFilter {
         Some(hue_sat::CLASS) => fltr.and_then(hue_sat::import_params).map(|p| (hue_sat::COMMAND, p)),
         Some(perspective_warp::CLASS) => perspective_warp::import_params(item).map(|p| (perspective_warp::COMMAND, p)),
         Some(GALLERY_CLASS) => fltr.and_then(|f| gallery_params(item, f)).map(|p| (GALLERY_COMMAND, p)),
+        Some(c @ ("Fbrs" | "Clds" | "DfrC")) => fltr.and_then(|f| coloured_params(c, item, f)),
+        // A `Fltr` that is there but not a descriptor is settings we can't read: kept verbatim
+        // rather than taken for a filter stored without options (which would drop it on save).
+        _ if fltr.is_none() && item.get("Fltr").is_some() => None,
         c => c.and_then(|c| known_params(c, fltr, item)),
     };
     let (command, params) = match known {
@@ -922,18 +1013,20 @@ fn fltr_for(k: &Known, p: &J) -> Result<Option<Descriptor>, String> {
                 .with("Mnch", Value::Boolean(p.get("monochromatic").and_then(J::as_bool).unwrap_or(false)))
                 .with("FlRs", pi(p, "seed", 0.0))
         }
-        "surfaceBlur" => d.with("Rds ", unit(b"#Pxl", pf(p, "radius", 5.0))).with("Thsh", pi(p, "threshold", 15.0)),
+        "surfaceBlur" => d.with("Rds ", unit(b"#Pxl", pf_range(p, "radius", 5.0, 1.0, 100.0)?)).with("Thsh", pi_range(p, "threshold", 15.0, 2, 255)?),
         "SmrB" => d
-            .with("Rds ", Value::Double(pf(p, "radius", 3.0)))
-            .with("Thsh", Value::Double(pf(p, "threshold", 25.0)))
+            .with("Rds ", Value::Double(pf_range(p, "radius", 3.0, 0.1, 100.0)?))
+            .with("Thsh", Value::Double(pf_range(p, "threshold", 25.0, 0.1, 100.0)?))
             .with("SmBQ", enum_param(p, "quality", "high", "SmBQ", &SMART_BLUR_QUALITY)?)
             .with("SmBM", enum_param(p, "mode", "normal", "SmBM", &SMART_BLUR_MODE)?),
         "RdlB" => {
             // Photoshop wrote no centre key for a centred blur; an off-centre one is unmeasured.
-            if ["centerX", "centerY"].iter().any(|k| (pf(p, k, 0.5) - 0.5).abs() > 1e-9) {
-                return Err("an off-centre Radial Blur centre is not written to PSD".into());
+            for k in ["centerX", "centerY"] {
+                if (pf_range(p, k, 0.5, 0.0, 1.0)? - 0.5).abs() > 1e-9 {
+                    return Err("an off-centre Radial Blur centre is not written to PSD".into());
+                }
             }
-            d.with("Amnt", pi(p, "amount", 10.0))
+            d.with("Amnt", pi_range(p, "amount", 10.0, 1, 100)?)
                 .with("BlrM", enum_param(p, "method", "spin", "BlrM", &RADIAL_METHOD)?)
                 .with("BlrQ", enum_param(p, "quality", "good", "BlrQ", &RADIAL_QUALITY)?)
         }
@@ -1005,6 +1098,17 @@ fn fltr_for(k: &Known, p: &J) -> Result<Option<Descriptor>, String> {
                 .with("Ofst", whole(pf(p, "offset", 0.0), CUSTOM_OFFSET, "Offset")?)
                 .with("Mtrx", Value::List(m))
         }
+        "LnsF" => {
+            let lens = p.get("lens").and_then(J::as_str).unwrap_or("zoom");
+            let code = LENSES.iter().find(|(_, l)| *l == lens).ok_or_else(|| format!("lens `{lens}` has no PSD equivalent"))?.0;
+            let mut centre = Descriptor::new("Pnt ").with("Hrzn", Value::Double(pf(p, "centerX", 0.5))).with("Vrtc", Value::Double(pf(p, "centerY", 0.5)));
+            centre.name = UnicodeString::new_nul("");
+            d.with("Brgh", pi(p, "brightness", 100.0))
+                .with("FlrC", Value::Descriptor(centre))
+                .with("Lns ", Value::Enumerated { type_id: Id::new("Lns "), value: Id::Code(*code) })
+        }
+        "Fbrs" => d.with("Vrnc", pi(p, "variance", 16.0)).with("Strg", pi(p, "strength", 4.0)).with("RndS", seed_param(p)),
+        "Clds" | "DfrC" => d.with("FlRs", seed_param(p)),
         "Lvls" => d.with("Adjs", adjustments(p, false)?),
         "Crvs" => d.with("Adjs", adjustments(p, true)?),
         "adaptCorrect" => {
@@ -1052,23 +1156,40 @@ pub fn item_for_filter(f: &SmartFilter) -> Result<Descriptor, String> {
     }
     let k = known_by_command(&f.command).ok_or("this filter has no PSD equivalent")?;
     let fltr = fltr_for(k, &f.params)?;
-    // Pointillize's background and Tiles' fill colours are the entry's; the others write the defaults.
-    let (foreground, background) = match k.class {
+    // Pointillize's background, Tiles' colours and the render filters' colours are the entry's;
+    // the others store Photoshop's defaults.
+    let (fg, bg) = match k.class {
         "Pntl" => (rgbc(0.0), colour_rgbc(f.params.get("background"), 255.0)?),
-        "Tls " => (colour_rgbc(f.params.get("foreground"), 0.0)?, colour_rgbc(f.params.get("background"), 255.0)?),
+        "Tls " | "Fbrs" | "Clds" | "DfrC" => (colour_rgbc(f.params.get("foreground"), 0.0)?, colour_rgbc(f.params.get("background"), 255.0)?),
         _ => (rgbc(0.0), rgbc(255.0)),
     };
+    // The render filters are written with the descriptor names Photoshop gives them: the filter's
+    // own name on `Fltr` and empty ones on the colours.
+    let render = matches!(k.class, "Fbrs" | "Clds" | "DfrC" | "LnsF");
+    let (fltr, fg, bg) = if render { (fltr.map(|f| named(f, k.name.trim_end_matches("..."))), named_value(fg), named_value(bg)) } else { (fltr, fg, bg) };
     let mut d = Descriptor::new("filterFX")
         .with("Nm  ", Value::Text(UnicodeString::new_nul(k.name)))
         .with("blendOptions", blend_options(f))
         .with("enab", Value::Boolean(f.visible))
         .with("hasoptions", Value::Boolean(fltr.is_some()))
-        .with("FrgC", foreground)
-        .with("BckC", background);
+        .with("FrgC", fg)
+        .with("BckC", bg);
     if let Some(x) = fltr {
         d = d.with("Fltr", Value::Descriptor(x));
     }
     Ok(d.with("filterID", Value::Integer(k.filter_id)))
+}
+
+fn named(mut d: Descriptor, name: &str) -> Descriptor {
+    d.name = UnicodeString::new_nul(name);
+    d
+}
+
+fn named_value(v: Value) -> Value {
+    match v {
+        Value::Descriptor(d) => Value::Descriptor(named(d, "")),
+        other => other,
+    }
 }
 
 /// Builds a `filterFX` object; filters that can't be written are left out, with a message each.
@@ -1704,12 +1825,18 @@ mod tests {
             photoshop_no_options_item("X", Value::Integer(-1)),
             // Settings we don't know of on a filter that has none.
             photoshop_no_options_item("X", Value::Integer(blur)).with("Fltr", Value::Descriptor(Descriptor::new("Blr ").with("Amnt", Value::Integer(5)))),
+            // Settings that aren't a descriptor, on a filter that has none.
+            photoshop_no_options_item("X", Value::Integer(blur)).with("Fltr", Value::Integer(5)),
+            photoshop_no_options_item("X", Value::Integer(blur)).with("Fltr", Value::Text(UnicodeString::new_nul("Blr "))),
+            photoshop_no_options_item("X", Value::Integer(781)).with("Fltr", Value::Integer(5)),
         ];
         for item in cases {
             let f = filter_from_item(&item);
             assert_eq!(f.command, UNSUPPORTED_FILTER, "{item:?}");
             // Written back (a bare item gains blending and visibility) and still not editable.
-            let back = filter_from_item(&item_for_filter(&f).unwrap());
+            let written = item_for_filter(&f).unwrap();
+            assert_eq!(written.get("Fltr"), item.get("Fltr"), "{item:?}");
+            let back = filter_from_item(&written);
             assert_eq!((back.command.as_str(), &back.params["filterID"]), (UNSUPPORTED_FILTER, &f.params["filterID"]));
         }
     }
@@ -2237,6 +2364,10 @@ mod tests {
             offset_fltr(i(1), unit(b"#Pxl", f64::NAN), enumv("FlMd", "Wrp ")),
             Descriptor::new("Ofst").with("Hrzn", i(1)).with("Fl  ", enumv("FlMd", "Wrp ")),
             Descriptor::new("Ofst"),
+            // A mistyped enum, a setting we don't write back and a repeated one.
+            offset_fltr(i(1), i(2), enumv("Xxxx", "Wrp ")),
+            offset_fltr(i(1), i(2), enumv("FlMd", "Wrp ")).with("Xtra", i(1)),
+            offset_fltr(i(1), i(2), enumv("FlMd", "Wrp ")).with("Hrzn", i(3)),
         ] {
             let item = measured_named_item(b"Ofst", "Offset...", fltr);
             let f = filter_from_item(&item);
@@ -2318,6 +2449,8 @@ mod tests {
             Descriptor::new("Cstm").with("Scl ", i(1)).with("Ofst", i(0)).with("Mtrx", i(5)),
             Descriptor::new("Cstm").with("Scl ", i(1)).with("Mtrx", Value::List(longs(&SHARPEN))),
             Descriptor::new("Cstm"),
+            // A setting we don't write back.
+            custom_fltr(i(1), i(0), longs(&SHARPEN)).with("Xtra", i(1)),
         ] {
             let item = measured_named_item(b"Cstm", "Custom...", fltr);
             let f = filter_from_item(&item);
@@ -2427,6 +2560,11 @@ mod tests {
             pixelate_item("Color Halftone...", ch(Value::Integer(6), Value::Integer(361)), code(b"ClrH")),
             pixelate_item("Color Halftone...", ch(Value::Integer(6), Value::Integer(i32::MIN)), code(b"ClrH")),
             pixelate_item("Color Halftone...", ch(Value::Integer(6), Value::Double(f64::NAN)), code(b"ClrH")),
+            // A mistyped enum and settings we don't write back.
+            pixelate_item("Mezzotint...", mz(enumv("Xxxx", "FnDt")), code(b"Mztn")),
+            pixelate_item("Mezzotint...", mz(enumv("MztT", "FnDt")).with("Xtra", Value::Integer(1)), code(b"Mztn")),
+            pixelate_item("Color Halftone...", ch(Value::Integer(6), Value::Integer(10)).with("Xtra", Value::Integer(1)), code(b"ClrH")),
+            pixelate_item("Color Halftone...", ch(Value::Integer(6), Value::Integer(10)).with("Ang1", Value::Integer(11)), code(b"ClrH")),
         ];
         for item in cases {
             let f = filter_from_item(&item);
@@ -2544,6 +2682,12 @@ mod tests {
         assert_eq!(fltr("filter.blur.radialBlur", json!({"centerX": 0.5, "centerY": 0.5})), Some(Value::Descriptor(radial_blur(10, "Spn ", "Gd  "))));
     }
 
+    /// `d` with `key` set to `v` (replacing the measured value).
+    fn replaced(mut d: Descriptor, key: &str, v: Value) -> Descriptor {
+        set(&mut d, key, v);
+        d
+    }
+
     /// Malformed or unmodelled blur descriptors stay verbatim (and are written back unchanged);
     /// settings PSD can't hold are reported, never a panic.
     #[test]
@@ -2584,6 +2728,16 @@ mod tests {
             // A key we don't model (an off-centre Radial Blur would carry one).
             (radial_blur(10, "Zm  ", "Gd  ").with("Cntr", Value::Descriptor(Descriptor::new("Pnt ").with("Hrzn", Value::Double(10.0)))), radial),
             (surface_blur(5.0, 15).with("Edg ", Value::Integer(1)), 1135),
+            // Enums of another type, units and value types we would not write back.
+            (replaced(smart_blur(3.0, 25.0, "SBQH", "SBMN"), "SmBQ", enumv("Othr", "SBQH")), smart),
+            (replaced(smart_blur(3.0, 25.0, "SBQH", "SBMN"), "SmBM", enumv("SmBQ", "SBMN")), smart),
+            (replaced(radial_blur(10, "Spn ", "Gd  "), "BlrM", enumv("Othr", "Spn ")), radial),
+            (replaced(radial_blur(10, "Spn ", "Gd  "), "BlrQ", enumv("BlrM", "Gd  ")), radial),
+            (Descriptor::new("surfaceBlur").with("Rds ", unit(b"#Prc", 5.0)).with("Thsh", Value::Integer(15)), 1135),
+            (Descriptor::new("surfaceBlur").with("Rds ", Value::Double(5.0)).with("Thsh", Value::Integer(15)), 1135),
+            (replaced(smart_blur(3.0, 25.0, "SBQH", "SBMN"), "Rds ", unit(b"#Pxl", 3.0)), smart),
+            (replaced(smart_blur(3.0, 25.0, "SBQH", "SBMN"), "Thsh", unit(b"#Prc", 25.0)), smart),
+            (replaced(smart_blur(3.0, 25.0, "SBQH", "SBMN"), "Thsh", Value::Integer(25)), smart),
         ];
         for (fltr, id) in bad {
             let item = ps_item("x", fltr.clone(), id);
@@ -2604,8 +2758,33 @@ mod tests {
             ("filter.blur.radialBlur", json!({"quality": ["best"]})),
             ("filter.blur.radialBlur", json!({"centerX": 0.25})),
             ("filter.blur.radialBlur", json!({"centerY": 1.0})),
+            // A centre, or a value, that is there but can't be written as Photoshop would open it.
+            ("filter.blur.radialBlur", json!({"centerX": "middle"})),
+            ("filter.blur.radialBlur", json!({"centerY": true})),
+            ("filter.blur.radialBlur", json!({"amount": 0})),
+            ("filter.blur.radialBlur", json!({"amount": 101})),
+            ("filter.blur.radialBlur", json!({"amount": "10"})),
+            ("filter.blur.surfaceBlur", json!({"radius": 0.5})),
+            ("filter.blur.surfaceBlur", json!({"radius": 100.5})),
+            ("filter.blur.surfaceBlur", json!({"threshold": 1})),
+            ("filter.blur.surfaceBlur", json!({"threshold": 256})),
+            ("filter.blur.surfaceBlur", json!({"radius": "5"})),
+            ("filter.blur.smartBlur", json!({"radius": 0.05})),
+            ("filter.blur.smartBlur", json!({"threshold": 100.5})),
+            ("filter.blur.smartBlur", json!({"threshold": [25]})),
         ] {
             assert!(item_for_filter(&sf(command, p.clone())).is_err(), "{command} {p}");
+        }
+        // Every value that is written opens again as the same editable filter (range ends included).
+        for (command, p) in [
+            ("filter.blur.surfaceBlur", json!({"radius": 1.0, "threshold": 2})),
+            ("filter.blur.surfaceBlur", json!({"radius": 100.0, "threshold": 255})),
+            ("filter.blur.smartBlur", json!({"radius": 0.1, "threshold": 100.0, "quality": "low", "mode": "edgeOnly"})),
+            ("filter.blur.radialBlur", json!({"amount": 1, "method": "zoom", "quality": "best", "centerX": 0.5, "centerY": null})),
+            ("filter.blur.radialBlur", json!({"amount": 100, "method": "spin", "quality": "draft"})),
+        ] {
+            let back = filter_from_item(&item_for_filter(&sf(command, p.clone())).unwrap());
+            assert_eq!(back.command, command, "{p}");
         }
         // Hostile numbers write without panicking.
         for p in [json!({"radius": f64::MAX, "threshold": -1e300, "amount": 1e300}), json!({"radius": "x", "threshold": null}), json!(null), json!([1, 2])] {
@@ -3336,5 +3515,141 @@ mod tests {
         assert_eq!(u.len(), 36);
         assert_eq!(u, uuid_from(b"x"));
         assert_ne!(u, uuid_from(b"y"));
+    }
+
+    // Render filters as Photoshop 27 saves them on a smart object (`filterFXList` items, with
+    // neutral blending): Clouds and Difference Clouds in white on black, Fibers in black on white,
+    // Lens Flare with the 50-300mm Zoom at 159%.
+    const PHOTOSHOP_CLOUDS: &str = "0000000100000000000866696c746572465800000008000000004e6d202054455854000000070043006c006f00750064007300000000000c626c656e644f7074696f6e734f626a63000000000000000c626c656e644f7074696f6e7300000002000000004f706374556e7446235072634059000000000000000000004d642020656e756d00000000426c6e4d000000066e6f726d616c00000000656e6162626f6f6c010000000a6861736f7074696f6e73626f6f6c0100000000467267434f626a630000000100000000000052474243000000030000000052642020646f7562406fe000000000000000000047726e20646f7562406fe0000000000000000000426c2020646f7562406fe000000000000000000042636b434f626a630000000100000000000052474243000000030000000052642020646f756200000000000000000000000047726e20646f7562000000000000000000000000426c2020646f7562000000000000000000000000466c74724f626a63000000070043006c006f007500640073000000000000436c64730000000100000000466c52736c6f6e67000049e40000000866696c74657249446c6f6e67436c6473";
+    const PHOTOSHOP_DIFFERENCE_CLOUDS: &str = "0000000100000000000866696c746572465800000008000000004e6d202054455854000000120044006900660066006500720065006e0063006500200043006c006f00750064007300000000000c626c656e644f7074696f6e734f626a63000000000000000c626c656e644f7074696f6e7300000002000000004f706374556e7446235072634059000000000000000000004d642020656e756d00000000426c6e4d000000066e6f726d616c00000000656e6162626f6f6c010000000a6861736f7074696f6e73626f6f6c0100000000467267434f626a630000000100000000000052474243000000030000000052642020646f7562406fe000000000000000000047726e20646f7562406fe0000000000000000000426c2020646f7562406fe000000000000000000042636b434f626a630000000100000000000052474243000000030000000052642020646f756200000000000000000000000047726e20646f7562000000000000000000000000426c2020646f7562000000000000000000000000466c74724f626a63000000120044006900660066006500720065006e0063006500200043006c006f007500640073000000000000446672430000000100000000466c52736c6f6e67000057d20000000866696c74657249446c6f6e6744667243";
+    const PHOTOSHOP_FIBERS: &str = "0000000100000000000866696c746572465800000008000000004e6d2020544558540000000a004600690062006500720073002e002e002e00000000000c626c656e644f7074696f6e734f626a63000000000000000c626c656e644f7074696f6e7300000002000000004f706374556e7446235072634059000000000000000000004d642020656e756d00000000426c6e4d000000066e6f726d616c00000000656e6162626f6f6c010000000a6861736f7074696f6e73626f6f6c0100000000467267434f626a630000000100000000000052474243000000030000000052642020646f756200000000000000000000000047726e20646f7562000000000000000000000000426c2020646f756200000000000000000000000042636b434f626a630000000100000000000052474243000000030000000052642020646f7562406fe000000000000000000047726e20646f7562406fe0000000000000000000426c2020646f7562406fe0000000000000000000466c74724f626a630000000700460069006200650072007300000000000046627273000000030000000056726e636c6f6e670000001000000000537472676c6f6e670000000400000000526e64536c6f6e67000062f10000000866696c74657249446c6f6e6746627273";
+    const PHOTOSHOP_LENS_FLARE: &str = "0000000100000000000866696c746572465800000008000000004e6d2020544558540000000e004c0065006e007300200046006c006100720065002e002e002e00000000000c626c656e644f7074696f6e734f626a63000000000000000c626c656e644f7074696f6e7300000002000000004f706374556e7446235072634059000000000000000000004d642020656e756d00000000426c6e4d000000066e6f726d616c00000000656e6162626f6f6c010000000a6861736f7074696f6e73626f6f6c0100000000467267434f626a630000000100000000000052474243000000030000000052642020646f756200000000000000000000000047726e20646f7562000000000000000000000000426c2020646f756200000000000000000000000042636b434f626a630000000100000000000052474243000000030000000052642020646f7562406fe000000000000000000047726e20646f7562406fe0000000000000000000426c2020646f7562406fe0000000000000000000466c74724f626a630000000b004c0065006e007300200046006c0061007200650000000000004c6e73460000000300000000427267686c6f6e670000009f00000000466c72434f626a6300000001000000000000506e7420000000020000000048727a6e646f75623fe86666600000000000000056727463646f75623fe60b60c0000000000000004c6e7320656e756d000000004c6e7320000000005a6d20200000000866696c74657249446c6f6e674c6e7346";
+
+    fn photoshop(hex: &str) -> Descriptor {
+        Descriptor::from_bytes(&from_hex(hex).unwrap()).unwrap()
+    }
+
+    fn set_lens(item: &mut Descriptor, code: [u8; 4]) {
+        let Some(Value::Descriptor(fltr)) = item.items.iter_mut().find(|(k, _)| k.is("Fltr")).map(|(_, v)| v) else { panic!("no Fltr") };
+        set(fltr, "Lns ", Value::Enumerated { type_id: Id::new("Lns "), value: Id::Code(code) });
+    }
+
+    #[test]
+    fn photoshop_render_filters_read_and_write_like_photoshop() {
+        let colours = |fg: f64, bg: f64| (json!([fg, fg, fg, 1.0]), json!([bg, bg, bg, 1.0]));
+        let (white, black) = colours(1.0, 0.0);
+        let cases = [
+            (PHOTOSHOP_CLOUDS, "filter.render.clouds", json!({"seed": 18916, "foreground": white, "background": black})),
+            (PHOTOSHOP_DIFFERENCE_CLOUDS, "filter.render.differenceClouds", json!({"seed": 22482, "foreground": white, "background": black})),
+            (PHOTOSHOP_FIBERS, "filter.render.fibers", json!({"variance": 16, "strength": 4, "seed": 25329, "foreground": black, "background": white})),
+            (
+                PHOTOSHOP_LENS_FLARE,
+                "filter.render.lensFlare",
+                json!({"brightness": 159, "centerX": 0.762499988079071, "centerY": 0.6888889074325562, "lens": "zoom"}),
+            ),
+        ];
+        for (hex, command, params) in cases {
+            let item = photoshop(hex);
+            let f = filter_from_item(&item);
+            assert_eq!((f.command.as_str(), &f.params), (command, &params));
+            // Written back, it is Photoshop's item again: name, colours, settings and key order.
+            assert_eq!(item_for_filter(&f).unwrap().items, item.items, "{command}");
+        }
+    }
+
+    #[test]
+    fn every_lens_flare_lens_round_trips_with_photoshops_code() {
+        for (code, lens) in LENSES {
+            let mut item = photoshop(PHOTOSHOP_LENS_FLARE);
+            set_lens(&mut item, *code);
+            let f = filter_from_item(&item);
+            assert_eq!(f.params["lens"], lens);
+            assert_eq!(item_for_filter(&f).unwrap().items, item.items, "{lens}");
+        }
+        // A lens we don't know keeps the filter verbatim.
+        let mut item = photoshop(PHOTOSHOP_LENS_FLARE);
+        set_lens(&mut item, *b"Xxxx");
+        assert_eq!(filter_from_item(&item).command, UNSUPPORTED_FILTER);
+    }
+
+    /// The descriptor at `path` (nested keys) inside `item`, for editing.
+    fn desc_at<'a>(item: &'a mut Descriptor, path: &[&str]) -> &'a mut Descriptor {
+        path.iter().fold(item, |d, key| {
+            let Some(Value::Descriptor(x)) = d.items.iter_mut().find(|(k, _)| k.is(key)).map(|(_, v)| v) else { panic!("no {key}") };
+            x
+        })
+    }
+
+    #[test]
+    fn render_filters_with_settings_we_dont_model_stay_verbatim() {
+        // Each case changes one thing in a Photoshop item: an extra setting, a repeated one, or a
+        // value of another type than Photoshop writes. Opened as editable, a re-save would drop the
+        // extra setting or rewrite the value; kept verbatim, the item is written back byte for byte.
+        type Edit = Box<dyn Fn(&mut Descriptor)>;
+        /// A descriptor path in the item (nested keys) and the edit made there.
+        type Change = (&'static [&'static str], Edit);
+        let extra: fn(&mut Descriptor) = |d| d.items.push((Id::new("Xtra"), Value::Integer(1)));
+        let as_double = |key: &'static str| -> Edit { Box::new(move |d| set(d, key, Value::Double(1.0))) };
+        let as_long = |key: &'static str| -> Edit { Box::new(move |d| set(d, key, Value::Integer(1))) };
+        let repeat = |key: &'static str| -> Edit {
+            Box::new(move |d| {
+                let v = d.get(key).cloned().unwrap();
+                d.items.push((Id::new(key), v));
+            })
+        };
+        let colour_edits = || -> Vec<Change> {
+            vec![
+                (&["FrgC"], Box::new(|d: &mut Descriptor| d.items.push((Id::new("redFloat"), Value::Double(0.5))))),
+                (&["BckC"], as_long("Grn ")),
+                (&["FrgC"], Box::new(|d: &mut Descriptor| set(d, "Rd  ", Value::Double(300.0)))),
+                (&["BckC"], Box::new(|d: &mut Descriptor| d.class_id = Id::new("HSBC"))),
+            ]
+        };
+        let mut cases: Vec<(&str, &'static [&'static str], Edit)> = Vec::new();
+        for hex in [PHOTOSHOP_CLOUDS, PHOTOSHOP_DIFFERENCE_CLOUDS] {
+            cases.push((hex, &["Fltr"], Box::new(extra)));
+            cases.push((hex, &["Fltr"], repeat("FlRs")));
+            cases.push((hex, &["Fltr"], as_double("FlRs")));
+            cases.extend(colour_edits().into_iter().map(|(p, e)| (hex, p, e)));
+        }
+        cases.push((PHOTOSHOP_FIBERS, &["Fltr"], Box::new(extra)));
+        cases.push((PHOTOSHOP_FIBERS, &["Fltr"], repeat("Strg")));
+        for key in ["Vrnc", "Strg", "RndS"] {
+            cases.push((PHOTOSHOP_FIBERS, &["Fltr"], as_double(key)));
+        }
+        cases.extend(colour_edits().into_iter().map(|(p, e)| (PHOTOSHOP_FIBERS, p, e)));
+        cases.push((PHOTOSHOP_LENS_FLARE, &["Fltr"], Box::new(extra)));
+        cases.push((PHOTOSHOP_LENS_FLARE, &["Fltr"], repeat("Brgh")));
+        cases.push((PHOTOSHOP_LENS_FLARE, &["Fltr"], as_double("Brgh")));
+        cases.push((PHOTOSHOP_LENS_FLARE, &["Fltr"], Box::new(|d| set(d, "Lns ", Value::Enumerated { type_id: Id::new("Xxxx"), value: Id::Code(*b"Zm  ") }))));
+        cases.push((PHOTOSHOP_LENS_FLARE, &["Fltr", "FlrC"], Box::new(extra)));
+        cases.push((PHOTOSHOP_LENS_FLARE, &["Fltr", "FlrC"], as_long("Hrzn")));
+        cases.push((PHOTOSHOP_LENS_FLARE, &["Fltr", "FlrC"], Box::new(|d| set(d, "Vrtc", Value::UnitFloat { unit: *b"#Pxl", value: 0.5 }))));
+        for (i, (hex, path, edit)) in cases.iter().enumerate() {
+            let mut item = photoshop(hex);
+            edit(desc_at(&mut item, path));
+            let f = filter_from_item(&item);
+            assert_eq!(f.command, UNSUPPORTED_FILTER, "case {i} ({path:?}): {:?}", f.params);
+            assert_eq!(item_for_filter(&f).unwrap().to_bytes(), item.to_bytes(), "case {i} ({path:?})");
+        }
+    }
+
+    #[test]
+    fn render_filters_made_in_photocraft_are_written() {
+        // Without colours (an older document or a script), Photoshop's default black and white.
+        let back = filter_from_item(&item_for_filter(&sf("filter.render.clouds", json!({"seed": 7}))).unwrap());
+        assert_eq!(back.params, json!({"seed": 7, "foreground": [0.0, 0.0, 0.0, 1.0], "background": [1.0, 1.0, 1.0, 1.0]}));
+        // A seed above i32::MAX keeps its bit pattern, and colours may be hex.
+        let p = json!({"variance": 30, "strength": 10, "seed": 4_000_000_000u32, "foreground": "#ff0000", "background": [0.0, 0.0, 1.0, 1.0]});
+        let back = filter_from_item(&item_for_filter(&sf("filter.render.fibers", p)).unwrap());
+        assert_eq!(
+            back.params,
+            json!({"variance": 30, "strength": 10, "seed": 4_000_000_000u32, "foreground": [1.0, 0.0, 0.0, 1.0], "background": [0.0, 0.0, 1.0, 1.0]})
+        );
+        let flare = sf("filter.render.lensFlare", json!({"brightness": 120, "centerX": 0.25, "centerY": 0.75, "lens": "moviePrime"}));
+        assert_eq!(filter_from_item(&item_for_filter(&flare).unwrap()).params, flare.params);
+        // Lenses and colours we can't write are reported, not guessed.
+        assert!(item_for_filter(&sf("filter.render.lensFlare", json!({"lens": "fisheye"}))).unwrap_err().contains("fisheye"));
+        assert!(item_for_filter(&sf("filter.render.clouds", json!({"foreground": "red"}))).is_err());
     }
 }

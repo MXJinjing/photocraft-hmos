@@ -15,7 +15,7 @@ use photocraft_geom::Rect;
 use photocraft_raster::{Surface, from_rgba_into, to_rgba};
 
 use crate::brush::{BrushSettings, MaskMode, Pattern, TipShape};
-use crate::dynamics::DabGenerator;
+use crate::dynamics::{DabGenerator, grid_cell};
 use crate::retouch::{Footprint, alpha_index, over_native};
 use crate::rng::hash2;
 use crate::tile::{Mips, PatternImage};
@@ -52,7 +52,7 @@ const NOISE_SALT: u64 = 0x006E_6F69_7365;
 /// the Pencil cursor shows ([`grid_square`]).
 pub fn grid_center(x: f64, y: f64, diameter: f32) -> (f32, f32) {
     let n = if diameter.is_finite() { diameter.round().max(1.0) as i64 } else { 1 };
-    let snap = |v: f64| if n % 2 == 1 { v.floor() + 0.5 } else { v.round() };
+    let snap = |v: f64| if n % 2 == 1 { grid_cell(v, 0.5) } else { v.round() };
     (snap(x) as f32, snap(y) as f32)
 }
 

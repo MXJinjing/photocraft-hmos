@@ -83,7 +83,7 @@ pub fn persist(app: &mut PhotocraftApp, ctx: &egui::Context) {
 /// tip bitmaps are shared, so equal brushes compare by pointer). A brush that can't be remembered
 /// yet (a sampled tip too big to embed, before the preset store takes it) keeps what was saved.
 fn persist_brushes(app: &mut PhotocraftApp) {
-    let (owner, brushes) = (app.ui.brush_tool, &app.ui.tool_brushes);
+    let (owner, brushes) = (saved_owner(app), &app.ui.tool_brushes);
     if app.prefs_rt.tool_brushes.as_ref().is_some_and(|(o, b)| *o == owner && b == brushes) {
         return;
     }
@@ -108,6 +108,18 @@ fn persist_brushes(app: &mut PhotocraftApp) {
     if app.session.prefs().tool_brushes != now {
         app.session.prefs.edit(|p| p.tool_brushes = now);
     }
+}
+
+/// The tool whose brush `last_brush` holds: the one that owns the session brush, once
+/// `last_brush::persist` has saved that brush. Until then (a sampled tip too big to embed, before
+/// the preset store takes it) `last_brush` still holds the previously saved owner's brush, so
+/// that owner stands; with none saved it is the Brush, as `toolBrushes` is null then.
+fn saved_owner(app: &PhotocraftApp) -> Tool {
+    let t = &app.session.tools;
+    if t.brush_rev == t.brush_saved_rev {
+        return app.ui.brush_tool;
+    }
+    app.session.prefs().tool_brushes.get("owner").and_then(|v| serde_json::from_value::<Tool>(v.clone()).ok()).unwrap_or(Tool::Brush)
 }
 
 /// Restore the painting tools' own brushes and which tool the session brush (`last_brush`)
@@ -142,8 +154,11 @@ fn restore_brushes(app: &mut PhotocraftApp) {
 }
 
 /// Flush the final choice on normal exit, even if no further frame ran after the tool changed.
+/// The brush first, as in a frame, so the saved brush owner matches the saved brush.
 pub(crate) fn save_on_exit(app: &mut PhotocraftApp) -> Result<(), String> {
-    persist(app, &egui::Context::default());
+    let ctx = egui::Context::default();
+    crate::last_brush::persist(app, &ctx);
+    persist(app, &ctx);
     crate::prefs_ui::save_preferences(app)
 }
 
@@ -246,5 +261,52 @@ fn nulls(v: &Value) -> usize {
         Value::Array(a) => a.iter().map(nulls).sum(),
         Value::Object(o) => o.values().map(nulls).sum(),
         _ => 0,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn selected_tool_and_non_default_options_roundtrip() {
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        app.ui.tool = Tool::Move;
+        app.ui.tool_options.tolerance = 42.5;
+        persist(&mut app, &egui::Context::default());
+
+        let saved = app.session.prefs();
+        assert_eq!(saved.selected_tool, serde_json::to_value(Tool::Move).unwrap());
+        assert_eq!(saved.tool_options["tolerance"], Value::from(42.5));
+        assert!(saved.tool_options.get("contiguous").is_none(), "unchanged defaults are not written");
+
+        let mut restored = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        restored.session.prefs.edit(|p| {
+            p.selected_tool = saved.selected_tool.clone();
+            p.tool_options = saved.tool_options.clone();
+        });
+        restore(&mut restored);
+        assert_eq!(restored.ui.tool, Tool::Move);
+        assert_eq!(restored.ui.tool_options.tolerance, 42.5);
+    }
+
+    #[test]
+    fn restore_ignores_unknown_and_malformed_tool_options() {
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        let original_tool = app.ui.tool;
+        let default_contiguous = ToolOptions::default().contiguous;
+        app.session.prefs.edit(|p| {
+            p.selected_tool = Value::from("not-a-tool");
+            p.tool_options = serde_json::json!({
+                "tolerance": 42.5,
+                "contiguous": "not a boolean",
+                "future_option": true
+            });
+        });
+
+        restore(&mut app);
+        assert_eq!(app.ui.tool, original_tool, "an invalid selected tool leaves the current tool intact");
+        assert_eq!(app.ui.tool_options.tolerance, 42.5, "valid fields still restore");
+        assert_eq!(app.ui.tool_options.contiguous, default_contiguous, "a malformed field falls back to its default");
     }
 }
