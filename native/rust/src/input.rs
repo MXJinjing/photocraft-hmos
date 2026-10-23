@@ -110,6 +110,9 @@ impl PreviewResume {
 #[derive(Default)]
 pub struct State {
     pressed: Option<PointerButton>,
+    /// Last position actually emitted to egui, in logical points. Cancel packets
+    /// may omit coordinates or report a different contact; never use their position.
+    last_pointer: Option<Pos2>,
     touches: BTreeMap<u64, Pos2>,
     touch_pointer: Option<u64>,
     pen_down: bool,
@@ -135,6 +138,11 @@ pub struct State {
     pub viewport: egui::ViewportId,
 }
 impl State {
+    fn move_pointer(&mut self, pos: Pos2, events: &mut Vec<Event>) {
+        self.last_pointer = Some(pos);
+        events.push(Event::PointerMoved(pos));
+    }
+
     fn finger_owns_pointer(&self) -> bool {
         !self.touches.is_empty()
             || self.touch_nav_active
@@ -179,7 +187,7 @@ impl State {
         };
         self.touch_pointer = Some(id);
         self.pressed = Some(PointerButton::Primary);
-        events.push(Event::PointerMoved(pos));
+        self.move_pointer(pos, events);
         events.push(Event::PointerButton {
             pos,
             button: PointerButton::Primary,
@@ -263,7 +271,8 @@ impl State {
         }
     }
 
-    pub fn cancel(&mut self, pos: Pos2, events: &mut Vec<Event>) {
+    pub fn cancel(&mut self, events: &mut Vec<Event>) {
+        let release = self.pressed.take().zip(self.last_pointer.take());
         self.feed.clear_hover(self.viewport);
         self.feed.clear_contact(self.viewport);
         self.clear_touches(events);
@@ -280,7 +289,7 @@ impl State {
         self.leftover_guard_until = None;
         self.mouse_echo_guard = None;
         self.axis_zoom = None;
-        if let Some(button) = self.pressed.take() {
+        if let Some((button, pos)) = release {
             events.push(Event::PointerButton {
                 pos,
                 button,
@@ -294,8 +303,16 @@ impl State {
         events.push(Event::ModifiersChanged(self.modifiers));
     }
     pub fn push(&mut self, input: Input, scale: f32, events: &mut Vec<Event>) {
+        if input.kind == "blur" {
+            self.cancel(events);
+            return;
+        }
         // 平台坐标是物理像素，egui 事件使用点；同一输入状态也负责跟踪按键与接触释放。
-        if !input.x.is_finite() || !input.y.is_finite() || !scale.is_finite() || scale <= 0.0 {
+        let cancelling = input.kind == "pointer" && input.action == 3;
+        if (!cancelling && (!input.x.is_finite() || !input.y.is_finite()))
+            || !scale.is_finite()
+            || scale <= 0.0
+        {
             return;
         }
         // XComponent pointer events do not carry keyboard modifiers. Retain the
@@ -407,10 +424,8 @@ impl State {
                 let first = self.touches.is_empty();
                 // egui's pinch anchor needs a pointer frame when multi-touch begins —
                 // including the common staggered case (finger one already down).
-                if entering_multi {
-                    if let Some(&pos) = next.values().next() {
-                        events.push(Event::PointerMoved(pos));
-                    }
+                if entering_multi && let Some(&pos) = next.values().next() {
+                    self.move_pointer(pos, events);
                 }
                 for (&id, &pos) in &next {
                     let phase = if self.touches.contains_key(&id) {
@@ -426,7 +441,7 @@ impl State {
                         force: None,
                     });
                     if self.touch_pointer == Some(id) {
-                        events.push(Event::PointerMoved(pos));
+                        self.move_pointer(pos, events);
                     }
                 }
                 if !multi {
@@ -456,7 +471,7 @@ impl State {
                 if !self.finger_owns_pointer() && !self.touch_settling() {
                     self.feed.report(PointerSource::Mouse, None);
                 }
-                events.push(Event::PointerMoved(pos));
+                self.move_pointer(pos, events);
                 if input.zoom.is_finite() && input.zoom > 0.0 {
                     let ratio = input.zoom / self.axis_zoom.unwrap_or(1.0);
                     if ratio.is_finite() && ratio > 0.0 && ratio != 1.0 {
@@ -501,7 +516,7 @@ impl State {
                                 .take()
                                 .unwrap_or_else(|| self.resume_guard())
                         });
-                    self.cancel(pos, events);
+                    self.cancel(events);
                     // Pointer cancellation hides a pen preview too. Focus blur
                     // still calls cancel directly to restore normal OS cursors.
                     if let Some(resume) = resume {
@@ -603,7 +618,7 @@ impl State {
                     self.hide_pen_preview();
                 }
                 self.feed.report(input.source, input.sample);
-                events.push(Event::PointerMoved(pos));
+                self.move_pointer(pos, events);
                 let button = match input.button {
                     1 => PointerButton::Secondary,
                     2 => PointerButton::Middle,
@@ -648,7 +663,6 @@ impl State {
                 events.push(Event::PointerGone);
             }
             "display_rotation" => self.feed.set_display_rotation(input.rotation, input.landscape),
-            "blur" => self.cancel(pos, events),
             "wheel" => events.push(Event::MouseWheel {
                 unit: egui::MouseWheelUnit::Point,
                 phase: egui::TouchPhase::Move,

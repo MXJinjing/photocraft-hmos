@@ -2,6 +2,7 @@ import { abilityDelegatorRegistry, TestRunner, Driver, PointerMatrix } from '@ki
 import native from 'libphotocraft.so';
 import { runBrushPreviewTest } from '../test/BrushPreviewTest';
 import { runTransformTouchTest } from '../test/TransformTouchTest';
+import { runTouchCancelTest } from '../test/TouchCancelTest';
 
 export default class OpenHarmonyTestRunner implements TestRunner {
   onPrepare(): void {}
@@ -12,6 +13,10 @@ export default class OpenHarmonyTestRunner implements TestRunner {
 
   async onRun(): Promise<void> {
     const parameters = abilityDelegatorRegistry.getArguments().parameters;
+    if (parameters['-s touchCancel'] === 'true' || parameters['touchCancel'] === 'true') {
+      await runTouchCancelTest();
+      return;
+    }
     if (parameters['-s transformTouch'] === 'true' || parameters['transformTouch'] === 'true') {
       await runTransformTouchTest();
       return;
