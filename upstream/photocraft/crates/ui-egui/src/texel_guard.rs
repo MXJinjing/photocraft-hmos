@@ -19,7 +19,7 @@
 
 use std::sync::Arc;
 
-use eframe::wgpu;
+use wgpu;
 use egui::{Color32, FullOutput, ImageData, TexturesDelta};
 
 /// What a fully transparent texel is uploaded as.

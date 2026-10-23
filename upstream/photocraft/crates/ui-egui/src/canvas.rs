@@ -10202,6 +10202,7 @@ mod display_memo_tests;
 #[path = "canvas/blend_viewport_tests.rs"]
 mod blend_viewport_regression;
 
+#[cfg(test)]
 mod pen_hover_tip_tests {
     #[test]
     fn preview_toggle_only_hides_an_idle_harmonyos_pen_tip() {
@@ -10215,6 +10216,8 @@ mod pen_hover_tip_tests {
                 }
             }
         }
+    }
+}
 
 #[cfg(test)]
 mod lasso_preview_tests {

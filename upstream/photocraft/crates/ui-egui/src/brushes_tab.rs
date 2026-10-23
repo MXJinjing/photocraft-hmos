@@ -357,6 +357,7 @@ pub(crate) fn grid_cell_width(cell: f32, scale: f32) -> f32 {
 
 fn list_row(ui: &mut egui::Ui, p: &BrushPreset, current: bool, presets: &[BrushPreset], indent: f32, scale: f32, source: PointerSource, acts: &mut Vec<Action>) {
     let t = Tokens::get(ui.ctx());
+    let k = list_row_height(scale) / 44.0;
     let item = egui::Id::new(("brush-preset", p.name.as_str()));
     let sense = list_drag::row_sense(ui.ctx(), source, item);
     let (full, raw_resp) = ui.allocate_exact_size(vec2(ui.available_width(), list_row_height(scale)), sense);

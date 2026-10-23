@@ -1000,7 +1000,7 @@ pub struct PhotocraftApp {
     gpu: Option<gpu_canvas::GpuCanvas>,
     /// The device the window itself draws with, and its health flag: the GPU canvas's, or one
     /// watched for the CPU canvas (see `gpu_status::check_window`).
-    window_device: Option<(eframe::wgpu::Device, photocraft_gpu::DeviceHealth)>,
+    window_device: Option<(wgpu::Device, photocraft_gpu::DeviceHealth)>,
     /// That device was lost: frames draw nothing and the app closes once its work is saved (#3438).
     window_lost: bool,
     /// When (in `egui::InputState::time`) to try saving unsaved work for recovery again after a
@@ -1008,7 +1008,7 @@ pub struct PhotocraftApp {
     window_recovery_retry: Option<f64>,
     /// The render state the GPU canvas was built on, kept after it is dropped so Retry GPU can
     /// build a new one on the same device (see `gpu_status::choose_recovery`, #6577).
-    gpu_render_state: Option<eframe::egui_wgpu::RenderState>,
+    gpu_render_state: Option<egui_wgpu::RenderState>,
     /// Why the GPU canvas was dropped (see `gpu_status::fall_back`).
     gpu_fault: Option<photocraft_gpu::Fault>,
     /// Run once the first frames have rendered (see [`Self::on_started`]).
@@ -1273,7 +1273,7 @@ impl PhotocraftApp {
 
     /// Watch the device the window draws with when the GPU canvas doesn't (the CPU canvas), so
     /// its loss is handled like the GPU canvas's (see `gpu_status::check_window`).
-    pub fn watch_window_device(&mut self, device: &eframe::wgpu::Device) {
+    pub fn watch_window_device(&mut self, device: &wgpu::Device) {
         self.window_device = Some((device.clone(), photocraft_gpu::DeviceHealth::watch(device)));
     }
 

@@ -63,7 +63,7 @@ pub(crate) struct Redraw {
     /// The state the blocks are drawn from, and what the texels depend on besides it.
     doc: Arc<Document>,
     display: u64,
-    format: eframe::wgpu::TextureFormat,
+    format: wgpu::TextureFormat,
     /// Uploaded blocks of `doc` kept for [`Kept`] (empty once over `cap`), and their bytes.
     collected: Vec<Option<Vec<u8>>>,
     collected_bytes: u64,
@@ -91,7 +91,7 @@ pub(crate) struct Kept {
     doc: Weak<Document>,
     id: DocId,
     display: u64,
-    format: eframe::wgpu::TextureFormat,
+    format: wgpu::TextureFormat,
     blocks: Vec<Rect>,
     texels: Vec<Vec<u8>>,
     bytes: u64,
@@ -102,7 +102,7 @@ impl Kept {
     /// (layers and their pixels, visibility, opacity, blending, masks, adjustments and everything
     /// else it holds), so a stale composite can't come back; Arc-shared tiles compare without
     /// reading their pixels.
-    fn matches(&self, doc: &Arc<Document>, display: u64, format: eframe::wgpu::TextureFormat, blocks: &[Rect]) -> bool {
+    fn matches(&self, doc: &Arc<Document>, display: u64, format: wgpu::TextureFormat, blocks: &[Rect]) -> bool {
         self.display == display
             && self.format == format
             && self.blocks == blocks
@@ -118,7 +118,7 @@ pub(crate) struct KeptComposites {
 
 impl KeptComposites {
     /// The kept redraw of exactly this state, now the newest.
-    fn find(&mut self, doc: &Arc<Document>, display: u64, format: eframe::wgpu::TextureFormat, blocks: &[Rect]) -> Option<&Kept> {
+    fn find(&mut self, doc: &Arc<Document>, display: u64, format: wgpu::TextureFormat, blocks: &[Rect]) -> Option<&Kept> {
         let i = self.entries.iter().position(|k| k.matches(doc, display, format, blocks))?;
         let k = self.entries.remove(i)?;
         self.entries.push_front(k);
@@ -342,7 +342,7 @@ struct Spawn {
     doc: Arc<Document>,
     display: Option<Arc<CanvasDisplay>>,
     display_key: u64,
-    format: eframe::wgpu::TextureFormat,
+    format: wgpu::TextureFormat,
     visible: Rect,
     blocks: Vec<Rect>,
     pending: Vec<bool>,
