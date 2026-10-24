@@ -310,9 +310,11 @@ fn a_disabled_shortcut_says_why() {
 #[test]
 fn a_disabled_shortcut_uses_the_command_id_translation() {
     let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), Default::default());
-    crate::i18n::with_language(crate::i18n::Lang::from_code("cs").unwrap(), || {
+    let cs = crate::i18n::Lang::from_code("cs").unwrap();
+    crate::i18n::with_language(cs, || {
         super::dispatch(&mut app, &egui::Context::default(), "select.all");
-        assert!(app.ui.status.starts_with("Vybrat vše není k dispozici:"), "{}", app.ui.status);
+        let shown = crate::i18n::tr_id(cs, "select.all", &super::label("select.all")).to_string();
+        assert!(app.ui.status.contains(&shown), "{}", app.ui.status);
         assert!(app.ui.status_error);
     });
 }

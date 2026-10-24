@@ -65,7 +65,7 @@ fn numeric_type_fields_have_localized_accessible_names() {
     );
     PhotocraftApp::setup_context(&h.ctx, Default::default());
     h.run_steps(4);
-    h.get_by_role_and_label(egui::accesskit::Role::SpinButton, "Tamanho da fonte").click();
+    h.get_by_role_and_label(egui::accesskit::Role::SpinButton, crate::i18n::tr(pt, "Font size")).click();
     h.run();
     h.key_press_modifiers(Modifiers::COMMAND, egui::Key::A);
     h.event(egui::Event::Text("36".into()));

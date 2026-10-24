@@ -719,10 +719,81 @@ pub fn title(d: &Dialog) -> String {
     }
 }
 
+type Fields = serde_json::Map<String, Value>;
+
+/// The markers [`confirm`] and [`cancel`] choose a dialog's handler by: keys the code opening a
+/// dialog puts in its fields. Keep in step with the arms of `confirm`.
+const ROUTES: &[fn(&Fields) -> bool] = &[
+    crate::guide_layout_ui::owns,
+    crate::brush_preset_dialog::owns,
+    crate::fill_ui::owns,
+    crate::pattern_fill_ui::owns,
+    crate::stroke_ui::owns,
+    crate::channel_options_ui::owns,
+    crate::channel_options_ui::owns_new_spot,
+    crate::shape_dialog::owns,
+    crate::delete_layer_prompt::owns,
+    crate::disk_change_prompt::owns,
+    crate::actions::owns_insert_stop,
+    crate::new_layer_ui::owns,
+    crate::mask_trash_prompt::owns,
+    crate::rasterize_prompt::owns,
+    crate::duplicate_layer_ui::owns,
+    crate::stack_dialog::owns,
+    crate::tool_reset::owns,
+    crate::crop_presets::owns,
+    crate::variables_ui::owns,
+    crate::file_ui::owns,
+    crate::new_guide_ui::owns,
+    crate::color_picker_ui::owns,
+    crate::color_range_ui::owns,
+    crate::prefs_ui::owns,
+    crate::open_prompt::owns,
+    crate::replace_prompt::owns,
+    crate::layer_style::color_picker::owns,
+    |f| f.contains_key("__export"),
+    |f| f.contains_key("__smartFilter"),
+    |f| f.contains_key(crate::actions::RESUME),
+];
+
+/// Whether `key` is a marker that picks a dialog's handler. Automation may change the values of
+/// a dialog's fields, private ones included, but never add a marker: a dialog it opened would
+/// otherwise confirm through another dialog's handler, one its command was never judged for.
+pub fn is_route_marker(key: &str) -> bool {
+    let probe = Fields::from_iter([(key.to_string(), Value::Bool(true))]);
+    ROUTES.iter().any(|owns| owns(&probe))
+}
+
+/// The file command a dialog's handler stands for when it reads or writes files itself, outside
+/// the engine (a disk-change save, Export As, Save for Web, Print), so automation is judged for
+/// that command rather than for the dialog's `__command`.
+fn file_command(fields: &Fields) -> Option<&'static str> {
+    if crate::disk_change_prompt::owns(fields) {
+        Some("file.save")
+    } else if fields.contains_key("__export") {
+        Some("file.export.exportAs")
+    } else if fields.contains_key("__web") {
+        Some("file.export.saveForWebLegacy")
+    } else if fields.contains_key("__print") {
+        Some("file.print")
+    } else {
+        None
+    }
+}
+
 /// Confirm a dialog: run its action and close it. Used by the OK button and by automation.
 pub fn confirm(app: &mut PhotocraftApp, id: u64) -> Result<Value, String> {
     if crate::layer_style::color_picker::has_child(app, id) {
         return Err("confirm or cancel the Layer Style color picker first".into());
+    }
+    // A control request installs the session gate; synthetic input sets `automation_input`.
+    // Either way the handler's own file access is judged before it runs, as its command would be.
+    if (app.automation_input || app.session.authorize.is_some())
+        && let Some(d) = app.ui.dialogs.iter().find(|d| d.id == id)
+        && let Some(command) = file_command(&d.fields)
+        && let Some(authorize) = app.services.automation_command.as_ref()
+    {
+        authorize(command, &Value::Object(d.fields.clone()))?;
     }
     if let Some(d) = app.ui.dialogs.iter().find(|d| d.id == id).filter(|d| crate::guide_layout_ui::owns(&d.fields)) {
         if app.ui.dialogs.iter().any(|child| crate::color_picker_ui::owns(&child.fields) && child.fields.get("__dialog").and_then(Value::as_u64) == Some(id)) {
@@ -778,7 +849,20 @@ pub fn confirm(app: &mut PhotocraftApp, id: u64) -> Result<Value, String> {
             };
             if crate::filter_dialog::needs_displace_map(&cmd, &crate::filter_dialog::params_of(&d.fields)) {
                 app.filter_preview = None;
-                return crate::filter_dialog::ask_displace_map(app, cmd, d.fields.clone());
+                let result = crate::filter_dialog::ask_displace_map(app, cmd, d.fields.clone());
+                if result.is_err() {
+                    crate::actions::abandoned(app, &d.fields);
+                } else {
+                    // Cancel and an unavailable picker finish before the Displace callback
+                    // runs. Observe the whole file-dialog result, including those exits.
+                    app.after_file_dialog(move |app, result| {
+                        if result.is_err() {
+                            crate::actions::abandoned(app, &d.fields);
+                        }
+                        result
+                    });
+                }
+                return result;
             }
             let (cmd, params) = match crate::smart_ui::confirm_command(app, &d.fields, cmd, crate::filter_dialog::params_of(&d.fields)) {
                 Ok(edit) => edit,

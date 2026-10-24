@@ -314,7 +314,7 @@ pub(crate) fn read_plane(t: &Tiff, ifd: &Ifd, limits: &Limits, layout: JpegLayou
                 let scatter = if layout == JpegLayout::Quads && samples == 1 { s.w.saturating_mul(s.h).saturating_mul(2) as u64 } else { 0 };
                 let budget = usize::try_from(limits.max_alloc.saturating_sub(scatter) / 2).unwrap_or(usize::MAX);
                 let geom = s.w.saturating_mul(s.h).saturating_mul(samples).saturating_mul(4);
-                let (f, v) = ljpeg::decode(src, geom.min(budget))?;
+                let (f, mut v) = ljpeg::decode(src, geom.min(budget))?;
                 if v.len() < need {
                     return Err(RawError::malformed("lossless JPEG tile is smaller than its tile"));
                 }
@@ -329,6 +329,9 @@ pub(crate) fn read_plane(t: &Tiff, ifd: &Ifd, limits: &Limits, layout: JpegLayou
                     }
                     return Ok(tile);
                 }
+                // The frame may be declared larger than the tile; keep (and so charge) the tile.
+                v.truncate(s.w.saturating_mul(s.h).saturating_mul(samples));
+                v.shrink_to_fit();
                 Ok(v)
             }
         }

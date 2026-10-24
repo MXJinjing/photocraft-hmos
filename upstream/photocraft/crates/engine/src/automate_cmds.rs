@@ -358,7 +358,9 @@ fn write_shim(droplet: &str) -> Result<String> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(&shim, std::fs::Permissions::from_mode(0o755));
+        // The shim only has to run as the user who created it; 0o755 would also let every other
+        // local account read and execute it.
+        let _ = std::fs::set_permissions(&shim, std::fs::Permissions::from_mode(0o700));
     }
     Ok(shim)
 }

@@ -150,6 +150,22 @@ fn scratch_reuse_preserves_pixels_and_bounds_retention() {
     });
 }
 
+/// Every layer the compositor draws, groups before their children: hidden layers and everything
+/// inside hidden groups are left out.
+pub(crate) fn visible_layers(layers: &[Layer]) -> Vec<&Layer> {
+    fn rec<'a>(layers: &'a [Layer], out: &mut Vec<&'a Layer>) {
+        for l in layers.iter().filter(|l| l.visible) {
+            out.push(l);
+            if let Some(children) = l.children() {
+                rec(children, out);
+            }
+        }
+    }
+    let mut out = Vec::new();
+    rec(layers, &mut out);
+    out
+}
+
 /// Composite the whole document over `rect`, in parallel 256² tiles on
 /// native targets (single-threaded on wasm).
 pub fn render(doc: &Document, rect: Rect) -> Buffer {
@@ -383,7 +399,11 @@ pub fn flatten(doc: &Document) -> Buffer {
 }
 
 /// Render an arbitrary subset: a single layer (e.g. for thumbnails), isolated.
+/// Rects past [`MAX_RENDER_PIXELS`] give an empty buffer.
 pub fn render_layer(layer: &Layer, rect: Rect) -> Buffer {
+    if u64::from(rect.width()) * u64::from(rect.height()) > MAX_RENDER_PIXELS {
+        return Buffer::transparent(Rect::EMPTY);
+    }
     let mut buf = Buffer::transparent(rect);
     let patterns = pattern::PreparedPatterns::new(&[], pattern::PREPARED_PATTERN_BYTES);
     composite_stack_at(
@@ -1720,14 +1740,34 @@ fn blend_if_level(x: f32) -> f32 {
     if (v - r).abs() < 1e-4 { r } else { v }
 }
 
+/// Blend If groups inside one another whose own colour is still rendered separately. Each extra
+/// level multiplies the work by the tree's depth, so the cost is polynomial, not exponential.
+const MAX_BLEND_IF_GROUP_DEPTH: u32 = 2;
+
+thread_local! {
+    /// Blend If groups being rendered for their own colour on this thread.
+    static BLEND_IF_GROUPS: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+}
+
 /// Apply `layer`'s Blend If to a finished composite: `out` (the backdrop with the layer drawn)
 /// is mixed back towards `before` (the backdrop without it) where the ranges hide the layer.
 /// Mixing premultiplied colour by `k` equals compositing the layer at `k` × its alpha, since
 /// every blend mode's source-over result is linear in the source alpha.
 fn apply_blend_if(layer: &Layer, before: &Buffer, out: &mut Buffer, cx: &Ctx) {
     // "This Layer" is the layer's own colour; adjustment layers (no content of their own) are
-    // judged by their result.
-    let own = if matches!(layer.content, LayerContent::Adjustment(_)) { None } else { render_content(layer, out.rect, cx) };
+    // judged by their result. So are groups nested deeper than `MAX_BLEND_IF_GROUP_DEPTH` Blend
+    // Ifs: a group's own colour re-composites its children, which doubles the work at every
+    // level of Blend If groups inside one another.
+    let is_group = matches!(layer.content, LayerContent::Group(_));
+    let nested = BLEND_IF_GROUPS.with(std::cell::Cell::get);
+    let own = if matches!(layer.content, LayerContent::Adjustment(_)) || (is_group && nested >= MAX_BLEND_IF_GROUP_DEPTH) {
+        None
+    } else {
+        BLEND_IF_GROUPS.with(|d| d.set(nested + u32::from(is_group)));
+        let own = render_content(layer, out.rect, cx);
+        BLEND_IF_GROUPS.with(|d| d.set(nested));
+        own
+    };
     for (i, (p, b)) in out.px.iter_mut().zip(&before.px).enumerate() {
         let this = match &own {
             Some(o) => Some(o.px[i]).filter(|q| q[3] > 0.0),
@@ -2226,12 +2266,21 @@ fn fx_region_bytes(layers: &[Layer], canvas: Rect) -> u64 {
     bytes(layers, canvas, 0)
 }
 
+/// Most bytes one layer's effect maps and source may take to build, whatever the cache budget.
+const MAX_FX_BUILD_BYTES: u64 = if cfg!(target_pointer_width = "64") { 4 << 30 } else { 512 << 20 };
+
 /// The layer's effect maps over its region (layer bounds grown by the effect reach, within the
 /// canvas grown likewise; see [`effect_region`]), built once per layer state and shared by every
 /// tile. `rect` is what the caller composites the layer over (see [`effect_region`]).
 fn effect_maps(layer: &Layer, rect: Rect, cx: &Ctx) -> std::sync::Arc<effects::FxMaps> {
     use std::hash::{Hash, Hasher};
-    let (region, clipped) = effect_region(layer, rect, cx);
+    let (mut region, clipped) = effect_region(layer, rect, cx);
+    // Non-local effects keep their whole source region, which a few distant pixels stretch over
+    // the canvas: past the cap the effects are left out instead of allocating it.
+    let region_px = u64::from(region.width()) * u64::from(region.height());
+    if (effects::map_count(layer) as u64 + 1).saturating_mul(region_px).saturating_mul(4) > MAX_FX_BUILD_BYTES {
+        region = Rect::EMPTY;
+    }
     static NO_CACHE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     if *NO_CACHE.get_or_init(|| std::env::var_os("PHOTOCRAFT_FX_NOCACHE").is_some()) {
         let shape = if region.is_empty() { Vec::new() } else { effect_shape(layer, region, cx) };

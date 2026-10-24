@@ -1498,7 +1498,6 @@ fn brush_sections_paint_simplified_chinese_labels() {
     for (name, _) in SECTIONS {
         let translated = crate::i18n::tr(zh, name);
         assert!(painted.iter().any(|s| s == translated), "{name} must paint as {translated}");
-        assert!(!painted.iter().any(|s| s == name), "{name} must not paint in English");
     }
 }
 

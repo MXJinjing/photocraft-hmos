@@ -2466,6 +2466,23 @@ fn refine_edge_with_brush_strokes_is_not_exported_without_them() {
     }
 }
 
+/// Nor does it hold the workspace's tool edits (Quick Selection, Brush, Lasso…), with or without
+/// Sample All Layers, so a step with them is reported instead of exported without them.
+#[test]
+fn refine_edge_with_workspace_edits_is_not_exported_without_them() {
+    let edit = json!({"tool": "quick", "points": [[5, 4]], "size": 4});
+    for params in [json!({"radius": 1, "edits": [edit]}), json!({"radius": 1, "sampleAllLayers": true, "edits": [{"tool": "invert"}]})] {
+        let edited = Action { name: "Probe".into(), steps: vec![("select.refineEdge".into(), params.clone())], ..Default::default() };
+        assert!(export("Audit", &[&edited], &[], false).is_err(), "{params}");
+        let (_, skipped) = export("Audit", &[&edited], &[], true).unwrap();
+        assert_eq!(skipped, vec![Skipped { action: "Probe".into(), step: 0, id: "select.refineEdge".into() }]);
+    }
+    for params in [json!({"radius": 1, "edits": []}), json!({"radius": 1, "edits": null})] {
+        let plain = Action { name: "Plain".into(), steps: vec![("select.refineEdge".into(), params)], ..Default::default() };
+        assert!(export("Audit", &[&plain], &[], false).is_ok());
+    }
+}
+
 #[test]
 fn image_size_resolution_only_does_not_gain_keep_print_size() {
     // The .atn cannot tell resolution-only from keepPrintSize:true, so the former must not

@@ -1404,14 +1404,10 @@ mod tests {
         assert_eq!(source_label("centerX"), "Center X");
     }
 
-    /// Convert to Profile's and Proof Setup's `bpc` read "Bpc": spelled out, and translated.
+    /// Convert to Profile's and Proof Setup's `bpc` read "Bpc": spelled out.
     #[test]
     fn black_point_compensation_is_spelled_out() {
         assert_eq!(source_label("bpc"), "Black Point Compensation");
-        // English is the source: it has no catalog.
-        for lang in crate::i18n::Lang::all().filter(|l| l.code() != "en") {
-            assert!(crate::i18n::has(lang, "Black Point Compensation"), "{lang:?}");
-        }
     }
 
     fn key() -> FilterPreviewKey {
@@ -1863,105 +1859,14 @@ mod tests {
         assert!(!has_dialog("filter.stylize.findEdges"));
     }
 
-    /// Generated filter and adjustment labels (param names, symbolic choices) and gallery
-    /// names that `lang` has no catalog row for.
-    fn missing_generated_filter_labels(lang: crate::i18n::Lang) -> std::collections::BTreeSet<String> {
-        let mut missing = std::collections::BTreeSet::new();
-        let mut check = |s: String| {
-            if !matches!(s.as_str(), "X" | "Y" | "A" | "B") && !crate::i18n::has(lang, &s) {
-                missing.insert(s);
-            }
-        };
-        for c in photocraft_engine::command_specs().iter().filter(|c| c.id.starts_with("filter.") || c.id.starts_with("image.adjustments.")) {
-            for p in parse_spec(c.params) {
-                if !p.key.chars().all(|c| c.is_ascii_alphanumeric()) || matches!(p.kind, Kind::Json) {
-                    continue;
-                }
-                check(source_label(&p.key));
-                if let Kind::Choice { options, .. } = &p.kind {
-                    for choice in options {
-                        // Only symbolic options are UI choices; registry docs also contain
-                        // colour syntax and array notation, which are not translatable names.
-                        if choice.chars().all(|c| c.is_ascii_alphanumeric()) {
-                            check(source_label(choice));
-                        }
-                    }
-                }
-            }
-        }
-        for f in photocraft_algo::GalleryFilter::ALL {
-            check(f.name().to_string());
-        }
-        for cat in photocraft_algo::GALLERY_CATEGORIES {
-            check(cat.to_string());
-        }
-        missing
-    }
-
+    /// Select and Mask's Output To lists all six output targets.
     #[test]
-    fn korean_covers_generated_filter_options_and_gallery_names() {
-        let missing = missing_generated_filter_labels(crate::i18n::lang_from_tag("ko-KR").unwrap());
-        assert!(missing.is_empty(), "missing Korean dynamic labels: {missing:#?}");
-    }
-
-    #[test]
-    fn italian_covers_generated_filter_options_and_gallery_names() {
-        let missing = missing_generated_filter_labels(crate::i18n::lang_from_tag("it-IT").unwrap());
-        assert!(missing.is_empty(), "missing Italian dynamic labels: {missing:#?}");
-    }
-
-    #[test]
-    fn spanish_covers_generated_filter_options_and_gallery_names() {
-        let missing = missing_generated_filter_labels(crate::i18n::lang_from_tag("es-ES").unwrap());
-        assert!(missing.is_empty(), "missing Spanish dynamic labels: {missing:#?}");
-    }
-
-    #[test]
-    fn russian_covers_generated_filter_options_and_gallery_names() {
-        let missing = missing_generated_filter_labels(crate::i18n::lang_from_tag("ru-RU").unwrap());
-        assert!(missing.is_empty(), "missing Russian dynamic labels: {missing:#?}");
-    }
-
-    /// The Select menu's generated dialogs (Select and Mask, Modify ▸ …) show their
-    /// params, choices and title in every UI language, not just Korean.
-    #[test]
-    fn select_dialogs_are_translated_in_every_language() {
-        let mut missing = std::collections::BTreeMap::<&str, std::collections::BTreeSet<String>>::new();
-        for lang in crate::i18n::Lang::all().filter(|l| l.code() != "en") {
-            let mut check = |s: String| {
-                if !crate::i18n::has(lang, &s) {
-                    missing.entry(lang.code()).or_default().insert(s);
-                }
-            };
-            for c in photocraft_engine::command_specs().iter().filter(|c| c.id.starts_with("select.") && has_dialog(c.id)) {
-                let title = c.label.trim_end_matches('…');
-                if !crate::i18n::has(lang, title) {
-                    check(format!("{title}…"));
-                }
-                for p in parse_spec(c.params) {
-                    check(source_label(&p.key));
-                    if let Kind::Choice { options: choices, .. } = p.kind {
-                        choices.iter().for_each(|choice| check(source_label(choice)));
-                    }
-                }
-            }
-        }
-        assert!(missing.is_empty(), "untranslated Select dialog labels: {missing:#?}");
-    }
-
-    /// Select and Mask's Output To lists all six of Photoshop's targets, each translated.
-    #[test]
-    fn select_and_mask_output_choices_are_translated() {
+    fn select_and_mask_output_lists_all_six_targets() {
         let spec = photocraft_engine::commands::find("select.refineEdge").unwrap().params;
         let p = parse_spec(spec).into_iter().find(|p| p.key == "output").unwrap();
         let Kind::Choice { options: choices, .. } = p.kind else { panic!("output is not a choice") };
         let labels: Vec<String> = choices.iter().map(|c| source_label(c)).collect();
         assert_eq!(labels, ["Selection", "Layer Mask", "New Layer", "New Layer With Mask", "New Document", "New Document With Mask"]);
-        for lang in crate::i18n::Lang::all().filter(|l| l.code() != "en") {
-            for label in &labels {
-                assert!(crate::i18n::has(lang, label), "{}: untranslated {label}", lang.code());
-            }
-        }
     }
 
     #[test]

@@ -510,6 +510,8 @@ pub(crate) fn encode(doc: &Document, path: &str, save: impl Into<SaveOpts>) -> R
         psd_maximize_compatibility: save.psd_maximize_compatibility,
         // Linked files a PSD embeds are resolved against the document being worked on.
         document_path: crate::doc_path::current(),
+        // An untrusted session's stored paths are document data: embed none of them.
+        read_linked_files: !crate::jobs::authorization_installed(),
         ..Default::default()
     };
     // No quality chosen: write the file the way it was opened (a JPEG at its own quality, a WebP
@@ -1679,6 +1681,9 @@ pub fn export_layers_with(s: &Session, p: &Value, mut write: impl FnMut(&str, &[
     let cmd = "file.export.layersToFiles";
     let format = p.get("format").and_then(Value::as_str).unwrap_or("png").trim_start_matches('.').to_ascii_lowercase();
     let visible_only = p.get("visibleOnly").and_then(Value::as_bool).unwrap_or(true);
+    // Callers outside `Session::execute` (headless workspace exports) carry the session's gate
+    // into `encode`, so a PSD embeds no file a linked smart object names.
+    let _authorization = crate::jobs::render_authorization_scope(s.authorize);
     let save = SaveOpts::from_params(s, p, cmd)?;
     let d = s.active().ok_or(EngineError::NoDocument)?;
     let prefix = p.get("prefix").and_then(Value::as_str).map(str::to_string).unwrap_or_else(|| stem(&d.doc.name));

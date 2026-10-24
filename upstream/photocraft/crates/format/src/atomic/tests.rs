@@ -330,6 +330,19 @@ fn keeps_the_original_file_mode() {
 
 #[cfg(unix)]
 #[test]
+fn new_file_follows_the_process_umask() {
+    use std::os::unix::fs::PermissionsExt;
+    let d = TempDir::new("umask");
+    let probe = d.0.join("probe.psd");
+    std::fs::File::create(&probe).unwrap();
+    let expected = std::fs::metadata(&probe).unwrap().permissions().mode() & 0o777;
+    let p = d.0.join("fresh.psd");
+    atomic_write(&p, b"new").unwrap();
+    assert_eq!(std::fs::metadata(&p).unwrap().permissions().mode() & 0o777, expected);
+}
+
+#[cfg(unix)]
+#[test]
 fn writes_through_a_symlink() {
     let d = TempDir::new("link");
     let real = d.0.join("real.psd");

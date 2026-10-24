@@ -67,6 +67,8 @@ pub struct Printer {
 /// Timeouts: connecting, and each request (a Print-Job carries the whole PDF).
 const CONNECT: Duration = Duration::from_secs(3);
 const REQUEST: Duration = Duration::from_secs(60);
+/// The whole reply, however it trickles in: the timeouts above only cover each read.
+const REPLY_DEADLINE: Duration = Duration::from_secs(120);
 /// Largest reply read.
 const MAX_REPLY: usize = 16 << 20;
 /// Largest number of attributes taken from a reply.
@@ -434,7 +436,13 @@ fn read_response(stream: &mut Stream) -> Result<Vec<u8>> {
     let mut body_at = None;
     let mut expected: Option<usize> = None;
     let mut chunked = false;
+    // Where the chunk walk resumes, so each read costs its own bytes, not the whole body again.
+    let mut chunk_at = 0usize;
+    let started = std::time::Instant::now();
     loop {
+        if started.elapsed() > REPLY_DEADLINE {
+            return Err(Error::Protocol("the print server took too long to reply".into()));
+        }
         let n = stream.read(&mut buf).map_err(|e| Error::Protocol(format!("reading: {e}")))?;
         if n == 0 {
             return Ok(raw);
@@ -455,7 +463,7 @@ fn read_response(stream: &mut Stream) -> Result<Vec<u8>> {
         let body = raw.get(at..).unwrap_or_default();
         let complete = match expected {
             Some(len) if !chunked => body.len() >= len,
-            _ if chunked => chunked_complete(body),
+            _ if chunked => chunked_complete(body, &mut chunk_at),
             _ => false,
         };
         if complete {
@@ -483,8 +491,11 @@ fn http_response(raw: &[u8]) -> Result<(u16, Headers, &[u8])> {
 /// `0\r\n\r\n` inside a chunk's payload (an attribute value can hold it) does not count. A
 /// malformed or impossible size counts as complete, so [`dechunk`] reports it instead of
 /// waiting for more.
-fn chunked_complete(mut b: &[u8]) -> bool {
+fn chunked_complete(body: &[u8], resume: &mut usize) -> bool {
+    let mut b = body.get(*resume..).unwrap_or_default();
     loop {
+        // Chunks already walked are not walked again: `resume` marks the start of this one.
+        *resume = body.len() - b.len();
         let Some(line_end) = b.windows(2).position(|w| w == b"\r\n") else { return false };
         let size_str = String::from_utf8_lossy(b.get(..line_end).unwrap_or(&[]));
         let Ok(size) = usize::from_str_radix(size_str.split(';').next().unwrap_or_default().trim(), 16) else { return true };

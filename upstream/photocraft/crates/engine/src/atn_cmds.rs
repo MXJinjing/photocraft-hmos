@@ -3037,13 +3037,14 @@ macro_rules! adjustment_event {
 
 const RIPPLE_SIZE: &[(&str, &str)] = &[("Sml", "small"), ("Mdm", "medium"), ("Lrg", "large")];
 
-/// Whether a Select and Mask step carries Refine Edge Brush strokes, which no descriptor holds.
+/// Whether a Select and Mask step carries Refine Edge Brush strokes or the workspace's tool
+/// edits (Quick Selection, Brush, Lasso…), which no descriptor holds.
 fn has_refine_strokes(p: &Value) -> bool {
-    p.get("refineStrokes").is_some_and(|v| !v.is_null() && v.as_array().is_none_or(|a| !a.is_empty()))
+    p.get("refineStrokes").is_some_and(|v| !v.is_null() && v.as_array().is_none_or(|a| !a.is_empty())) || crate::select_mask_edits::has_edits(p)
 }
 
-/// Select and Mask to Photoshop. The descriptor has no field for the Refine Edge Brush, so a
-/// step with `refineStrokes` can't be exported faithfully. One with `sampleAllLayers` is not
+/// Select and Mask to Photoshop. The descriptor has no field for the Refine Edge Brush or the
+/// workspace's tools, so a step with `refineStrokes` or `edits` can't be exported faithfully. One with `sampleAllLayers` is not
 /// exported here either: it exports as `smartBrushWorkspace`.
 fn refine_edge_to(_: &str, p: &Value) -> Option<Descriptor> {
     if !pixel_target(p) || p.get("sampleAllLayers").is_some() || has_refine_strokes(p) {

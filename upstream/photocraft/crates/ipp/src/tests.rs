@@ -429,10 +429,29 @@ fn a_last_chunk_pattern_inside_a_value_does_not_end_the_reply() {
     assert_eq!(list.len(), 1);
     assert_eq!(list[0].name, "Of\r\n0\r\n\r\nfice");
     // The boundary walk itself: complete only at a zero-size chunk, never on payload bytes.
-    assert!(!chunked_complete(b"5\r\nab\r\n0"));
-    assert!(!chunked_complete(b"7\r\n\r\n0\r\n\r\nx\r\n"));
-    assert!(chunked_complete(b"7\r\n\r\n0\r\n\r\nx\r\n0\r\n\r\n"));
-    assert!(chunked_complete(b"zz\r\n") && dechunk(b"zz\r\n").is_err());
+    assert!(!complete(b"5\r\nab\r\n0"));
+    assert!(!complete(b"7\r\n\r\n0\r\n\r\nx\r\n"));
+    assert!(complete(b"7\r\n\r\n0\r\n\r\nx\r\n0\r\n\r\n"));
+    assert!(complete(b"zz\r\n") && dechunk(b"zz\r\n").is_err());
+}
+
+/// [`chunked_complete`] on a whole body at once.
+fn complete(body: &[u8]) -> bool {
+    chunked_complete(body, &mut 0)
+}
+
+/// Fed a byte at a time, as a server dripping the reply would, the walk resumes where it stopped
+/// and agrees with the one-shot answer at every length.
+#[test]
+fn the_chunk_walk_resumes_instead_of_starting_over() {
+    let body = b"3\r\nabc\r\n10\r\n0123456789abcdef\r\n0\r\n\r\n";
+    let mut at = 0;
+    for len in 0..=body.len() {
+        let prefix = &body[..len];
+        assert_eq!(chunked_complete(prefix, &mut at), complete(prefix), "{len}");
+        assert!(at <= len);
+    }
+    assert!(at > 0, "it moved past the chunks already walked");
 }
 
 /// A chunk size that cannot be satisfied (`usize::MAX`, `usize::MAX - 1`, anything past the
@@ -440,7 +459,7 @@ fn a_last_chunk_pattern_inside_a_value_does_not_end_the_reply() {
 #[test]
 fn an_impossible_chunk_size_is_a_protocol_error_not_a_panic() {
     for size_line in ["ffffffffffffffff", "fffffffffffffffe", "1000001"] {
-        assert!(chunked_complete(format!("{size_line}\r\n").as_bytes()));
+        assert!(complete(format!("{size_line}\r\n").as_bytes()));
         assert!(dechunk(format!("{size_line}\r\nab\r\n").as_bytes()).is_err());
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();

@@ -803,6 +803,7 @@
 	Split Warp Vertically	Bagi Warp Vertikal
 	Statistics…	Statistik…
 	Refine Strokes	Goresan penyempurnaan
+	Edits	Suntingan
 # Counted status and panel messages
 @plural	Exported {n} swatch to {file}|Exported {n} swatches to {file}	{n} swatch diekspor ke {file}
 @plural	Imported {n} swatch from {file}|Imported {n} swatches from {file}	{n} swatch diimpor dari {file}

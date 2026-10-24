@@ -819,6 +819,7 @@
 	Split Warp Vertically	Podziel wypaczenie w pionie
 	Statistics…	Statystyki…
 	Refine Strokes	Pociągnięcia udoskonalania
+	Edits	Edycje
 # Counted status and panel messages (plural forms: 1 | 2–4 except 12–14 | the rest)
 @plural	Exported {n} swatch to {file}|Exported {n} swatches to {file}	Wyeksportowano {n} próbkę koloru do {file}|Wyeksportowano {n} próbki kolorów do {file}|Wyeksportowano {n} próbek kolorów do {file}
 @plural	Imported {n} swatch from {file}|Imported {n} swatches from {file}	Zaimportowano {n} próbkę koloru z {file}|Zaimportowano {n} próbki kolorów z {file}|Zaimportowano {n} próbek kolorów z {file}

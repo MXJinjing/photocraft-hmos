@@ -598,7 +598,14 @@ fn write_bundle_file(root: &Path, path: &Path, data: &[u8], fs: &dyn crate::atom
     let mut temporary = None;
     for _ in 0..8 {
         let candidate = parent.join(crate::atomic::temp_name(&name.to_string_lossy()));
-        match std::fs::OpenOptions::new().write(true).create_new(true).open(&candidate) {
+        let mut opts = std::fs::OpenOptions::new();
+        opts.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            opts.mode(0o600);
+        }
+        match opts.open(&candidate) {
             Ok(file) => {
                 temporary = Some((candidate, file));
                 break;

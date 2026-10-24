@@ -303,6 +303,17 @@ mod archive {
     }
 
     #[test]
+    fn fixed_records_of_zero_width_are_rejected_before_any_value_is_made() {
+        // Four million records of no bytes each pass a length check that multiplies by the width.
+        let mut f = vec![0x80 | 0x2c];
+        f.extend(tag(b"Big_").0.to_le_bytes());
+        f.extend(4_000_000u32.to_le_bytes());
+        f.extend(0u16.to_le_bytes());
+        let d = synth::stream(&[(tag(b"Big_"), F::Raw(f))]);
+        assert_eq!(stream::parse(&d).unwrap_err(), Error::Malformed("array longer than its data"));
+    }
+
+    #[test]
     fn a_small_compressed_entry_cannot_make_the_stream_allocate_gigabytes() {
         // Each decoded value takes about 40 bytes, and a bool array packs eight in a byte: 16 MiB
         // of zero bits, a few KiB once compressed, would ask for 2^27 values (about 4 GiB). An

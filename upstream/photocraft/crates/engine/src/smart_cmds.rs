@@ -79,10 +79,16 @@ fn base_name(path: &str) -> String {
 
 /// A linked file's bytes; `None` when it is missing or its path is not followed
 /// ([`crate::doc_path::resolve`]).
+///
+/// The path is document data, not a request parameter, so every read rechecks it with the gate
+/// of the session the work is done for: a filter, transform or refresh re-renders from here,
+/// not only the contents commands that judge it up front. A refused path is handled like a
+/// missing file: the layer keeps its last rendering.
 fn read_file(path: &str) -> Option<Vec<u8>> {
     if path.is_empty() {
         return None;
     }
+    crate::jobs::authorize_render_command("layer.smartObjects.updateModifiedContent", &json!({"path": path})).ok()?;
     photocraft_format::read_file(&crate::doc_path::resolve(path).ok()?).ok()
 }
 

@@ -303,8 +303,11 @@ mod tests {
             assert_eq!(result["info"]["lines"], json!(english));
             assert_eq!(crate::i18n::current().code(), "cs", "diagnostics restore the drawing language");
             let screen = system_info_ui(&app);
-            assert!(screen.iter().any(|line| line == "Grafický adaptér: Test GPU"), "{screen:?}");
-            assert!(screen.iter().any(|line| line.starts_with("Profil monitoru:")), "{screen:?}");
+            let cs = crate::i18n::current();
+            let adapter = crate::i18n::fmt(crate::i18n::tr(cs, "Graphics adapter: {adapter}"), &[("adapter", "Test GPU")]);
+            assert!(screen.contains(&adapter), "{screen:?}");
+            let profile = crate::i18n::tr(cs, "Monitor profile: {profile}").split('{').next().unwrap_or_default();
+            assert!(screen.iter().any(|line| line.starts_with(profile)), "{screen:?}");
             assert!(english.iter().any(|line| line == "GPU backend preference: auto"));
         });
     }
@@ -319,8 +322,11 @@ mod tests {
             app.perf.gpu_info.preference = "auto".into();
             app.perf.gpu_info.selected = "auto".into();
             assert_eq!(system_info_ui(&app), empty);
-            assert!(empty.iter().any(|line| line == "Grafický adaptér: auto"));
-            assert!(empty.iter().any(|line| line == "Preferovaný backend GPU: automaticky"), "{empty:?}");
+            let cs = crate::i18n::current();
+            let adapter = crate::i18n::fmt(crate::i18n::tr(cs, "Graphics adapter: {adapter}"), &[("adapter", "auto")]);
+            assert!(empty.contains(&adapter), "{empty:?}");
+            let preference = crate::i18n::fmt(crate::i18n::tr(cs, "GPU backend preference: {backend}"), &[("backend", crate::i18n::tr(cs, "auto"))]);
+            assert!(empty.contains(&preference), "{empty:?}");
             assert_eq!(app.perf.gpu_info.preference, "auto");
             assert_eq!(app.perf.gpu_info.selected, "auto");
         });

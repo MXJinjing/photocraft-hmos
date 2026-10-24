@@ -223,8 +223,8 @@ fn pattern_texture(ctx: &egui::Context, pat: &photocraft_doc::Pattern) -> Textur
     cached_texture(ctx, ("pattern", pat.id.clone()), || {
         let (w, h) = (pat.width.max(1), pat.height.max(1));
         let fmt = pat.surface.format();
-        let px = pat.surface.read_region(photocraft_geom::Rect::new(0, 0, w as i32, h as i32));
-        let n = fmt.channels();
+        // Only the pixels the swatch shows are read: a pattern file can declare a padded source
+        // of any size, and reading it whole to pick 4096 of its pixels is gigabytes of floats.
         // Tiles smaller than the swatch repeat; larger ones are shown shrunk.
         const S: u32 = 64;
         let step = (w.max(h) as f32 / S as f32).max(1.0);
@@ -233,8 +233,8 @@ fn pattern_texture(ctx: &egui::Context, pat: &photocraft_doc::Pattern) -> Textur
             for x in 0..S {
                 let sx = ((x as f32 * step) as u32) % w;
                 let sy = ((y as f32 * step) as u32) % h;
-                let i = (sy * w + sx) as usize * n;
-                img.pixels[(y * S + x) as usize] = c32(photocraft_raster::to_rgba(&fmt, &px[i..i + n]));
+                let px = pat.surface.read_region(photocraft_geom::Rect::from_xywh(sx as i32, sy as i32, 1, 1));
+                img.pixels[(y * S + x) as usize] = c32(photocraft_raster::to_rgba(&fmt, &px));
             }
         }
         img

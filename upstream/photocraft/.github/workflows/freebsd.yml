@@ -9,6 +9,8 @@ name: FreeBSD
 # or dependency change: a drifted dependency still shows up within a day. PRs that change the
 # FreeBSD packaging itself still run it.
 on:
+  push:
+    branches: [release]
   schedule:
     - cron: "17 2 * * *"
   pull_request:

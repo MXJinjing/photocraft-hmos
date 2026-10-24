@@ -28,6 +28,48 @@ use crate::{ImportResult, IoError};
 pub const MAX_SIDE: u32 = 16_384;
 /// A rasterised fallback layer or a smart-object render never exceeds this many pixels.
 const MAX_RASTER_PIXELS: u64 = 24_000_000;
+/// Largest decoded byte size (RGBA8) accepted for an embedded raster image before resvg decodes
+/// it. resvg/tiny-skia allocate the full intrinsic image before any destination-size scaling,
+/// so a highly compressed PNG or WebP could otherwise trigger gigabyte-scale allocation and
+/// decompression that the destination pixmap's size check never sees.
+const MAX_EMBEDDED_IMAGE_BYTES: u64 = MAX_RASTER_PIXELS * 4;
+
+/// The IHDR width/height of a PNG, read directly from its header (no decoding): the signature
+/// (8 bytes), the IHDR chunk's length and type (8 bytes), then big-endian width and height.
+fn png_dimensions(data: &[u8]) -> Option<(u32, u32)> {
+    let sig = data.get(0..8)?;
+    if sig != [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A] {
+        return None;
+    }
+    if data.get(12..16)? != b"IHDR" {
+        return None;
+    }
+    let w = u32::from_be_bytes(data.get(16..20)?.try_into().ok()?);
+    let h = u32::from_be_bytes(data.get(20..24)?.try_into().ok()?);
+    Some((w, h))
+}
+
+/// Intrinsic dimensions of a raster image resvg can embed, from its header alone, for formats
+/// where decoding allocates the full image before any destination scaling (PNG, WebP).
+/// Returns `Some(Some((w, h)))` when the format is PNG/WebP and its header parses cleanly,
+/// `Some(None)` when the format is PNG/WebP (by MIME or magic bytes under `"text/plain"`)
+/// and its header is malformed, or `None` for other formats.
+fn embedded_image_dimensions(mime: &str, data: &[u8]) -> Option<Option<(u32, u32)>> {
+    match mime {
+        "image/png" => Some(png_dimensions(data)),
+        "image/webp" => Some(photocraft_codecs::probe_size(data).ok()),
+        "text/plain" => {
+            if data.starts_with(&[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A]) {
+                Some(png_dimensions(data))
+            } else if data.get(0..4) == Some(b"RIFF") && data.get(8..12) == Some(b"WEBP") {
+                Some(photocraft_codecs::probe_size(data).ok())
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
 /// Aggregate memory for retained fallback surfaces in the document's pixel format.
 const MAX_PIXEL_BYTES: u64 = 1 << 30;
 /// Estimated peak during raster conversion (retained surfaces + RGBA8 pixmap + f32 staging + tiles).
@@ -139,9 +181,36 @@ fn system_generic_family(_generic: &str) -> Option<String> {
 /// `~/.ssh/...`) into the document. Embedded SVG images get no `<image>` resolution at all
 /// (`usvg` already blanks it for sub-SVGs).
 fn options(fontdb: Arc<usvg::fontdb::Database>) -> usvg::Options<'static> {
+    let default_resolver = usvg::ImageHrefResolver::default_data_resolver();
+    let resolve_data: usvg::ImageHrefDataResolverFn<'static> = Box::new(move |mime, data, opts| {
+        // Reject embedded images whose decoded RGBA storage would exceed the budget before
+        // resvg (which allocates the full intrinsic image before any destination scaling) ever
+        // sees them. Formats without a cheap header probe fall through unchanged; their decode
+        // path is bounded elsewhere or accepted as-is, matching the previous behavior.
+        if let Some(probed) = embedded_image_dimensions(mime, &data) {
+            let (w, h) = probed?;
+            let decoded = u64::from(w).saturating_mul(u64::from(h)).saturating_mul(4);
+            if decoded > MAX_EMBEDDED_IMAGE_BYTES {
+                return None;
+            }
+        }
+        // An embedded `image/svg+xml` value can itself be gzip-compressed (SVGZ-in-data-URL).
+        // The default resolver's sub-SVG loader checks for the gzip magic and decompresses
+        // again with no byte limit of its own. Apply our bounded inflate first: if the data is
+        // gzip-compressed, hand the default resolver the already-decompressed (and
+        // size-checked) bytes, which no longer start with the gzip magic, so it parses them
+        // directly instead of decompressing a second time.
+        if (mime == "image/svg+xml" || mime == "text/plain") && data.starts_with(&[0x1f, 0x8b]) {
+            return match inflate(&data) {
+                Ok(xml) if !xml.starts_with(&[0x1f, 0x8b]) => default_resolver("image/svg+xml", std::sync::Arc::new(xml.into_owned()), opts),
+                _ => None,
+            };
+        }
+        default_resolver(mime, data, opts)
+    });
     usvg::Options {
         resources_dir: None,
-        image_href_resolver: usvg::ImageHrefResolver { resolve_data: usvg::ImageHrefResolver::default_data_resolver(), resolve_string: Box::new(|_, _| None) },
+        image_href_resolver: usvg::ImageHrefResolver { resolve_data, resolve_string: Box::new(|_, _| None) },
         fontdb,
         ..usvg::Options::default()
     }
@@ -174,7 +243,11 @@ fn parse_with(bytes: &[u8], fonts: fn() -> Arc<usvg::fontdb::Database>) -> Resul
     let fontdb = if has_text { fonts() } else { Arc::new(usvg::fontdb::Database::new()) };
     let fontless_text = has_text && fontdb.faces().next().is_none();
     let opt = options(fontdb);
-    let tree = usvg::Tree::from_data(&xml, &opt).map_err(|e| IoError::Svg(e.to_string()))?;
+    // Parse the already-bounded-and-decoded text with from_str, not from_data: from_data
+    // re-checks the gzip magic and would decompress a second time without our size limit if
+    // the inflated content happened to start with a nested gzip stream.
+    let text = std::str::from_utf8(&xml).map_err(|_| IoError::Svg("the SVG is not valid UTF-8".into()))?;
+    let tree = usvg::Tree::from_str(text, &opt).map_err(|e| IoError::Svg(e.to_string()))?;
     Ok(Parsed { tree, fontless_text })
 }
 
@@ -1057,5 +1130,47 @@ mod tests {
         let cv = canvas(&tree, &mut w);
         assert_eq!((cv.size.width, cv.size.height), (MAX_SIDE, MAX_SIDE / 2));
         assert_eq!(w.len(), 1);
+    }
+
+    #[test]
+    fn resolve_data_rejects_oversized_and_malformed_embedded_png_and_webp() {
+        let opt = options(Arc::new(usvg::fontdb::Database::new()));
+        let resolve = &opt.image_href_resolver.resolve_data;
+        let img = photocraft_codecs::Image::from_u8(2, 2, photocraft_codecs::ChannelLayout::Rgb, vec![255; 12]).unwrap();
+        let valid_png = photocraft_codecs::encode(&img, photocraft_codecs::Format::Png, &Default::default()).unwrap();
+        assert!(resolve("image/png", Arc::new(valid_png.clone()), &opt).is_some());
+        assert!(resolve("text/plain", Arc::new(valid_png.clone()), &opt).is_some());
+
+        let mut huge_png = valid_png;
+        huge_png[16..20].copy_from_slice(&40_000u32.to_be_bytes());
+        huge_png[20..24].copy_from_slice(&40_000u32.to_be_bytes());
+        assert!(resolve("image/png", Arc::new(huge_png.clone()), &opt).is_none(), "oversized PNG rejected before decode");
+        assert!(resolve("text/plain", Arc::new(huge_png), &opt).is_none(), "oversized mime-less PNG rejected before decode");
+
+        // Malformed WebP header under image/webp or text/plain must be rejected at the probe step.
+        let bad_webp = b"RIFF\x10\x00\x00\x00WEBPVP8 ".to_vec();
+        assert!(resolve("image/webp", Arc::new(bad_webp.clone()), &opt).is_none());
+        assert!(resolve("text/plain", Arc::new(bad_webp), &opt).is_none());
+    }
+
+    #[test]
+    fn resolve_data_rejects_nested_gzip_and_handles_text_plain_svgz() {
+        use std::io::Write;
+        fn gz(bytes: &[u8]) -> Vec<u8> {
+            let mut e = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
+            e.write_all(bytes).unwrap();
+            e.finish().unwrap()
+        }
+        let opt = options(Arc::new(usvg::fontdb::Database::new()));
+        let resolve = &opt.image_href_resolver.resolve_data;
+        let svg = b"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"4\" height=\"4\"><rect width=\"4\" height=\"4\"/></svg>";
+        let once = gz(svg);
+        assert!(resolve("image/svg+xml", Arc::new(once.clone()), &opt).is_some());
+        assert!(resolve("text/plain", Arc::new(once.clone()), &opt).is_some());
+
+        // Doubly gzip-compressed payload must be rejected rather than decompressed a second time by usvg.
+        let twice = gz(&once);
+        assert!(resolve("image/svg+xml", Arc::new(twice.clone()), &opt).is_none());
+        assert!(resolve("text/plain", Arc::new(twice), &opt).is_none());
     }
 }

@@ -232,6 +232,9 @@ pub struct ExportOptions {
     pub document_path: Option<std::path::PathBuf>,
     /// Reuse one cache per open document for native saves; other formats ignore it.
     pub pcraft_cache: Option<PcraftExportCache>,
+    /// PSD/PSB and layered TIFF: read and embed the files linked smart objects name (see
+    /// [`PsdExportOptions::read_linked_files`]). On by default; automation turns it off.
+    pub read_linked_files: bool,
 }
 
 impl Default for ExportOptions {
@@ -246,6 +249,7 @@ impl Default for ExportOptions {
             psd_maximize_compatibility: true,
             document_path: None,
             pcraft_cache: None,
+            read_linked_files: true,
         }
     }
 }
@@ -526,6 +530,7 @@ fn export_stages(doc: &Document, name_or_ext: &str, opts: &ExportOptions, ctl: &
             force_psb: opts.force_psb || ext == "psb",
             maximize_compatibility: opts.psd_maximize_compatibility,
             document_path: opts.document_path.clone(),
+            read_linked_files: opts.read_linked_files,
             ..Default::default()
         };
         let (mut file, mut warnings) = with_span(ctl, 0.0, PSD_MODEL_DONE, |ctl| psd_export::document_to_psd_interruptible(doc, &o, ctl));
