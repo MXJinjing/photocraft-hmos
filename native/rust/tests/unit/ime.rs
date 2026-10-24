@@ -163,6 +163,7 @@ fn canvas_type_session_opens_ime_and_accepts_composition_and_unicode_deletion() 
         .unwrap();
     app.ui.text_edit = Some(TextEdit {
         layer,
+        document: None,
         caret: 0,
         anchor: 0,
         session: "test-type".into(),

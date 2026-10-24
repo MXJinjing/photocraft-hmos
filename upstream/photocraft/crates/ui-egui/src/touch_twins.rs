@@ -60,7 +60,7 @@ mod tests {
         let app = crate::PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
         let mut harness = Harness::builder().with_size(egui::vec2(1200.0, 700.0)).with_step_dt(1.0 / 60.0).build_ui_state(
             |ui, app| {
-                crate::menus::menu_bar(app, ui);
+                crate::menus::menu_bar(app, ui, 10_000.0);
             },
             app,
         );

@@ -1979,7 +1979,7 @@ mod tests {
         let mut harness = Harness::builder().with_size(egui::vec2(1200.0, 700.0)).build_ui_state(
             |ui, app| {
                 egui::Frame::NONE.inner_margin(egui::Margin { top: 4, ..Default::default() }).show(ui, |ui| {
-                    menu_bar(app, ui);
+                    menu_bar(app, ui, 10_000.0);
                 });
             },
             app,
