@@ -2208,7 +2208,7 @@ checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
 
 [[package]]
 name = "photocraft-affinity"
-version = "0.13.0"
+version = "0.15.1"
 dependencies = [
  "crc32fast",
  "flate2",
@@ -2217,7 +2217,7 @@ dependencies = [
 
 [[package]]
 name = "photocraft-algo"
-version = "0.13.0"
+version = "0.15.1"
 dependencies = [
  "photocraft-color",
  "photocraft-geom",
@@ -2229,14 +2229,14 @@ dependencies = [
 
 [[package]]
 name = "photocraft-cms"
-version = "0.13.0"
+version = "0.15.1"
 dependencies = [
  "rayon",
 ]
 
 [[package]]
 name = "photocraft-codecs"
-version = "0.13.0"
+version = "0.15.1"
 dependencies = [
  "exr",
  "flate2",
@@ -2255,7 +2255,7 @@ dependencies = [
 
 [[package]]
 name = "photocraft-color"
-version = "0.13.0"
+version = "0.15.1"
 dependencies = [
  "photocraft-cms",
  "serde",
@@ -2263,7 +2263,7 @@ dependencies = [
 
 [[package]]
 name = "photocraft-compose"
-version = "0.13.0"
+version = "0.15.1"
 dependencies = [
  "photocraft-color",
  "photocraft-doc",
@@ -2275,7 +2275,7 @@ dependencies = [
 
 [[package]]
 name = "photocraft-doc"
-version = "0.13.0"
+version = "0.15.1"
 dependencies = [
  "photocraft-color",
  "photocraft-geom",
@@ -2286,7 +2286,7 @@ dependencies = [
 
 [[package]]
 name = "photocraft-engine"
-version = "0.13.0"
+version = "0.15.1"
 dependencies = [
  "blake3",
  "chrono",
@@ -2310,7 +2310,7 @@ dependencies = [
  "photocraft-text",
  "photocraft-vector",
  "rayon",
- "roxmltree 0.20.0",
+ "roxmltree 0.21.1",
  "same-file",
  "serde",
  "serde_json",
@@ -2321,7 +2321,7 @@ dependencies = [
 
 [[package]]
 name = "photocraft-format"
-version = "0.13.0"
+version = "0.15.1"
 dependencies = [
  "blake3",
  "crc32fast",
@@ -2343,14 +2343,14 @@ dependencies = [
 
 [[package]]
 name = "photocraft-geom"
-version = "0.13.0"
+version = "0.15.1"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "photocraft-gpu"
-version = "0.13.0"
+version = "0.15.1"
 dependencies = [
  "half",
  "log",
@@ -2365,7 +2365,7 @@ dependencies = [
 
 [[package]]
 name = "photocraft-hmos"
-version = "0.13.0"
+version = "0.15.1"
 dependencies = [
  "egui",
  "egui-wgpu",
@@ -2384,7 +2384,7 @@ dependencies = [
 
 [[package]]
 name = "photocraft-io"
-version = "0.13.0"
+version = "0.15.1"
 dependencies = [
  "blake3",
  "craft-docpath",
@@ -2405,25 +2405,25 @@ dependencies = [
  "photocraft-text",
  "photocraft-vector",
  "resvg",
- "roxmltree 0.20.0",
+ "roxmltree 0.21.1",
  "serde_json",
  "thiserror",
 ]
 
 [[package]]
 name = "photocraft-ipp"
-version = "0.13.0"
+version = "0.15.1"
 
 [[package]]
 name = "photocraft-ops"
-version = "0.13.0"
+version = "0.15.1"
 dependencies = [
  "photocraft-doc",
 ]
 
 [[package]]
 name = "photocraft-paint"
-version = "0.13.0"
+version = "0.15.1"
 dependencies = [
  "photocraft-color",
  "photocraft-geom",
@@ -2433,12 +2433,13 @@ dependencies = [
 
 [[package]]
 name = "photocraft-plugins"
-version = "0.13.0"
+version = "0.15.1"
 dependencies = [
  "photocraft-color",
  "photocraft-geom",
  "photocraft-raster",
  "rayon",
+ "rustix",
  "serde",
  "serde_json",
  "thiserror",
@@ -2447,7 +2448,7 @@ dependencies = [
 
 [[package]]
 name = "photocraft-psd"
-version = "0.13.0"
+version = "0.15.1"
 dependencies = [
  "flate2",
  "thiserror",
@@ -2455,7 +2456,7 @@ dependencies = [
 
 [[package]]
 name = "photocraft-raster"
-version = "0.13.0"
+version = "0.15.1"
 dependencies = [
  "photocraft-color",
  "photocraft-geom",
@@ -2465,7 +2466,7 @@ dependencies = [
 
 [[package]]
 name = "photocraft-raw"
-version = "0.13.0"
+version = "0.15.1"
 dependencies = [
  "flate2",
  "jxl-oxide",
@@ -2476,7 +2477,7 @@ dependencies = [
 
 [[package]]
 name = "photocraft-text"
-version = "0.13.0"
+version = "0.15.1"
 dependencies = [
  "flate2",
  "parley",
@@ -2491,7 +2492,7 @@ dependencies = [
 
 [[package]]
 name = "photocraft-ui-egui"
-version = "0.13.0"
+version = "0.15.1"
 dependencies = [
  "base64 0.22.1",
  "craft-print",
@@ -2533,7 +2534,7 @@ dependencies = [
 
 [[package]]
 name = "photocraft-vector"
-version = "0.13.0"
+version = "0.15.1"
 dependencies = [
  "photocraft-color",
  "photocraft-doc",
