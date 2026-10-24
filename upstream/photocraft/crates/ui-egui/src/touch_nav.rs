@@ -211,7 +211,9 @@ pub fn update(app: &mut PhotocraftApp, ctx: &Context, eligible: bool) -> bool {
     });
     let mut remaining = None;
     with_grace(ctx, |g| {
-        if g.started_at.is_none() && first_moved {
+        // Ownership is latched until lift. Stationary Move reports still differ from
+        // the original contact: they must not rearm grace and replay a tool press.
+        if !g.tool_owned && g.started_at.is_none() && first_moved {
             g.started_at = Some(now);
         }
         if let Some(started_at) = g.started_at {
@@ -399,6 +401,36 @@ mod tests {
         let cancelled = normalize_pointer(ctx, &mut raw);
         ctx.run_ui(raw, |_| {}).textures_delta.clear();
         cancelled
+    }
+
+    #[test]
+    fn a_held_contact_cannot_rearm_the_deferred_press() {
+        let ctx = Context::default();
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        let mut frame = |time, events| {
+            let mut deferred = false;
+            ctx.run_ui(egui::RawInput { time: Some(time), events, ..Default::default() }, |ui| {
+                assert!(!update(&mut app, ui.ctx(), true));
+                deferred |= take_deferred_press(ui.ctx());
+            })
+            .textures_delta
+            .clear();
+            deferred
+        };
+        let pos = egui::pos2(100.0, 50.0);
+        assert!(!frame(
+            0.0,
+            vec![
+                touch(1, TouchPhase::Start, pos.x),
+                Event::PointerMoved(pos),
+                Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() }
+            ]
+        ));
+        assert!(!frame(0.01, vec![touch(1, TouchPhase::Move, 110.0)]));
+        assert!(frame(0.07, vec![]), "grace must still provide its one fallback press");
+        for n in 1..30 {
+            assert!(!frame(0.07 + f64::from(n) * 0.04, vec![touch(1, TouchPhase::Move, 110.0)]), "a stationary report after ownership must not restart grace");
+        }
     }
 
     #[test]
