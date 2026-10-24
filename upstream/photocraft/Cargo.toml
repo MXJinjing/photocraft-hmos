@@ -8,7 +8,7 @@ default-members = ["crates/*", "apps/photocraft", "apps/photocraft-cli", "xtask"
 wgpu-hal = { path = "../../third_party/wgpu-hal-30.0.1" }
 
 [workspace.package]
-version = "0.13.0"
+version = "0.15.1"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 rust-version = "1.95"
@@ -76,15 +76,18 @@ unsafe_code = "forbid"
 dbg_macro = "warn"
 todo = "warn"
 
+# Dependencies carry no debug info: their frames in a backtrace lose file:line, and the target dir
+# and link times shrink. The test profile inherits both settings.
 [profile.dev.package."*"]
 opt-level = 2
+debug = false
 
 [profile.dev]
 opt-level = 1
 # Line tables keep file:line in panic backtraces but drop variable info, which roughly halves link
-# time and PDB size for the ~260 test binaries (#2204). CI sets the same through
-# CARGO_PROFILE_DEV_DEBUG (and no debuginfo at all for the Windows tests). To inspect locals in a
-# debugger, build with CARGO_PROFILE_DEV_DEBUG=true.
+# time and PDB size for the test binaries (#2204). CI's Windows legs build with no debuginfo at all
+# (CARGO_PROFILE_DEV_DEBUG=0). To inspect locals in a debugger, build with
+# CARGO_PROFILE_DEV_DEBUG=true.
 debug = "line-tables-only"
 
 # Test builds compile ui-egui without optimization: its library and unit tests were the biggest

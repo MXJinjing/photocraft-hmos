@@ -239,20 +239,21 @@ fn browser_languages() -> Vec<String> {
     web_sys::window().map(|w| w.navigator().languages().iter().filter_map(|l| l.as_string()).collect()).unwrap_or_default()
 }
 
-/// GET `url` (relative to the page) and read the whole body. With `integrity` (a Subresource
-/// Integrity value), the browser rejects a body whose hash differs.
+/// GET `url` (a relative path on the same origin) and read the whole body. With `integrity` (a
+/// Subresource Integrity value), the browser rejects a body whose hash differs.
 async fn fetch_bytes(url: &str, integrity: Option<&str>) -> Result<Vec<u8>, String> {
     use wasm_bindgen_futures::JsFuture;
+    if !served_fonts::is_relative_path(url) {
+        return Err("url must be a relative path".into());
+    }
     let js = |e: wasm_bindgen::JsValue| format!("{e:?}");
     let window = web_sys::window().ok_or("no window")?;
-    let request = match integrity {
-        Some(sri) => {
-            let init = web_sys::RequestInit::new();
-            init.set_integrity(sri);
-            window.fetch_with_str_and_init(url, &init)
-        }
-        None => window.fetch_with_str(url),
-    };
+    let init = web_sys::RequestInit::new();
+    init.set_mode(web_sys::RequestMode::SameOrigin);
+    if let Some(sri) = integrity {
+        init.set_integrity(sri);
+    }
+    let request = window.fetch_with_str_and_init(url, &init);
     let resp: web_sys::Response = JsFuture::from(request).await.map_err(js)?.dyn_into().map_err(|_| "not a Response")?;
     if !resp.ok() {
         return Err(format!("HTTP {}", resp.status()));

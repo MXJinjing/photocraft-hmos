@@ -902,6 +902,9 @@ fn dispatch(app: &mut PhotocraftApp, ctx: &egui::Context, req: &ControlRequest) 
             };
             let mut fields = if kind == DialogKind::NewDocument { app.new_document_fields() } else { Default::default() };
             if let Some(f) = p.get("fields").and_then(Value::as_object) {
+                if let Some(marker) = f.keys().find(|k| crate::dialogs::is_route_marker(k)) {
+                    return err(format!("`{marker}` is set only by the dialog it belongs to"));
+                }
                 fields.extend(f.clone());
             }
             ok(json!({"dialog": app.ui.open_dialog(kind, fields)}))
@@ -955,6 +958,13 @@ fn dispatch(app: &mut PhotocraftApp, ctx: &egui::Context, req: &ControlRequest) 
             let (Some(id), Some(field)) = (u("dialog"), s("field")) else { return err("need `dialog` and `field`") };
             let value = p.get("value").cloned().unwrap_or(Value::Null);
             match app.ui.dialog_mut(id) {
+                // A continuation belongs to the dialog that paused it, even when another
+                // action has a valid token. Replacing it would resume or cancel that action.
+                Some(_) if field == crate::actions::RESUME => err("the paused action token is read-only"),
+                // A marker picks the handler OK runs: a dialog keeps the ones it was opened with.
+                Some(d) if !d.fields.contains_key(field) && crate::dialogs::is_route_marker(field) => {
+                    err(format!("`{field}` is set only by the dialog it belongs to"))
+                }
                 Some(d) => {
                     d.fields.insert(field.to_string(), value);
                     ok(Value::Null)
@@ -2659,6 +2669,77 @@ mod tests {
         } else {
             Ok(())
         }
+    }
+
+    /// An app whose automation gates refuse file commands, with a document open, and the paths
+    /// its writer was asked to write.
+    fn gated_app_recording_writes() -> (PhotocraftApp, egui::Context, std::rc::Rc<std::cell::RefCell<Vec<String>>>, u64) {
+        let written: std::rc::Rc<std::cell::RefCell<Vec<String>>> = std::rc::Rc::default();
+        let w = written.clone();
+        let services = crate::Services {
+            automation_authorize: Some(deny_ambient_file),
+            automation_command: Some(Box::new(|id, params| deny_ambient_file(id, params).map_err(|e| e.to_string()))),
+            export: Some(Box::new(|_: &photocraft_doc::Document, _: &str, _: &crate::ExportSettings| Ok((b"out".to_vec(), Vec::new())))),
+            write: Some(Box::new(move |path: &str, _: &[u8]| {
+                w.borrow_mut().push(path.to_string());
+                Ok(())
+            })),
+            ..Default::default()
+        };
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), services);
+        app.background_jobs = false;
+        app.session.execute("file.new", json!({"width": 4, "height": 4})).unwrap();
+        let doc = app.session.active().unwrap().doc.id.0;
+        (app, egui::Context::default(), written, doc)
+    }
+
+    fn outside_target() -> String {
+        std::env::temp_dir().join("outside").join("x.png").to_string_lossy().into_owned()
+    }
+
+    /// `ui.dialog.set` and `ui.dialog.open` never add a marker that picks a dialog's OK handler:
+    /// a View › Zoom In dialog can't be made to confirm as the disk-change prompt's save.
+    #[test]
+    fn automation_cannot_add_a_marker_that_reroutes_a_dialog() {
+        let (mut app, ctx, written, doc) = gated_app_recording_writes();
+        let target = outside_target();
+        let r = call(&mut app, &ctx, "ui.dialog.open", json!({"kind": "command", "command": "view.zoomIn"}));
+        let dialog = r["result"]["dialog"].clone();
+        for (field, value) in [("document", json!(doc)), ("path", json!(target)), ("flat", json!(false))] {
+            let r = call(&mut app, &ctx, "ui.dialog.set", json!({"dialog": dialog, "field": field, "value": value}));
+            assert!(r.get("error").is_none(), "{r}");
+        }
+        let injected = call(&mut app, &ctx, "ui.dialog.set", json!({"dialog": dialog, "field": "__diskChanged", "value": true}));
+        let replace = call(&mut app, &ctx, "ui.dialog.set", json!({"dialog": dialog, "field": "__replaceSaved", "value": true}));
+        assert!(replace["error"].as_str().is_some_and(|e| e.contains("set only by the dialog")), "{replace}");
+        call(&mut app, &ctx, "ui.dialog.confirm", json!({"dialog": dialog}));
+        assert!(written.borrow().is_empty(), "nothing is written: {:?}", written.borrow());
+        assert!(injected["error"].as_str().is_some_and(|e| e.contains("set only by the dialog")), "{injected}");
+        let r = call(&mut app, &ctx, "ui.dialog.open", json!({"kind": "about", "fields": {"__export": true}}));
+        assert!(r["error"].as_str().is_some_and(|e| e.contains("set only by the dialog")), "{r}");
+    }
+
+    /// A handler that writes files itself (the disk-change prompt's save) is judged as the file
+    /// command it stands for, through a control request or synthetic input alike.
+    #[test]
+    fn automation_confirming_a_file_writing_dialog_is_judged_as_its_file_command() {
+        let (mut app, ctx, written, doc) = gated_app_recording_writes();
+        let target = outside_target();
+        // A real disk-change prompt keeps its own fields settable, but its save is a file command.
+        let fields = json!({"__diskChanged": true, "__label": "Save", "message": "", "document": doc, "path": target, "flat": false});
+        let prompt = app.ui.open_dialog(DialogKind::Command, fields.as_object().cloned().unwrap());
+        let r = call(&mut app, &ctx, "ui.dialog.set", json!({"dialog": prompt, "field": "__diskChanged", "value": true}));
+        assert!(r.get("error").is_none(), "{r}");
+        let r = call(&mut app, &ctx, "ui.dialog.confirm", json!({"dialog": prompt}));
+        assert!(written.borrow().is_empty(), "nothing is written: {:?}", written.borrow());
+        assert!(r["error"].as_str().is_some_and(|e| e.contains("file.save")), "{r}");
+        // Synthetic input (Enter or OK) reaches the same handler without the control pre-check.
+        let synthetic = app.ui.open_dialog(DialogKind::Command, fields.as_object().cloned().unwrap());
+        app.automation_input = true;
+        let r = crate::dialogs::confirm(&mut app, synthetic);
+        app.automation_input = false;
+        assert!(written.borrow().is_empty(), "nothing is written: {:?}", written.borrow());
+        assert!(r.is_err_and(|e| e.contains("file.save")));
     }
 
     #[test]

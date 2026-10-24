@@ -1738,6 +1738,20 @@ fn vector_mask_combines_with_pixel_mask() {
 }
 
 #[test]
+fn effect_maps_over_distant_pixels_are_not_built_over_the_canvas() {
+    // Two pixels 190000 apart: the effect source region spans 3.6·10¹⁰ px.
+    let mut doc = Document::new("big", Size::new(200_000, 200_000), ColorMode::Rgb, SampleType::U8);
+    let mut l = solid_layer("fx", Rect::new(0, 0, 1, 1), [1.0, 0.0, 0.0, 1.0]);
+    l.surface_mut().unwrap().fill_rect(Rect::new(190_000, 190_000, 190_001, 190_001), &[1.0, 0.0, 0.0, 1.0]);
+    l.effects.items.push(photocraft_doc::Effect::default_drop_shadow());
+    doc.layers.push(l);
+    let t = std::time::Instant::now();
+    let px = render(&doc, Rect::new(0, 0, 4, 4));
+    assert_eq!(px.px.len(), 16);
+    assert!(t.elapsed().as_secs() < 20, "{:?}", t.elapsed());
+}
+
+#[test]
 fn effect_maps_are_cached_and_invalidated_by_pixel_changes() {
     let mut doc = doc_white(64, 64);
     let mut l = solid_layer("fx", Rect::new(16, 16, 48, 48), [1.0, 0.0, 0.0, 1.0]);
@@ -2324,6 +2338,26 @@ fn blend_if_this_layer_hides_by_the_layers_own_value() {
     d.layers[2].blend_if.set(0, [FULL, FULL]);
     assert!(d.layers[2].blend_if.is_default());
     assert!(close4(px(&d, 1, 1), [0.0, 0.0, 0.0, 1.0]));
+}
+
+#[test]
+fn nested_blend_if_groups_do_not_double_the_work_at_every_level() {
+    // Each Blend If group re-renders its children for its own colour; 40 levels would be 2^40.
+    let mut inner = solid_layer("dot", Rect::new(0, 0, 4, 4), [1.0, 1.0, 1.0, 1.0]);
+    inner.blend_if.set(0, [range([10, 10], [255, 255]), FULL]);
+    let mut layers = vec![inner];
+    for _ in 0..40 {
+        let mut g = Layer::group("g", layers);
+        g.blend_if.set(0, [range([10, 10], [255, 255]), FULL]);
+        layers = vec![g];
+    }
+    // A black backdrop, not doc_white's white: the asserted white can then only come from the
+    // inner layer rendered through the whole group chain, not from the backdrop itself.
+    let mut d = Document::with_background("t", Size::new(4, 4), ColorMode::Rgb, SampleType::U8, Color::BLACK);
+    d.layers.extend(layers);
+    let t = std::time::Instant::now();
+    assert!(close4(px(&d, 1, 1), [1.0, 1.0, 1.0, 1.0]));
+    assert!(t.elapsed().as_secs() < 10, "{:?}", t.elapsed());
 }
 
 #[test]

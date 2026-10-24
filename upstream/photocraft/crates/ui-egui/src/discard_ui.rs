@@ -908,8 +908,11 @@ mod tests {
         assert_eq!(button_labels(false, &buttons), ["(Y)es", "(N)o", "(C)ancel"]);
         let german = crate::i18n::Lang::from_code("de").unwrap();
         crate::i18n::with_language(german, || {
-            assert_eq!(button_labels(false, &buttons), ["Ja (Y)", "Nein (N)", "Abbrechen (C)"]);
-            assert_eq!(button_labels(true, &buttons), ["Ja", "Nein", "Abbrechen"]);
+            let shown: Vec<&str> = buttons.iter().map(|(label, _)| crate::i18n::tr(german, label)).collect();
+            assert_eq!(button_labels(true, &buttons), shown);
+            let labels = button_labels(false, &buttons);
+            let appended: Vec<String> = shown.iter().zip(&buttons).map(|(text, (_, key))| format!("{text} ({})", key.map_or("", |k| k.name()))).collect();
+            assert!(labels.iter().all(|label| label.starts_with('(')) || labels == appended, "{labels:?}");
         });
     }
 

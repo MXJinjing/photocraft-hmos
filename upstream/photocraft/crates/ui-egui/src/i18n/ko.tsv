@@ -797,6 +797,7 @@
 	Split Warp Vertically	뒤틀기 세로로 분할
 	Statistics…	통계…
 	Refine Strokes	다듬기 획
+	Edits	편집
 # Counted status and panel messages
 @plural	Exported {n} swatch to {file}|Exported {n} swatches to {file}	색상 견본 {n}개를 {file}(으)로 내보냈습니다
 @plural	Imported {n} swatch from {file}|Imported {n} swatches from {file}	{file}에서 색상 견본 {n}개를 가져왔습니다

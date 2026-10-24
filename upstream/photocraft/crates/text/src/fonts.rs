@@ -298,6 +298,9 @@ impl FontDb {
     /// Registers every face in `blob`, under `family` when given, else under the family each
     /// face's `name` table gives.
     fn register_blob(&mut self, blob: Blob<u8>, family: Option<&str>) -> Vec<String> {
+        let Some(blob) = sanitize_font_blob(blob) else {
+            return Vec::new();
+        };
         let added = self.fcx.collection.register_fonts(blob, family.map(|f| FontInfoOverride { family_name: Some(f), ..Default::default() }));
         let mut names = Vec::new();
         for (id, _) in added {
@@ -553,6 +556,65 @@ impl FontDb {
             }
         }
         None
+    }
+}
+
+/// Maximum faces and cumulative variation axes admitted from a single font blob.
+const MAX_COLLECTION_FACES: usize = 256;
+const MAX_COLLECTION_AXES: usize = 4096;
+
+/// Validates `blob` before handing it to `fontique`, deduplicating repeated TTC table-directory
+/// offsets and rejecting collections with excessive faces or variation axes.
+fn sanitize_font_blob(blob: Blob<u8>) -> Option<Blob<u8>> {
+    let data = blob.as_ref();
+    if data.len() > 256 * 1024 * 1024 {
+        return None;
+    }
+    match FileRef::new(data).ok()? {
+        FileRef::Font(font) => {
+            if font.axes().len() > MAX_COLLECTION_AXES {
+                return None;
+            }
+            Some(blob)
+        }
+        FileRef::Collection(collection) => {
+            let n = usize::try_from(collection.len()).ok()?;
+            if n == 0 || n > MAX_COLLECTION_FACES {
+                return None;
+            }
+            let dir_end = 12usize.checked_add(n.checked_mul(4)?)?;
+            let offsets_raw = data.get(12..dir_end)?;
+            let mut unique_offsets: Vec<u32> = Vec::with_capacity(n);
+            let mut total_axes = 0usize;
+            for (i, chunk) in offsets_raw.as_chunks::<4>().0.iter().enumerate() {
+                let off = u32::from_be_bytes(*chunk);
+                if unique_offsets.contains(&off) {
+                    continue;
+                }
+                let idx = u32::try_from(i).ok()?;
+                let Ok(font) = collection.get(idx) else {
+                    continue;
+                };
+                total_axes = total_axes.checked_add(font.axes().len())?;
+                if total_axes > MAX_COLLECTION_AXES {
+                    return None;
+                }
+                unique_offsets.push(off);
+            }
+            if unique_offsets.is_empty() {
+                return None;
+            }
+            if unique_offsets.len() == n {
+                return Some(blob);
+            }
+            let mut bytes = data.to_vec();
+            bytes.get_mut(8..12)?.copy_from_slice(&(unique_offsets.len() as u32).to_be_bytes());
+            for (slot, off) in unique_offsets.iter().enumerate() {
+                let pos = 12 + slot * 4;
+                bytes.get_mut(pos..pos + 4)?.copy_from_slice(&off.to_be_bytes());
+            }
+            Some(Blob::new(Arc::new(bytes)))
+        }
     }
 }
 

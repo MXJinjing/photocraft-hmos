@@ -209,11 +209,20 @@ pub fn auto_cell(bounds: Rect) -> f64 {
     if bounds.size().area() <= 4_200_000 { 2.0 } else { 4.0 }
 }
 
+/// Most nodes of a field's displacement grid (12 bytes each with the freeze mask): 192 MB.
+const MAX_FIELD_NODES: usize = 1 << 24;
+
 impl LiquifyField {
     pub fn new(bounds: Rect, cell: f64) -> Self {
-        let cell = cell.clamp(1.0, 64.0);
-        let w = (f64::from(bounds.width()) / cell).ceil() as usize + 2;
-        let h = (f64::from(bounds.height()) / cell).ceil() as usize + 2;
+        let mut cell = cell.clamp(1.0, 64.0);
+        let nodes = |cell: f64| ((f64::from(bounds.width()) / cell).ceil() as usize + 2, (f64::from(bounds.height()) / cell).ceil() as usize + 2);
+        let (mut w, mut h) = nodes(cell);
+        // The extent is the document canvas, which a file declares: past the node budget the
+        // field gets coarser (it is interpolated anyway) instead of asking for gigabytes.
+        while w.saturating_mul(h) > MAX_FIELD_NODES {
+            cell *= 2.0;
+            (w, h) = nodes(cell);
+        }
         LiquifyField { bounds, cell, w, h, d: vec![[0.0; 2]; w * h], freeze: vec![0.0; w * h], cursor: None }
     }
 
@@ -1120,6 +1129,15 @@ mod tests {
         let dd = slow.d.iter().zip(&fast.d).map(|(p, q)| (p[0] - q[0]).abs().max((p[1] - q[1]).abs())).fold(0.0f32, f32::max);
         assert!(slow.max_displacement() > 50.0, "the drag builds up a deep displacement");
         assert!(dd < 1e-3, "slow and fast pointer fields differ by {dd} px");
+    }
+
+    #[test]
+    fn a_huge_canvas_gets_a_coarser_field_not_a_huge_one() {
+        // 400000² px at 2 px per node is 4·10¹⁰ nodes.
+        let f = LiquifyField::new(Rect::new(0, 0, 400_000, 400_000), 2.0);
+        assert!(f.w * f.h <= MAX_FIELD_NODES && f.d.len() == f.w * f.h && f.freeze.len() == f.d.len());
+        assert!(f.cell > 64.0);
+        assert_eq!(LiquifyField::new(Rect::new(0, 0, 100, 100), 2.0).cell, 2.0);
     }
 
     #[test]

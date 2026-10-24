@@ -361,7 +361,14 @@ struct Planner<'a> {
     cx: DocCtx<'a>,
     fx: Vec<FxLayer<'a>>,
     checkpoints: Vec<Checkpoint>,
+    /// Layers planned so far, counting a layer each time it is planned (a clipped pass-through
+    /// group is planned twice).
+    visits: usize,
 }
+
+/// Most layer plannings one document may take: a pass-through group with clipped layers is
+/// planned twice, so groups nested in one another double the work at every level.
+const MAX_PLAN_VISITS: usize = 100_000;
 
 /// Coverage source of an effect paint (`kind` in `fs_fxpaint`); flags refine it.
 #[derive(Clone, Copy)]
@@ -455,7 +462,7 @@ pub const SHAPE_MAP: usize = usize::MAX;
 
 impl<'a> Planner<'a> {
     fn new(cx: DocCtx<'a>) -> Self {
-        Planner { passes: Vec::new(), free: Vec::new(), refs: Vec::new(), cx, fx: Vec::new(), checkpoints: Vec::new() }
+        Planner { passes: Vec::new(), free: Vec::new(), refs: Vec::new(), cx, fx: Vec::new(), checkpoints: Vec::new(), visits: 0 }
     }
 
     fn finish(self, root: Slot) -> Plan<'a> {
@@ -607,6 +614,10 @@ impl<'a> Planner<'a> {
 
     /// composite_layer, honouring the layer's channel restrictions.
     fn layer(&mut self, layer: &'a Layer, clipped: &'a [Layer], backdrop: Slot) -> Result<Slot, Unsupported> {
+        self.visits += 1;
+        if self.visits > MAX_PLAN_VISITS {
+            return Err(Unsupported("too many nested layers to plan for the GPU (composited on the CPU)".into()));
+        }
         self.check_advanced(layer, clipped)?;
         self.restricted(layer, backdrop, |s, b| s.layer_any(layer, clipped, b))
     }
@@ -1875,6 +1886,23 @@ mod tests {
     use super::*;
     use photocraft_color::{Color, ColorMode, SampleType};
     use photocraft_geom::Size;
+
+    #[test]
+    fn nested_pass_through_groups_with_clipped_layers_are_not_planned_exponentially() {
+        let mut layers = vec![Layer::raster("leaf", photocraft_color::PixelFormat::RGBA8)];
+        for _ in 0..30 {
+            let group = Layer::group("g", layers);
+            let mut clipped = Layer::raster("c", photocraft_color::PixelFormat::RGBA8);
+            clipped.clipped = true;
+            layers = vec![group, clipped];
+        }
+        let mut doc = Document::new("nest", Size::new(8, 8), ColorMode::Rgb, SampleType::U8);
+        doc.layers = layers;
+        let started = std::time::Instant::now();
+        let Err(error) = plan(&doc) else { panic!("2^30 plannings must be refused") };
+        assert!(error.0.contains("too many nested layers"), "{}", error.0);
+        assert!(started.elapsed().as_secs() < 10, "{:?}", started.elapsed());
+    }
 
     #[test]
     fn stops_closer_than_one_lut_step_stay_on_the_cpu() {

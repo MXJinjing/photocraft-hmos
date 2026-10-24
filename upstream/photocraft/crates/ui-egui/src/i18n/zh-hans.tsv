@@ -831,6 +831,7 @@
 	Split Warp Vertically	垂直分割变形
 	Statistics…	统计…
 	Refine Strokes	调整描边
+	Edits	编辑
 # Counted status and panel messages
 @plural	Exported {n} swatch to {file}|Exported {n} swatches to {file}	已将 {n} 个色板导出到 {file}
 @plural	Imported {n} swatch from {file}|Imported {n} swatches from {file}	已从 {file} 导入 {n} 个色板

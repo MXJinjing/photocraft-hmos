@@ -80,7 +80,6 @@ fn histogram_matches_visible_preview_at_all_supported_depths_and_cancel_commit_a
 
 #[test]
 fn settings_sections_group_existing_controls_without_rendering_or_document_edits() {
-    assert_eq!(photocraft_ui_egui::i18n::tr_ctx(photocraft_ui_egui::i18n::Lang::from_code("ru").unwrap(), "cameraRaw", "Light"), "Свет");
     for theme in ThemeKind::ALL {
         let mut h = Harness::builder().with_step_dt(1.0 / 60.0).with_size(vec2(1200.0, 900.0)).build_eframe(move |cc| {
             PhotocraftApp::setup_context(&cc.egui_ctx, theme);

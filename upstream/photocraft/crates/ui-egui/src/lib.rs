@@ -379,6 +379,9 @@ pub struct ExportSettings {
     pub document_path: Option<std::path::PathBuf>,
     /// Native save cache owned by the open document; exports without one remain one-shot.
     pub pcraft_cache: Option<photocraft_io::PcraftExportCache>,
+    /// Read and embed the files linked smart objects name ([`photocraft_io::ExportOptions::read_linked_files`]).
+    /// Off for automation saves, which are granted only their target.
+    pub read_linked_files: bool,
 }
 
 impl Default for ExportSettings {
@@ -398,6 +401,7 @@ impl Default for ExportSettings {
             embed_metadata: true,
             document_path: None,
             pcraft_cache: None,
+            read_linked_files: true,
         }
     }
 }
@@ -425,6 +429,7 @@ impl ExportSettings {
         opts.psd_maximize_compatibility = self.psd_maximize_compatibility;
         opts.document_path = self.document_path.clone();
         opts.pcraft_cache = self.pcraft_cache.clone();
+        opts.read_linked_files = self.read_linked_files;
         opts
     }
 }
@@ -915,6 +920,9 @@ pub struct PhotocraftApp {
     /// makes shortcut- and dialog-triggered commands pass the same policy as
     /// direct control calls.
     pub(crate) automation_input: bool,
+    /// Action playbacks paused at a step dialog, by the token in that dialog's fields
+    /// ([`actions::RESUME`]): what to play next and the automation gate it paused under.
+    pub(crate) paused_playbacks: actions::PausedPlaybacks,
     /// Levels/Curves histogram cache: (document, adjustment layer, revision it is valid for).
     pub(crate) tone_hist: Option<(DocId, photocraft_doc::LayerId, u64, std::sync::Arc<tone::Histograms>)>,
     /// Histogram panel cache: (document, revision, computed at ms, histograms).
@@ -1149,6 +1157,7 @@ impl PhotocraftApp {
             live_adjust_preview: None,
             synthetic: Vec::new(),
             automation_input: false,
+            paused_playbacks: Default::default(),
             channel_thumbs: None,
             channel_views: HashMap::new(),
             type_layout: None,
@@ -2209,11 +2218,14 @@ impl PhotocraftApp {
             )?
         };
         let reply = |path: &str, warnings: &[String]| json!({"path": path, "warnings": warnings});
+        // Only the target is granted: a linked smart object's stored path is document data, so
+        // PSD export writes that layer as pixels instead of embedding the file.
+        let settings = ExportSettings { read_linked_files: false, ..choices.apply(self.save_settings()) };
         // #2017: the File › Save worker path, so the encode doesn't block the frame loop.
         if self.background_jobs
             && let Some(save) = self.services.automation_save.clone()
         {
-            return match jobs_ui::start_save(self, target.clone(), choices.apply(self.save_settings()), false, save, true)? {
+            return match jobs_ui::start_save(self, target.clone(), settings, false, save, true)? {
                 Some((path, warnings)) => Ok(reply(&path, &warnings)),
                 None => {
                     let job = self.jobs.last_started;
@@ -2223,7 +2235,6 @@ impl PhotocraftApp {
         }
         let state = self.session.active().ok_or("no document")?;
         let (doc, revision) = (state.doc.id, state.revision);
-        let settings = choices.apply(self.save_settings());
         let export = self.services.export.as_ref().ok_or("no exporter configured")?;
         let (bytes, warnings) = export(&state.doc, &target, &settings)?;
         let write = self.services.automation_write.as_mut().ok_or("automation write authority is not configured")?;

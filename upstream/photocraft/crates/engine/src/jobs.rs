@@ -66,6 +66,11 @@ pub(crate) fn authorize_render_command(id: &str, params: &Value) -> Result<()> {
     }
 }
 
+/// Whether the work on this thread is done for an untrusted session (a gate is installed).
+pub(crate) fn authorization_installed() -> bool {
+    RENDER_AUTHORIZATION.with(std::cell::Cell::get).is_some()
+}
+
 /// Identifies one background job for the session's lifetime.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, serde::Deserialize)]
 pub struct JobId(pub u64);

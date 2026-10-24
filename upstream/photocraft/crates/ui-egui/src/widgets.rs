@@ -2429,7 +2429,8 @@ mod tests {
 
     #[test]
     fn arrow_keys_on_a_field_with_a_reversed_range_do_not_panic() {
-        let mut h = focused(5.0, 10.0..=0.0);
+        // The empty range is the case under test — arrow keys must not panic on it.
+        let mut h = focused(5.0, 10.0..=0.0); // NOSONAR
         let _ = press(&mut h, Modifiers::NONE, Key::ArrowUp);
         let mut h = focused(5.0, f32::NAN..=10.0);
         let _ = press(&mut h, Modifiers::NONE, Key::ArrowDown);

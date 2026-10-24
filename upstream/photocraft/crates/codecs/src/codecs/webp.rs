@@ -85,7 +85,9 @@ pub(crate) fn decode_frames(bytes: &[u8], limits: &Limits) -> Result<Option<Vec<
         if out.len() >= MAX_GIF_FRAMES {
             return Err(CodecError::LimitExceeded(format!("more than {MAX_GIF_FRAMES} frames")));
         }
-        if (size as u64).saturating_mul(out.len() as u64 + 1) > limits.max_alloc {
+        // Every frame keeps its own copy of the file's ICC profile along with its pixels.
+        let frame_bytes = (size as u64).saturating_add(icc.as_ref().map_or(0, |p| p.len() as u64));
+        if frame_bytes.saturating_mul(out.len() as u64 + 1) > limits.max_alloc {
             return Err(CodecError::LimitExceeded(format!("{} frames of {w}x{h} exceed max_alloc {}", out.len() + 1, limits.max_alloc)));
         }
         let delay_ms = match dec.read_frame(&mut buf) {

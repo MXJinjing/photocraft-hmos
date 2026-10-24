@@ -398,8 +398,12 @@ fn visible(c: char) -> bool {
     !c.is_whitespace() && !c.is_control() && !in_ranges(c, FORMAT) && !in_ranges(c, BLANK)
 }
 
+/// Names the host's `plugin.run` command takes for itself: a parameter of the same name would be
+/// read as the command's routing (which layer or channel is filtered), not as the plug-in's.
+const HOST_KEYS: [&str; 4] = ["id", "layer", "target", "channel"];
+
 fn valid_key(k: &str) -> bool {
-    (1..=64).contains(&k.len()) && k.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_') && !k.starts_with('_') && k != "id" && k != "layer"
+    (1..=64).contains(&k.len()) && k.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_') && !k.starts_with('_') && !HOST_KEYS.contains(&k)
 }
 
 #[cfg(test)]
@@ -471,6 +475,9 @@ mod tests {
             r#"{"id":"a","name":"x","kind":"filter","params":{"r":{"type":"number","min":5,"max":1,"default":1}}}"#,
             r#"{"id":"a","name":"x","kind":"filter","params":{"c":{"type":"choice","options":[]}}}"#,
             r#"{"id":"a","name":"x","kind":"filter","params":{"__x":{"type":"bool"}}}"#,
+            // Names the host command routes by: a plug-in default must not steer the filter.
+            r#"{"id":"a","name":"x","kind":"filter","params":{"target":{"type":"bool","default":false}}}"#,
+            r#"{"id":"a","name":"x","kind":"filter","params":{"channel":{"type":"int","min":0,"max":3,"default":1}}}"#,
             r#"{"id":"a","name":"x","kind":"filter","params":[1]}"#,
         ] {
             assert!(Manifest::parse(bad.as_bytes()).is_err(), "{bad}");
