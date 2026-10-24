@@ -598,6 +598,9 @@ fn alt_scroll_zooms_when_the_modifier_state_misses_the_held_alt() {
             assert!(zoom(&h) < z1, "pref on: a plain notch zooms out: {z1} -> {}", zoom(&h));
         } else {
             assert_eq!(zoom(&h), z1, "a plain scroll after Alt's release doesn't zoom");
+        }
+    }
+}
 
 fn touch(id: u64, phase: egui::TouchPhase, pos: Pos2) -> egui::Event {
     egui::Event::Touch { device_id: egui::TouchDeviceId(0), id: egui::TouchId(id), phase, pos, force: Some(1.0) }

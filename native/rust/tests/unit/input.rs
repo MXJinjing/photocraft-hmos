@@ -326,7 +326,7 @@ fn pen_takeover_cancels_fingers_and_ignores_palms_until_lift() {
     snapshot(&mut state, &[], &mut events);
     snapshot(&mut state, &[(3, 20., 30.)], &mut events);
     assert_eq!(state.touches.len(), 1);
-    state.cancel(egui::Pos2::ZERO, &mut events);
+    state.cancel(&mut events);
     assert!(state.touches.is_empty() && state.pressed.is_none());
 }
 
@@ -689,7 +689,7 @@ fn pen_samples_finger_source_and_host_gestures_reach_the_shared_feed() {
     // Unknown protocol versions must not trigger actions.
     input.push(serde_json::from_str(r#"{"kind":"stylus","packet":{"version":2,"type":"gesture","gesture":"doubleTap","timestampMs":4000}}"#).unwrap(), 1., &mut events);
     assert!(app.stylus.feed.take_gestures().is_empty());
-    input.cancel(egui::Pos2::ZERO, &mut events);
+    input.cancel(&mut events);
     assert!(app.stylus.feed.get().is_none());
 }
 use super::*;
@@ -751,7 +751,7 @@ fn cancel_releases_pointer_and_scales_coordinates() {
         &mut events,
     );
     assert!(matches!(events.first(),Some(Event::PointerMoved(p)) if *p==Pos2::new(100.,50.)));
-    state.cancel(Pos2::ZERO, &mut events);
+    state.cancel(&mut events);
     assert!(matches!(
         events.get(2),
         Some(Event::PointerButton { pressed: false, .. })
@@ -1834,4 +1834,340 @@ fn pen_hover_is_forwarded_across_canvas_and_chrome() {
         "toolbar hover must resume on the first new pen sample after lift"
     );
     assert_eq!(state.feed.source(), super::PointerSource::Pen);
+}
+
+// Exercise the actual native adapter and editor frame, including idle repaint frames.
+#[test]
+#[allow(clippy::unwrap_used)]
+fn native_free_transform_single_contact_stays_still() {
+    use photocraft_ui_egui::{PhotocraftApp, Services, state::Tool};
+    for tool in [Tool::Brush, Tool::Eraser, Tool::Move] {
+        for source in ["touch", "pen", "mouse"] {
+            for offset in [
+                egui::vec2(35., 25.),
+                egui::vec2(-128., -128.),
+                egui::vec2(0., -128.),
+                egui::Vec2::ZERO,
+                egui::vec2(150., 25.),
+            ] {
+                for displacement in [egui::Vec2::ZERO, egui::vec2(3., 0.), egui::vec2(20., 15.)] {
+                    let moved = displacement != egui::Vec2::ZERO;
+                    let ctx = egui::Context::default();
+                    let mut app =
+                        PhotocraftApp::new(photocraft_engine::Session::new(), Services::default());
+                    app.run("file.new", serde_json::json!({"width":256,"height":256}))
+                        .unwrap();
+                    app.run("layer.new.layer", serde_json::json!({})).unwrap();
+                    app.session
+                        .edit("fixture", |doc, active| {
+                            let bounds = doc.bounds();
+                            doc.layer_mut(active.unwrap())
+                                .unwrap()
+                                .surface_mut()
+                                .unwrap()
+                                .fill_rect(bounds, &[1., 0., 0., 1.]);
+                            Ok(())
+                        })
+                        .unwrap();
+                    app.ui.tool = tool;
+                    app.ui.extras.snap = false;
+                    let mut state = super::State {
+                        feed: app.stylus.feed.clone(),
+                        ..Default::default()
+                    };
+                    let mut now = 0.;
+                    let mut render = |app: &mut PhotocraftApp, events| {
+                        now += 1. / 60.;
+                        let mut raw = egui::RawInput {
+                            events,
+                            time: Some(now),
+                            screen_rect: Some(egui::Rect::from_min_size(
+                                egui::Pos2::ZERO,
+                                egui::vec2(1200., 800.),
+                            )),
+                            ..Default::default()
+                        };
+                        app.host_input(&ctx, &mut raw);
+                        super::super::editor_frame(&ctx, app, raw)
+                            .textures_delta
+                            .clear();
+                    };
+                    for _ in 0..4 {
+                        render(&mut app, vec![]);
+                    }
+                    photocraft_ui_egui::menus::invoke(
+                        &mut app,
+                        &ctx,
+                        "edit.freeTransform",
+                        serde_json::json!({}),
+                    )
+                    .unwrap();
+                    for _ in 0..4 {
+                        render(&mut app, vec![]);
+                    }
+                    let xf = photocraft_ui_egui::canvas::ViewXform::active(&app).unwrap();
+                    let p = xf.to_screen(128. + offset.x, 128. + offset.y);
+                    let transform = app.ui.transform.as_ref().unwrap();
+                    let original = (transform.quad, transform.pivot);
+                    let view = app.ui.views[0].clone();
+                    let mut events = vec![];
+                    transform_contact(&mut state, source, 0, p, &mut events);
+                    render(&mut app, std::mem::take(&mut events));
+                    let held = p + displacement;
+                    transform_contact(&mut state, source, 2, held, &mut events);
+                    render(&mut app, std::mem::take(&mut events));
+                    let transform = app.ui.transform.as_ref().unwrap();
+                    let mut expected = (transform.quad, transform.pivot);
+                    let mut awaiting_drag_threshold =
+                        displacement == egui::vec2(3., 0.) && expected == original;
+                    if !moved {
+                        assert_eq!(expected, original);
+                    }
+                    for i in 0..90 {
+                        // Alternate stationary OS reports and idle frames without any input.
+                        if i % 2 == 0 {
+                            transform_contact(&mut state, source, 2, held, &mut events);
+                        }
+                        render(&mut app, std::mem::take(&mut events));
+                        let transform = app.ui.transform.as_ref().unwrap();
+                        let actual = (transform.quad, transform.pivot);
+                        // egui can recognize a tiny drag only after its long-press timeout.
+                        if awaiting_drag_threshold && actual != original {
+                            expected = actual;
+                            awaiting_drag_threshold = false;
+                        }
+                        assert_eq!(
+                            actual, expected,
+                            "tool={tool:?}, source={source}, offset={offset:?}, displacement={displacement:?}, frame={i}"
+                        );
+                        assert_eq!(app.ui.views[0].rotation, view.rotation);
+                        assert_eq!(app.ui.views[0].zoom, view.zoom);
+                        assert_eq!(app.ui.views[0].center, view.center);
+                    }
+                    if displacement == egui::vec2(20., 15.) {
+                        assert_ne!(
+                            expected, original,
+                            "the drag must actually transform the fixture: {tool:?}/{source}/{offset:?} p={p:?} xf={xf:?}"
+                        );
+                        transform_contact(&mut state, source, 1, held, &mut events);
+                        render(&mut app, std::mem::take(&mut events));
+                        render(&mut app, vec![]);
+                        let transform = app.ui.transform.as_ref().unwrap();
+                        assert_eq!(
+                            (transform.quad, transform.pivot),
+                            expected,
+                            "release must not jump"
+                        );
+                        photocraft_ui_egui::menus::invoke(
+                            &mut app,
+                            &ctx,
+                            "edit.undo",
+                            serde_json::json!({}),
+                        )
+                        .unwrap();
+                        let transform = app.ui.transform.as_ref().unwrap();
+                        assert_eq!(
+                            (transform.quad, transform.pivot),
+                            original,
+                            "one drag is one undo step"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[allow(clippy::unwrap_used)]
+fn transform_contact(
+    state: &mut super::State,
+    source: &str,
+    action: i32,
+    pos: egui::Pos2,
+    events: &mut Vec<egui::Event>,
+) {
+    if source == "touch" {
+        if action == 1 {
+            snapshot(state, &[], events);
+        } else {
+            snapshot(state, &[(1, pos.x * 2., pos.y * 2.)], events);
+        }
+    } else {
+        state.push(
+            serde_json::from_value(serde_json::json!({
+                "kind":"pointer", "source":source, "action":action,
+                "x":pos.x * 2., "y":pos.y * 2.,
+                "sample":{"pressure":if action == 1 {0.} else {0.5}}
+            }))
+            .unwrap(),
+            2.,
+            events,
+        );
+    }
+}
+
+#[test]
+fn cancellation_releases_at_last_emitted_position_for_every_pointer_source() {
+    for source in [
+        PointerSource::Mouse,
+        PointerSource::Pen,
+        PointerSource::Touch,
+    ] {
+        for (kind, action, x, y) in [
+            ("blur", 0, 0., 0.),
+            ("pointer", 3, 0., 0.),
+            ("pointer", 3, 1800., 1600.),
+            ("pointer", 3, f32::NAN, f32::INFINITY),
+        ] {
+            let mut state = State::default();
+            let mut events = vec![];
+            for (action, x, y) in [(0, 200., 300.), (2, 400., 500.)] {
+                if source == PointerSource::Touch {
+                    snapshot(&mut state, &[(1, x, y)], &mut events);
+                } else {
+                    state.push(
+                        Input {
+                            kind: "pointer".into(),
+                            source,
+                            action,
+                            x,
+                            y,
+                            sample: (source == PointerSource::Pen).then_some(PenSample {
+                                pressure: 0.5,
+                                ..Default::default()
+                            }),
+                            ..Default::default()
+                        },
+                        2.,
+                        &mut events,
+                    );
+                }
+            }
+            events.clear();
+            state.push(
+                Input {
+                    kind: kind.into(),
+                    source,
+                    action,
+                    x,
+                    y,
+                    ..Default::default()
+                },
+                2.,
+                &mut events,
+            );
+            assert_eq!(
+                events
+                    .iter()
+                    .filter_map(|e| match e {
+                        Event::PointerButton {
+                            pos,
+                            pressed: false,
+                            ..
+                        } => Some(*pos),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>(),
+                vec![Pos2::new(200., 250.)],
+                "{source:?} {kind} ({x}, {y})"
+            );
+            assert!(!events.iter().any(|e| matches!(e, Event::PointerMoved(_))));
+            assert!(state.pressed.is_none() && state.last_pointer.is_none());
+            assert!(state.touches.is_empty() && state.touch_pointer.is_none() && !state.pen_down);
+            events.clear();
+            state.cancel(&mut events);
+            assert!(
+                !events
+                    .iter()
+                    .any(|e| matches!(e, Event::PointerButton { .. }))
+            );
+            snapshot(&mut state, &[(2, 800., 900.)], &mut events);
+            assert!(events.iter().any(|e| matches!(e, Event::PointerButton { pos, pressed: true, .. } if *pos == Pos2::new(400., 450.))));
+            events.clear();
+            state.cancel(&mut events);
+            assert!(events.iter().any(|e| matches!(e, Event::PointerButton { pos, pressed: false, .. } if *pos == Pos2::new(400., 450.))));
+        }
+    }
+}
+
+#[test]
+fn cancelled_touch_keeps_egui_interaction_at_its_endpoint() {
+    let ctx = egui::Context::default();
+    let mut state = State::default();
+    let mut events = vec![];
+    snapshot(&mut state, &[(1, 1200., 1000.)], &mut events);
+    frame(
+        &ctx,
+        egui::RawInput {
+            events: std::mem::take(&mut events),
+            ..Default::default()
+        },
+        |_| {},
+    );
+    snapshot(&mut state, &[(1, 1400., 1100.)], &mut events);
+    frame(
+        &ctx,
+        egui::RawInput {
+            events: std::mem::take(&mut events),
+            ..Default::default()
+        },
+        |_| {},
+    );
+    state.push(
+        serde_json::from_str(r#"{"kind":"blur"}"#).unwrap(),
+        2.,
+        &mut events,
+    );
+    frame(
+        &ctx,
+        egui::RawInput {
+            events,
+            ..Default::default()
+        },
+        |ui| {
+            ui.input(|i| {
+                assert!(i.pointer.primary_released());
+                assert_eq!(i.pointer.interact_pos(), Some(Pos2::new(700., 550.)));
+            });
+        },
+    );
+}
+
+#[test]
+fn cancellation_ignores_filtered_mouse_and_pen_hover_coordinates() {
+    let mut state = State::default();
+    let mut events = vec![];
+    snapshot(&mut state, &[(1, 400., 500.)], &mut events);
+    push_mouse(&mut state, 0., 0., &mut events); // Compatibility mouse echo, filtered.
+    events.clear();
+    state.cancel(&mut events);
+    assert!(events.iter().any(|e| matches!(e, Event::PointerButton { pos, pressed: false, .. } if *pos == Pos2::new(200., 250.))));
+    push_pen(&mut state, 0, 800., 900., 0.5, &mut events);
+    push_pen(&mut state, 2, 0., 0., 0., &mut events); // Contact-time hover echo, filtered.
+    events.clear();
+    state.cancel(&mut events);
+    assert!(events.iter().any(|e| matches!(e, Event::PointerButton { pos, pressed: false, .. } if *pos == Pos2::new(400., 450.))));
+}
+
+#[test]
+fn cancelling_navigation_or_idle_state_never_synthesizes_a_release() {
+    let mut state = State::default();
+    let mut events = vec![];
+    snapshot(&mut state, &[(1, 400., 500.)], &mut events);
+    snapshot(&mut state, &[(1, 400., 500.), (2, 800., 500.)], &mut events);
+    events.clear();
+    state.cancel(&mut events);
+    assert!(
+        !events
+            .iter()
+            .any(|e| matches!(e, Event::PointerButton { .. }))
+    );
+    assert!(!state.touch_nav_active);
+    events.clear();
+    state.cancel(&mut events);
+    assert!(
+        !events
+            .iter()
+            .any(|e| matches!(e, Event::PointerButton { .. }))
+    );
 }

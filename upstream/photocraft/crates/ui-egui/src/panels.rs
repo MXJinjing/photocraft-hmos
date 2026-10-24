@@ -890,11 +890,11 @@ mod title_tests {
         let mut app = app(true);
         open_named(&mut app, "foo.psd");
         app.session.prefs.edit(|p| p.interface.show_file_name_in_title = false);
-        assert_eq!(window_title(&app), "PhotoCraft");
+        assert_eq!(window_title(&app), crate::brand::APP_NAME);
         if let Some(st) = app.session.active_mut() {
             st.revision += 1;
         }
-        assert_eq!(window_title(&app), "*PhotoCraft");
+        assert_eq!(window_title(&app), format!("*{}", crate::brand::APP_NAME));
     }
 
     #[test]

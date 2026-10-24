@@ -335,7 +335,7 @@ impl Registry {
             if width > 0 && height > 0 {
                 child.size_px = (width, height);
             }
-            child.input.cancel(Pos2::ZERO, &mut scratch);
+            child.input.cancel(&mut scratch);
             child.events.append(&mut scratch);
         }
     }
@@ -354,7 +354,7 @@ impl Registry {
         let mut scratch = Vec::new();
         if let Some(child) = self.child_mut(key) {
             child.phase = Phase::Detached;
-            child.input.cancel(Pos2::ZERO, &mut scratch);
+            child.input.cancel(&mut scratch);
         }
     }
 
@@ -377,7 +377,7 @@ impl Registry {
     pub fn cancel(&mut self, key: u32) {
         if let Some(child) = self.child_mut(key) {
             let mut events = Vec::new();
-            child.input.cancel(Pos2::ZERO, &mut events);
+            child.input.cancel(&mut events);
             child.events.append(&mut events);
         }
     }
