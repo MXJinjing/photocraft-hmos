@@ -244,9 +244,13 @@ pub fn load(app: &mut PhotocraftApp) {
     }
     app.prefs_rt.loaded = true;
     let mut invalid = Vec::new();
+    let mut stored = None;
     if let Some(text) = app.services.load_prefs.as_mut().and_then(|f| f()) {
         match app.session.load_prefs_json(&text) {
-            Ok(found) => invalid = found,
+            Ok(found) => {
+                invalid = found;
+                stored = serde_json::from_str::<Value>(&text).ok();
+            }
             Err(e) => {
                 let template = "Preferences were reset: {error}";
                 app.ui.status = crate::i18n::fmt(tl!(template), &[("error", &e)]);
@@ -261,10 +265,40 @@ pub fn load(app: &mut PhotocraftApp) {
     crate::view_cmds::restore(app);
     app.sync_recent();
     app.prefs_rt.saved_rev = app.session.prefs.rev();
-    app.prefs_rt.saved_value = Some(app.session.prefs_value());
+    let loaded = app.session.prefs_value();
+    app.prefs_rt.saved_value = Some(match stored {
+        Some(stored) => stored_base(&loaded, &stored),
+        None => loaded,
+    });
     if !invalid.is_empty() {
         repair_invalid(app, &invalid);
     }
+}
+
+/// The save base after loading `stored`: what was loaded, with the keys the shift tool switch
+/// migration may change (#5647) put back as the file had them, the way [`repair_invalid`] puts
+/// back unreadable values. The migrated value and the new version then differ from the base, so
+/// the next save writes them rather than keeping the old value under a newer version. Every other
+/// key keeps its loaded value, so the three-way merge leaves another instance's changes alone,
+/// also for keys the file doesn't have yet. A file from a newer version keeps its version.
+fn stored_base(loaded: &Value, stored: &Value) -> Value {
+    let mut base = loaded.clone();
+    let Some(obj) = base.as_object_mut() else {
+        return base;
+    };
+    match stored.get("version") {
+        Some(v) if v.as_u64().is_some_and(|v| v > prefs::PREFS_VERSION) => {}
+        Some(v) => {
+            obj.insert("version".into(), v.clone());
+        }
+        None => {
+            obj.remove("version");
+        }
+    }
+    if let (Some(v), Some(tools)) = (stored.pointer("/tools/useShiftKeyForToolSwitch"), obj.get_mut("tools").and_then(Value::as_object_mut)) {
+        tools.insert("useShiftKeyForToolSwitch".into(), v.clone());
+    }
+    base
 }
 
 /// Some saved values couldn't be read and took their defaults (#6611): say which, and write
@@ -605,6 +639,7 @@ fn write_prefs(app: &mut PhotocraftApp, ours: &Value) -> Result<(), String> {
     let stored = app.services.load_prefs.as_mut().and_then(|load| load()).and_then(|t| serde_json::from_str::<Value>(&t).ok());
     let text = match (stored, &app.prefs_rt.saved_value) {
         (Some(mut theirs @ Value::Object(_)), Some(base)) => {
+            let base = &without_stale_migration(base, &theirs);
             merge_changes(base, ours, &mut theirs);
             serde_json::to_string_pretty(&theirs)
         }
@@ -612,6 +647,24 @@ fn write_prefs(app: &mut PhotocraftApp, ours: &Value) -> Result<(), String> {
     }
     .map_err(|e| e.to_string())?;
     save(&text)
+}
+
+/// The save base without the shift tool switch migration (#5647) once storage already holds a
+/// version 2 file: another instance wrote it, so its Use Shift Key for Tool Switch is a choice,
+/// not the old default this instance migrated. The base then holds the migrated value (on) instead
+/// of the old file's off, so only a change made here since loading is written over that choice.
+fn without_stale_migration(base: &Value, theirs: &Value) -> Value {
+    let mut base = base.clone();
+    let new_file = |v: &Value| v.get("version").and_then(Value::as_u64).is_some_and(|v| v >= 2);
+    if new_file(theirs) && !new_file(&base) {
+        let key = "useShiftKeyForToolSwitch";
+        if let Some(tools) = base.get_mut("tools").and_then(Value::as_object_mut)
+            && tools.get(key) == Some(&Value::Bool(false))
+        {
+            tools.insert(key.into(), Value::Bool(true));
+        }
+    }
+    base
 }
 
 /// Three-way merge of preference trees: whatever `ours` changed since `base` goes over `theirs`
@@ -1218,6 +1271,8 @@ fn gpu_memory_lines(app: &PhotocraftApp) -> Vec<String> {
     v
 }
 
+/// The label a preference key shows in the dialog: a few keys have their own wording, the rest
+/// split camelCase into words (`convertToSrgb` → "Convert to srgb").
 fn humanize(key: &str) -> String {
     match key {
         "blockFingerInputConfigured" => return "Block finger input".into(),
@@ -1227,6 +1282,7 @@ fn humanize(key: &str) -> String {
         "exrAcesCg" => return "Open color-less EXR as ACEScg".into(),
         "darkTheme" => return "Dark Theme".into(),
         "lightTheme" => return "Light Theme".into(),
+        "automaticallyCheckUpdates" => return "Automatically Check for Updates".into(),
         _ => {}
     }
     // These controls appear only for WebP, so reuse the existing translated labels.
@@ -3379,6 +3435,106 @@ mod tests {
         tick(&mut next, &ctx);
         assert!(next.ui.notices.iter().all(|n| n.title != "Some preferences were reset"));
         assert_eq!(next.session.prefs().file_handling.autosave_minutes, 5);
+    }
+
+    #[test]
+    fn an_old_files_shift_tool_switch_migration_is_saved_with_the_new_version() {
+        // #5647: a file before version 2 loads with Use Shift Key for Tool Switch on. Saving
+        // writes that and the current version, so turning it off later isn't taken for the old
+        // default on the next launch.
+        let ctx = egui::Context::default();
+        for saved in [
+            json!({"version": 1, "tools": {"useShiftKeyForToolSwitch": false}, "futureSection": {"kept": true}}),
+            json!({"tools": {"useShiftKeyForToolSwitch": false}, "futureSection": {"kept": true}}),
+        ] {
+            let (mut app, store) = app_with_saved(Some(saved.to_string()));
+            tick(&mut app, &ctx);
+            assert!(app.session.prefs().tools.use_shift_key_for_tool_switch, "{saved}");
+            app.run("prefs.set", json!({"values": {"performance.historyStates": 12}})).unwrap();
+            tick(&mut app, &ctx);
+            let v = stored(&store);
+            assert_eq!(v["version"], json!(prefs::PREFS_VERSION), "{saved}");
+            assert_eq!(v["tools"]["useShiftKeyForToolSwitch"], true, "{saved}");
+            assert_eq!(v["futureSection"]["kept"], true, "keys this version doesn't know survive");
+            app.run("prefs.set", json!({"values": {"tools.useShiftKeyForToolSwitch": false}})).unwrap();
+            tick(&mut app, &ctx);
+            let (mut next, _) = app_with_saved(store.lock().unwrap().clone());
+            tick(&mut next, &ctx);
+            assert!(!next.session.prefs().tools.use_shift_key_for_tool_switch, "{saved}: turned off, it stays off");
+        }
+    }
+
+    #[test]
+    fn an_old_sparse_file_keeps_another_instances_change() {
+        // Two instances on a version 1 file that lacks most keys: one changes a key the file
+        // doesn't have, the other then saves an unrelated change and must not write its default
+        // over it.
+        let saved = json!({"version": 1, "tools": {"useShiftKeyForToolSwitch": false}});
+        let store = Arc::new(Mutex::new(Some(saved.to_string())));
+        let ctx = egui::Context::default();
+        let (mut a, mut b) = (app_on(&store, Arc::default()), app_on(&store, Arc::default()));
+        tick(&mut a, &ctx);
+        tick(&mut b, &ctx);
+        b.run("prefs.set", json!({"values": {"interface.theme": "studio"}})).unwrap();
+        tick(&mut b, &ctx);
+        assert_eq!(stored(&store)["interface"]["theme"], "studio");
+        a.run("prefs.set", json!({"values": {"performance.historyStates": 12}})).unwrap();
+        tick(&mut a, &ctx);
+        let v = stored(&store);
+        assert_eq!((v["interface"]["theme"].as_str(), v["performance"]["historyStates"].as_u64()), (Some("studio"), Some(12)));
+    }
+
+    #[test]
+    fn another_instances_shift_tool_switch_choice_beats_this_ones_migration() {
+        // Two instances migrate the same version 1 file. One turns the switch off and saves
+        // version 2; the other's unrelated save must not write its migrated "on" over that.
+        let saved = json!({"version": 1, "tools": {"useShiftKeyForToolSwitch": false}});
+        let store = Arc::new(Mutex::new(Some(saved.to_string())));
+        let ctx = egui::Context::default();
+        let (mut a, mut b) = (app_on(&store, Arc::default()), app_on(&store, Arc::default()));
+        tick(&mut a, &ctx);
+        tick(&mut b, &ctx);
+        b.run("prefs.set", json!({"values": {"tools.useShiftKeyForToolSwitch": false}})).unwrap();
+        tick(&mut b, &ctx);
+        assert_eq!(stored(&store)["tools"]["useShiftKeyForToolSwitch"], false);
+        a.run("prefs.set", json!({"values": {"performance.historyStates": 12}})).unwrap();
+        tick(&mut a, &ctx);
+        let v = stored(&store);
+        assert_eq!((v["tools"]["useShiftKeyForToolSwitch"].as_bool(), v["performance"]["historyStates"].as_u64()), (Some(false), Some(12)));
+        assert_eq!(v["version"], json!(prefs::PREFS_VERSION));
+    }
+
+    #[test]
+    fn turning_the_shift_tool_switch_off_is_saved_over_another_instances_migration() {
+        // Two instances migrate the same version 1 file. B saves version 2 with the migrated "on";
+        // the user then turns the switch off in A, which must be written.
+        let saved = json!({"version": 1, "tools": {"useShiftKeyForToolSwitch": false}});
+        let store = Arc::new(Mutex::new(Some(saved.to_string())));
+        let ctx = egui::Context::default();
+        let (mut a, mut b) = (app_on(&store, Arc::default()), app_on(&store, Arc::default()));
+        tick(&mut a, &ctx);
+        tick(&mut b, &ctx);
+        b.run("prefs.set", json!({"values": {"performance.historyStates": 12}})).unwrap();
+        tick(&mut b, &ctx);
+        assert_eq!(stored(&store)["tools"]["useShiftKeyForToolSwitch"], true);
+        a.run("prefs.set", json!({"values": {"tools.useShiftKeyForToolSwitch": false}})).unwrap();
+        tick(&mut a, &ctx);
+        let v = stored(&store);
+        assert_eq!((v["tools"]["useShiftKeyForToolSwitch"].as_bool(), v["performance"]["historyStates"].as_u64()), (Some(false), Some(12)));
+    }
+
+    #[test]
+    fn a_newer_files_version_is_kept_on_save() {
+        let saved = json!({"version": prefs::PREFS_VERSION + 1, "tools": {"useShiftKeyForToolSwitch": false}});
+        let (mut app, store) = app_with_saved(Some(saved.to_string()));
+        let ctx = egui::Context::default();
+        tick(&mut app, &ctx);
+        assert!(!app.session.prefs().tools.use_shift_key_for_tool_switch, "a newer file isn't migrated");
+        app.run("prefs.set", json!({"values": {"performance.historyStates": 12}})).unwrap();
+        tick(&mut app, &ctx);
+        let v = stored(&store);
+        assert_eq!(v["version"], json!(prefs::PREFS_VERSION + 1));
+        assert_eq!(v["performance"]["historyStates"], 12);
     }
 
     #[test]

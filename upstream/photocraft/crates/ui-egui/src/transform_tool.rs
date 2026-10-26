@@ -1109,6 +1109,9 @@ pub fn commit(app: &mut PhotocraftApp) {
         return;
     }
     match r {
+        // Nothing changed (an untouched cylinder or Warp Text): no step to fold a copy into, so
+        // it stays its own step, as for an untouched box.
+        Ok(v) if v.get("changed") == Some(&json!(false)) => {}
         Ok(_) => finish(app, document, LayerId(t.layer), made, true),
         Err(e) => keep_open(app, t, preview, e),
     }
@@ -4379,6 +4382,35 @@ mod tests {
         assert_eq!(app.ui.transform.as_ref().unwrap().rect, [8.0, 8.0, 16.0, 24.0]);
         cancel(&mut app);
         assert_eq!(app.session.active().unwrap().doc.layers.len(), layers);
+    }
+
+    /// #4112: ⌥⌘T on a cylinder smart object, Warp mode, Enter with nothing touched: the copy
+    /// keeps the cylinder and stays its own step (no warp step to fold into), so one undo takes
+    /// back the copy and nothing before it.
+    #[test]
+    fn untouched_warp_of_a_cylinder_copy_keeps_its_own_step() {
+        let ctx = egui::Context::default();
+        let mut app = app_with_square(64, photocraft_geom::Rect::new(8, 8, 24, 24));
+        app.run("layer.smartObjects.convertToSmartObject", json!({})).unwrap();
+        app.run("layer.smartObjects.warp", json!({"style": "cylinder", "values": [8, 24, 24, 8, 0.3, 0.3, 0.5], "rect": [8, 8, 24, 24]})).unwrap();
+        let warp = |app: &PhotocraftApp, i: usize| match &app.session.active().unwrap().doc.layers[i].content {
+            photocraft_doc::LayerContent::Smart(sm) => sm.warp.as_ref().map(|w| w.style),
+            _ => None,
+        };
+        let (layers, steps) = (app.session.active().unwrap().doc.layers.len(), app.session.active().unwrap().history.past_len());
+        assert_eq!(warp(&app, layers - 1), Some(WarpStyle::Cylinder));
+        crate::menus::invoke(&mut app, &ctx, "edit.freeTransformCopy", json!({})).unwrap();
+        enter_warp(&mut app, &ctx);
+        assert!(app.ui.transform.as_ref().unwrap().warp.is_some(), "Warp mode shows the cylinder");
+        commit(&mut app);
+        assert!(!app.ui.status_error, "{}", app.ui.status);
+        let st = app.session.active().unwrap();
+        assert_eq!((st.doc.layers.len(), st.history.past_len()), (layers + 1, steps + 1));
+        assert_eq!(warp(&app, layers), Some(WarpStyle::Cylinder), "the copy is still a cylinder");
+        app.session.undo();
+        let st = app.session.active().unwrap();
+        assert_eq!((st.doc.layers.len(), st.history.past_len()), (layers, steps), "one undo takes back the copy only");
+        assert_eq!(warp(&app, layers - 1), Some(WarpStyle::Cylinder));
     }
 
     /// #1099: cancel, frame cleanup and a commit before the next frame all belong to the

@@ -118,17 +118,20 @@ pub mod smartselect_cmds;
 pub mod snap;
 pub mod solid_fill_cmds;
 pub mod stamp_cmds;
+pub mod style_asl_cmds;
 pub mod swatch_cmds;
 pub mod symmetry_cmds;
 mod timeline_cmds;
 pub mod transform_cmds;
 mod trap_cmds;
+pub mod type_area_cmds;
 pub mod type_caret_cmds;
 pub mod type_cmds;
 pub mod type_extra_cmds;
 pub mod type_mask_cmds;
 pub mod type_spell_cmds;
 pub mod type_styles_cmds;
+pub mod updates_cmds;
 mod variables_cmds;
 pub use variables_cmds::{export_data_sets_with, import_data_sets_text};
 pub mod vector_cmds;
@@ -497,6 +500,8 @@ pub struct Session {
     color_restrict: Option<usize>,
     /// Edit › Preferences, keyboard shortcuts, menu and toolbar customisation (see `prefs`).
     pub prefs: prefs::PrefsStore,
+    /// Release checks use an injected platform transport; no network I/O in the engine.
+    pub updates: updates_cmds::Updates,
     /// Edit menu state: Fade source, custom shape library (see `edit_menu_cmds`).
     pub edit_state: edit_menu_cmds::EditState,
     /// The pattern library (Window › Patterns; see `pattern.*`).
@@ -714,6 +719,17 @@ impl Session {
     /// `paint.cloneStamp` / `paint.historyBrush` it was drawn for. Refused for the Healing Brush
     /// (it blends on release) and when the brush, layer or clone source changed during the stroke.
     pub fn offer_live_retouch(&mut self, live: retouch_cmds::LiveRetouch) -> Result<()> {
+        let commit = live.into_commit(self)?;
+        self.live_commit = Some(commit);
+        Ok(())
+    }
+
+    /// [`Self::offer_live_stroke`] for a live Dodge, Burn, Sponge, Blur, Sharpen or Smudge stroke,
+    /// taken by the command it was drawn for: the stroke's finishing dabs are run first. Refused
+    /// when the brush, tool options or layer changed during the stroke.
+    pub fn offer_live_dab(&mut self, live: retouch_cmds::LiveDab) -> Result<()> {
+        // A refused offer withdraws the previous one too.
+        self.live_commit = None;
         let commit = live.into_commit(self)?;
         self.live_commit = Some(commit);
         Ok(())

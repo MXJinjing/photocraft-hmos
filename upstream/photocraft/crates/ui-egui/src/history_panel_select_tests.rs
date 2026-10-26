@@ -225,3 +225,25 @@ fn a_new_state_at_the_history_limit_still_scrolls_into_view() {
     h.run_steps(4);
     assert!(shown(&h, 0), "a new state at the limit scrolls into view");
 }
+
+#[test]
+fn a_new_state_at_the_history_limit_deselects_the_snapshot() {
+    let mut h = long_harness();
+    h.state_mut().run("history.newSnapshot", json!({})).unwrap();
+    h.run_steps(2);
+    // What a click on the snapshot row does: the command, then the selection at the state it made.
+    let id = h.state().session.active().unwrap().snapshots[0].id;
+    h.state_mut().run("history.selectSnapshot", json!({"snapshot": id})).unwrap();
+    select_snapshot(&h.ctx, h.state().session.active().unwrap(), id);
+    h.run_steps(4);
+    assert_eq!(selected_snapshot(&h.ctx, h.state().session.active().unwrap()), Some(id), "the snapshot is selected");
+    // At the limit, selecting the snapshot again by command adds a state with the same name and
+    // drops the oldest: only the newest state tells the two apart.
+    let st = h.state_mut().session.active_mut().unwrap();
+    st.history.max_states = st.history.past_len();
+    let past = st.history.past_len();
+    h.state_mut().run("history.selectSnapshot", json!({"snapshot": id})).unwrap();
+    assert_eq!(h.state().session.active().unwrap().history.past_len(), past, "the oldest state was dropped");
+    h.run_steps(4);
+    assert_eq!(selected_snapshot(&h.ctx, h.state().session.active().unwrap()), None, "a new state deselects the snapshot");
+}

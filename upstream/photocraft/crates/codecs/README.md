@@ -106,6 +106,9 @@ embedded table (and a PNG's transparent entry) so `photocraft-io` can open them 
   give `DecodeWarning::MoreElements`; the image orientation is applied on import. Writing is
   big-endian, one unencoded element, at `EncodeOptions::dpx_bits` (8/10/12/16; by default 8 for
   U8 and 16 otherwise), packing 1 for 10 and 12 bits; gray with alpha is written as luma.
+  `FidelityWarning::BitsReduced` reports a 10- or 12-bit save (and every Cineon save) that drops
+  precision: always for float samples, for U16 ones unless they are already code values at that
+  depth.
   Other descriptors, signed or run-length-encoded data and other bit depths return
   `CodecError::Unsupported` naming the field.
 

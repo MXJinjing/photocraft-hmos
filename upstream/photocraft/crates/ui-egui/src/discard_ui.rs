@@ -91,6 +91,14 @@ pub fn intercept(app: &mut PhotocraftApp, id: &str, params: &Value) -> bool {
     if docs.is_empty() {
         return false;
     }
+    // Once the window's GPU device is lost nothing can be drawn (`gpu_status::check_window`), so
+    // the prompt would never show. While saving for recovery keeps failing, quitting (the close
+    // button, File › Exit) must still go through rather than leave a blank window that can't be
+    // closed.
+    if id == EXIT && app.window_lost {
+        log::warn!("quitting a window that lost its GPU device before its unsaved work could be saved for recovery");
+        return false;
+    }
     let prompt = Prompt { id: id.to_string(), params: params.clone(), target, docs, focused: None, awaiting_save: None, save_undo: None, save_commit: None };
     match &app.discard {
         None => ask(app, prompt),
@@ -1161,6 +1169,41 @@ mod tests {
         make_dirty(&mut app, 0);
         assert!(press_window_close(&mut app));
         assert!(app.discard.is_some());
+    }
+
+    /// After the window's GPU device is lost nothing can be drawn, so a prompt could never be seen
+    /// or answered. While unsaved work can't be written for recovery (the save keeps retrying), the
+    /// close button must still quit, instead of opening a prompt that never shows.
+    #[test]
+    fn window_close_goes_through_once_the_window_device_is_lost() {
+        let mut app = app_with_docs(1);
+        make_dirty(&mut app, 0);
+        app.window_lost = true;
+        assert!(!press_window_close(&mut app), "the close isn't cancelled");
+        assert!(app.discard.is_none(), "no prompt opened");
+    }
+
+    /// The title bar's close button and File › Exit run `file.exit` through `menus::invoke`, which
+    /// parks it behind the prompt before any close request is made: once the window's device is
+    /// lost they must close instead.
+    #[test]
+    fn file_exit_quits_without_a_prompt_once_the_window_device_is_lost() {
+        let exit = |app: &mut PhotocraftApp| {
+            let mut out = egui::Context::default().run_ui(egui::RawInput::default(), |ui| {
+                let _ = crate::menus::invoke(app, ui.ctx(), EXIT, json!({}));
+            });
+            out.textures_delta.clear();
+            let commands = out.viewport_output.remove(&egui::ViewportId::ROOT).map(|o| o.commands).unwrap_or_default();
+            commands.iter().any(|c| matches!(c, egui::ViewportCommand::Close))
+        };
+        let mut app = app_with_docs(1);
+        make_dirty(&mut app, 0);
+        assert!(!exit(&mut app), "a window that can draw asks first");
+        assert!(app.discard.is_some());
+        app.discard = None;
+        app.window_lost = true;
+        assert!(exit(&mut app), "the window is asked to close");
+        assert!(app.discard.is_none(), "no prompt opened");
     }
 
     #[test]

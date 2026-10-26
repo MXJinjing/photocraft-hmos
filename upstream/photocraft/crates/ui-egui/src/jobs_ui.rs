@@ -200,7 +200,7 @@ pub fn run(app: &mut PhotocraftApp, id: &str, params: Value) -> Result<Value, St
 /// replaces it when decoded. `path` is remembered for File › Save and Open Recent.
 pub fn start_open(app: &mut PhotocraftApp, name: &str, path: Option<String>, source: OpenSource) -> Result<(), String> {
     let name = &app.open_name(name);
-    match app.session.start_open(name, source).map_err(|e| e.to_string())? {
+    match app.session.start_open_for_user(name, source).map_err(|e| e.to_string())? {
         // Inline (wasm): finish now, like a background open that ended at once.
         Started::Done(v) => finish_open(app, name, path.as_deref(), &v, None),
         Started::Job(job) => {
@@ -552,6 +552,7 @@ fn finish_open(app: &mut PhotocraftApp, name: &str, path: Option<&str>, v: &Valu
     let held = |doc, read_only, question, policy_applied| crate::open_prompt::Held {
         doc,
         read_only,
+        damage_pending: v.get("damaged").and_then(Value::as_bool).unwrap_or(false),
         name: name.to_string(),
         path: path.map(str::to_string),
         warnings: warnings.clone(),
@@ -563,7 +564,7 @@ fn finish_open(app: &mut PhotocraftApp, name: &str, path: Option<&str>, v: &Valu
     // Held back for the profile prompt (Ask When Opening).
     if let Some(id) = v.get("held").and_then(Value::as_u64) {
         let (doc, read_only) = app.session.take_held_open(id).ok_or("the open job's document is gone")?;
-        crate::open_prompt::arrive(app, held(doc, read_only, v.get("color").cloned(), false));
+        crate::open_prompt::arrive(app, held(doc, read_only, v.get("color").filter(|q| !q.is_null()).cloned(), false));
         return Ok(());
     }
     // poll_jobs applies all ready jobs before the shell handles their events. An earlier

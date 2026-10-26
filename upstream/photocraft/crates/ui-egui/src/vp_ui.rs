@@ -12,7 +12,7 @@
 use egui::{Color32, Pos2, Stroke, TextureHandle, pos2};
 use photocraft_algo::transform::Homography;
 use photocraft_algo::vanishing::{PlaneCheck, Scene, VpPlane};
-use photocraft_doc::{LayerContent, LayerId};
+use photocraft_doc::{DocId, LayerContent, LayerId};
 use photocraft_engine::vp_cmds::VP;
 use photocraft_geom::Rect;
 use serde_json::{Value, json};
@@ -46,6 +46,8 @@ struct Clip {
 }
 
 pub struct VpSession {
+    /// Document this session belongs to (#5115).
+    pub document: DocId,
     pub layer: LayerId,
     canvas: Rect,
     pub planes: Vec<VpPlane>,
@@ -80,6 +82,7 @@ impl VpSession {
         let center = self.center();
         let planes: Vec<Value> = self.planes.iter().map(|p| json!({"corners": p.corners, "check": p.check(center)})).collect();
         json!({
+            "document": self.document.0,
             "layer": self.layer.0,
             "tool": self.tool,
             "planes": planes,
@@ -310,6 +313,7 @@ pub fn begin(app: &mut PhotocraftApp, ctx: &egui::Context) -> Result<(), String>
         })
     });
     app.distort.vanishing = Some(VpSession {
+        document: st.doc.id,
         layer,
         canvas,
         planes: Vec::new(),

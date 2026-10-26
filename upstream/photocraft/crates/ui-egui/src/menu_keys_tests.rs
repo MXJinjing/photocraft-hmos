@@ -107,6 +107,49 @@ fn alt_with_a_wheel_scroll_or_a_lost_focus_is_no_tap() {
     assert_eq!(Keys::current(&h.ctx).focus, None, "Alt that went to the desktop leaves the bar alone");
 }
 
+/// Alt's own auto-repeat (holding it after Alt+wheel) doesn't make the release a tap again, and
+/// holding Alt alone long enough to repeat is still a tap.
+#[test]
+fn a_held_alt_repeating_after_the_wheel_is_no_tap() {
+    let repeat = |h: &mut Harness<'static, PhotocraftApp>| {
+        h.event_modifiers(
+            egui::Event::Key { key: egui::Key::AltLeft, physical_key: None, pressed: true, repeat: true, modifiers: egui::Modifiers::ALT },
+            egui::Modifiers::ALT,
+        );
+        h.run_steps(1);
+    };
+    let mut h = bar();
+    h.key_down(egui::Key::AltLeft);
+    h.run_steps(2);
+    h.event_modifiers(
+        egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Line,
+            delta: egui::vec2(0.0, 1.0),
+            modifiers: egui::Modifiers::ALT,
+            phase: egui::TouchPhase::Move,
+        },
+        egui::Modifiers::ALT,
+    );
+    h.run_steps(2);
+    for _ in 0..5 {
+        repeat(&mut h);
+    }
+    h.key_up(egui::Key::AltLeft);
+    h.run_steps(3);
+    assert_eq!(Keys::current(&h.ctx).focus, None, "Alt held on after the wheel: still no tap");
+    key(&mut h, egui::Key::Space);
+    assert!(!is_open(&h.ctx), "Space opens no menu");
+    // Alt alone, held long enough to repeat, is still a tap.
+    h.key_down(egui::Key::AltLeft);
+    h.run_steps(1);
+    for _ in 0..5 {
+        repeat(&mut h);
+    }
+    h.key_up(egui::Key::AltLeft);
+    h.run_steps(3);
+    assert_eq!(Keys::current(&h.ctx).focus, Some(0), "a long press of Alt alone focuses the bar");
+}
+
 #[test]
 fn a_second_alt_or_esc_or_a_click_takes_the_keyboard_off_the_bar() {
     let mut h = bar();

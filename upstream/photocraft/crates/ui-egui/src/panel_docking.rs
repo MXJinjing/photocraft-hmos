@@ -855,6 +855,10 @@ fn panel_menu(app: &mut PhotocraftApp, ui: &mut egui::Ui, panel: &str) {
             crate::swatches_ui::panel_menu(app, ui);
             ui.separator();
         }
+        "color" => {
+            crate::color_panel_ui::panel_menu(app, ui);
+            ui.separator();
+        }
         "history" => {
             crate::history_menu_ui::panel_menu(app, ui);
             ui.separator();

@@ -371,6 +371,7 @@ jobs:
           - { crate: psd, name: metadata }
           - { crate: psd, name: tagged }
           - { crate: psd, name: resources }
+          - { crate: psd, name: asl }
           - { crate: codecs, name: decode_any }
           - { crate: codecs, name: decode_png }
           - { crate: codecs, name: decode_jpeg }

@@ -32,17 +32,18 @@ fn byte_of(text: &str, ci: usize) -> usize {
 
 /// Layout of a type layer (cached per document revision) and its text → document transform.
 pub fn layout(app: &mut PhotocraftApp, id: LayerId) -> Option<(Arc<TextLayout>, Affine, String)> {
+    let dragged = crate::type_transform::current_transform(app, id);
+    // Borrows the document in place (no clone): the canvas hover hit-tests type every frame.
     let st = app.session.active()?;
-    let (doc, rev) = (st.doc.clone(), st.revision);
-    let t = text_layer(&doc, id)?;
-    let transform = crate::type_transform::current_transform(app, id).unwrap_or(t.transform);
-    let key = (doc.id.0, rev, id.0);
+    let t = text_layer(&st.doc, id)?;
+    let transform = dragged.unwrap_or(t.transform);
+    let key = (st.doc.id.0, st.revision, id.0);
     if let Some((k, l)) = &app.type_layout
         && *k == key
     {
         return Some((l.clone(), transform, t.text.clone()));
     }
-    let l = Arc::new(photocraft_text::shared().lock().ok()?.layout(t, doc.resolution_dpi));
+    let l = Arc::new(photocraft_text::shared().lock().ok()?.layout(t, st.doc.resolution_dpi));
     app.type_layout = Some((key, l.clone()));
     Some((l, transform, t.text.clone()))
 }
@@ -53,29 +54,35 @@ fn to_text(aff: &Affine, x: f64, y: f64) -> (f32, f32) {
 }
 
 /// Topmost shown type layer (it and every group around it visible, #4320) whose laid-out text
-/// contains the document point.
+/// contains the document point. The press and the canvas hover (`hover_path_target`) share it, so
+/// the pointer never promises a path click that the press would turn into editing this layer.
 pub(crate) fn hit_layer(app: &mut PhotocraftApp, x: f64, y: f64) -> Option<LayerId> {
-    let doc = app.session.active()?.doc.clone();
     let slop = 6.0 / app.point_zoom().max(0.01);
     // A Type Mask session's text is a hidden layer; it is still the text being edited.
     let editing = app.ui.text_edit.as_ref().filter(|ed| ed.mask).map(|ed| LayerId(ed.layer));
-    let mut ids: Vec<LayerId> = doc
-        .walk()
-        .into_iter()
-        .filter(|(path, _, l)| matches!(l.content, LayerContent::Text(_)) && (editing == Some(l.id) || doc.shown_at(path)))
-        .map(|(_, _, l)| l.id)
-        .collect();
+    let mut ids: Vec<LayerId> = {
+        let doc = &app.session.active()?.doc;
+        doc.walk()
+            .into_iter()
+            .filter(|(path, _, l)| matches!(l.content, LayerContent::Text(_)) && (editing == Some(l.id) || doc.shown_at(path)))
+            .map(|(_, _, l)| l.id)
+            .collect()
+    };
     ids.reverse(); // walk() is bottom-up; hit the topmost first
     ids.into_iter().find(|id| {
         // The pixels shown count too: a PSD's type keeps Photoshop's rendering until edited,
         // which can sit off our layout when fonts are substituted (#123).
-        let shown = text_layer(&doc, *id).and_then(|t| t.cache.as_ref()).map(|c| c.content_bounds()).is_some_and(|r| {
+        let shown = app.session.active().and_then(|st| text_layer(&st.doc, *id)).and_then(|t| t.cache.as_ref()).map(|c| c.content_bounds()).is_some_and(|r| {
             let s = f64::from(slop);
             !r.is_empty() && x >= f64::from(r.x0) - s && x <= f64::from(r.x1) + s && y >= f64::from(r.y0) - s && y <= f64::from(r.y1) + s
         });
-        let Some((l, aff, _)) = layout(app, *id) else { return shown };
+        // The hover calls this every frame: skip the layout when the pixels already answer.
+        if shown {
+            return true;
+        }
+        let Some((l, aff, _)) = layout(app, *id) else { return false };
         let (tx, ty) = to_text(&aff, x, y);
-        shown || photocraft_text::text_point_inside(&l, tx, ty, slop)
+        photocraft_text::text_point_inside(&l, tx, ty, slop)
     })
 }
 
@@ -373,6 +380,109 @@ pub fn pointer_move(app: &mut PhotocraftApp, x: f64, y: f64, mods: egui::Modifie
     }
 }
 
+/// What a Type tool click on a path does, like Photoshop: inside a closed path, area type;
+/// on a path's outline, type on the path from that point.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum PathClick {
+    Area { shape: Option<u64> },
+    OnPath { shape: Option<u64>, subpath: usize, start: f64 },
+}
+
+/// Arc length (px) along `sub` from its first anchor to segment `seg` at curve parameter `t`.
+fn arc_length_to(sub: &photocraft_doc::Subpath, seg: usize, t: f64) -> f64 {
+    const PIECES: usize = 32;
+    let eval = photocraft_vector::edit::eval;
+    let length = |s: &[Point; 4], upto: f64| {
+        (1..=PIECES)
+            .fold((0.0, eval(s, 0.0)), |(len, prev), j| {
+                let q = eval(s, upto * j as f64 / PIECES as f64);
+                (len + (q.x - prev.x).hypot(q.y - prev.y), q)
+            })
+            .0
+    };
+    let segs = sub.segments();
+    let whole: f64 = segs.iter().take(seg).map(|s| length(s, 1.0)).sum();
+    whole + segs.get(seg).map_or(0.0, |s| length(s, t.clamp(0.0, 1.0)))
+}
+
+/// The path a Type tool click at document `(x, y)` would use: on the outline (within 6 screen px)
+/// of the active shape layer's path, else of the work path, type on that path; inside a closed
+/// one, area type. The work path's inside counts only while the canvas draws it (selected in the
+/// Paths panel, #6551): a hidden Work Path left after Load as Selection must not turn a plain
+/// click into area type. None while View › Show › Target Path (or Extras) hides paths.
+pub(crate) fn path_target(app: &PhotocraftApp, x: f64, y: f64) -> Option<PathClick> {
+    use photocraft_vector::edit::{Hit, hit};
+    if !app.ui.view.shows(app.ui.view.show.target_path) {
+        return None;
+    }
+    let shape_path = crate::vector_ui::active_shape_path(app);
+    let work = app.session.active().and_then(|s| s.doc.work_path.clone());
+    let work_shown = app.ui.selected_path.as_deref() == Some("work");
+    // The canvas hover runs this every frame and `hit` samples every segment, so a path with more
+    // anchors than this is not a click target (the click and the pointer agree: plain point
+    // text). 4096 anchors is far beyond hand-drawn paths and shapes yet keeps a frame cheap, and
+    // it is the most `type.fillPath` accepts, so every area click target can be filled.
+    const MAX_TARGET_KNOTS: usize = photocraft_text::area::MAX_AREA_KNOTS;
+    let small = |path: &photocraft_doc::vector::Path| path.subpaths.iter().map(|s| s.knots.len()).fold(0usize, usize::saturating_add) <= MAX_TARGET_KNOTS;
+    let tol = 6.0 / app.point_zoom().max(0.01) as f64;
+    // Only the horizontal Type tool starts type on a path: vertical type on a path is not laid
+    // out yet.
+    let vertical = app.ui.tool.is_vertical_type();
+    let outline = |path: &photocraft_doc::vector::Path, shape: Option<u64>| {
+        let on_path = |sp: usize, k: usize, t: f64| {
+            // Type on a path needs a segment to run along (`type.attachToPath` rejects one anchor).
+            let sub = path.subpaths.get(sp).filter(|s| !vertical && s.knots.len() >= 2)?;
+            Some(PathClick::OnPath { shape, subpath: sp, start: arc_length_to(sub, k, t) })
+        };
+        match hit(path, Point::new(x, y), tol, &[]) {
+            Some(Hit::Segment([sp, k], t)) => on_path(sp, k, t),
+            Some(Hit::Anchor([sp, k])) => on_path(sp, k, 0.0),
+            _ => None,
+        }
+    };
+    let inside = |path: &photocraft_doc::vector::Path| photocraft_text::area::AreaShape::new(path, false).is_some_and(|a| a.contains(x as f32, y as f32));
+    if let Some((id, p)) = shape_path.as_ref().filter(|(_, p)| small(p)) {
+        if let Some(c) = outline(p, Some(*id)) {
+            return Some(c);
+        }
+        if inside(p) {
+            return Some(PathClick::Area { shape: Some(*id) });
+        }
+    }
+    let w = work.as_ref().filter(|w| small(w))?;
+    if let Some(c) = outline(w, None) {
+        return Some(c);
+    }
+    (work_shown && inside(w)).then_some(PathClick::Area { shape: None })
+}
+
+/// What the Type tool's pointer over document `(x, y)` shows (#218): the path click a press there
+/// would make, unless the press edits the type layer under it instead (`pointer_down`: an
+/// unshifted press on shown type), where Photoshop keeps the plain I-beam. The type hit is only
+/// tested over a path, so a hover elsewhere lays out nothing. Nothing while a type edit is open
+/// (a click then commits rather than starting new type). While the button is held it is what the
+/// release makes (`pointer_up`): nothing once the drag is a text box, else the path click at the
+/// press.
+pub(crate) fn hover_path_target(app: &mut PhotocraftApp, x: f64, y: f64, shift: bool) -> Option<PathClick> {
+    if app.ui.text_edit.is_some() {
+        return None;
+    }
+    if let Some(start) = app.drag.as_ref().map(|d| d.start) {
+        // The press already passed over editing type (`pointer_down`), so no type hit test.
+        return if makes_box(app, start, [x, y]) { None } else { path_target(app, start[0], start[1]) };
+    }
+    let target = path_target(app, x, y)?;
+    (shift || hit_layer(app, x, y).is_none()).then_some(target)
+}
+
+/// Whether a press at `start` released at `end` drags out a paragraph box rather than clicking
+/// (at least 4 screen pixels both ways).
+fn makes_box(app: &PhotocraftApp, start: [f64; 2], end: [f64; 2]) -> bool {
+    let (w, h) = ((end[0] - start[0]).abs(), (end[1] - start[1]).abs());
+    let min = 4.0 / app.point_zoom().max(0.01) as f64;
+    w >= min && h >= min
+}
+
 /// Pointer up. `rect` is the dragged box (document px) when no edit session consumed the press.
 pub fn pointer_up(app: &mut PhotocraftApp, start: [f64; 2], end: [f64; 2]) {
     if let Some(e) = app.ui.text_edit.as_mut() {
@@ -385,6 +495,9 @@ pub fn pointer_up(app: &mut PhotocraftApp, start: [f64; 2], end: [f64; 2]) {
     let min = 4.0 / app.point_zoom().max(0.01) as f64;
     let o = app.ui.tool_options.clone();
     let mask = app.ui.tool.is_type_mask();
+    // A click (not a drag) with the Type tool on a path: area type inside a closed path, type
+    // on the path on its outline. The Type Mask tools ignore paths.
+    let target = if !mask && !makes_box(app, start, end) { path_target(app, start[0], start[1]) } else { None };
     // Preferences ▸ Type: "Fill new type layers with placeholder text" (on by default). The Type
     // Mask tools start empty, as Photoshop's do.
     let text = if !mask && app.session.prefs().type_.fill_new_type_layers_with_placeholder { PLACEHOLDER } else { "" };
@@ -397,23 +510,25 @@ pub fn pointer_up(app: &mut PhotocraftApp, start: [f64; 2], end: [f64; 2]) {
         p["x"] = json!(start[0].round());
         p["y"] = json!(start[1].round());
     }
-    // A click on a shown path starts type on that path, from the point clicked (Photoshop).
-    let on_path = if p.get("box").is_none() { path_at(app, start[0], start[1]) } else { None };
     let key = session_key(app);
     p["coalesce"] = json!(key);
     if let Ok(v) = app.run("type.create", p)
         && let Some(id) = v.get("layer").and_then(serde_json::Value::as_u64)
     {
+        // A failed follow-up leaves point text; say why instead of passing over it.
+        let follow_up = match &target {
+            Some(PathClick::Area { shape }) => app.run("type.fillPath", json!({"layer": id, "shape": shape, "coalesce": key})),
+            Some(PathClick::OnPath { shape, subpath, start }) => {
+                app.run("type.attachToPath", json!({"layer": id, "shape": shape, "subpath": subpath, "start": start, "coalesce": key}))
+            }
+            None => Ok(serde_json::Value::Null),
+        };
+        if let Err(e) = follow_up {
+            app.ui.status = e;
+            app.ui.status_error = true;
+        }
         if o.type_aa != "sharp" {
             let _ = app.run("type.edit", json!({"layer": id, "antialias": o.type_aa, "coalesce": key}));
-        }
-        if let Some(mut q) = on_path {
-            q["layer"] = json!(id);
-            q["at"] = json!([start[0], start[1]]);
-            q["coalesce"] = json!(key);
-            if let Err(e) = app.run("type.attachToPath", q) {
-                app.ui.status = e;
-            }
         }
         // A Type Mask's text is a hidden working layer: the canvas shows the mask overlay
         // instead, and committing turns it into the selection.
@@ -437,53 +552,6 @@ pub fn pointer_up(app: &mut PhotocraftApp, start: [f64; 2], end: [f64; 2]) {
         });
         app.ui.text_edit_return_tool = None;
     }
-}
-
-/// The shown path a Type tool click at document point (`x`, `y`) puts type on, as
-/// `type.attachToPath` params naming it (`shape`, `subpath`): the active shape layer's path, else
-/// the work path, within a few screen pixels, as in Photoshop. Only the horizontal Type tool
-/// starts path type for now; vertical type on a path is not laid out yet.
-pub(crate) fn path_at(app: &PhotocraftApp, x: f64, y: f64) -> Option<serde_json::Value> {
-    if app.ui.tool != crate::state::Tool::Type || app.ui.text_edit.is_some() || !app.ui.view.shows(app.ui.view.show.target_path) {
-        return None;
-    }
-    let tol = f64::from(6.0 / app.point_zoom().max(0.01));
-    let hit = |p: &photocraft_doc::vector::Path| {
-        let s = match photocraft_vector::edit::hit(p, Point::new(x, y), tol, &[])? {
-            photocraft_vector::edit::Hit::Anchor([s, _]) | photocraft_vector::edit::Hit::Segment([s, _], _) => s,
-            photocraft_vector::edit::Hit::Handle(..) => return None,
-        };
-        p.subpaths.get(s).filter(|sp| sp.knots.len() >= 2).map(|_| s)
-    };
-    if let Some((id, p)) = crate::vector_ui::active_shape_path(app)
-        && let Some(s) = hit(&p)
-    {
-        return Some(json!({"shape": id, "subpath": s}));
-    }
-    let work = app.session.active()?.doc.work_path.as_ref()?;
-    hit(work).map(|s| json!({"subpath": s}))
-}
-
-/// The Type tool's pointer over a path it can follow: Photoshop's I-beam crossed by a dotted
-/// wavy line, drawn on the canvas.
-pub(crate) fn path_cursor(painter: &egui::Painter, at: Pos2) -> egui::CursorIcon {
-    let beam = |c: Color32, w: f32| {
-        let s = Stroke::new(w, c);
-        painter.line_segment([at + egui::vec2(0.0, -8.0), at + egui::vec2(0.0, 8.0)], s);
-        for dy in [-8.0, 8.0] {
-            painter.line_segment([at + egui::vec2(-3.0, dy), at + egui::vec2(3.0, dy)], s);
-        }
-    };
-    beam(Color32::WHITE, 3.0);
-    beam(Color32::BLACK, 1.0);
-    // The wave: short dashes along a sine through the beam's lower half.
-    let wave = |t: f32| at + egui::vec2(-9.0 + 18.0 * t, 5.0 - 3.0 * t + 2.0 * (t * std::f32::consts::TAU * 1.5).sin());
-    for i in (0..12).step_by(2) {
-        let (a, b) = (wave(i as f32 / 12.0), wave((i + 1) as f32 / 12.0));
-        painter.line_segment([a, b], Stroke::new(3.0, Color32::WHITE));
-        painter.line_segment([a, b], Stroke::new(1.0, Color32::BLACK));
-    }
-    egui::CursorIcon::None
 }
 
 fn session_key(app: &mut PhotocraftApp) -> String {
@@ -1058,7 +1126,12 @@ pub fn handle_keys(app: &mut PhotocraftApp, ctx: &egui::Context) -> bool {
                     Key::Enter if m.command => commit_with(app, *m),
                     Key::Enter => insert(app, "\n"),
                     // Photoshop types a tab character; layout advances it to the next tab stop.
-                    Key::Tab if !m.command && !m.alt && !m.shift => insert(app, "\t"),
+                    Key::Tab if !m.command && !m.alt && !m.shift => {
+                        // egui queues focus navigation before this handler runs; consuming the
+                        // key alone would let the menu bar take focus after the first tab (#8889).
+                        ctx.memory_mut(|m| m.move_focus(egui::FocusDirection::None));
+                        insert(app, "\t");
+                    }
                     Key::Escape if crate::type_transform::active(app) => crate::type_transform::cancel_drag(app),
                     // The Type Mask tools: Escape always cancels, leaving the selection as it was.
                     Key::Escape if ed.mask => cancel(app),
@@ -1269,6 +1342,17 @@ pub fn draw_overlay(app: &mut PhotocraftApp, painter: &egui::Painter, xf: &ViewX
                     let r = egui::Rect::from_center_size(*p, egui::vec2(7.0, 7.0));
                     painter.rect_filled(r, 0.0, Color32::WHITE);
                     painter.rect_stroke(r, 0.0, frame, egui::StrokeKind::Inside);
+                }
+            }
+        }
+        // Area type: the outline of the shape it wraps inside.
+        Some(photocraft_doc::text::TextShape::Area { path }) => {
+            if !has_transform {
+                for poly in photocraft_vector::flatten::flatten_path(&path, 0.5) {
+                    let pts: Vec<Pos2> = poly.pts.iter().map(|&(x, y)| scr_t(x as f32, y as f32)).collect();
+                    if pts.len() >= 2 {
+                        painter.add(egui::Shape::closed_line(pts, frame));
+                    }
                 }
             }
         }
@@ -2840,8 +2924,8 @@ fn type_sections(app: &mut PhotocraftApp, ui: &mut egui::Ui, character: bool, pa
             ("justifyAll", tl!("Justify all"), A::JustifyAll),
         ];
         let cw = cell_width(full, items.len());
-        // Justification needs a paragraph box: on point text Photoshop greys the four justify
-        // buttons (#7713).
+        // Justification needs a paragraph box or area type: on point text Photoshop greys the four
+        // justify buttons (#7713).
         // The panel formats the layer being typed in, else every selected type layer.
         let point = match formatting_params(app) {
             Some(p) => p.get("layers").and_then(serde_json::Value::as_array).map_or_else(
@@ -2851,7 +2935,10 @@ fn type_sections(app: &mut PhotocraftApp, ui: &mut egui::Ui, character: bool, pa
             None => Vec::new(),
         }
         .into_iter()
-        .any(|layer| box_shape(app, LayerId(layer)).is_none());
+        .any(|layer| {
+            let shape = app.session.active().and_then(|s| text_layer(&s.doc, LayerId(layer)).map(|t| t.shape.clone()));
+            !matches!(shape, Some(photocraft_doc::text::TextShape::Box { .. } | photocraft_doc::text::TextShape::Area { .. }))
+        });
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 2.0;
             for (key, tip, a) in items {
@@ -3185,8 +3272,8 @@ mod tests {
                 Ok(())
             })
             .unwrap();
-        assert!(path_at(&app, 200.0, 101.0).is_some());
-        assert!(path_at(&app, 200.0, 160.0).is_none(), "off the path");
+        assert!(matches!(path_target(&app, 200.0, 101.0), Some(PathClick::OnPath { .. })));
+        assert!(path_target(&app, 200.0, 160.0).is_none(), "off the path");
         let before = app.session.active().unwrap().history.entries().len();
         assert!(!pointer_down(&mut app, 200.0, 101.0, egui::Modifiers::NONE));
         pointer_up(&mut app, [200.0, 101.0], [200.0, 101.0]);
@@ -3200,7 +3287,7 @@ mod tests {
         commit(&mut app);
         // With the vertical tool a click does not start path type.
         app.ui.tool = crate::state::Tool::VerticalType;
-        assert!(path_at(&app, 200.0, 101.0).is_none());
+        assert!(!matches!(path_target(&app, 200.0, 101.0), Some(PathClick::OnPath { .. })));
         app.ui.tool = crate::state::Tool::Type;
         pointer_up(&mut app, [200.0, 160.0], [200.0, 160.0]);
         let id = LayerId(app.ui.text_edit.as_ref().unwrap().layer);

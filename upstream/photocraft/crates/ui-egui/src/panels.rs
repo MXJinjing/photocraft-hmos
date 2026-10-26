@@ -7,7 +7,7 @@ use photocraft_engine::history_source_cmds::HistorySource;
 use serde_json::{Value, json};
 
 use crate::mask_thumbs_ui::MaskKind;
-use crate::state::{ColorPanelSliderMode, Tool};
+use crate::state::Tool;
 use crate::theme::{self, Tokens};
 use crate::{PhotocraftApp, icons, widgets};
 
@@ -1019,661 +1019,572 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                 .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
                 .scroll_source(egui::scroll_area::ScrollSource { scroll_bar: false, drag: egui::scroll_area::DragScroll::Always, mouse_wheel: true })
                 .show(ui, |ui| {
-            // Font ink can extend beyond its advance width at fractional positions.
-            // Include its gutter in the container layout, including right-aligned actions.
-            egui::Frame::NONE.inner_margin(egui::Margin { right: 2, ..Default::default() }).show(ui, |ui| {
-            crate::direction::horizontal_centered(ui, |ui| {
-                if t.pro {
-                    crate::chrome_ui::home_button(app, ui);
-                    widgets::vline(ui, 22.0);
-                }
-                let tool_icon = icons::button(ui, icons::tool_icon(app.ui.tool), if t.pro { 26.0 } else { 28.0 }, !t.pro, tl!(app.ui.tool.label()));
-                // Photoshop: right-click the tool icon for Reset Tool / Reset All Tools (#2825).
-                let mut reset = None;
-                tool_icon.context_menu(|ui| {
-                    if ui.button(tl!("Reset Tool")).clicked() {
-                        reset = Some("tool.reset");
-                        ui.close();
-                    }
-                    if ui.button(tl!("Reset All Tools")).clicked() {
-                        reset = Some("tool.resetAll");
-                        ui.close();
-                    }
-                });
-                if let Some(id) = reset
-                    && let Err(e) = crate::menus::invoke(app, ui.ctx(), id, json!({}))
-                {
-                    app.ui.status = e;
-                }
-                if t.pro {
-                    let (r, _) = ui.allocate_exact_size(vec2(10.0, 20.0), Sense::hover());
-                    icons::paint(ui, r, "chevron-down", 10.0, t.text_faint);
-                }
-                widgets::vline(ui, 22.0);
-                if app.ui.transform.is_some() {
-                    crate::transform_tool::options_bar(app, ui);
-                    return;
-                }
-                if crate::symmetry_ui::options_bar(app, ui) || crate::distort_ui::options_bar(app, ui) {
-                    return;
-                }
-                let tool = app.ui.tool;
-                // The options bar shows the active tool's brush: switch it in before drawing the
-                // chip, so a tool change swaps the brush with it (Photoshop keeps one per tool).
-                crate::paint_mouse::sync_tool_brush(app);
-                // Brush edits here go through `tools.setBrush`, one journal entry per gesture (Rule 1).
-                if (tool.is_brushlike() && !matches!(tool, Tool::Brush | Tool::Pencil | Tool::MixerBrush | Tool::Eraser)) || tool == Tool::QuickSelection {
-                    brush_preset_chip(ui, &app.session.tools.brush, &mut app.ui);
-                    crate::brush_picker::settings_toggle(app, ui);
-                    widgets::vline(ui, 22.0);
-                }
-                if tool == Tool::CloneStamp {
-                    let before = app.session.tools.brush.clone();
-                    let mut brush = before.clone();
-                    let width = if t.pro { 62.0 } else { 66.0 };
-                    percent_field(ui, tl!("Opacity"), &mut brush.opacity, 1.0..=100.0, width);
-                    percent_field(ui, tl!("Flow"), &mut brush.flow, 1.0..=100.0, width);
-                    crate::brush_panel::commit_gesture(app, ui.ctx(), &before, &brush);
-                    widgets::vline(ui, 22.0);
-                }
-                if crate::eraser_ui::options_bar(app, ui, tool)
-                    || crate::retouch_ui::options_bar(app, ui, tool)
-                    || crate::vector_ui::options_bar(app, ui, tool)
-                    || crate::analysis_ui::options_bar(app, ui, tool)
-                    || crate::slice_ui::options_bar(app, ui, tool)
-                    || crate::frame_tool::options_bar(app, ui, tool)
-                    || crate::artboard_tool::options_bar(app, ui, tool)
-                {
-                    return;
-                }
-                let brush_before = app.session.tools.brush.clone();
-                let mut brush = brush_before.clone();
-                let b = &mut brush;
-                match app.ui.tool {
-                    Tool::Brush | Tool::Eraser if t.pro => {
-                        // A Block-mode Eraser has a fixed size, opacity and flow (Photoshop, #2770).
-                        let block = crate::eraser_ui::block_mode(app, app.ui.tool);
-                        ui.add_enabled_ui(!block, |ui| {
-                            brush_preset_chip(ui, b, &mut app.ui);
-                            crate::brush_picker::settings_toggle(app, ui);
-                        });
-                        widgets::vline(ui, 22.0);
-                        // The Eraser has no blend mode: its Mode is Brush, Pencil or Block (#2662).
-                        if app.ui.tool == Tool::Eraser {
-                            crate::eraser_ui::mode_dropdown(ui, &mut app.ui.tool_options.eraser_mode);
-                        } else {
-                            opt_label(ui, tl!("Mode"));
-                            let held = app.held_erase;
-                            paint_mode_dropdown(ui, "brush-mode", b, &mut app.ui.tool_options.brush_clear, held);
+                // Font ink can extend beyond its advance width at fractional positions.
+                // Include its gutter in the container layout, including right-aligned actions.
+                egui::Frame::NONE.inner_margin(egui::Margin { right: 2, ..Default::default() }).show(ui, |ui| {
+                    crate::direction::horizontal_centered(ui, |ui| {
+                        if t.pro {
+                            crate::chrome_ui::home_button(app, ui);
+                            widgets::vline(ui, 22.0);
                         }
-                        ui.add_enabled_ui(!block, |ui| {
-                            percent_field(ui, tl!("Opacity"), &mut b.opacity, 0.0..=100.0, 62.0);
-                            // Eraser keeps its own pressure flags, independent of the brush.
-                            let pressure_opacity = if tool == Tool::Eraser {
-                                app.ui.tool_options.eraser_pressure_opacity
-                            } else {
-                                b.pressure_opacity
-                            };
-                            if icons::button(ui, "circle-dot", 24.0, pressure_opacity, tl!("Always use pressure for opacity")).clicked() {
-                                if tool == Tool::Eraser {
-                                    app.ui.tool_options.eraser_pressure_opacity = !pressure_opacity;
+                        let tool_icon = icons::button(ui, icons::tool_icon(app.ui.tool), if t.pro { 26.0 } else { 28.0 }, !t.pro, tl!(app.ui.tool.label()));
+                        // Photoshop: right-click the tool icon for Reset Tool / Reset All Tools (#2825).
+                        let mut reset = None;
+                        tool_icon.context_menu(|ui| {
+                            if ui.button(tl!("Reset Tool")).clicked() {
+                                reset = Some("tool.reset");
+                                ui.close();
+                            }
+                            if ui.button(tl!("Reset All Tools")).clicked() {
+                                reset = Some("tool.resetAll");
+                                ui.close();
+                            }
+                        });
+                        if let Some(id) = reset
+                            && let Err(e) = crate::menus::invoke(app, ui.ctx(), id, json!({}))
+                        {
+                            app.ui.status = e;
+                        }
+                        if t.pro {
+                            let (r, _) = ui.allocate_exact_size(vec2(10.0, 20.0), Sense::hover());
+                            icons::paint(ui, r, "chevron-down", 10.0, t.text_faint);
+                        }
+                        widgets::vline(ui, 22.0);
+                        if app.ui.transform.is_some() {
+                            crate::transform_tool::options_bar(app, ui);
+                            return;
+                        }
+                        if crate::symmetry_ui::options_bar(app, ui) || crate::distort_ui::options_bar(app, ui) {
+                            return;
+                        }
+                        let tool = app.ui.tool;
+                        // The options bar shows the active tool's brush: switch it in before drawing the
+                        // chip, so a tool change swaps the brush with it (Photoshop keeps one per tool).
+                        crate::paint_mouse::sync_tool_brush(app);
+                        // Brush edits here go through `tools.setBrush`, one journal entry per gesture (Rule 1).
+                        if (tool.is_brushlike() && !matches!(tool, Tool::Brush | Tool::Pencil | Tool::MixerBrush | Tool::Eraser))
+                            || tool == Tool::QuickSelection
+                        {
+                            brush_preset_chip(ui, &app.session.tools.brush, &mut app.ui);
+                            crate::brush_picker::settings_toggle(app, ui);
+                            widgets::vline(ui, 22.0);
+                        }
+                        if tool == Tool::CloneStamp {
+                            let before = app.session.tools.brush.clone();
+                            let mut brush = before.clone();
+                            let width = if t.pro { 62.0 } else { 66.0 };
+                            percent_field(ui, tl!("Opacity"), &mut brush.opacity, 1.0..=100.0, width);
+                            percent_field(ui, tl!("Flow"), &mut brush.flow, 1.0..=100.0, width);
+                            crate::brush_panel::commit_gesture(app, ui.ctx(), &before, &brush);
+                            widgets::vline(ui, 22.0);
+                        }
+                        if crate::eraser_ui::options_bar(app, ui, tool)
+                            || crate::retouch_ui::options_bar(app, ui, tool)
+                            || crate::vector_ui::options_bar(app, ui, tool)
+                            || crate::analysis_ui::options_bar(app, ui, tool)
+                            || crate::slice_ui::options_bar(app, ui, tool)
+                            || crate::frame_tool::options_bar(app, ui, tool)
+                            || crate::artboard_tool::options_bar(app, ui, tool)
+                        {
+                            return;
+                        }
+                        let brush_before = app.session.tools.brush.clone();
+                        let mut brush = brush_before.clone();
+                        let b = &mut brush;
+                        match app.ui.tool {
+                            Tool::Brush | Tool::Eraser if t.pro => {
+                                // A Block-mode Eraser has a fixed size, opacity and flow (Photoshop, #2770).
+                                let block = crate::eraser_ui::block_mode(app, app.ui.tool);
+                                ui.add_enabled_ui(!block, |ui| {
+                                    brush_preset_chip(ui, b, &mut app.ui);
+                                    crate::brush_picker::settings_toggle(app, ui);
+                                });
+                                widgets::vline(ui, 22.0);
+                                // The Eraser has no blend mode: its Mode is Brush, Pencil or Block (#2662).
+                                if app.ui.tool == Tool::Eraser {
+                                    crate::eraser_ui::mode_dropdown(ui, &mut app.ui.tool_options.eraser_mode);
                                 } else {
-                                    b.set_opacity_uses_pen_pressure(!pressure_opacity);
+                                    opt_label(ui, tl!("Mode"));
+                                    let held = app.held_erase;
+                                    paint_mode_dropdown(ui, "brush-mode", b, &mut app.ui.tool_options.brush_clear, held);
+                                }
+                                ui.add_enabled_ui(!block, |ui| {
+                                    percent_field(ui, tl!("Opacity"), &mut b.opacity, 0.0..=100.0, 62.0);
+                                    if icons::button(ui, "circle-dot", 24.0, b.pressure_opacity, tl!("Always use pressure for opacity")).clicked() {
+                                        b.pressure_opacity = !b.pressure_opacity;
+                                    }
+                                });
+                                // A Pencil- or Block-mode Eraser is always full flow, without build-up (Photoshop).
+                                ui.add_enabled_ui(!block && !crate::eraser_ui::pencil_mode(app, app.ui.tool), |ui| {
+                                    percent_field(ui, tl!("Flow"), &mut b.flow, 1.0..=100.0, 62.0);
+                                    let airbrush = icons::button(ui, "sparkles", 24.0, b.build_up, tl!("Enable airbrush-style build-up effects"));
+                                    if crate::brush_picker::named(airbrush, "Enable airbrush-style build-up effects").clicked() {
+                                        b.build_up = !b.build_up;
+                                    }
+                                });
+                                opt_label(ui, tl!("Smoothing"));
+                                smoothing_field(ui, b, 58.0);
+                                smoothing_options(ui, b);
+                                widgets::vline(ui, 22.0);
+                                if icons::button(ui, "circle-dot", 24.0, b.pressure_size, tl!("Always use pressure for size")).clicked() {
+                                    b.pressure_size = !b.pressure_size;
                                 }
                             }
-                        });
-                        // A Pencil- or Block-mode Eraser is always full flow, without build-up (Photoshop).
-                        ui.add_enabled_ui(!block && !crate::eraser_ui::pencil_mode(app, app.ui.tool), |ui| {
-                            percent_field(ui, tl!("Flow"), &mut b.flow, 1.0..=100.0, 62.0);
-                            let airbrush = icons::button(ui, "sparkles", 24.0, b.build_up, tl!("Enable airbrush-style build-up effects"));
-                            if crate::brush_picker::named(airbrush, "Enable airbrush-style build-up effects").clicked() {
-                                b.build_up = !b.build_up;
+                            // Pencil: Photoshop's options (no hardness or flow: the pencil is always hard).
+                            Tool::Pencil => {
+                                brush_preset_chip(ui, b, &mut app.ui);
+                                crate::brush_picker::settings_toggle(app, ui);
+                                widgets::vline(ui, 22.0);
+                                if !t.pro {
+                                    opt_label(ui, tl!("Size"));
+                                    widgets::value_field(ui, &mut b.size, 1.0..=photocraft_engine::paint::MAX_BRUSH_SIZE, "px", 76.0);
+                                    widgets::vline(ui, 22.0);
+                                }
+                                opt_label(ui, tl!("Mode"));
+                                let held = app.held_erase;
+                                paint_mode_dropdown(ui, "pencil-mode", b, &mut app.ui.tool_options.pencil_clear, held);
+                                percent_field(ui, tl!("Opacity"), &mut b.opacity, 0.0..=100.0, if t.pro { 62.0 } else { 66.0 });
+                                opt_label(ui, tl!("Smoothing"));
+                                smoothing_field(ui, b, if t.pro { 58.0 } else { 66.0 });
+                                widgets::vline(ui, 22.0);
+                                widgets::checkbox(ui, &mut app.ui.tool_options.pencil_auto_erase, tl!("Auto Erase"));
                             }
-                        });
-                        opt_label(ui, tl!("Smoothing"));
-                        smoothing_field(ui, b, 58.0);
-                        smoothing_options(ui, b);
-                        widgets::vline(ui, 22.0);
-                        let pressure_size = if tool == Tool::Eraser {
-                            app.ui.tool_options.eraser_pressure_size
-                        } else {
-                            b.pressure_size
-                        };
-                        if icons::button(ui, "circle-dot", 24.0, pressure_size, tl!("Always use pressure for size")).clicked() {
-                            if tool == Tool::Eraser {
-                                app.ui.tool_options.eraser_pressure_size = !pressure_size;
-                            } else {
-                                b.set_size_uses_pen_pressure(!pressure_size);
+                            Tool::Brush | Tool::Eraser => {
+                                brush_preset_chip(ui, b, &mut app.ui);
+                                crate::brush_picker::settings_toggle(app, ui);
+                                widgets::vline(ui, 22.0);
+                                // A Block-mode Eraser has a fixed size, opacity and flow (Photoshop, #2770).
+                                let block = crate::eraser_ui::block_mode(app, app.ui.tool);
+                                ui.add_enabled_ui(!block, |ui| {
+                                    opt_label(ui, tl!("Size"));
+                                    widgets::value_field(ui, &mut b.size, 1.0..=photocraft_engine::paint::MAX_BRUSH_SIZE, "px", 76.0);
+                                });
+                                widgets::vline(ui, 22.0);
+                                if app.ui.tool == Tool::Eraser {
+                                    crate::eraser_ui::mode_dropdown(ui, &mut app.ui.tool_options.eraser_mode);
+                                } else {
+                                    opt_label(ui, tl!("Mode"));
+                                    let held = app.held_erase;
+                                    paint_mode_dropdown(ui, "brush-mode", b, &mut app.ui.tool_options.brush_clear, held);
+                                }
+                                // A Pencil-mode Eraser is always hard and at full flow (Photoshop).
+                                let fixed = block || crate::eraser_ui::pencil_mode(app, app.ui.tool);
+                                ui.add_enabled_ui(!fixed, |ui| percent_field(ui, tl!("Hardness"), &mut b.hardness, 0.0..=100.0, 66.0));
+                                ui.add_enabled_ui(!block, |ui| percent_field(ui, tl!("Opacity"), &mut b.opacity, 0.0..=100.0, 66.0));
+                                ui.add_enabled_ui(!fixed, |ui| percent_field(ui, tl!("Flow"), &mut b.flow, 1.0..=100.0, 66.0));
+                                opt_label(ui, tl!("Smoothing"));
+                                smoothing_field(ui, b, 66.0);
+                                widgets::vline(ui, 22.0);
+                                widgets::toggle(ui, &mut b.pressure_size, tl!("Pressure for Size"));
+                                widgets::toggle(ui, &mut b.pressure_opacity, tl!("Pressure for Opacity"));
                             }
-                        }
-                    }
-                    // Pencil: Photoshop's options (no hardness or flow: the pencil is always hard).
-                    Tool::Pencil => {
-                        brush_preset_chip(ui, b, &mut app.ui);
-                        crate::brush_picker::settings_toggle(app, ui);
-                        widgets::vline(ui, 22.0);
-                        if !t.pro {
-                            opt_label(ui, tl!("Size"));
-                            widgets::value_field(ui, &mut b.size, 1.0..=photocraft_engine::paint::MAX_BRUSH_SIZE, "px", 76.0);
-                            widgets::vline(ui, 22.0);
-                        }
-                        opt_label(ui, tl!("Mode"));
-                        let held = app.held_erase;
-                        paint_mode_dropdown(ui, "pencil-mode", b, &mut app.ui.tool_options.pencil_clear, held);
-                        percent_field(ui, tl!("Opacity"), &mut b.opacity, 0.0..=100.0, if t.pro { 62.0 } else { 66.0 });
-                        opt_label(ui, tl!("Smoothing"));
-                        smoothing_field(ui, b, if t.pro { 58.0 } else { 66.0 });
-                        widgets::vline(ui, 22.0);
-                        widgets::checkbox(ui, &mut app.ui.tool_options.pencil_auto_erase, tl!("Auto Erase"));
-                    }
-                    Tool::Brush | Tool::Eraser => {
-                        brush_preset_chip(ui, b, &mut app.ui);
-                        crate::brush_picker::settings_toggle(app, ui);
-                        widgets::vline(ui, 22.0);
-                        // A Block-mode Eraser has a fixed size, opacity and flow (Photoshop, #2770).
-                        let block = crate::eraser_ui::block_mode(app, app.ui.tool);
-                        ui.add_enabled_ui(!block, |ui| {
-                            opt_label(ui, tl!("Size"));
-                            widgets::value_field(ui, &mut b.size, 1.0..=photocraft_engine::paint::MAX_BRUSH_SIZE, "px", 76.0);
-                        });
-                        widgets::vline(ui, 22.0);
-                        if app.ui.tool == Tool::Eraser {
-                            crate::eraser_ui::mode_dropdown(ui, &mut app.ui.tool_options.eraser_mode);
-                        } else {
-                            opt_label(ui, tl!("Mode"));
-                            let held = app.held_erase;
-                            paint_mode_dropdown(ui, "brush-mode", b, &mut app.ui.tool_options.brush_clear, held);
-                        }
-                        // A Pencil-mode Eraser is always hard and at full flow (Photoshop).
-                        let fixed = block || crate::eraser_ui::pencil_mode(app, app.ui.tool);
-                        ui.add_enabled_ui(!fixed, |ui| percent_field(ui, tl!("Hardness"), &mut b.hardness, 0.0..=100.0, 66.0));
-                        ui.add_enabled_ui(!block, |ui| percent_field(ui, tl!("Opacity"), &mut b.opacity, 0.0..=100.0, 66.0));
-                        ui.add_enabled_ui(!fixed, |ui| percent_field(ui, tl!("Flow"), &mut b.flow, 1.0..=100.0, 66.0));
-                        opt_label(ui, tl!("Smoothing"));
-                        smoothing_field(ui, b, 66.0);
-                        widgets::vline(ui, 22.0);
-                        if tool == Tool::Eraser {
-                            widgets::toggle(ui, &mut app.ui.tool_options.eraser_pressure_size, tl!("Pressure for Size"));
-                            widgets::toggle(ui, &mut app.ui.tool_options.eraser_pressure_opacity, tl!("Pressure for Opacity"));
-                        } else {
-                            let mut size_on = b.pressure_size;
-                            if widgets::toggle(ui, &mut size_on, tl!("Pressure for Size")).changed() {
-                                b.set_size_uses_pen_pressure(size_on);
+                            Tool::MixerBrush => {
+                                brush_preset_chip(ui, b, &mut app.ui);
+                                crate::brush_picker::settings_toggle(app, ui);
+                                widgets::vline(ui, 22.0);
+                                mixer_load_swatch(app, ui);
+                                let m = &mut b.mixer;
+                                for (icon, on, tip) in [
+                                    ("brush", &mut m.load_after_stroke, tl!("Load the brush after each stroke")),
+                                    ("brush-cleaning", &mut m.clean_after_stroke, tl!("Clean the brush after each stroke")),
+                                ] {
+                                    if icons::button(ui, icon, 24.0, *on, tip).clicked() {
+                                        *on = !*on;
+                                    }
+                                }
+                                widgets::vline(ui, 22.0);
+                                for (label, value) in [
+                                    (tl!("Wet"), &mut b.mixer.wet),
+                                    (tl!("Load"), &mut b.mixer.load),
+                                    (tl!("Mix"), &mut b.mixer.mix),
+                                    (tl!("Flow"), &mut b.mixer.flow),
+                                ] {
+                                    percent_field(ui, label, value, 0.0..=100.0, 62.0);
+                                }
+                                widgets::vline(ui, 22.0);
+                                widgets::checkbox(ui, &mut b.mixer.sample_all_layers, tl!("Sample All Layers"));
                             }
-                            let mut opacity_on = b.pressure_opacity;
-                            if widgets::toggle(ui, &mut opacity_on, tl!("Pressure for Opacity")).changed() {
-                                b.set_opacity_uses_pen_pressure(opacity_on);
+                            Tool::RectMarquee | Tool::EllipseMarquee | Tool::SingleRowMarquee | Tool::SingleColumnMarquee => {
+                                ui.spacing_mut().item_spacing.x = 2.0;
+                                for (i, (icon, tip)) in [
+                                    ("square", tl!("New selection").to_string()),
+                                    ("plus", crate::i18n::fmt(tl!("Add to selection  ({key})"), &[("key", &crate::shortcuts::pretty("Shift"))])),
+                                    ("minus", crate::i18n::fmt(tl!("Subtract from selection  ({key})"), &[("key", &crate::shortcuts::pretty("Alt"))])),
+                                    (
+                                        "squares-subtract",
+                                        crate::i18n::fmt(tl!("Intersect with selection  ({key})"), &[("key", &crate::shortcuts::pretty("Shift+Alt"))]),
+                                    ),
+                                ]
+                                .iter()
+                                .enumerate()
+                                {
+                                    if icons::button(ui, icon, 24.0, app.ui.selection_mode == i as u8, tip).clicked() {
+                                        app.ui.selection_mode = i as u8;
+                                    }
+                                }
+                                ui.spacing_mut().item_spacing.x = 8.0;
+                                widgets::vline(ui, 22.0);
+                                let (units, size) = fixed_size_units(app);
+                                let o = &mut app.ui.tool_options;
+                                opt_label(ui, tl!("Feather"));
+                                widgets::value_field(ui, &mut o.feather, 0.0..=1000.0, "px", 62.0);
+                                // Photoshop greys Anti-alias for the Rectangular Marquee (its edges are always hard).
+                                ui.add_enabled_ui(app.ui.tool == Tool::EllipseMarquee, |ui| widgets::checkbox(ui, &mut o.anti_alias, tl!("Anti-alias")));
+                                widgets::vline(ui, 22.0);
+                                // A single row or column has no style or size: Photoshop greys them.
+                                let sized = matches!(app.ui.tool, Tool::RectMarquee | Tool::EllipseMarquee);
+                                ui.add_enabled_ui(sized, |ui| opt_label(ui, tl!("Style")));
+                                let styles = [
+                                    ("normal".to_string(), tl!("Normal")),
+                                    ("fixedRatio".to_string(), tl!("Fixed Ratio")),
+                                    ("fixedSize".to_string(), tl!("Fixed Size")),
+                                ];
+                                if ui.add_enabled_ui(sized, |ui| widgets::dropdown(ui, "marquee-style", &mut o.marquee_style, &styles, 96.0)).inner {
+                                    (o.marquee_width, o.marquee_height) = if o.marquee_style == "fixedSize" { (64.0, 64.0) } else { (1.0, 1.0) };
+                                }
+                                let fixed = sized && o.marquee_style != "normal";
+                                let fixed_size = o.marquee_style == "fixedSize";
+                                // Fixed Size shows its pixels in the unit picked by right-clicking Width or Height (#7910).
+                                let units = widgets::FieldUnits { unit: photocraft_engine::prefs::Unit::parse(&o.marquee_unit).unwrap_or_default(), ..units };
+                                ui.add_enabled_ui(fixed, |ui| {
+                                    let mut picked = None;
+                                    opt_label(ui, tl!("Width"));
+                                    if fixed_size {
+                                        picked = fixed_size_field(ui, &mut o.marquee_width, units, size[0]);
+                                    } else {
+                                        widgets::value_field(ui, &mut o.marquee_width, crate::tool_memory::style_range(&o.marquee_style), "", 62.0);
+                                    }
+                                    if icons::button(ui, "arrow-left-right", 22.0, false, tl!("Swaps height and width")).clicked() {
+                                        std::mem::swap(&mut o.marquee_width, &mut o.marquee_height);
+                                    }
+                                    opt_label(ui, tl!("Height"));
+                                    if fixed_size {
+                                        picked = fixed_size_field(ui, &mut o.marquee_height, units, size[1]).or(picked);
+                                    } else {
+                                        widgets::value_field(ui, &mut o.marquee_height, crate::tool_memory::style_range(&o.marquee_style), "", 62.0);
+                                    }
+                                    if let Some(name) = picked {
+                                        o.marquee_unit = name.into();
+                                    }
+                                });
+                                widgets::vline(ui, 22.0);
+                                select_and_mask_button(app, ui);
                             }
-                        }
-                    }
-                    Tool::MixerBrush => {
-                        brush_preset_chip(ui, b, &mut app.ui);
-                        crate::brush_picker::settings_toggle(app, ui);
-                        widgets::vline(ui, 22.0);
-                        mixer_load_swatch(app, ui);
-                        let m = &mut b.mixer;
-                        for (icon, on, tip) in [
-                            ("brush", &mut m.load_after_stroke, tl!("Load the brush after each stroke")),
-                            ("brush-cleaning", &mut m.clean_after_stroke, tl!("Clean the brush after each stroke")),
-                        ] {
-                            if icons::button(ui, icon, 24.0, *on, tip).clicked() {
-                                *on = !*on;
+                            Tool::Lasso | Tool::PolygonLasso | Tool::MagneticLasso => {
+                                selection_mode_buttons(app, ui);
+                                widgets::vline(ui, 22.0);
+                                opt_label(ui, tl!("Feather"));
+                                widgets::value_field(ui, &mut app.ui.tool_options.feather, 0.0..=1000.0, "px", 62.0);
+                                widgets::checkbox(ui, &mut app.ui.tool_options.anti_alias, tl!("Anti-alias"));
+                                widgets::vline(ui, 22.0);
+                                if app.ui.tool == Tool::MagneticLasso {
+                                    let o = &mut app.ui.tool_options;
+                                    opt_label(ui, tl!("Width"));
+                                    widgets::value_field(ui, &mut o.magnetic_width, 1.0..=256.0, "px", 58.0)
+                                        .on_hover_text(tl!("Follows only edges this close to the pointer ([ and ] change it)"));
+                                    opt_label(ui, tl!("Contrast"));
+                                    widgets::value_field(ui, &mut o.magnetic_contrast, 1.0..=100.0, "%", 58.0)
+                                        .on_hover_text(tl!("Higher values follow only edges that contrast sharply with their surroundings"));
+                                    opt_label(ui, tl!("Frequency"));
+                                    widgets::value_field(ui, &mut o.magnetic_frequency, 0.0..=100.0, "", 50.0)
+                                        .on_hover_text(tl!("How often fastening points are placed by themselves"));
+                                    if icons::button(ui, "circle-dot", 24.0, o.magnetic_pressure, tl!("Use tablet pressure to change pen width")).clicked() {
+                                        o.magnetic_pressure = !o.magnetic_pressure;
+                                    }
+                                    widgets::vline(ui, 22.0);
+                                }
+                                select_and_mask_button(app, ui);
+                                if crate::lasso_ui::active(app) || (app.ui.tool == Tool::PolygonLasso && !app.ui.polygon.is_empty()) {
+                                    hint(
+                                        ui,
+                                        &crate::i18n::fmt(
+                                            tl!("Click the first point or press {key} to close · Esc cancels"),
+                                            &[("key", &crate::shortcuts::pretty("Enter"))],
+                                        ),
+                                    );
+                                } else if app.ui.tool == Tool::Lasso {
+                                    hint(ui, tl!("Hold Alt while drawing for straight segments"));
+                                }
+                                if app.ui.tool == Tool::MagneticLasso && app.ui.magnetic.active() {
+                                    hint(
+                                        ui,
+                                        &crate::i18n::fmt(
+                                            tl!("Click the first point or press {key} to close · {del} removes a point · Esc cancels"),
+                                            &[("key", &crate::shortcuts::pretty("Enter")), ("del", &crate::shortcuts::pretty("Backspace"))],
+                                        ),
+                                    );
+                                }
                             }
-                        }
-                        widgets::vline(ui, 22.0);
-                        for (label, value) in [
-                            (tl!("Wet"), &mut b.mixer.wet),
-                            (tl!("Load"), &mut b.mixer.load),
-                            (tl!("Mix"), &mut b.mixer.mix),
-                            (tl!("Flow"), &mut b.mixer.flow),
-                        ] {
-                            percent_field(ui, label, value, 0.0..=100.0, 62.0);
-                        }
-                        widgets::vline(ui, 22.0);
-                        widgets::checkbox(ui, &mut b.mixer.sample_all_layers, tl!("Sample All Layers"));
-                    }
-                    Tool::RectMarquee | Tool::EllipseMarquee | Tool::SingleRowMarquee | Tool::SingleColumnMarquee if t.pro => {
-                        ui.spacing_mut().item_spacing.x = 2.0;
-                        for (i, (icon, tip)) in [
-                            ("square", tl!("New selection").to_string()),
-                            ("plus", crate::i18n::fmt(tl!("Add to selection  ({key})"), &[("key", &crate::shortcuts::pretty("Shift"))])),
-                            ("minus", crate::i18n::fmt(tl!("Subtract from selection  ({key})"), &[("key", &crate::shortcuts::pretty("Alt"))])),
-                            (
-                                "squares-subtract",
-                                crate::i18n::fmt(tl!("Intersect with selection  ({key})"), &[("key", &crate::shortcuts::pretty("Shift+Alt"))]),
-                            ),
-                        ]
-                        .iter()
-                        .enumerate()
-                        {
-                            if icons::button(ui, icon, 24.0, app.ui.selection_mode == i as u8, tip).clicked() {
-                                app.ui.selection_mode = i as u8;
+                            Tool::MagicWand => {
+                                selection_mode_buttons(app, ui);
+                                widgets::vline(ui, 22.0);
+                                opt_label(ui, tl!("Tolerance"));
+                                widgets::value_field(ui, &mut app.ui.tool_options.tolerance, 0.0..=255.0, "", 58.0);
+                                widgets::checkbox(ui, &mut app.ui.tool_options.anti_alias, tl!("Anti-alias"));
+                                widgets::checkbox(ui, &mut app.ui.tool_options.contiguous, tl!("Contiguous"));
+                                widgets::checkbox(ui, &mut app.ui.tool_options.sample_all.magic_wand, tl!("Sample All Layers"));
+                                widgets::vline(ui, 22.0);
+                                if widgets::secondary_button(ui, tl!("Select Subject"), 0.0).clicked() {
+                                    let r = app.run("select.subject", json!({}));
+                                    crate::retouch_ui::report_smart_result(app, r, tl!("No subject found — try Object Selection or the Lasso"));
+                                }
+                                select_and_mask_button(app, ui);
                             }
-                        }
-                        ui.spacing_mut().item_spacing.x = 8.0;
-                        widgets::vline(ui, 22.0);
-                        let (units, size) = fixed_size_units(app);
-                        let o = &mut app.ui.tool_options;
-                        opt_label(ui, tl!("Feather"));
-                        widgets::value_field(ui, &mut o.feather, 0.0..=1000.0, "px", 62.0);
-                        // Photoshop greys Anti-alias for the Rectangular Marquee (its edges are always hard).
-                        ui.add_enabled_ui(app.ui.tool == Tool::EllipseMarquee, |ui| widgets::checkbox(ui, &mut o.anti_alias, tl!("Anti-alias")));
-                        widgets::vline(ui, 22.0);
-                        // A single row or column has no style or size: Photoshop greys them.
-                        let sized = matches!(app.ui.tool, Tool::RectMarquee | Tool::EllipseMarquee);
-                        ui.add_enabled_ui(sized, |ui| opt_label(ui, tl!("Style")));
-                        let styles = [
-                            ("normal".to_string(), tl!("Normal")),
-                            ("fixedRatio".to_string(), tl!("Fixed Ratio")),
-                            ("fixedSize".to_string(), tl!("Fixed Size")),
-                        ];
-                        if ui.add_enabled_ui(sized, |ui| widgets::dropdown(ui, "marquee-style", &mut o.marquee_style, &styles, 96.0)).inner {
-                            (o.marquee_width, o.marquee_height) = if o.marquee_style == "fixedSize" { (64.0, 64.0) } else { (1.0, 1.0) };
-                        }
-                        let fixed = sized && o.marquee_style != "normal";
-                        let fixed_size = o.marquee_style == "fixedSize";
-                        // Fixed Size shows its pixels in the unit picked by right-clicking Width or Height (#7910).
-                        let units = widgets::FieldUnits { unit: photocraft_engine::prefs::Unit::parse(&o.marquee_unit).unwrap_or_default(), ..units };
-                        ui.add_enabled_ui(fixed, |ui| {
-                            let mut picked = None;
-                            opt_label(ui, tl!("Width"));
-                            if fixed_size {
-                                picked = fixed_size_field(ui, &mut o.marquee_width, units, size[0]);
-                            } else {
-                                widgets::value_field(ui, &mut o.marquee_width, 0.001..=999.0, "", 62.0);
+                            Tool::PaintBucket => {
+                                opt_label(ui, tl!("Fill"));
+                                let mut src = u8::from(app.ui.tool_options.bucket_fill_pattern);
+                                if widgets::dropdown(ui, "bucket-src", &mut src, &[(0u8, tl!("Foreground")), (1, tl!("Pattern"))], 100.0) {
+                                    app.ui.tool_options.bucket_fill_pattern = src == 1;
+                                }
+                                opt_label(ui, tl!("Opacity"));
+                                widgets::value_field(ui, &mut app.ui.tool_options.fill_opacity, 1.0..=100.0, "%", 62.0);
+                                opt_label(ui, tl!("Tolerance"));
+                                widgets::value_field(ui, &mut app.ui.tool_options.tolerance, 0.0..=255.0, "", 58.0);
+                                widgets::checkbox(ui, &mut app.ui.tool_options.anti_alias, tl!("Anti-alias"));
+                                widgets::checkbox(ui, &mut app.ui.tool_options.contiguous, tl!("Contiguous"));
+                                widgets::checkbox(ui, &mut app.ui.tool_options.sample_all.paint_bucket, tl!("All Layers"));
                             }
-                            if icons::button(ui, "arrow-left-right", 22.0, false, tl!("Swaps height and width")).clicked() {
-                                std::mem::swap(&mut o.marquee_width, &mut o.marquee_height);
+                            Tool::Gradient => {
+                                // Live "Gradient" (a Gradient Fill layer) or "Classic gradient" (pixels).
+                                let mut classic = app.ui.tool_options.gradient_classic;
+                                if widgets::dropdown(ui, "gradient-mode", &mut classic, &[(false, "Gradient"), (true, "Classic gradient")], 118.0) {
+                                    app.ui.tool_options.gradient_classic = classic;
+                                }
+                                // Live "Gradient" (a Gradient Fill layer) or "Classic gradient" (pixels):
+                                // both paint with the same engine-owned preset (#1651), and either swatch
+                                // click opens the Gradient Editor window, as in Photoshop.
+                                if crate::gradient_ui::preset_swatch(app, ui) {
+                                    app.ui.panels.gradient_editor = true;
+                                }
+                                widgets::vline(ui, 22.0);
+                                ui.spacing_mut().item_spacing.x = 2.0;
+                                let before = app.ui.tool_options.clone();
+                                for (style, icon, tip) in [
+                                    ("linear", "gradient", tl!("Linear Gradient")),
+                                    ("radial", "circle", tl!("Radial Gradient")),
+                                    ("angle", "rotate-cw", tl!("Angle Gradient")),
+                                    ("reflected", "arrow-left-right", tl!("Reflected Gradient")),
+                                    ("diamond", "diamond", tl!("Diamond Gradient")),
+                                ] {
+                                    if icons::button(ui, icon, 24.0, app.ui.tool_options.gradient_style == style, tip).clicked() {
+                                        app.ui.tool_options.gradient_style = style.into();
+                                    }
+                                }
+                                ui.spacing_mut().item_spacing.x = 8.0;
+                                widgets::vline(ui, 22.0);
+                                opt_label(ui, tl!("Mode"));
+                                let opts: Vec<(BlendMode, &str)> = BlendMode::LAYER_MODES.iter().map(|m| (*m, m.label())).collect();
+                                // The wheel over it steps the mode, as over the Layers panel's (#2061).
+                                widgets::dropdown_wheel_hovered(ui, "gradient-blend-mode", &mut app.ui.tool_options.gradient_blend_mode, &opts, 96.0);
+                                opt_label(ui, tl!("Opacity"));
+                                let r = widgets::value_field(ui, &mut app.ui.tool_options.fill_opacity, 1.0..=100.0, "%", 62.0);
+                                // Live while scrubbed, one undo step per scrub (#5012).
+                                let drag_key = r.id.with("gradient-opacity-drag");
+                                if r.drag_started() {
+                                    let n = ui.ctx().cumulative_pass_nr();
+                                    ui.data_mut(|d| d.insert_temp(drag_key, n));
+                                }
+                                if r.changed() {
+                                    let drag = if r.dragged() { ui.data(|d| d.get_temp::<u64>(drag_key)) } else { None };
+                                    crate::gradient_ui::opacity_changed(app, drag);
+                                }
+                                widgets::checkbox(ui, &mut app.ui.tool_options.gradient_reverse, tl!("Reverse"));
+                                widgets::checkbox(ui, &mut app.ui.tool_options.gradient_dither, tl!("Dither"));
+                                // Live mode: the options also change a selected gradient fill layer.
+                                crate::gradient_ui::options_changed(app, &before);
                             }
-                            opt_label(ui, tl!("Height"));
-                            if fixed_size {
-                                picked = fixed_size_field(ui, &mut o.marquee_height, units, size[1]).or(picked);
-                            } else {
-                                widgets::value_field(ui, &mut o.marquee_height, 0.001..=999.0, "", 62.0);
+                            Tool::PerspectiveCrop => crate::perspective_crop_ui::options_bar(app, ui),
+                            Tool::Crop => {
+                                let before_ratio = crate::crop_ui::preset_ratio(app);
+                                let doc_size = app.session.active().map_or((0.0, 0.0), |s| (f64::from(s.doc.size.width), f64::from(s.doc.size.height)));
+                                // Ratios, sizes, saved presets, New / Delete Crop Preset… (#2443, #1919).
+                                crate::crop_presets::dropdown(app, ui);
+                                let o = &mut app.ui.tool_options;
+                                let mut ratio_base = None;
+                                if o.crop_ratio == crate::crop_size::WHR {
+                                    crate::crop_size::fields(o, ui);
+                                } else {
+                                    // Keep partial edits in ToolOptions so the first side survives a frame;
+                                    // Original Ratio shows the document's numbers, as Photoshop does.
+                                    let (mut rw, mut rh) = crate::crop_size::custom_ratio_fields(o, doc_size);
+                                    let decimals = crate::crop_size::RATIO_DECIMALS;
+                                    let fw = widgets::value_field_prec(ui, &mut rw, 0.0..=99_999.0, "", 54.0, decimals);
+                                    let swap = icons::button(ui, "arrow-left-right", 22.0, false, tl!("Swaps height and width")).clicked();
+                                    let fh = widgets::value_field_prec(ui, &mut rh, 0.0..=99_999.0, "", 54.0, decimals);
+                                    let (cw, ch) = (fw.changed(), fh.changed());
+                                    if swap {
+                                        std::mem::swap(&mut rw, &mut rh);
+                                    }
+                                    if cw || ch || swap {
+                                        crate::crop_size::set_custom_ratio_fields(o, rw, rh);
+                                    }
+                                    // Every ratio typed or scrubbed in one edit fits from the frame the edit
+                                    // started with: 1:3 on the way to 16:3 mustn't shrink it first (#7752).
+                                    let base_id = egui::Id::new("crop-ratio-edit-base");
+                                    if cw || ch {
+                                        ratio_base = ui.data(|d| d.get_temp::<[f64; 4]>(base_id)).or(app.ui.crop_rect);
+                                    }
+                                    if ![&fw, &fh].iter().any(|f| f.has_focus() || f.dragged()) {
+                                        ui.data_mut(|d| d.remove::<[f64; 4]>(base_id));
+                                    } else if let Some(base) = ratio_base {
+                                        ui.data_mut(|d| d.insert_temp(base_id, base));
+                                    }
+                                }
+                                widgets::vline(ui, 22.0);
+                                if widgets::secondary_button(ui, tl!("Clear"), 0.0).clicked() {
+                                    if o.crop_ratio == crate::crop_size::WHR {
+                                        crate::crop_size::clear(o);
+                                    } else {
+                                        o.crop_ratio.clear();
+                                    }
+                                }
+                                crate::crop_straighten::options_button(&mut app.crop.straighten, ui);
+                                crate::crop_overlay::options_button(o, ui);
+                                let pick_shield_color = crate::crop_shield::options_button(&mut o.crop_shield, ui);
+                                widgets::checkbox(ui, &mut o.crop_delete, tl!("Delete Cropped Pixels"));
+                                // Fill: what a turned or extending crop puts where the image doesn't reach
+                                // (#3823). Generative Expand is not offered.
+                                ui.label(tl!("Fill:"));
+                                widgets::dropdown(
+                                    ui,
+                                    "crop-fill",
+                                    &mut o.crop_content_aware,
+                                    &[(false, tl!("Background (Default)")), (true, tl!("Content-Aware Fill"))],
+                                    150.0,
+                                );
+                                if crate::crop_ui::preset_ratio(app) != before_ratio {
+                                    match ratio_base {
+                                        Some(base) => crate::crop_ui::apply_ratio_from(app, base),
+                                        None => crate::crop_ui::apply_ratio(app),
+                                    }
+                                }
+                                if pick_shield_color {
+                                    crate::crop_shield::pick_custom_color(app);
+                                }
+                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                    if icons::button(
+                                        ui,
+                                        "check",
+                                        26.0,
+                                        false,
+                                        &crate::i18n::fmt(tl!("Commit current crop operation  ({key})"), &[("key", &crate::shortcuts::pretty("Enter"))]),
+                                    )
+                                    .clicked()
+                                    {
+                                        crate::canvas::commit_crop(app);
+                                    }
+                                    if icons::button(ui, "ban", 26.0, false, tl!("Cancel current crop operation  (Esc)")).clicked() {
+                                        crate::crop_ui::cancel(app);
+                                    }
+                                });
                             }
-                            if let Some(name) = picked {
-                                o.marquee_unit = name.into();
+                            // Every theme gets the font, style and size controls (#1387), as with Auto-Select (#1275).
+                            Tool::Type | Tool::VerticalType | Tool::HorizontalTypeMask | Tool::VerticalTypeMask => crate::type_tool::options_bar(app, ui),
+                            Tool::Move => {
+                                let o = &mut app.ui.tool_options;
+                                widgets::checkbox(ui, &mut o.move_auto_select, tl!("Auto-Select:"));
+                                widgets::dropdown(
+                                    ui,
+                                    "move-target",
+                                    &mut o.move_target,
+                                    &[("layer".to_string(), tl!("Layer")), ("group".to_string(), tl!("Group"))],
+                                    76.0,
+                                );
+                                widgets::vline(ui, 22.0);
+                                widgets::checkbox(ui, &mut o.move_show_transform, tl!("Show Transform Controls"));
+                                widgets::vline(ui, 22.0);
+                                crate::align_bar::options(app, ui);
                             }
-                        });
-                        widgets::vline(ui, 22.0);
-                        select_and_mask_button(app, ui);
-                    }
-                    Tool::Lasso | Tool::PolygonLasso | Tool::MagneticLasso if t.pro => {
-                        selection_mode_buttons(app, ui);
-                        widgets::vline(ui, 22.0);
-                        opt_label(ui, tl!("Feather"));
-                        widgets::value_field(ui, &mut app.ui.tool_options.feather, 0.0..=1000.0, "px", 62.0);
-                        widgets::checkbox(ui, &mut app.ui.tool_options.anti_alias, tl!("Anti-alias"));
-                        widgets::vline(ui, 22.0);
-                        if app.ui.tool == Tool::MagneticLasso {
-                            let o = &mut app.ui.tool_options;
-                            opt_label(ui, tl!("Width"));
-                            widgets::value_field(ui, &mut o.magnetic_width, 1.0..=256.0, "px", 58.0)
-                                .on_hover_text(tl!("Follows only edges this close to the pointer ([ and ] change it)"));
-                            opt_label(ui, tl!("Contrast"));
-                            widgets::value_field(ui, &mut o.magnetic_contrast, 1.0..=100.0, "%", 58.0)
-                                .on_hover_text(tl!("Higher values follow only edges that contrast sharply with their surroundings"));
-                            opt_label(ui, tl!("Frequency"));
-                            widgets::value_field(ui, &mut o.magnetic_frequency, 0.0..=100.0, "", 50.0)
-                                .on_hover_text(tl!("How often fastening points are placed by themselves"));
-                            if icons::button(ui, "circle-dot", 24.0, o.magnetic_pressure, tl!("Use tablet pressure to change pen width")).clicked() {
-                                o.magnetic_pressure = !o.magnetic_pressure;
+                            Tool::Eyedropper => crate::eyedropper_ui::options(app, ui),
+                            Tool::Zoom => {
+                                // Resize Windows to Fit is Preferences › Zoom Resizes Windows itself, as in
+                                // Photoshop: one setting, shown in both places (zoom_window_fit.rs).
+                                let mut fit = app.session.prefs().general.zoom_resizes_windows;
+                                if widgets::checkbox(ui, &mut fit, tl!("Resize Windows to Fit")).changed() {
+                                    app.session.prefs.edit(|p| p.general.zoom_resizes_windows = fit);
+                                }
+                                widgets::checkbox(ui, &mut app.ui.tool_options.zoom_scrubby, tl!("Scrubby Zoom"));
+                                hint(
+                                    ui,
+                                    &crate::i18n::fmt(
+                                        tl!("Click to zoom in  ·  {key}-click to zoom out  ·  drag right/left to zoom in/out"),
+                                        &[("key", &crate::shortcuts::pretty("Alt"))],
+                                    ),
+                                );
+                                if widgets::secondary_button(ui, tl!("Fit Screen"), 0.0).clicked()
+                                    && let Some(i) = app.session.active_index()
+                                {
+                                    app.ui.views[i].fit_pending = true;
+                                    app.ui.views[i].request_zoom_animation(app.session.prefs().general.animated_zoom);
+                                    app.ui.views[i].zoom_anchor = None;
+                                }
+                                if widgets::secondary_button(ui, "100%", 0.0).clicked()
+                                    && let Some(i) = app.session.active_index()
+                                {
+                                    app.ui.views[i].zoom = 1.0;
+                                    app.ui.views[i].request_zoom_animation(app.session.prefs().general.animated_zoom);
+                                    app.ui.views[i].zoom_anchor = None;
+                                    app.ui.views[i].fit_pending = false;
+                                    app.ui.views[i].fill_pending = false;
+                                }
                             }
-                            widgets::vline(ui, 22.0);
-                        }
-                        select_and_mask_button(app, ui);
-                        if crate::lasso_ui::active(app) || (app.ui.tool == Tool::PolygonLasso && !app.ui.polygon.is_empty()) {
-                            hint(
-                                ui,
-                                &crate::i18n::fmt(
-                                    tl!("Click the first point or press {key} to close · Esc cancels"),
-                                    &[("key", &crate::shortcuts::pretty("Enter"))],
-                                ),
-                            );
-                        } else if app.ui.tool == Tool::Lasso {
-                            hint(ui, tl!("Hold Alt while drawing for straight segments"));
-                        }
-                        if app.ui.tool == Tool::MagneticLasso && app.ui.magnetic.active() {
-                            hint(
-                                ui,
-                                &crate::i18n::fmt(
-                                    tl!("Click the first point or press {key} to close · {del} removes a point · Esc cancels"),
-                                    &[("key", &crate::shortcuts::pretty("Enter")), ("del", &crate::shortcuts::pretty("Backspace"))],
-                                ),
-                            );
-                        }
-                    }
-                    Tool::MagicWand => {
-                        selection_mode_buttons(app, ui);
-                        widgets::vline(ui, 22.0);
-                        opt_label(ui, tl!("Tolerance"));
-                        widgets::value_field(ui, &mut app.ui.tool_options.tolerance, 0.0..=255.0, "", 58.0);
-                        widgets::checkbox(ui, &mut app.ui.tool_options.anti_alias, tl!("Anti-alias"));
-                        widgets::checkbox(ui, &mut app.ui.tool_options.contiguous, tl!("Contiguous"));
-                        widgets::checkbox(ui, &mut app.ui.tool_options.sample_all.magic_wand, tl!("Sample All Layers"));
-                        widgets::vline(ui, 22.0);
-                        if widgets::secondary_button(ui, tl!("Select Subject"), 0.0).clicked() {
-                            let r = app.run("select.subject", json!({}));
-                            crate::retouch_ui::report_smart_result(app, r, tl!("No subject found — try Object Selection or the Lasso"));
-                        }
-                        select_and_mask_button(app, ui);
-                    }
-                    Tool::PaintBucket if t.pro => {
-                        opt_label(ui, tl!("Fill"));
-                        let mut src = u8::from(app.ui.tool_options.bucket_fill_pattern);
-                        if widgets::dropdown(ui, "bucket-src", &mut src, &[(0u8, tl!("Foreground")), (1, tl!("Pattern"))], 100.0) {
-                            app.ui.tool_options.bucket_fill_pattern = src == 1;
-                        }
-                        opt_label(ui, tl!("Opacity"));
-                        widgets::value_field(ui, &mut app.ui.tool_options.fill_opacity, 1.0..=100.0, "%", 62.0);
-                        opt_label(ui, tl!("Tolerance"));
-                        widgets::value_field(ui, &mut app.ui.tool_options.tolerance, 0.0..=255.0, "", 58.0);
-                        widgets::checkbox(ui, &mut app.ui.tool_options.anti_alias, tl!("Anti-alias"));
-                        widgets::checkbox(ui, &mut app.ui.tool_options.contiguous, tl!("Contiguous"));
-                        widgets::checkbox(ui, &mut app.ui.tool_options.sample_all.paint_bucket, tl!("All Layers"));
-                    }
-                    Tool::Gradient => {
-                        // Live "Gradient" (a Gradient Fill layer) or "Classic gradient" (pixels).
-                        let mut classic = app.ui.tool_options.gradient_classic;
-                        if widgets::dropdown(ui, "gradient-mode", &mut classic, &[(false, "Gradient"), (true, "Classic gradient")], 118.0) {
-                            app.ui.tool_options.gradient_classic = classic;
-                        }
-                        // Live "Gradient" (a Gradient Fill layer) or "Classic gradient" (pixels):
-                        // both paint with the same engine-owned preset (#1651), and either swatch
-                        // click opens the Gradient Editor window, as in Photoshop.
-                        if crate::gradient_ui::preset_swatch(app, ui) {
-                            app.ui.panels.gradient_editor = true;
-                        }
-                        widgets::vline(ui, 22.0);
-                        ui.spacing_mut().item_spacing.x = 2.0;
-                        let before = app.ui.tool_options.clone();
-                        for (style, icon, tip) in [
-                            ("linear", "gradient", tl!("Linear Gradient")),
-                            ("radial", "circle", tl!("Radial Gradient")),
-                            ("angle", "rotate-cw", tl!("Angle Gradient")),
-                            ("reflected", "arrow-left-right", tl!("Reflected Gradient")),
-                            ("diamond", "diamond", tl!("Diamond Gradient")),
-                        ] {
-                            if icons::button(ui, icon, 24.0, app.ui.tool_options.gradient_style == style, tip).clicked() {
-                                app.ui.tool_options.gradient_style = style.into();
+                            Tool::RotateView => {
+                                hint(ui, tl!("Drag around the centre to rotate the view  ·  Shift constrains to 15°"));
+                                if let Some(i) = app.session.active_index() {
+                                    ui.label(tl!("Angle"));
+                                    let mut angle = app.ui.views.get(i).map(|v| v.rotation).unwrap_or(0.0);
+                                    if widgets::value_field(ui, &mut angle, -180.0..=180.0, "°", 56.0).changed()
+                                        && let Some(v) = app.ui.views.get_mut(i)
+                                    {
+                                        v.rotation = crate::rotate_view::wrap_deg(angle);
+                                    }
+                                    if widgets::secondary_button(ui, tl!("Reset View"), 0.0).clicked()
+                                        && let Some(v) = app.ui.views.get_mut(i)
+                                    {
+                                        v.rotation = 0.0;
+                                    }
+                                }
                             }
-                        }
-                        ui.spacing_mut().item_spacing.x = 8.0;
-                        widgets::vline(ui, 22.0);
-                        opt_label(ui, tl!("Mode"));
-                        let opts: Vec<(BlendMode, &str)> = BlendMode::LAYER_MODES.iter().map(|m| (*m, m.label())).collect();
-                        // The wheel over it steps the mode, as over the Layers panel's (#2061).
-                        widgets::dropdown_wheel_hovered(ui, "gradient-blend-mode", &mut app.ui.tool_options.gradient_blend_mode, &opts, 96.0);
-                        opt_label(ui, tl!("Opacity"));
-                        let r = widgets::value_field(ui, &mut app.ui.tool_options.fill_opacity, 1.0..=100.0, "%", 62.0);
-                        // Live while scrubbed, one undo step per scrub (#5012).
-                        let drag_key = r.id.with("gradient-opacity-drag");
-                        if r.drag_started() {
-                            let n = ui.ctx().cumulative_pass_nr();
-                            ui.data_mut(|d| d.insert_temp(drag_key, n));
-                        }
-                        if r.changed() {
-                            let drag = if r.dragged() { ui.data(|d| d.get_temp::<u64>(drag_key)) } else { None };
-                            crate::gradient_ui::opacity_changed(app, drag);
-                        }
-                        widgets::checkbox(ui, &mut app.ui.tool_options.gradient_reverse, tl!("Reverse"));
-                        widgets::checkbox(ui, &mut app.ui.tool_options.gradient_dither, tl!("Dither"));
-                        // Live mode: the options also change a selected gradient fill layer.
-                        crate::gradient_ui::options_changed(app, &before);
-                    }
-                    Tool::PerspectiveCrop if t.pro => crate::perspective_crop_ui::options_bar(app, ui),
-                    Tool::Crop if t.pro => {
-                        let before_ratio = crate::crop_ui::preset_ratio(app);
-                        let doc_size = app.session.active().map_or((0.0, 0.0), |s| (f64::from(s.doc.size.width), f64::from(s.doc.size.height)));
-                        // Ratios, sizes, saved presets, New / Delete Crop Preset… (#2443, #1919).
-                        crate::crop_presets::dropdown(app, ui);
-                        let o = &mut app.ui.tool_options;
-                        let mut ratio_base = None;
-                        if o.crop_ratio == crate::crop_size::WHR {
-                            crate::crop_size::fields(o, ui);
-                        } else {
-                            // Keep partial edits in ToolOptions so the first side survives a frame;
-                            // Original Ratio shows the document's numbers, as Photoshop does.
-                            let (mut rw, mut rh) = crate::crop_size::custom_ratio_fields(o, doc_size);
-                            let decimals = crate::crop_size::RATIO_DECIMALS;
-                            let fw = widgets::value_field_prec(ui, &mut rw, 0.0..=99_999.0, "", 54.0, decimals);
-                            let swap = icons::button(ui, "arrow-left-right", 22.0, false, tl!("Swaps height and width")).clicked();
-                            let fh = widgets::value_field_prec(ui, &mut rh, 0.0..=99_999.0, "", 54.0, decimals);
-                            let (cw, ch) = (fw.changed(), fh.changed());
-                            if swap {
-                                std::mem::swap(&mut rw, &mut rh);
+                            Tool::Hand => {
+                                hint(ui, tl!("Drag to pan  ·  hold Space with any tool"));
+                                if widgets::secondary_button(ui, "100%", 0.0).clicked()
+                                    && let Some(i) = app.session.active_index()
+                                {
+                                    app.ui.views[i].zoom = 1.0;
+                                    app.ui.views[i].request_zoom_animation(app.session.prefs().general.animated_zoom);
+                                    app.ui.views[i].zoom_anchor = None;
+                                    app.ui.views[i].fit_pending = false;
+                                    app.ui.views[i].fill_pending = false;
+                                }
+                                if widgets::secondary_button(ui, tl!("Fit Screen"), 0.0).clicked()
+                                    && let Some(i) = app.session.active_index()
+                                {
+                                    app.ui.views[i].fit_pending = true;
+                                    app.ui.views[i].request_zoom_animation(app.session.prefs().general.animated_zoom);
+                                    app.ui.views[i].zoom_anchor = None;
+                                    app.ui.views[i].fill_pending = false;
+                                }
+                                if widgets::secondary_button(ui, tl!("Fill Screen"), 0.0).clicked()
+                                    && let Some(i) = app.session.active_index()
+                                {
+                                    app.ui.views[i].fill_pending = true;
+                                    app.ui.views[i].request_zoom_animation(app.session.prefs().general.animated_zoom);
+                                    app.ui.views[i].zoom_anchor = None;
+                                    app.ui.views[i].fit_pending = false;
+                                }
                             }
-                            if cw || ch || swap {
-                                crate::crop_size::set_custom_ratio_fields(o, rw, rh);
-                            }
-                            // Every ratio typed or scrubbed in one edit fits from the frame the edit
-                            // started with: 1:3 on the way to 16:3 mustn't shrink it first (#7752).
-                            let base_id = egui::Id::new("crop-ratio-edit-base");
-                            if cw || ch {
-                                ratio_base = ui.data(|d| d.get_temp::<[f64; 4]>(base_id)).or(app.ui.crop_rect);
-                            }
-                            if ![&fw, &fh].iter().any(|f| f.has_focus() || f.dragged()) {
-                                ui.data_mut(|d| d.remove::<[f64; 4]>(base_id));
-                            } else if let Some(base) = ratio_base {
-                                ui.data_mut(|d| d.insert_temp(base_id, base));
-                            }
+                            // Retouching and smart-selection tools draw their bar in `retouch_ui::options_bar`.
+                            _ => {}
                         }
-                        widgets::vline(ui, 22.0);
-                        if widgets::secondary_button(ui, tl!("Clear"), 0.0).clicked() {
-                            if o.crop_ratio == crate::crop_size::WHR {
-                                crate::crop_size::clear(o);
-                            } else {
-                                o.crop_ratio.clear();
-                            }
+                        // Painting symmetry is independent of visual theme. Keep the options-bar
+                        // action available for Brush, Pencil and Eraser in every palette (#2659).
+                        if matches!(tool, Tool::Brush | Tool::Pencil | Tool::Eraser) {
+                            crate::symmetry_ui::menu(app, ui);
                         }
-                        crate::crop_straighten::options_button(&mut app.crop.straighten, ui);
-                        crate::crop_overlay::options_button(o, ui);
-                        let pick_shield_color = crate::crop_shield::options_button(&mut o.crop_shield, ui);
-                        widgets::checkbox(ui, &mut o.crop_delete, tl!("Delete Cropped Pixels"));
-                        // Fill: what a turned or extending crop puts where the image doesn't reach
-                        // (#3823). Generative Expand is not offered.
-                        ui.label(tl!("Fill:"));
-                        widgets::dropdown(
-                            ui,
-                            "crop-fill",
-                            &mut o.crop_content_aware,
-                            &[(false, tl!("Background (Default)")), (true, tl!("Content-Aware Fill"))],
-                            150.0,
-                        );
-                        if crate::crop_ui::preset_ratio(app) != before_ratio {
-                            match ratio_base {
-                                Some(base) => crate::crop_ui::apply_ratio_from(app, base),
-                                None => crate::crop_ui::apply_ratio(app),
-                            }
-                        }
-                        if pick_shield_color {
-                            crate::crop_shield::pick_custom_color(app);
-                        }
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if icons::button(
-                                ui,
-                                "check",
-                                26.0,
-                                false,
-                                &crate::i18n::fmt(tl!("Commit current crop operation  ({key})"), &[("key", &crate::shortcuts::pretty("Enter"))]),
-                            )
-                            .clicked()
-                            {
-                                crate::canvas::commit_crop(app);
-                            }
-                            if icons::button(ui, "ban", 26.0, false, tl!("Cancel current crop operation  (Esc)")).clicked() {
-                                crate::crop_ui::cancel(app);
-                            }
-                        });
-                    }
-                    // Every theme gets the font, style and size controls (#1387), as with Auto-Select (#1275).
-                    Tool::Type | Tool::VerticalType | Tool::HorizontalTypeMask | Tool::VerticalTypeMask => crate::type_tool::options_bar(app, ui),
-                    Tool::Move if t.pro => {
-                        let o = &mut app.ui.tool_options;
-                        widgets::checkbox(ui, &mut o.move_auto_select, tl!("Auto-Select:"));
-                        widgets::dropdown(
-                            ui,
-                            "move-target",
-                            &mut o.move_target,
-                            &[("layer".to_string(), tl!("Layer")), ("group".to_string(), tl!("Group"))],
-                            76.0,
-                        );
-                        widgets::vline(ui, 22.0);
-                        widgets::checkbox(ui, &mut o.move_show_transform, tl!("Show Transform Controls"));
-                        widgets::vline(ui, 22.0);
-                        crate::align_bar::options(app, ui);
-                    }
-                    Tool::RectMarquee | Tool::EllipseMarquee => hint(
-                        ui,
-                        &format!(
-                            "Drag to select  ·  {} add  ·  {} subtract  ·  {} intersect  ·  click to deselect",
-                            crate::shortcuts::pretty("Shift"),
-                            crate::shortcuts::pretty("Alt"),
-                            crate::shortcuts::pretty("Shift+Alt")
-                        ),
-                    ),
-                    Tool::SingleRowMarquee | Tool::SingleColumnMarquee => hint(
-                        ui,
-                        &format!(
-                            "Click to select a one-pixel line  ·  {} add  ·  {} subtract  ·  {} intersect",
-                            crate::shortcuts::pretty("Shift"),
-                            crate::shortcuts::pretty("Alt"),
-                            crate::shortcuts::pretty("Shift+Alt")
-                        ),
-                    ),
-                    Tool::Move => {
-                        // The Studio themes keep Photoshop's Auto-Select toggle too (#1275).
-                        widgets::checkbox(ui, &mut app.ui.tool_options.move_auto_select, tl!("Auto-Select:"));
-                        // And Show Transform Controls (#5740): without it the box could not be
-                        // turned on outside the Pro themes.
-                        widgets::checkbox(ui, &mut app.ui.tool_options.move_show_transform, tl!("Show Transform Controls"));
-                        hint(ui, tl!("Drag to move the active layer"));
-                        widgets::vline(ui, 22.0);
-                        crate::align_bar::options(app, ui);
-                    }
-                    Tool::Eyedropper => crate::eyedropper_ui::options(app, ui),
-                    Tool::Zoom => {
-                        // Resize Windows to Fit is Preferences › Zoom Resizes Windows itself, as in
-                        // Photoshop: one setting, shown in both places (zoom_window_fit.rs).
-                        let mut fit = app.session.prefs().general.zoom_resizes_windows;
-                        if widgets::checkbox(ui, &mut fit, tl!("Resize Windows to Fit")).changed() {
-                            app.session.prefs.edit(|p| p.general.zoom_resizes_windows = fit);
-                        }
-                        widgets::checkbox(ui, &mut app.ui.tool_options.zoom_scrubby, tl!("Scrubby Zoom"));
-                        hint(
-                            ui,
-                            &crate::i18n::fmt(
-                                tl!("Click to zoom in  ·  {key}-click to zoom out  ·  drag right/left to zoom in/out"),
-                                &[("key", &crate::shortcuts::pretty("Alt"))],
-                            ),
-                        );
-                        if widgets::secondary_button(ui, tl!("Fit Screen"), 0.0).clicked()
-                            && let Some(i) = app.session.active_index()
-                        {
-                            app.ui.views[i].fit_pending = true;
-                            app.ui.views[i].request_zoom_animation(app.session.prefs().general.animated_zoom);
-                            app.ui.views[i].zoom_anchor = None;
-                        }
-                        if widgets::secondary_button(ui, "100%", 0.0).clicked()
-                            && let Some(i) = app.session.active_index()
-                        {
-                            app.ui.views[i].zoom = 1.0;
-                            app.ui.views[i].request_zoom_animation(app.session.prefs().general.animated_zoom);
-                            app.ui.views[i].zoom_anchor = None;
-                            app.ui.views[i].fit_pending = false;
-                            app.ui.views[i].fill_pending = false;
-                        }
-                    }
-                    Tool::RotateView => {
-                        hint(ui, tl!("Drag around the centre to rotate the view  ·  Shift constrains to 15°"));
-                        if let Some(i) = app.session.active_index() {
-                            ui.label(tl!("Angle"));
-                            let mut angle = app.ui.views.get(i).map(|v| v.rotation).unwrap_or(0.0);
-                            if widgets::value_field(ui, &mut angle, -180.0..=180.0, "°", 56.0).changed()
-                                && let Some(v) = app.ui.views.get_mut(i)
-                            {
-                                v.rotation = crate::rotate_view::wrap_deg(angle);
-                            }
-                            if widgets::secondary_button(ui, tl!("Reset View"), 0.0).clicked()
-                                && let Some(v) = app.ui.views.get_mut(i)
-                            {
-                                v.rotation = 0.0;
-                            }
-                        }
-                    }
-                    Tool::Hand => {
-                        hint(ui, tl!("Drag to pan  ·  hold Space with any tool"));
-                        if widgets::secondary_button(ui, "100%", 0.0).clicked()
-                            && let Some(i) = app.session.active_index()
-                        {
-                            app.ui.views[i].zoom = 1.0;
-                            app.ui.views[i].request_zoom_animation(app.session.prefs().general.animated_zoom);
-                            app.ui.views[i].zoom_anchor = None;
-                            app.ui.views[i].fit_pending = false;
-                            app.ui.views[i].fill_pending = false;
-                        }
-                        if widgets::secondary_button(ui, tl!("Fit Screen"), 0.0).clicked()
-                            && let Some(i) = app.session.active_index()
-                        {
-                            app.ui.views[i].fit_pending = true;
-                            app.ui.views[i].request_zoom_animation(app.session.prefs().general.animated_zoom);
-                            app.ui.views[i].zoom_anchor = None;
-                            app.ui.views[i].fill_pending = false;
-                        }
-                        if widgets::secondary_button(ui, tl!("Fill Screen"), 0.0).clicked()
-                            && let Some(i) = app.session.active_index()
-                        {
-                            app.ui.views[i].fill_pending = true;
-                            app.ui.views[i].request_zoom_animation(app.session.prefs().general.animated_zoom);
-                            app.ui.views[i].zoom_anchor = None;
-                            app.ui.views[i].fit_pending = false;
-                        }
-                    }
-                    Tool::Lasso | Tool::PolygonLasso => hint(
-                        ui,
-                        &crate::i18n::fmt(
-                            tl!("Drag or click polygon points · hold Alt during lasso for straight segments · {add} add · {sub} before drawing subtracts"),
-                            &[("add", &crate::shortcuts::pretty("Shift")), ("sub", &crate::shortcuts::pretty("Alt"))],
-                        ),
-                    ),
-                    Tool::MagneticLasso => hint(
-                        ui,
-                        &crate::i18n::fmt(
-                            tl!("Click, then move along an edge · click to fasten a point · {alt}-click for a straight segment · double-click to close"),
-                            &[("alt", &crate::shortcuts::pretty("Alt"))],
-                        ),
-                    ),
-                    Tool::Crop => hint(
-                        ui,
-                        &crate::i18n::fmt(
-                            tl!("Drag a crop box · drag inside to move · edges resize ({ratio} ratio, {centre} centre) · Space moves while drawing · arrows nudge · X swaps orientation · {commit} commits · Esc cancels"),
-                            &[
-                                ("ratio", &crate::shortcuts::pretty("Shift")),
-                                ("centre", &crate::shortcuts::pretty("Alt")),
-                                ("commit", &crate::shortcuts::pretty("Enter")),
-                            ],
-                        ),
-                    ),
-                    Tool::PerspectiveCrop => hint(
-                        ui,
-                        &crate::i18n::fmt(
-                            tl!("Drag a box or click four corners · drag the corners onto the edges of a skewed shape · {commit} commits · Esc cancels"),
-                            &[("commit", &crate::shortcuts::pretty("Enter"))],
-                        ),
-                    ),
-                    Tool::PaintBucket => hint(ui, tl!("Click to fill similar colours")),
-                    // Retouching and smart-selection tools draw their bar in `retouch_ui::options_bar`.
-                    _ => {}
-                }
-                // Painting symmetry is independent of visual theme. Keep the options-bar
-                // action available for Brush, Pencil and Eraser in every palette (#2659).
-                if matches!(tool, Tool::Brush | Tool::Pencil | Tool::Eraser) {
-                    crate::symmetry_ui::menu(app, ui);
-                }
-                crate::brush_panel::commit_gesture(app, ui.ctx(), &brush_before, &brush);
-            });
-            reveal_focused_control(ui);
-            });
+                        crate::brush_panel::commit_gesture(app, ui.ctx(), &brush_before, &brush);
+                    });
+                    reveal_focused_control(ui);
+                });
             });
         });
 }
@@ -1735,7 +1646,7 @@ fn body_text_width(ui: &egui::Ui, s: &str) -> f32 {
 
 /// Options-bar label: Photoshop writes "Size:" with a colon.
 /// An options-bar label; one right before a value field scrubs it when dragged (Photoshop).
-fn opt_label(ui: &mut egui::Ui, s: &str) {
+pub(crate) fn opt_label(ui: &mut egui::Ui, s: &str) {
     let t = Tokens::get(ui.ctx());
     let text = if t.pro && !s.ends_with(':') { format!("{s}:") } else { s.to_string() };
     let label = ui.add(egui::Label::new(RichText::new(tl!(&text)).color(t.text_dim)).selectable(false));
@@ -1743,7 +1654,7 @@ fn opt_label(ui: &mut egui::Ui, s: &str) {
 }
 
 /// The largest Fixed Size side, in pixels.
-const FIXED_SIZE_MAX_PX: f64 = 300_000.0;
+pub(crate) const FIXED_SIZE_MAX_PX: f64 = 300_000.0;
 
 /// The resolution Fixed Size's units convert at (the active document's, 72 ppi without one) and
 /// the document's size in pixels, which a percentage is of. The unit is the caller's.
@@ -1974,17 +1885,10 @@ pub(crate) fn dock_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, group: crate
     match (group, tab) {
         (Group::Color, 2) => crate::preset_panels::gradients_panel(app, ui),
         (Group::Color, 3) => crate::preset_panels::patterns_panel(app, ui),
-        (Group::Color, 0) if pro => {
-            color_field(app, ui);
-            if app.ui.color_panel.slider_mode == ColorPanelSliderMode::Rgb {
-                ui.add_space(8.0);
-                rgb_sliders(app, ui);
-            }
-            color_slider_mode_row(app, ui);
-        }
-        (Group::Color, _) if pro => crate::swatches_ui::panel(app, ui),
-        (Group::Color, 0) => crate::swatches_ui::panel(app, ui),
-        (Group::Color, _) => color_picker(app, ui),
+        // The Color tab is the same in every theme, in the mode picked from its panel menu
+        // (#6000); only the tab order differs between themes.
+        (Group::Color, tab) if group.tabs(pro).get(tab) == Some(&"Color") => crate::color_panel_ui::panel(app, ui),
+        (Group::Color, _) => crate::swatches_ui::panel(app, ui),
         (Group::Properties, 0) => properties_body(app, ui),
         (Group::Properties, _) => adjustments_grid(app, ui),
         (Group::Character, tab) => crate::type_tool::character_panel(app, ui, tab == 1),
@@ -2568,95 +2472,6 @@ fn empty(ui: &mut egui::Ui, s: &str) {
     ui.add_space(6.0);
 }
 
-/// The Color tab of the themes other than Photoshop's: the same spectrum field (chips, saturation
-/// and brightness field, hue strip and readout) with HSB sliders under it (#4367).
-fn color_picker(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
-    color_field(app, ui);
-    ui.add_space(8.0);
-    match app.ui.color_panel.slider_mode {
-        ColorPanelSliderMode::Hsb => hsb_sliders(app, ui),
-        ColorPanelSliderMode::Rgb => rgb_sliders(app, ui),
-    }
-    color_slider_mode_row(app, ui);
-}
-
-/// HSB or RGB sliders under the colour field (#7172).
-fn color_slider_mode_row(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
-    ui.add_space(6.0);
-    let label = match app.ui.color_panel.slider_mode {
-        ColorPanelSliderMode::Hsb => tl!("HSB/HSL"),
-        ColorPanelSliderMode::Rgb => tl!("RGB Color"),
-    };
-    // A press menu, not a combo box: the default layout keeps the Color panel open beside
-    // adjustment editors, and harness tests pick the combo nearest "3D LUT File" (#7317).
-    let btn = ui.add_sized([72.0, ui.spacing().interact_size.y], egui::Button::new(label));
-    crate::press_menu::show(&btn, |ui, menu| {
-        if menu.item(ui, tl!("HSB/HSL")) {
-            app.ui.color_panel.slider_mode = ColorPanelSliderMode::Hsb;
-        }
-        if menu.item(ui, tl!("RGB Color")) {
-            app.ui.color_panel.slider_mode = ColorPanelSliderMode::Rgb;
-        }
-    });
-}
-
-/// Hue, Saturation and Brightness sliders for the foreground colour.
-fn hsb_sliders(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
-    let fg = app.session.tools.foreground;
-    // Keep the last edited HSB while it still gives the foreground: black and greys have no hue or
-    // saturation of their own, so recomputing them from RGB would reset what was just typed to 0.
-    let key = egui::Id::new("color-picker-hsva");
-    let stored: Option<egui::ecolor::Hsva> = ui.data(|d| d.get_temp(key));
-    let hsva0 = stored.filter(|h| srgb_bytes(hsva_srgb(*h)) == srgb_bytes(fg)).unwrap_or_else(|| srgb_hsva(fg));
-    let mut h = hsva0.h * 360.0;
-    let mut s = hsva0.s * 100.0;
-    let mut v = hsva0.v * 100.0;
-    let hue = widgets::hue_stops();
-    // Preferences ▸ Interface ▸ Dynamic Color Sliders: off, the tracks are the plain ones.
-    let dynamic = app.session.prefs().interface.dynamic_color_sliders;
-    let mut changed = widgets::slider_row(ui, tl!("Hue"), &mut h, 0.0..=360.0, "°", dynamic.then_some(&hue)).changed();
-    let sat_stops =
-        [egui::ecolor::Hsva::new(hsva0.h, 0.0, hsva0.v.max(0.2), 1.0), egui::ecolor::Hsva::new(hsva0.h, 1.0, hsva0.v.max(0.2), 1.0)].map(hsva_color32);
-    changed |= widgets::slider_row(ui, tl!("Saturation"), &mut s, 0.0..=100.0, "%", dynamic.then_some(&sat_stops)).changed();
-    let val_stops = [Color32::BLACK, hsva_color32(egui::ecolor::Hsva::new(hsva0.h, hsva0.s, 1.0, 1.0))];
-    changed |= widgets::slider_row(ui, tl!("Brightness"), &mut v, 0.0..=100.0, "%", dynamic.then_some(&val_stops)).changed();
-    let hsva = egui::ecolor::Hsva::new(h / 360.0, s / 100.0, v / 100.0, 1.0);
-    // Only an edit counts: the h/s/v round trip isn't exact, so comparing values would rewrite
-    // the foreground (and recolour selected type) every frame.
-    if changed {
-        app.session.tools.foreground = hsva_srgb(hsva);
-        ui.data_mut(|d| d.insert_temp(key, hsva));
-        crate::type_tool::foreground_changed(app);
-        crate::shape_fill_ui::foreground_changed(app, crate::shape_fill_ui::gesture(ui));
-    }
-}
-
-/// Red, Green and Blue sliders (0–255) for the colour the panel is editing (#7172).
-fn rgb_sliders(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
-    let bg = app.ui.color_panel.background;
-    let mut c = if bg { app.session.tools.background } else { app.session.tools.foreground };
-    let mut rgb = srgb_bytes(c).map(f32::from);
-    let dynamic = app.session.prefs().interface.dynamic_color_sliders;
-    let mut changed = false;
-    let [r0, g0, b0] = rgb.map(|v| v.round() as u8);
-    let r_stops = [Color32::from_rgb(0, g0, b0), Color32::from_rgb(255, g0, b0)];
-    changed |= widgets::slider_row(ui, tl!("Red"), &mut rgb[0], 0.0..=255.0, "", dynamic.then_some(&r_stops)).changed();
-    let g_stops = [Color32::from_rgb(r0, 0, b0), Color32::from_rgb(r0, 255, b0)];
-    changed |= widgets::slider_row(ui, tl!("Green"), &mut rgb[1], 0.0..=255.0, "", dynamic.then_some(&g_stops)).changed();
-    let b_stops = [Color32::from_rgb(r0, g0, 0), Color32::from_rgb(r0, g0, 255)];
-    changed |= widgets::slider_row(ui, tl!("Blue"), &mut rgb[2], 0.0..=255.0, "", dynamic.then_some(&b_stops)).changed();
-    if changed {
-        let q = |v: f32| (v.clamp(0.0, 255.0).round() / 255.0).clamp(0.0, 1.0);
-        c = [q(rgb[0]), q(rgb[1]), q(rgb[2]), 1.0];
-        if bg {
-            app.session.tools.background = c;
-        } else {
-            app.session.tools.foreground = c;
-            crate::type_tool::foreground_changed(app);
-        }
-    }
-}
-
 // ----------------------------------------------------------------------------- layers
 
 /// The simple themes' single lock button. On the Background it converts the layer to a normal
@@ -2718,6 +2533,62 @@ fn opacity_row_layout(available: f32, label_width: f32, gap: f32) -> (f32, bool)
     let show_label = available >= full_right + 80.0;
     let reserved = LAYER_PCT_W + gap + if show_label { label_width + gap + 16.0 } else { 0.0 };
     ((available - reserved).max(40.0), show_label)
+}
+
+/// Blend mode, Opacity, the locks and Fill with no layer selected: Photoshop keeps them in place,
+/// greyed out at Normal, 100% and unlocked, instead of removing them (#8880). Same layout as the
+/// active layer's rows in `layers`.
+fn inactive_blend_rows(ui: &mut egui::Ui, pro: bool) {
+    ui.add_enabled_ui(false, |ui| {
+        ui.horizontal(|ui| {
+            let opacity_label = if pro { tl!("Opacity:") } else { tl!("Opacity") };
+            let (blend_width, show_opacity_label) = opacity_row_layout(ui.available_width(), body_text_width(ui, opacity_label), ui.spacing().item_spacing.x);
+            let mut m = BlendMode::Normal;
+            let options = blend_options(false, m);
+            widgets::dropdown_wheel_hovered(ui, "blend", &mut m, &options, blend_width);
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let mut o = 100.0;
+                widgets::popup_value_field(ui, opacity_label, &mut o, 0.0..=100.0, "%", LAYER_PCT_W);
+                if show_opacity_label {
+                    scrub_pct_label(ui, opacity_label, &mut o, ui.available_width());
+                }
+            });
+        });
+        ui.add_space((theme::ROW_GAP - ui.spacing().item_spacing.y).max(0.0));
+        ui.horizontal(|ui| {
+            let lock_label = if pro { tl!("Lock:") } else { tl!("Lock") };
+            let lang = crate::i18n::current();
+            let fill_label = if pro { crate::i18n::tr_ctx(lang, "layers", "Fill:") } else { crate::i18n::tr_ctx(lang, "layers", "Fill") };
+            let gap = ui.spacing().item_spacing.x;
+            let icons_w = if pro { 5.0 * 20.0 + gap } else { 22.0 + gap };
+            let fits = body_text_width(ui, lock_label) + icons_w + body_text_width(ui, fill_label) + LAYER_PCT_W + 2.0 * gap <= ui.available_width();
+            if fits {
+                label(ui, lock_label);
+            }
+            if pro {
+                ui.scope(|ui| {
+                    ui.spacing_mut().item_spacing.x = 0.0;
+                    for (icon, tip) in [
+                        ("grid-3x3", tl!("Lock transparent pixels")),
+                        ("brush", tl!("Lock image pixels")),
+                        ("move", tl!("Lock position")),
+                        ("scan", tl!("Prevent auto-nesting in and out of Artboards and Frames")),
+                        ("lock", tl!("Lock all")),
+                    ] {
+                        icons::button(ui, icon, 20.0, false, tip);
+                    }
+                });
+            } else {
+                icons::button(ui, "lock-open", 22.0, false, tl!("Lock layer"));
+            }
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let mut f = 100.0;
+                widgets::popup_value_field(ui, fill_label, &mut f, 0.0..=100.0, "%", LAYER_PCT_W);
+                scrub_pct_label(ui, fill_label, &mut f, ui.available_width());
+            });
+        });
+        ui.add_space(2.0);
+    });
 }
 
 fn layers(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
@@ -2848,6 +2719,8 @@ fn layers(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
             });
         });
         ui.add_space(2.0);
+    } else {
+        inactive_blend_rows(ui, t.pro);
     }
 
     // Top of the stack first, groups above their contents, closed groups' contents hidden (#126).
@@ -2910,6 +2783,9 @@ fn layers(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                     crate::smart_ui::filter_rows(app, ui, &doc, l, depth, &mut actions);
                 }
             }
+            // The bottom of everything drawn: the last layer's effect and Smart Filter rows sit
+            // under its own row (#8764).
+            let rows_bottom = ui.min_rect().bottom();
             // #1721: the list takes drops everywhere, not only on a row (Photoshop): the space
             // between two rows lands above the lower one, the empty space below the bottom-most
             // row below it. Both copy with ⌥ held, move without.
@@ -2920,8 +2796,10 @@ fn layers(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
             if let Some(&(last, last_rect)) = drawn.last() {
                 let below = Rect::from_min_max(pos2(last_rect.left(), last_rect.bottom()), pos2(last_rect.right(), ui.clip_rect().bottom()));
                 layer_drop_zone(app, &ctx, ui, below, (last, last_rect), "below", &mut actions);
-                // A click on that empty space deselects every layer, as in Photoshop (#8100).
-                if below.height() > 0.0 && ui.interact(below, ui.id().with("layers-empty-space"), Sense::click()).clicked() && !selection.is_empty() {
+                // A click on that empty space deselects every layer, as in Photoshop (#8100). It
+                // starts under the last layer's sub-rows, which take their own clicks.
+                let empty = Rect::from_min_max(pos2(below.left(), rows_bottom), below.max);
+                if empty.height() > 0.0 && ui.interact(empty, ui.id().with("layers-empty-space"), Sense::click()).clicked() && !selection.is_empty() {
                     actions.push(("select.deselectLayers".into(), json!({})));
                 }
             }
@@ -3374,12 +3252,12 @@ fn layer_row(
         painter.line_segment([rect.left_bottom(), rect.right_bottom()], Stroke::new(1.0, t.separator));
     }
     let mut x = rect.left() + 6.0;
-    let eye = Rect::from_min_size(pos2(x, rect.center().y - 11.0), vec2(22.0, 22.0));
-    // The eye takes drags too (so a drag starting on it never reorders the row): dragging down
-    // the eyes gives every row swept over the visibility the first eye toggled to.
+    // The whole eye column takes drags too (so a drag starting on it never reorders the row): dragging down
+    // the eyes gives every row swept over the visibility the first eye toggled to (#8467).
+    // Touch/pen: click-only so a drag scrolls the list instead of sweeping visibility (Hmos).
     let eye_sense = if crate::list_drag::prefers_scroll(source) { Sense::click() } else { Sense::click_and_drag() };
-    let eye_resp = ui.interact(eye, ui.id().with(("eye", l.id.0)), eye_sense);
-    // A hidden layer's eye box is left empty (still clickable).
+    let eye_resp = ui.interact(eye_cell, ui.id().with(("eye", l.id.0)), eye_sense);
+    // A hidden layer's eye box is left empty (still clickable; the whole column takes the click, #8467).
     if l.visible {
         // Centre the drawing in the column while preserving the visibility hit area.
         icons::paint(ui, eye_cell, "eye", 15.0, t.layer_label_icon(l.label));
@@ -3690,10 +3568,7 @@ fn history(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let redo: Vec<String> = st.history.redo_labels().map(str::to_string).collect();
     let source = photocraft_engine::history_source_cmds::source(st);
     let selected_snap = selected_snapshot(ui.ctx(), st);
-    // The newest past state is a new document on every step, Undo and Redo, also at the state
-    // limit, where the counts and a repeated name stay the same.
-    let newest = st.history.past_len().checked_sub(1).and_then(|i| st.history.state(i)).map(|d| std::sync::Arc::as_ptr(&d) as usize);
-    let spot = (doc.id, history_spot(st), newest);
+    let spot = (doc.id, history_spot(st));
     let ctx = ui.ctx().clone();
     // A row dragged onto the trash (#5324); a drag that never saw its release must not outlive it.
     if !ctx.input(|i| i.pointer.primary_down() || i.pointer.any_released()) {
@@ -3726,7 +3601,7 @@ fn history(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     // layer click, a channel eye) and a selected snapshot leave the list where the user put it.
     let follow_id = egui::Id::new("history-follow");
     let moved = ui.ctx().data_mut(|d| {
-        let moved = d.get_temp::<(photocraft_doc::DocId, HistorySpot, Option<usize>)>(follow_id).as_ref() != Some(&spot);
+        let moved = d.get_temp::<(photocraft_doc::DocId, HistorySpot)>(follow_id).as_ref() != Some(&spot);
         d.insert_temp(follow_id, spot);
         moved
     });
@@ -3893,12 +3768,15 @@ fn history_drag_key() -> egui::Id {
 }
 
 /// The snapshot the History panel shows selected (#5324), and where the history stood after its
-/// click: the number of past states, the current state's name and the number of redo states.
+/// click: the number of past states, the current state's name, the number of redo states and the
+/// newest past state. That last one is a new document on every step, also at the state limit,
+/// where the counts and a repeated name stay the same.
 type SelectedSnapshot = (u64, HistorySpot);
-type HistorySpot = (usize, Option<String>, usize);
+type HistorySpot = (usize, Option<String>, usize, Option<usize>);
 
 fn history_spot(st: &photocraft_engine::DocState) -> HistorySpot {
-    (st.history.past_len(), st.history.entries().pop(), st.history.redo_labels().count())
+    let newest = st.history.past_len().checked_sub(1).and_then(|i| st.history.state(i)).map(|d| std::sync::Arc::as_ptr(&d) as usize);
+    (st.history.past_len(), st.history.entries().pop(), st.history.redo_labels().count(), newest)
 }
 
 fn selected_snapshot_key(doc: photocraft_doc::DocId) -> egui::Id {
@@ -4090,20 +3968,20 @@ pub fn properties_window(app: &mut PhotocraftApp, ctx: &egui::Context) {
 }
 
 fn adjustment_controls(app: &mut PhotocraftApp, ui: &mut egui::Ui, id: LayerId, adj: &photocraft_doc::Adjustment) {
+    // Keep the scope reachable before tall editors and within a compact dock (#5231).
+    // Adjustment layers affect the stack by default; clipping limits them to their base.
+    if let Some(mut clip) = app.session.active().and_then(|s| s.doc.layer(id).map(|l| l.clipped))
+        && widgets::toggle(ui, &mut clip, tl!("Clip to layer below")).changed()
+    {
+        let _ = app.run("layer.setProps", json!({"layer": id.0, "clipped": clip}));
+    }
+    ui.add_space(6.0);
     crate::adjust_editors::layer_editor(app, ui, id, adj);
     ui.add_space(6.0);
-    let layer = app.session.active().and_then(|s| s.doc.layer(id).map(|l| (l.visible, l.clipped)));
-    if let Some((visible, clipped)) = layer {
-        ui.horizontal(|ui| {
-            let mut vis = visible;
-            if widgets::toggle(ui, &mut vis, tl!("Adjustment visible")).changed() {
-                let _ = app.run("layer.setProps", json!({"layer": id.0, "visible": vis}));
-            }
-            let mut clip = clipped;
-            if widgets::toggle(ui, &mut clip, tl!("Clip to layer below")).changed() {
-                let _ = app.run("layer.setProps", json!({"layer": id.0, "clipped": clip}));
-            }
-        });
+    if let Some(mut vis) = app.session.active().and_then(|s| s.doc.layer(id).map(|l| l.visible))
+        && widgets::toggle(ui, &mut vis, tl!("Adjustment visible")).changed()
+    {
+        let _ = app.run("layer.setProps", json!({"layer": id.0, "visible": vis}));
     }
     ui.add_space(6.0);
     if widgets::secondary_button(ui, tl!("Reset to defaults"), ui.available_width()).clicked() {
@@ -4251,7 +4129,7 @@ fn adjustments_grid(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
 
 /// The Color panel's foreground and background chips. A click picks the colour the field edits,
 /// framed; a double-click opens the Color Picker on it.
-fn field_chips(app: &mut PhotocraftApp, ui: &mut egui::Ui, chips: Rect) {
+pub(crate) fn field_chips(app: &mut PhotocraftApp, ui: &mut egui::Ui, chips: Rect) {
     let t = Tokens::get(ui.ctx());
     let bgr = Rect::from_min_size(chips.min + vec2(13.0, 13.0), vec2(22.0, 22.0));
     let fgr = Rect::from_min_size(chips.min + vec2(3.0, 3.0), vec2(22.0, 22.0));
@@ -4279,14 +4157,14 @@ fn field_chips(app: &mut PhotocraftApp, ui: &mut egui::Ui, chips: Rect) {
 }
 
 /// Where the dock tells the Color field how tall its group body is.
-fn color_field_fill_id() -> egui::Id {
+pub(crate) fn color_field_fill_id() -> egui::Id {
     egui::Id::new("color-field-fill-height")
 }
 
-/// The pro Color field stretches to its dock group's height instead of a fixed 120 pt: a dock
-/// calls this with the group body's `ui` before drawing the tab.
+/// The Color field stretches to its dock group's height instead of a fixed 120 pt, in every theme
+/// (#6000): a dock calls this with the group body's `ui` before drawing the tab.
 pub(crate) fn offer_color_field_fill(ui: &egui::Ui, pro: bool, group: crate::dock::Group, tab: usize) {
-    if pro && group == crate::dock::Group::Color && tab == 0 {
+    if group == crate::dock::Group::Color && group.tabs(pro).get(tab) == Some(&"Color") {
         let inner = ui.available_height().max(0.0);
         ui.data_mut(|d| d.insert_temp(color_field_fill_id(), inner));
     }
@@ -4306,7 +4184,7 @@ fn color_field_height(avail: Option<f32>, width: f32) -> f32 {
 /// neither hue nor saturation — so a drag that bottoms out into black would otherwise round-trip
 /// through RGB as `s = 0` and drop the knob from the bottom-right corner to the bottom-left one
 /// (#3228).
-fn field_hsva(mut hsva: egui::ecolor::Hsva, remembered: (f32, f32)) -> egui::ecolor::Hsva {
+pub(crate) fn field_hsva(mut hsva: egui::ecolor::Hsva, remembered: (f32, f32)) -> egui::ecolor::Hsva {
     if hsva.v < 0.01 {
         hsva.h = remembered.0;
         hsva.s = remembered.1;
@@ -4318,8 +4196,9 @@ fn field_hsva(mut hsva: egui::ecolor::Hsva, remembered: (f32, f32)) -> egui::eco
     hsva
 }
 
-/// Photoshop Color panel: saturation/brightness field + hue strip, drawn as shaded meshes.
-fn color_field(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
+/// Photoshop's Color panel Hue Cube (saturation/brightness field + hue strip) or Brightness Cube
+/// (hue/saturation field + brightness strip), drawn as shaded meshes, over a hex/RGB readout.
+pub(crate) fn color_field(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let t = Tokens::get(ui.ctx());
     let bg_active = app.ui.color_panel.background;
     let key = egui::Id::new(("color-field-hue", bg_active));
@@ -4329,79 +4208,67 @@ fn color_field(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     hsva = field_hsva(hsva, remembered);
     let w = ui.available_width();
     let strip_w = 14.0;
-    // Photoshop's Color panel field fills the panel: take the height the dock offers, less the
-    // hex/RGB readout (which folds onto a second line in a narrow dock). Without a dock, 120 pt.
-    // Only Photoshop's themes stretch it over the group: the other themes put sliders under it.
-    let fill = if t.pro { ui.data(|d| d.get_temp::<f32>(color_field_fill_id())) } else { None };
+    // Photoshop's Color panel field fills the panel in every theme (#6000): take the height the
+    // dock offers, less the hex/RGB readout (which folds onto a second line in a narrow dock) and
+    // the theme's spacing between the rows. Without a dock, 120 pt.
+    let gaps = 2.0 * ui.spacing().item_spacing.y;
+    let fill = ui.data(|d| d.get_temp::<f32>(color_field_fill_id())).map(|a| a - gaps);
     let h = color_field_height(fill, w);
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 8.0;
         let (chips, _) = ui.allocate_exact_size(vec2(38.0, h), Sense::hover());
         field_chips(app, ui, chips);
-        // SV field.
+        // Hue Cube: saturation across and brightness up, hue on the strip. Brightness Cube (the
+        // Color Picker's B mode): hue across and saturation up, brightness on the strip.
+        let brightness = app.ui.color_panel.mode == crate::state::ColorPanelMode::BrightnessCube;
         let field_w = w - 38.0 - strip_w - 16.0;
         let (field, fresp) = ui.allocate_exact_size(vec2(field_w, h), Sense::click_and_drag());
-        let mut mesh = egui::Mesh::default();
-        let n = 16;
-        for j in 0..=n {
-            for i in 0..=n {
-                let (sx, vy) = (i as f32 / n as f32, j as f32 / n as f32);
-                let c = hsva_color32(egui::ecolor::Hsva::new(hsva.h, sx, 1.0 - vy, 1.0));
-                mesh.colored_vertex(pos2(field.left() + sx * field.width(), field.top() + vy * field.height()), c);
-            }
-        }
-        for j in 0..n {
-            for i in 0..n {
-                let a = (j * (n + 1) + i) as u32;
-                let b = a + 1;
-                let c = a + (n + 1) as u32;
-                let d = c + 1;
-                mesh.add_triangle(a, b, d);
-                mesh.add_triangle(a, d, c);
-            }
-        }
-        ui.painter().add(mesh);
+        let at = |x: f32, y: f32| {
+            if brightness { egui::ecolor::Hsva::new(x.min(0.9999), 1.0 - y, hsva.v, 1.0) } else { egui::ecolor::Hsva::new(hsva.h, x, 1.0 - y, 1.0) }
+        };
+        ui.painter().add(color_grid(field, 16, |x, y| hsva_color32(at(x, y))));
         ui.painter().rect_stroke(field, 0.0, Stroke::new(1.0, t.separator), StrokeKind::Outside);
-        if (fresp.dragged() || fresp.clicked())
-            && let Some(p) = fresp.interact_pointer_pos()
-        {
-            hsva.s = ((p.x - field.left()) / field.width()).clamp(0.0, 1.0);
-            hsva.v = 1.0 - ((p.y - field.top()) / field.height()).clamp(0.0, 1.0);
+        let field_pick = widgets::pick_pos(&fresp);
+        if let Some(p) = field_pick {
+            let x = ((p.x - field.left()) / field.width()).clamp(0.0, 1.0);
+            let y = ((p.y - field.top()) / field.height()).clamp(0.0, 1.0);
+            if brightness {
+                hsva.h = x.min(0.9999);
+                hsva.s = 1.0 - y;
+            } else {
+                hsva.s = x;
+                hsva.v = 1.0 - y;
+            }
         }
-        let knob = pos2(field.left() + hsva.s * field.width(), field.top() + (1.0 - hsva.v) * field.height());
+        let (kx, ky) = if brightness { (hsva.h, 1.0 - hsva.s) } else { (hsva.s, 1.0 - hsva.v) };
+        let knob = pos2(field.left() + kx * field.width(), field.top() + ky * field.height());
         ui.painter().circle_stroke(knob, 5.0, Stroke::new(1.5, Color32::WHITE));
         ui.painter().circle_stroke(knob, 6.5, Stroke::new(1.0, Color32::from_black_alpha(160)));
-        // Hue strip.
+        // The strip: hue (red at both ends, as Photoshop's) or brightness (the colour down to black).
         let (strip, sresp) = ui.allocate_exact_size(vec2(strip_w, h), Sense::click_and_drag());
-        let mut m2 = egui::Mesh::default();
-        let steps = 24;
-        for k in 0..=steps {
-            let f = k as f32 / steps as f32;
-            let c = hsva_color32(egui::ecolor::Hsva::new(1.0 - f, 1.0, 1.0, 1.0));
-            m2.colored_vertex(pos2(strip.left(), strip.top() + f * strip.height()), c);
-            m2.colored_vertex(pos2(strip.right(), strip.top() + f * strip.height()), c);
+        let strip_at = |f: f32| {
+            if brightness { egui::ecolor::Hsva::new(hsva.h, hsva.s, 1.0 - f, 1.0) } else { egui::ecolor::Hsva::new(1.0 - f, 1.0, 1.0, 1.0) }
+        };
+        ui.painter().add(color_grid(strip, 24, |_, y| hsva_color32(strip_at(y))));
+        let strip_pick = widgets::pick_pos(&sresp);
+        if let Some(p) = strip_pick {
+            let f = ((p.y - strip.top()) / strip.height()).clamp(0.0, 1.0);
+            if brightness {
+                hsva.v = 1.0 - f;
+            } else {
+                hsva.h = 1.0 - f.min(0.9999);
+            }
         }
-        for k in 0..steps {
-            let a = (k * 2) as u32;
-            m2.add_triangle(a, a + 1, a + 3);
-            m2.add_triangle(a, a + 3, a + 2);
-        }
-        ui.painter().add(m2);
-        if (sresp.dragged() || sresp.clicked())
-            && let Some(p) = sresp.interact_pointer_pos()
-        {
-            hsva.h = 1.0 - ((p.y - strip.top()) / strip.height()).clamp(0.0, 0.9999);
-        }
-        let y = strip.top() + (1.0 - hsva.h) * strip.height();
+        let y = strip.top() + (1.0 - if brightness { hsva.v } else { hsva.h }) * strip.height();
         let tri = vec![pos2(strip.right() + 1.0, y), pos2(strip.right() + 6.0, y - 4.0), pos2(strip.right() + 6.0, y + 4.0)];
         ui.painter().add(egui::Shape::convex_polygon(tri, t.text, Stroke::NONE));
-        if fresp.dragged() || fresp.clicked() || sresp.dragged() || sresp.clicked() {
+        if field_pick.is_some() || strip_pick.is_some() {
             if bg_active {
                 app.session.tools.background = hsva_srgb(hsva);
-            } else {
+            } else if app.session.tools.foreground != hsva_srgb(hsva) {
+                // A held, unmoved press repeats the pick: restyle selected type only on a change.
                 app.session.tools.foreground = hsva_srgb(hsva);
-                crate::type_tool::foreground_changed(app);
-                crate::shape_fill_ui::foreground_changed(app, crate::shape_fill_ui::gesture(ui));
+                crate::apply_color::foreground_changed(app, crate::apply_color::gesture(ui.ctx()));
             }
             ui.data_mut(|d| d.insert_temp(key, (hsva.h, hsva.s)));
         }
@@ -4414,8 +4281,7 @@ fn color_field(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                 app.session.tools.background = c;
             } else {
                 app.session.tools.foreground = c;
-                crate::type_tool::foreground_changed(app);
-                crate::shape_fill_ui::foreground_changed(app, crate::shape_fill_ui::gesture(ui));
+                crate::apply_color::foreground_changed(app, crate::apply_color::gesture(ui.ctx()));
             }
             // Keep the hue for greys, so the field marker doesn't jump to red; the saturation with
             // it, so a later black lands on the corner it was last dragged to (#3228).
@@ -4425,11 +4291,34 @@ fn color_field(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
             }
         }
     });
+    crate::apply_color::track_focus(ui.ctx());
+}
+
+/// A smooth-shaded `n` x `n` grid over `rect`, coloured by `color(x, y)` with x and y in 0..1
+/// (y down).
+pub(crate) fn color_grid(rect: Rect, n: usize, color: impl Fn(f32, f32) -> Color32) -> egui::Mesh {
+    let n = n.max(1);
+    let mut mesh = egui::Mesh::default();
+    for j in 0..=n {
+        for i in 0..=n {
+            let (x, y) = (i as f32 / n as f32, j as f32 / n as f32);
+            mesh.colored_vertex(pos2(rect.left() + x * rect.width(), rect.top() + y * rect.height()), color(x, y));
+        }
+    }
+    let row = (n + 1) as u32;
+    for j in 0..n as u32 {
+        for i in 0..n as u32 {
+            let a = j * row + i;
+            mesh.add_triangle(a, a + 1, a + row + 1);
+            mesh.add_triangle(a, a + row + 1, a + row);
+        }
+    }
+    mesh
 }
 
 /// Tool colours are sRGB-encoded floats; egui's Hsva works on sRGB bytes via these helpers
 /// (its `from_rgba_unmultiplied` expects *linear* RGB, which gave wrong readouts).
-fn srgb_bytes(c: [f32; 4]) -> [u8; 3] {
+pub(crate) fn srgb_bytes(c: [f32; 4]) -> [u8; 3] {
     let q = |v: f32| (v.clamp(0.0, 1.0) * 255.0 + 0.5) as u8;
     [q(c[0]), q(c[1]), q(c[2])]
 }
@@ -4437,19 +4326,19 @@ fn srgb_bytes(c: [f32; 4]) -> [u8; 3] {
 /// The Color panel's HSB, as Photoshop's and the Color Picker's: on the sRGB-encoded values,
 /// so a 50% grey has Brightness 50%. egui's `Hsva` conversions work in linear light, which put
 /// that grey at 22% and drew the field's middle as 188 (#3323); `Hsva` only holds the numbers.
-fn srgb_hsva(c: [f32; 4]) -> egui::ecolor::Hsva {
+pub(crate) fn srgb_hsva(c: [f32; 4]) -> egui::ecolor::Hsva {
     let [h, s, v] = photocraft_color::convert::rgb_to_hsb([c[0], c[1], c[2]].map(|v| v.clamp(0.0, 1.0)));
     egui::ecolor::Hsva::new(h / 360.0, s, v, 1.0)
 }
 
 /// The inverse of srgb_hsva: the Color panel's HSB back to sRGB-encoded values.
-fn hsva_srgb(h: egui::ecolor::Hsva) -> [f32; 4] {
+pub(crate) fn hsva_srgb(h: egui::ecolor::Hsva) -> [f32; 4] {
     let [r, g, b] = photocraft_color::convert::hsb_to_rgb([h.h * 360.0, h.s.clamp(0.0, 1.0), h.v.clamp(0.0, 1.0)]);
     [r, g, b, 1.0]
 }
 
 /// The colour to draw for Color panel HSB `h` (see [`srgb_hsva`]).
-fn hsva_color32(h: egui::ecolor::Hsva) -> Color32 {
+pub(crate) fn hsva_color32(h: egui::ecolor::Hsva) -> Color32 {
     let [r, g, b] = srgb_bytes(hsva_srgb(h));
     Color32::from_rgb(r, g, b)
 }
@@ -4457,7 +4346,7 @@ fn hsva_color32(h: egui::ecolor::Hsva) -> Color32 {
 /// The Color panel's editable colour readout: a hex field and R, G, B fields, all drawn like the
 /// dock's [`widgets::value_field`] so they sit in the theme. Editing any of them sets `color`
 /// (sRGB-encoded floats) and returns `true`.
-fn color_readout(ui: &mut egui::Ui, id: egui::Id, color: &mut [f32; 4]) -> bool {
+pub(crate) fn color_readout(ui: &mut egui::Ui, id: egui::Id, color: &mut [f32; 4]) -> bool {
     let t = Tokens::get(ui.ctx());
     let mut changed = false;
     // Wrapped so the fields fold onto a second line in a narrow dock instead of being clipped.
@@ -4832,9 +4721,10 @@ fn start_fx_drag(ctx: &egui::Context, layer: LayerId, effect: Option<usize>) {
 fn fx_drag_feedback(ctx: &egui::Context, doc: &photocraft_doc::Document) {
     let Some((from, effect)) = ctx.data(|d| d.get_temp::<FxDrag>(fx_drag_key())) else { return };
     let Some(p) = ctx.input(|i| i.pointer.interact_pos()) else { return };
+    // `Effect::label` is the English key; translate for the drag ghost like the Layers panel rows.
     let label = match effect {
-        Some(i) => doc.layer(LayerId(from)).and_then(|l| l.effects.items.get(i)).map_or("", |e| e.label()),
-        None => "Effects",
+        Some(i) => doc.layer(LayerId(from)).and_then(|l| l.effects.items.get(i)).map(|e| tl!(e.label())).unwrap_or_default(),
+        None => tl!("Effects"),
     };
     crate::layer_transfer::ghost(ctx, p, label);
     if ctx.input(|i| i.modifiers.alt) {
@@ -4875,10 +4765,12 @@ fn effect_rows(app: &mut PhotocraftApp, ui: &mut egui::Ui, l: &Layer, depth: usi
     let t = Tokens::get(ui.ctx());
     let source = app.stylus.feed.source();
     let indent = 30.0 + depth as f32 * 14.0 + 34.0;
-    let mut rows: Vec<(String, bool, Option<&'static str>)> = vec![("Effects".into(), l.effects.enabled, None)];
+    // English `Effect::label` keys stay for kind matching; display goes through `tl!` (catalogs
+    // already have Drop Shadow → 投影, Effects → 效果, …).
+    let mut rows: Vec<(String, bool, Option<&'static str>)> = vec![(tl!("Effects").into(), l.effects.enabled, None)];
     for e in &l.effects.items {
         let kind = crate::layer_style::KINDS.iter().find(|k| k.1 == e.label()).map(|k| k.0);
-        rows.push((e.label().to_string(), e.enabled(), kind));
+        rows.push((tl!(e.label()).into(), e.enabled(), kind));
     }
     for (i, (name, on, kind)) in rows.into_iter().enumerate() {
         let item = ui.id().with(("layer-fx-row", l.id.0, i));
@@ -5021,6 +4913,80 @@ mod color_tests {
         }
     }
 
+    /// #7793: the Color panel's field and hue strip pick on the frame the button goes down (no
+    /// release, no time passing) and follow moves smaller than egui's 6-point click threshold.
+    #[test]
+    fn color_panel_field_and_hue_strip_pick_on_press() {
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        app.session.tools.foreground = [0.2, 0.4, 0.6, 1.0];
+        let mut h = egui_kittest::Harness::builder().with_size(vec2(300.0, 300.0)).build_ui_state(
+            |ui, app: &mut PhotocraftApp| {
+                let at = (ui.cursor().min, ui.available_width());
+                ui.data_mut(|d| d.insert_temp(egui::Id::new("test-origin"), at));
+                color_field(app, ui);
+            },
+            app,
+        );
+        PhotocraftApp::setup_context(&h.ctx, crate::theme::ThemeKind::Studio);
+        h.run_steps(2);
+        let (o, w) = h.ctx.data(|d| d.get_temp::<(Pos2, f32)>(egui::Id::new("test-origin"))).unwrap();
+        let field_w = w - 38.0 - 14.0 - 16.0;
+        let press = |h: &mut egui_kittest::Harness<'static, PhotocraftApp>, at: Pos2, pressed: bool| {
+            h.event(egui::Event::PointerMoved(at));
+            h.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE });
+            h.run_steps(1);
+        };
+        let at = o + vec2(38.0 + 8.0 + field_w * 0.5, 60.0);
+        press(&mut h, at, true);
+        let picked = h.state().session.tools.foreground;
+        assert_ne!(picked, [0.2, 0.4, 0.6, 1.0], "the press itself picks");
+        let hsva = srgb_hsva(picked);
+        assert!((hsva.s - 0.5).abs() < 0.03 && (hsva.v - 0.5).abs() < 0.03, "{hsva:?}");
+        h.event(egui::Event::PointerMoved(at + vec2(3.0, 0.0)));
+        h.run_steps(1);
+        assert_ne!(h.state().session.tools.foreground, picked, "a small drag adjusts the pick");
+        press(&mut h, at + vec2(3.0, 0.0), false);
+        h.run_steps(1);
+        // Hue strip: a press a third of the way down is a hue of about 240° at once.
+        let before = h.state().session.tools.foreground;
+        press(&mut h, o + vec2(38.0 + 8.0 + field_w + 8.0 + 7.0, 40.0), true);
+        let now = h.state().session.tools.foreground;
+        assert_ne!(now, before, "the strip picks on press");
+        assert!((srgb_hsva(now).h * 360.0 - 240.0).abs() < 8.0, "{:?}", srgb_hsva(now));
+    }
+
+    /// Only the primary button picks: a right or middle press (and its release) on the field or
+    /// the hue strip leaves the foreground colour alone.
+    #[test]
+    fn color_panel_ignores_secondary_and_middle_presses() {
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        app.session.tools.foreground = [0.2, 0.4, 0.6, 1.0];
+        let mut h = egui_kittest::Harness::builder().with_size(vec2(300.0, 300.0)).build_ui_state(
+            |ui, app: &mut PhotocraftApp| {
+                let at = (ui.cursor().min, ui.available_width());
+                ui.data_mut(|d| d.insert_temp(egui::Id::new("test-origin"), at));
+                color_field(app, ui);
+            },
+            app,
+        );
+        PhotocraftApp::setup_context(&h.ctx, crate::theme::ThemeKind::Studio);
+        h.run_steps(2);
+        let (o, w) = h.ctx.data(|d| d.get_temp::<(Pos2, f32)>(egui::Id::new("test-origin"))).unwrap();
+        let field_w = w - 38.0 - 14.0 - 16.0;
+        let field = o + vec2(38.0 + 8.0 + field_w * 0.5, 60.0);
+        let strip = o + vec2(38.0 + 8.0 + field_w + 8.0 + 7.0, 40.0);
+        for at in [field, strip] {
+            for button in [egui::PointerButton::Secondary, egui::PointerButton::Middle] {
+                for pressed in [true, false] {
+                    h.event(egui::Event::PointerMoved(at));
+                    h.event(egui::Event::PointerButton { pos: at, button, pressed, modifiers: egui::Modifiers::NONE });
+                    h.run_steps(1);
+                    assert_eq!(h.state().session.tools.foreground, [0.2, 0.4, 0.6, 1.0], "{button:?} pressed={pressed} at {at:?}");
+                }
+            }
+        }
+    }
+
     /// Click the hex field, select its text and type `text` one key per frame.
     fn type_hex(h: &mut egui_kittest::Harness<'static, PhotocraftApp>, text: &str) {
         use egui_kittest::kittest::Queryable;
@@ -5034,26 +5000,6 @@ mod color_tests {
         }
     }
 
-    #[test]
-    fn rgb_slider_mode_shows_red_green_blue_rows() {
-        use egui_kittest::kittest::Queryable;
-        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
-        app.ui.color_panel.slider_mode = ColorPanelSliderMode::Rgb;
-        let mut h = egui_kittest::Harness::builder().with_size(vec2(300.0, 360.0)).build_ui_state(
-            |ui, app: &mut PhotocraftApp| {
-                if ui.ctx().fonts(|f| f.families().contains(&egui::FontFamily::Name("medium".into()))) {
-                    color_picker(app, ui);
-                }
-            },
-            app,
-        );
-        PhotocraftApp::setup_context(&h.ctx, crate::theme::ThemeKind::Studio);
-        h.run_steps(2);
-        for label in ["Red", "Green", "Blue"] {
-            h.get_by_label(label);
-        }
-    }
-
     /// The Color panel's hex readout is editable, with or without the leading `#`.
     #[test]
     fn color_panel_hex_field_takes_a_typed_hex() {
@@ -5062,7 +5008,7 @@ mod color_tests {
         let mut h = egui_kittest::Harness::builder().with_size(vec2(300.0, 300.0)).build_ui_state(
             |ui, app: &mut PhotocraftApp| {
                 if ui.ctx().fonts(|f| f.families().contains(&egui::FontFamily::Name("medium".into()))) {
-                    color_picker(app, ui);
+                    color_field(app, ui);
                 }
             },
             app,
@@ -5197,7 +5143,7 @@ mod color_tests {
         let mut h = egui_kittest::Harness::builder().with_size(vec2(300.0, 300.0)).build_ui_state(
             |ui, app: &mut PhotocraftApp| {
                 if ui.ctx().fonts(|f| f.families().contains(&egui::FontFamily::Name("medium".into()))) {
-                    color_picker(app, ui);
+                    color_field(app, ui);
                 }
             },
             app,
@@ -5240,6 +5186,71 @@ mod color_tests {
         assert_eq!(srgb_bytes(h.state().session.tools.foreground), [0x00, 0x80, 0x00]);
     }
 
+    /// Typing a value into the R, G or B field recolours a selected shape as one undo step per
+    /// field, not one per keystroke.
+    #[test]
+    fn typing_an_rgb_value_recolours_the_selected_shape_in_one_step() {
+        use egui_kittest::kittest::Queryable;
+        use photocraft_doc::{Fill, LayerContent, LayerId};
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        app.session.execute("file.new", json!({"width": 64, "height": 48})).unwrap();
+        let id = LayerId(app.run("shape.create", json!({"rect": [8, 8, 40, 30], "fill": "#000000"})).unwrap()["layer"].as_u64().unwrap());
+        app.ui.tool = crate::state::Tool::Rectangle;
+        app.session.tools.foreground = [0.0, 0.0, 0.0, 1.0];
+        let mut h = field_harness(app);
+        let fill = |app: &PhotocraftApp| match &app.session.active().unwrap().doc.layer(id).unwrap().content {
+            LayerContent::Shape(sh) => match &sh.fill {
+                Some(Fill::Solid(c)) => srgb_bytes([c.c[0], c.c[1], c.c[2], 1.0]),
+                _ => panic!("a solid fill"),
+            },
+            _ => panic!("not a shape layer"),
+        };
+        let steps = |app: &PhotocraftApp| app.session.active().unwrap().history.entries().len();
+        let before = steps(h.state());
+        // The only spin buttons are R, G and B, in that order.
+        for (field, text, steps_after, want) in [(1, "128", 1, [0x00, 0x80, 0x00]), (2, "64", 2, [0x00, 0x80, 0x40])] {
+            h.query_all_by_role(egui::accesskit::Role::SpinButton).nth(field).unwrap().click();
+            h.run_steps(1);
+            h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+            h.run_steps(1);
+            for ch in text.chars() {
+                h.event(egui::Event::Text(ch.to_string()));
+                h.run_steps(1);
+            }
+            h.key_press(egui::Key::Tab);
+            h.run_steps(2);
+            assert_eq!(fill(h.state()), want, "{text}");
+            assert_eq!(steps(h.state()), before + steps_after, "{text}: one step for the typed value");
+        }
+        // Typing into B again and clicking the field while B still has the focus: two steps, the
+        // click is not part of the typed value.
+        h.query_all_by_role(egui::accesskit::Role::SpinButton).nth(2).unwrap().click();
+        h.run_steps(1);
+        h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+        h.run_steps(1);
+        h.event(egui::Event::Text("9".into()));
+        h.run_steps(1);
+        assert_eq!(fill(h.state()), [0x00, 0x80, 0x09]);
+        assert_eq!(steps(h.state()), before + 3, "the typed 9");
+        let min = h.ctx.input(|i| i.viewport_rect()).min;
+        click(&mut h, min + vec2(60.0, 10.0));
+        assert_eq!(steps(h.state()), before + 4, "the click after typing");
+        // A sum applies when Enter commits it, after the field let go of the focus: still the
+        // step of the "2" typed before it.
+        h.query_all_by_role(egui::accesskit::Role::SpinButton).next().unwrap().click();
+        h.run_steps(1);
+        h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+        h.run_steps(1);
+        for ch in "2*64".chars() {
+            h.event(egui::Event::Text(ch.to_string()));
+            h.run_steps(1);
+        }
+        h.key_press(egui::Key::Enter);
+        h.run_steps(2);
+        assert_eq!(fill(h.state())[0], 0x80, "2*64");
+        assert_eq!(steps(h.state()), before + 5, "2*64 is one step");
+    }
+
     /// The pro Color panel's hex readout edits the foreground too.
     #[test]
     fn color_field_hex_field_takes_a_typed_hex() {
@@ -5248,36 +5259,6 @@ mod color_tests {
         let mut h = field_harness(app);
         type_hex(&mut h, "003300");
         assert_eq!(srgb_bytes(h.state().session.tools.foreground), [0x00, 0x33, 0x00]);
-    }
-
-    #[test]
-    fn hue_and_saturation_fields_take_values_on_black() {
-        use egui_kittest::kittest::Queryable;
-        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
-        app.session.tools.foreground = [0.0, 0.0, 0.0, 1.0];
-        let mut h = egui_kittest::Harness::builder().with_size(vec2(300.0, 300.0)).build_ui_state(
-            |ui, app: &mut PhotocraftApp| {
-                if ui.ctx().fonts(|f| f.families().contains(&egui::FontFamily::Name("medium".into()))) {
-                    hsb_sliders(app, ui);
-                }
-            },
-            app,
-        );
-        PhotocraftApp::setup_context(&h.ctx, crate::theme::ThemeKind::Studio);
-        h.run_steps(2);
-        // Hue, Saturation, Brightness, typed one key per frame. Black has no hue or saturation of its
-        // own, so the first two used to reset to 0 and this ended on white.
-        for (field, typed) in [(0, "120"), (1, "100"), (2, "100")] {
-            h.query_all_by_role(egui::accesskit::Role::SpinButton).nth(field).unwrap().click();
-            h.run_steps(1);
-            for ch in typed.chars() {
-                h.event(egui::Event::Text(ch.to_string()));
-                h.run_steps(1);
-            }
-            h.key_press(egui::Key::Tab);
-            h.run_steps(2);
-        }
-        assert_eq!(srgb_bytes(h.state().session.tools.foreground), [0, 255, 0]);
     }
 
     /// The Color field fills the dock group, shrinks to leave room for the readout in a short group, and ignores a bad height.
@@ -5374,7 +5355,48 @@ mod color_tests {
         }
     }
 
-    /// #5568: with a shape layer selected, the Color panel recolours its fill (keeping the fill's
+    /// With a shape tool and a shape layer selected, the field recolours its fill, and each
+    /// gesture is its own undo step: a click, every drag, and a swatch followed by a drag. A drag
+    /// only reaches the field after its press frame, so it must not join the step before it.
+    #[test]
+    fn color_panel_gestures_recolour_the_selected_shape_in_separate_steps() {
+        use photocraft_doc::{Fill, LayerContent, LayerId};
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        app.session.execute("file.new", json!({"width": 64, "height": 48})).unwrap();
+        let id = LayerId(app.run("shape.create", json!({"rect": [8, 8, 40, 30], "fill": "#000000"})).unwrap()["layer"].as_u64().unwrap());
+        app.ui.tool = crate::state::Tool::Rectangle;
+        let mut h = field_harness(app);
+        let is_foreground = |app: &PhotocraftApp| {
+            let fg = app.session.tools.foreground;
+            match &app.session.active().unwrap().doc.layer(id).unwrap().content {
+                LayerContent::Shape(sh) => matches!(&sh.fill, Some(Fill::Solid(c)) if (0..3).all(|i| (c.c[i] - fg[i]).abs() < 0.01)),
+                _ => panic!("not a shape layer"),
+            }
+        };
+        let steps = |app: &PhotocraftApp| app.session.active().unwrap().history.entries().len();
+        let before = steps(h.state());
+        let min = h.ctx.input(|i| i.viewport_rect()).min;
+        click(&mut h, min + vec2(60.0, 10.0));
+        assert!(is_foreground(h.state()));
+        assert_eq!(steps(h.state()), before + 1, "the click");
+        drag(&mut h, min + vec2(120.0, 40.0), min + vec2(250.0, 120.0));
+        assert!(is_foreground(h.state()));
+        assert_eq!(steps(h.state()), before + 2, "the drag is one more step");
+        drag(&mut h, min + vec2(200.0, 60.0), min + vec2(100.0, 150.0));
+        assert_eq!(steps(h.state()), before + 3, "the next drag another");
+        // The drag ended on black, the first swatch: picking the shape's own colour changes
+        // nothing and adds no step (#5568), so take the second swatch.
+        let fg = h.state().session.tools.foreground;
+        let name = h.state_mut().run("swatches.list", json!({})).unwrap()["groups"][0]["swatches"][1]["name"].as_str().unwrap().to_string();
+        crate::swatches_ui::use_swatch(h.state_mut(), &name, false);
+        assert_ne!(h.state().session.tools.foreground, fg, "{name} is another colour");
+        assert_eq!(steps(h.state()), before + 4, "the swatch");
+        drag(&mut h, min + vec2(150.0, 30.0), min + vec2(220.0, 100.0));
+        assert!(is_foreground(h.state()));
+        assert_eq!(steps(h.state()), before + 5, "a drag after a swatch is a step of its own");
+    }
+
+    /// #5568: with a shape tool and a shape layer selected, the Color panel recolours its fill (keeping the fill's
     /// opacity): a click is one undo step and a whole drag across the field is one more.
     #[test]
     fn color_panel_recolours_the_selected_shape_fill() {
@@ -5382,6 +5404,7 @@ mod color_tests {
         let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
         app.session.execute("file.new", json!({"width": 64, "height": 48})).unwrap();
         let id = LayerId(app.run("shape.create", json!({"rect": [8, 8, 40, 30], "fill": [0.2, 0.4, 0.6, 0.5]})).unwrap()["layer"].as_u64().unwrap());
+        app.ui.tool = crate::state::Tool::Rectangle;
         let mut h = field_harness(app);
         let fill = |app: &PhotocraftApp| match &app.session.active().unwrap().doc.layer(id).unwrap().content {
             LayerContent::Shape(sh) => sh.fill.clone(),
@@ -5925,11 +5948,11 @@ mod swatch_type_tests {
     use super::*;
     use egui_kittest::Harness;
 
-    /// The HSB sliders only act on an edit. Their h/s/v round trip isn't exact for every colour
-    /// (#D8452E isn't), and comparing values used to rewrite the foreground every frame, which
-    /// would recolour selected type the moment it was selected.
+    /// The Color field only acts on an edit. Its h/s/v round trip isn't exact for every colour
+    /// (#D8452E isn't), and writing it back every frame would recolour selected type the moment it
+    /// was selected.
     #[test]
-    fn idle_hsb_sliders_leave_the_foreground_and_selected_type_alone() {
+    fn idle_color_field_leaves_the_foreground_and_selected_type_alone() {
         let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
         app.run("file.new", json!({"width": 400, "height": 200})).unwrap();
         let id = app.run("type.create", json!({"text": "Hello world", "size": 40, "x": 20, "y": 100, "color": "#ffffff"})).unwrap()["layer"].as_u64().unwrap();
@@ -5948,7 +5971,7 @@ mod swatch_type_tests {
             resize: None,
             preedit: None,
         });
-        let mut h = Harness::builder().with_size(vec2(300.0, 300.0)).build_ui_state(|ui, app: &mut PhotocraftApp| color_picker(app, ui), app);
+        let mut h = Harness::builder().with_size(vec2(300.0, 300.0)).build_ui_state(|ui, app: &mut PhotocraftApp| color_field(app, ui), app);
         h.run_steps(4);
         assert_eq!(h.state().session.tools.foreground, fg);
         let st = h.state().session.active().unwrap();

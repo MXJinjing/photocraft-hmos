@@ -256,7 +256,8 @@ pub fn caps(format: Format) -> FormatCaps {
         }
         Format::Jpeg => FormatCaps { layouts: &[L::Gray, L::Rgb, L::Cmyk], alpha: false, icc: true, exif: true, xmp: true, dpi: true, lossy: true, ..base },
         Format::Tiff => FormatCaps { depths: &[S::U8, S::U16, S::F32], layouts: TIFF_LAYOUTS, icc: true, exif: true, xmp: true, dpi: true, text: true, ..base },
-        Format::WebP => FormatCaps { icc: true, exif: true, xmp: true, animation: true, ..base },
+        // Resolution travels in EXIF (WebP has no field of its own).
+        Format::WebP => FormatCaps { icc: true, exif: true, xmp: true, dpi: true, animation: true, ..base },
         Format::Gif => FormatCaps { layouts: &[L::Rgba], animation: true, lossy: true, ..base },
         Format::Bmp => base,
         Format::Tga => FormatCaps { layouts: RGB_GRAY, ..base },

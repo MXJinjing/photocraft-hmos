@@ -15,7 +15,7 @@ use std::hash::{Hash, Hasher};
 
 use egui::{Align2, Color32, FontId, Rect as ERect, Sense, Stroke, TextureHandle, pos2, vec2};
 use photocraft_algo::{FilterParams, GALLERY_CATEGORIES, GalleryFilter};
-use photocraft_doc::LayerId;
+use photocraft_doc::{DocId, LayerId};
 use photocraft_geom::Rect;
 use photocraft_raster::{Interrupt, Surface};
 use serde_json::{Map, Value, json};
@@ -66,6 +66,8 @@ fn default_params(f: GalleryFilter) -> Map<String, Value> {
 }
 
 pub struct GalleryDialog {
+    /// Document this dialog belongs to (#5115).
+    pub document: DocId,
     pub layer: LayerId,
     layer_name: String,
     canvas: Rect,
@@ -100,6 +102,7 @@ pub struct GalleryDialog {
 impl GalleryDialog {
     pub fn describe(&self) -> Value {
         json!({
+            "document": self.document.0,
             "layer": self.layer.0,
             "effects": self.effects.iter().map(EffectLayer::to_json).collect::<Vec<_>>(),
             "selected": self.selected,
@@ -351,6 +354,7 @@ fn open_on(
     let open_cats = std::array::from_fn(|i| effects[sel].filter.category() == GALLERY_CATEGORIES[i]);
     let history = EditHistory::new(&effects);
     app.distort.gallery = Some(GalleryDialog {
+        document: st.doc.id,
         layer,
         layer_name,
         canvas,

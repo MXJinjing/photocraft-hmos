@@ -206,6 +206,27 @@ fn curve_of(a: &Adjustment) -> Vec<[f32; 2]> {
     }
 }
 
+/// #8984: the Curves graph in Properties grows with the panel instead of stopping at 300
+/// points, stays square, and edits where it is clicked at its new size.
+#[test]
+fn curves_graph_grows_with_the_properties_panel() {
+    let mut h = app_harness("curves", "rgb", 8);
+    let (id, _) = layer(&h);
+    let narrow = curves_graph(&h, id);
+    assert!(narrow.width() < 300.0, "{narrow:?}");
+    crate::panels::request_dock_width(&h.ctx, 760.0);
+    h.run_steps(8);
+    let wide = curves_graph(&h, id);
+    // 760 points of panel, but the 900-point window leaves room for 540 beside the other rows.
+    assert!(wide.width() > narrow.width() + 250.0 && wide.height() <= 900.0 - 360.0, "{narrow:?} → {wide:?}");
+    assert!((wide.width() - wide.height()).abs() < 1.0, "square: {wide:?}");
+    // A point added at the graph's centre lands at 128, 128 of the curve.
+    click(&mut h, wide.center());
+    let c = curve_of(&layer(&h).1);
+    assert_eq!(c.len(), 3, "{c:?}");
+    assert!((c[1][0] - 127.5).abs() < 2.0 && (c[1][1] - 127.5).abs() < 2.0, "{c:?}");
+}
+
 /// Issue #43: pressing on a point selects it (no new point), Delete/Backspace and ⌘/Ctrl-click
 /// remove points, dragging off the graph removes one, endpoints stay.
 #[test]

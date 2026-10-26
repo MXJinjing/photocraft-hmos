@@ -4,6 +4,7 @@
 
 use std::fmt;
 
+use crate::codecs::dpx;
 use crate::format::{Format, caps};
 use crate::image::{ChannelLayout, Image, SampleType};
 use crate::options::{DdsCompression, EncodeOptions};
@@ -19,6 +20,12 @@ pub enum FidelityWarning {
     DepthReduced {
         from: SampleType,
         to: SampleType,
+    },
+    /// Samples will be stored with fewer bits than their sample type holds: DPX at 10 or 12
+    /// bits, Cineon at 10.
+    BitsReduced {
+        from: SampleType,
+        bits: u8,
     },
     /// Float samples outside `[0, 1]` will be clipped by integer storage.
     RangeClipped,
@@ -82,6 +89,7 @@ impl fmt::Display for FidelityWarning {
                 write!(f, "{} cannot be written in this build", format.name())
             }
             DepthReduced { from, to } => write!(f, "{} will be reduced to {}", depth_name(*from), depth_name(*to)),
+            BitsReduced { from, bits } => write!(f, "{} will be reduced to {bits}-bit", depth_name(*from)),
             RangeClipped => write!(f, "HDR values outside 0..1 will be clipped"),
             AlphaDiscarded => write!(f, "alpha will be discarded"),
             AlphaBinarized => write!(f, "alpha will be reduced to on/off transparency"),
@@ -161,7 +169,7 @@ pub(crate) fn plan(image: &Image, format: Format, opts: &EncodeOptions) -> Plan 
         // The sample type follows the chosen bits (U8 for 8, U16 for 10, 12 and 16).
         Format::Dpx => Plan {
             layout: if layout == ChannelLayout::GrayA { ChannelLayout::Gray } else { pick_layout(layout, c.layouts, c.alpha) },
-            sample: crate::codecs::dpx::plan_sample(opts.dpx_bits, sample),
+            sample: dpx::plan_sample(opts.dpx_bits, sample),
         },
         // CIELab has no float form: float Lab is written with 16 bits.
         Format::Tiff if layout.is_lab() && sample.is_float() => Plan { layout: pick_layout(layout, c.layouts, c.alpha), sample: SampleType::U16 },
@@ -201,7 +209,13 @@ pub fn fidelity_warnings_with(image: &Image, format: Format, opts: &EncodeOption
         (SampleType::F16, SampleType::F32) => false,
         _ => true,
     };
-    if lossy_depth {
+    // DPX at 10 or 12 bits and Cineon keep fewer bits than their U16 plan: float samples always
+    // lose precision there, 16-bit ones unless they are already code values at that depth.
+    if let Some(bits) = dpx::packed_bits(format, opts).filter(|_| ss != SampleType::U8) {
+        if ss.is_float() || !dpx::keeps_u16_samples(&image.converted(p.layout, SampleType::U16), bits) {
+            w.push(W::BitsReduced { from: ss, bits });
+        }
+    } else if lossy_depth {
         w.push(W::DepthReduced { from: ss, to: p.sample });
     }
     // FITS stores floats as 0..1 (see `codecs::fits`), so out-of-range values are clipped too.
@@ -254,7 +268,7 @@ pub fn fidelity_warnings_with(image: &Image, format: Format, opts: &EncodeOption
                 w.push(W::MetadataTooLarge { what: "XMP", bytes: xmp.len() });
             }
         }
-        if m.dpi.is_some() && !c.dpi {
+        if m.dpi.is_some() && (!c.dpi || (format == Format::WebP && !crate::codecs::webp::keeps_dpi(image))) {
             w.push(W::DpiDropped);
         }
         // DPX keeps its own header fields, not free-form text.

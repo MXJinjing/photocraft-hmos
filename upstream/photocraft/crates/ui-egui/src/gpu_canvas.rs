@@ -325,7 +325,8 @@ impl GpuCanvas {
         if let Some(b) = budget {
             comp.set_memory_budget(b);
         }
-        let fit = LayerFit { doc: doc.id.0, needed: comp.working_set(doc, doc.bounds()), budget: comp.resident_budget() };
+        let needed = comp.working_set(doc, doc.bounds());
+        let fit = LayerFit { doc: doc.id.0, needed, budget: comp.fit_layers(needed, true) };
         res.layer_fit = Some(fit);
         Some(fit)
     }
@@ -508,7 +509,8 @@ impl GpuCanvas {
         // as hiding a big layer (#4024); small edits in the view stay on the GPU.
         let large = region.width() as u64 * region.height() as u64 >= DEFER_PX;
         if region == doc.bounds() || large {
-            let fit = LayerFit { doc: doc.id.0, needed: comp.working_set(doc, region), budget: comp.resident_budget() };
+            let needed = comp.working_set(doc, region);
+            let fit = LayerFit { doc: doc.id.0, needed, budget: comp.fit_layers(needed, region == doc.bounds()) };
             res.layer_fit = Some(fit);
             if !fit.fits() {
                 res.compositor = Some(comp);

@@ -139,9 +139,11 @@ fn gpu_time_tracks_execution_not_submission() {
     assert_eq!(t.px, area(full), "the measurement carries the pixels of the refresh it measured");
     assert!(t.spans >= 1, "at least one command buffer was timed");
 
-    // The premise: on this adapter the refresh really is dominated by GPU execution. A machine
-    // fast enough that it isn't cannot tell the two timings apart, so say so instead of failing.
-    if wall_ms < 3.0 * submit_ms {
+    // The premise: on this adapter the refresh really is dominated by GPU execution. `wall_ms`
+    // includes `submit_ms`, so the GPU execution window is `wall_ms - submit_ms`; a machine fast
+    // enough that this window isn't well above `3.0 * submit_ms` cannot tell the two timings
+    // apart, so say so instead of failing.
+    if wall_ms - submit_ms < 3.0 * submit_ms {
         eprintln!("SKIP the comparison: this GPU finishes a 6 MP composite in {wall_ms:.1} ms against {submit_ms:.1} ms of encoding");
         return;
     }

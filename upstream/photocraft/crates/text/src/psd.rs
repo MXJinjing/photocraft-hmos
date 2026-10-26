@@ -259,7 +259,7 @@ pub fn apply_txt2_frame(layer: &mut TextLayer, tysh: &[u8], txt2: &E) {
             let p = arr_f(frame.get("0"));
             if p.len() == 2 && p.iter().all(|v| v.is_finite()) { Affine::translate(p[0], p[1]) } else { Affine::IDENTITY }
         }
-        TextShape::Box { .. } => Affine::IDENTITY,
+        TextShape::Box { .. } | TextShape::Area { .. } => Affine::IDENTITY,
     };
     let to_text = matrix.mul(&at);
     if to_text == Affine::IDENTITY || to_text.determinant().abs() <= 1e-9 {
@@ -272,7 +272,7 @@ pub fn apply_txt2_frame(layer: &mut TextLayer, tysh: &[u8], txt2: &E) {
     // again would move it twice.
     let origin = match layer.shape {
         TextShape::Point | TextShape::Path { .. } => Point::new(0.0, 0.0),
-        TextShape::Box { .. } => {
+        TextShape::Box { .. } | TextShape::Area { .. } => {
             let b = engine_data(&t.text)
                 .map(|e| {
                     arr_f(
@@ -390,10 +390,44 @@ pub fn text_layer_from_tysh(data: &[u8], dpi: f32) -> Option<TextLayer> {
     // writing the TySh all agree on the visible position (#1469).
     if let Some([x, y]) = legacy_point_origin(&t) {
         let [a, b, c, d, e, f] = layer.transform.m;
-        layer.transform.m = [a, b, c, d, a * x + c * y + e, b * x + d * y + f];
+        let corrected = [a, b, c, d, a * x + c * y + e, b * x + d * y + f];
+        if corrected.iter().all(|v| v.is_finite()) {
+            layer.transform.m = corrected;
+        }
     }
     layer.sync_summary();
     Some(layer)
+}
+
+/// Refines a legacy point-text estimate after imported fonts and styles have been resolved.
+/// Uses the rendering engine's font context; an accepted `Txt2` frame stays authoritative.
+pub fn refine_legacy_point_origin(layer: &mut TextLayer, dpi: f32, engine: &mut crate::TextEngine, txt2: Option<&E>) {
+    let Some(raw) = layer.psd_raw.clone() else { return };
+    let Some(t) = parse_tysh(&raw) else { return };
+    let Some([x, y]) = legacy_point_origin(&t) else { return };
+    if !matches!(layer.shape, TextShape::Point) {
+        return;
+    }
+    let guessed = t.transform.mul(&Affine::translate(x, y));
+    if layer.transform != guessed {
+        return;
+    }
+    // `boundingBox` is the tight ink box (Photoshop writes the layout box as `bounds`), so match
+    // it with the layout's ink, not its logical box: text whose ink starts below the ascent
+    // line (`...`, `_`, lowercase) would otherwise land too low.
+    let Some(ink) = crate::render::ink_bounds(&engine.layout(layer, dpi)) else { return };
+    if !ink.iter().all(|v| v.is_finite()) {
+        return;
+    }
+    let corrected = t.transform.mul(&Affine::translate(x - ink[0], y - ink[1]));
+    if corrected.m.iter().all(|v| v.is_finite()) {
+        layer.transform = corrected;
+        // A valid frame can coincide with the initial estimate; numeric equality cannot tell
+        // whether it was used. Reapply it after the fallback so it always wins.
+        if let Some(txt2) = txt2 {
+            apply_txt2_frame(layer, &raw, txt2);
+        }
+    }
 }
 
 /// The local origin to fold into a legacy point-text transform, if present.
@@ -426,7 +460,11 @@ fn legacy_point_origin(t: &TySh) -> Option<[f64; 2]> {
     // A local bounding-box origin in the thousands and a transform origin beyond a normal canvas
     // are the signature of this old writer. Requiring that the bounding-box origin is closer to
     // the document prevents applying the correction again after export/import.
-    (bounds[0].abs().max(bounds[1].abs()) > 1024.0 && origin_distance > 4096.0 && shifted_distance < origin_distance).then_some([bounds[0], bounds[1]])
+    if !(bounds[0].abs().max(bounds[1].abs()) > 1024.0 && origin_distance > 4096.0 && shifted_distance < origin_distance) {
+        return None;
+    }
+
+    Some([bounds[0], bounds[1]])
 }
 
 fn descriptor_rect(text: &Descriptor, key: &str) -> Option<[f64; 4]> {
@@ -1655,10 +1693,16 @@ pub fn build_engine_data(layer: &TextLayer, template: Option<E>, dpi: f32) -> E 
     if dict.get("UseFractionalGlyphWidths").is_none() {
         dict.set("UseFractionalGlyphWidths", E::Bool(true));
     }
-    let (shape_type, box_bounds) = match layer.shape {
+    let (shape_type, box_bounds) = match &layer.shape {
         // PSD path type is not written yet: the layer saves as point text.
         TextShape::Point | TextShape::Path { .. } => (0, None),
-        TextShape::Box { x, y, width, height } => (1, Some([x, y, x + width, y + height])),
+        TextShape::Box { x, y, width, height } => (1, Some([*x, *y, x + width, y + height])),
+        // PSD area type is not written yet: the layer saves as paragraph text over the path's
+        // bounds, so Photoshop opens it with the same text wrapping in a rectangle.
+        TextShape::Area { path } => match crate::area::path_bounds(path) {
+            Some((x0, y0, x1, y1)) => (1, Some([x0 as f32, y0 as f32, x1 as f32, y1 as f32])),
+            None => (0, None),
+        },
     };
     let mut photoshop = E::Dict(vec![("ShapeType".into(), E::Int(shape_type))]);
     match box_bounds {
@@ -1771,9 +1815,14 @@ pub fn build_tysh(layer: &TextLayer, dpi: f32, ink: Option<[f32; 4]>) -> Vec<u8>
             },
         ),
     );
-    let [l, t, r, b] = match (&layer.shape, ink) {
-        (&TextShape::Box { x, y, width, height }, _) => [x, y, x + width, y + height],
-        (_, Some(i)) => i,
+    let area = match &layer.shape {
+        TextShape::Area { path } => crate::area::path_bounds(path).map(|(x0, y0, x1, y1)| [x0 as f32, y0 as f32, x1 as f32, y1 as f32]),
+        _ => None,
+    };
+    let [l, t, r, b] = match (&layer.shape, area, ink) {
+        (&TextShape::Box { x, y, width, height }, _, _) => [x, y, x + width, y + height],
+        (_, Some(a), _) => a,
+        (_, _, Some(i)) => i,
         _ => [0.0; 4],
     };
     let rect = |cls: &str| {
@@ -1877,6 +1926,27 @@ mod nonfinite_tests {
         let s = CharStyle { baseline: FontBaseline::Subscript, ..Default::default() };
         let back = char_style(&[], &style_sheet_data(&s, 0, 1.0), &[], 1.0);
         assert_eq!(back.baseline, FontBaseline::Subscript);
+    }
+
+    #[test]
+    fn area_path_that_is_not_finite_saves_as_point_text() {
+        let path = photocraft_doc::vector::Path::new(vec![photocraft_doc::vector::Subpath::polygon(&[(0.0, 0.0), (f64::NAN, 0.0), (10.0, f64::INFINITY)])]);
+        let layer = TextLayer {
+            text: "x".into(),
+            runs: vec![TextRun { len: 1, style: CharStyle { size_pt: 12.0, ..Default::default() } }],
+            shape: TextShape::Area { path },
+            ..Default::default()
+        };
+        let out = String::from_utf8_lossy(&crate::engine_data::write(&build_engine_data(&layer, None, 72.0))).into_owned();
+        assert!(out.contains("/PointBase") && !out.contains("/BoxBounds"), "{out}");
+        assert!(!out.to_ascii_lowercase().contains("nan") && !out.to_ascii_lowercase().contains("inf"), "{out}");
+        let t = parse_tysh(&build_tysh(&layer, 72.0, None)).unwrap();
+        for key in ["bounds", "boundingBox"] {
+            let Some(D::Descriptor(d)) = t.text.get(key) else { panic!("no {key}") };
+            for side in ["Left", "Top ", "Rght", "Btom"] {
+                assert!(matches!(d.get(side), Some(D::UnitFloat { value, .. }) if value.is_finite()), "{key} {side}: {:?}", d.get(side));
+            }
+        }
     }
 
     #[test]
