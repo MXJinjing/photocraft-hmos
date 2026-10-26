@@ -12,7 +12,9 @@
 ### Windows source builds
 
 Use the Rust MSVC toolchain and install Visual Studio or Microsoft C++ Build Tools with the
-**Desktop development with C++** workload. Follow Microsoft's
+**Desktop development with C++** workload (on Windows on ARM64 / `aarch64-pc-windows-msvc`, such
+as NVIDIA RTX Spark, also select **C++ Clang Compiler for Windows** or ensure `clang-cl.exe` is on
+`PATH`, as `aws-lc-sys` needs it to assemble ARMv8 crypto routines). Follow Microsoft's
 [Rust setup guide](https://learn.microsoft.com/en-us/windows/dev-environment/rust/setup),
 then open a new terminal and check `cargo --version` and `rustc --version`.
 
@@ -141,15 +143,18 @@ By default PhotoCraft's own crates log at `info` and everything else at `warn`. 
 
 ## Environment variables
 
+`photocraft --help` lists the desktop app's flags and, beside the control, automation-root and in-window-menu flags, the variable that stands in for each. A flag wins over its variable and an empty variable counts as unset. A bad flag value is a usage error naming the flag (exit status 2), as is an unknown option, a repeated flag or a flag without its value; a bad value in one of those listed variables is a usage error naming the variable. `PHOTOCRAFT_PRESENT_MODE` and `PHOTOCRAFT_FRAME_LATENCY` are not listed: a bad value there is logged and ignored. On Windows, release builds use the GUI subsystem and have no console, so `--help`, `--version` and usage errors print nothing in a terminal; redirect them to see the text (`photocraft --help | more` or `photocraft --help > help.txt`). The exit status is the same either way.
+
 | Variable | Effect |
 |---|---|
-| `PHOTOCRAFT_CONTROL_PORT` | Same as `--control <port>` |
+| `PHOTOCRAFT_CONTROL_PORT` | Same as `--control <port>`; also the port for `photocraft-cli serve --port` and `mcp --bridge` when the flag is absent. Empty is unset |
 | `PHOTOCRAFT_NO_PRINT` | Set to anything but `0`: `file.print` / `file.printOneCopy` refuse to spool (`dryRun` still works). CI sets it, with `LPDEST=photocraft-no-such-printer` as a second net; set both when running the panic hunt or fuzzers locally |
 | `RUST_LOG` | Log levels for standard error and the log file (see [Logs](#logs)) |
 | `PHOTOCRAFT_CONTROL_TOKEN` | 64-hex bearer token for control TCP (avoid on shared systems where environment inspection is possible) |
 | `PHOTOCRAFT_CONTROL_TOKEN_FILE` | Read, or create for a server, the control bearer-token file |
-| `PHOTOCRAFT_AUTOMATION_READ_ROOT` | Desktop app only: automation read root. Headless CLI modes require the `--automation-read-root` flag |
-| `PHOTOCRAFT_AUTOMATION_WRITE_ROOT` | Desktop app only: automation write root. Headless CLI modes require the `--automation-write-root` flag |
+| `PHOTOCRAFT_AUTOMATION_READ_ROOT` | Desktop app only: automation read root (`--automation-read-root`). Headless CLI modes require the flag |
+| `PHOTOCRAFT_AUTOMATION_WRITE_ROOT` | Desktop app only: automation write root (`--automation-write-root`). Headless CLI modes require the flag |
+| `PHOTOCRAFT_IN_WINDOW_MENUS=1` (or `--in-window-menus`) | macOS: keep the menus inside the window instead of the menu bar. `0`, `false`, `no`, `off` or empty is off |
 | `PHOTOCRAFT_CPU_CANVAS=1` | Force the CPU canvas path instead of the wgpu shader canvas |
 | `PHOTOCRAFT_NATIVE_WAYLAND=1` | Linux: stay on native Wayland when a pen is attached (by default the window then opens through Xwayland, because Wayland gives the app no pen input; #639). A pen is an input device with `BTN_TOOL_PEN` and the `ABS_X`/`ABS_Y` axes; virtual keyboards that claim every key are not pens (#1072) |
 | `PHOTOCRAFT_GPU_ADAPTER=nvidia` | Linux: use the graphics adapter whose name contains this (case-insensitive); overrides `performance.gpuAdapter` for one launch |
@@ -162,8 +167,8 @@ By default PhotoCraft's own crates log at `info` and everything else at `warn`. 
 | `PHOTOCRAFT_LOCALE` | Override Auto's native UI language for this launch; unsupported tags use English. See [system language detection](localization.md#first-launch-and-system-language). |
 | `PHOTOCRAFT_FX_TRACE=1` | Print the CPU time spent on GPU effect shapes and distance fields per rebuild |
 | `PHOTOCRAFT_STROKE_TRACE=1` (or `=<file.csv>`; also `--stroke-trace <stderr|file.csv>`, or `ui.set {"strokeTrace": true|false}` at runtime, without a file) | Time every frame of each brush stroke; print a summary per stroke, and with a path also append each frame to that CSV (see [Stroke latency trace](#stroke-latency-trace)) |
-| `PHOTOCRAFT_PRESENT_MODE=novsync` (or `--present-mode`) | Present mode for this launch: `fifo`, `autovsync`, or `novsync` (also `immediate`, `mailbox`: no vsync, the first of Immediate, Mailbox, Fifo the driver offers). Default: vsync, or no vsync when Preferences › Performance › Low-Latency Drawing is on (it ships off). For latency comparisons; shown in the stroke trace |
-| `PHOTOCRAFT_FRAME_LATENCY=1` (or `--frame-latency`) | Frames the swap chain may queue, 1 to 3 (wgpu's GL backend ignores it). For latency comparisons; shown in the stroke trace |
+| `PHOTOCRAFT_PRESENT_MODE=novsync` (or `--present-mode`) | Present mode for this launch: `fifo`, `autovsync`, or `novsync` (also `immediate`, `mailbox`: no vsync, the first of Immediate, Mailbox, Fifo the driver offers). Default: vsync, or no vsync when Preferences › Performance › Low-Latency Drawing is on (it ships off). For latency comparisons; shown in the stroke trace. A bad `--present-mode` is a usage error; a bad variable is logged and ignored |
+| `PHOTOCRAFT_FRAME_LATENCY=1` (or `--frame-latency`) | Frames the swap chain may queue, 1 to 3 (wgpu's GL backend ignores it). For latency comparisons; shown in the stroke trace. A bad `--frame-latency` is a usage error; a bad variable is logged and ignored |
 | `PHOTOCRAFT_PRINT_PORTAL=1` | Linux: File › Print always opens the system print dialog (the XDG print portal) instead of talking to CUPS; `0` never does. See [printing](printing.md). |
 | `PHOTOCRAFT_THEME_FILE=tokens.json` | **Debug builds only:** live design-token overrides, re-read on change |
 
@@ -225,6 +230,7 @@ cargo run -p photocraft-cli -- run in.png --cmd layer.new.layer --params '{"name
 cargo run -p photocraft-cli -- run --new '{"width":800,"height":600}' --cmd document.inspect
 cargo run -p photocraft-cli -- batch --actions actions.json --in photos/ --out done/ --format jpg
 cargo run -p photocraft-cli -- commands --filter blur                    # the command registry
+cargo run -p photocraft-cli --example man-and-completions -- out/       # man pages + bash/zsh/fish/elvish/PowerShell completions
 ```
 
 `actions.json` holds the steps of a recorded action: `[["<id>", {…}], …]`, `[{"command": "<id>", "params": {…}}, …]` or bare ids, as a list or wrapped in `{"actions": …}` or `{"steps": …}`; a droplet file works too. It can also be an Actions set (the Actions panel's `actions.json`, `{"actions": [{"name": …, "steps": […]}, …]}`): `--action <name>` picks the action to play (optional when the set holds one), and the whole set is loaded for each file, so a step that plays another action of the set works. `batch` refuses an `--out` folder that is the `--in` folder, since the results would replace the originals, unless `--in-place` is given. `run` prints one JSON line per command result.
@@ -256,10 +262,20 @@ For headless MCP clients, pass absolute paths to deliberately chosen trusted wor
 Tools:
 
 - `session_list`
-- `doc_open`, `doc_new`, `doc_place`, `doc_export_layers`, `doc_export_data_sets`, `doc_import_data_sets`, `doc_save`, `doc_export`, `doc_inspect`, `doc_render_preview` (returns a PNG image), `doc_select`, `doc_close`
+- `doc_open`, `doc_new`, `doc_place`, `doc_replace_smart_object`, `doc_export_layers`, `doc_export_data_sets`, `doc_import_data_sets`, `doc_save`, `doc_export`, `doc_inspect`, `doc_render_preview` (returns a PNG image), `doc_select`, `doc_close`
 - `command_list`, `command_run`, `command_batch` (several commands per call)
 - `jobs_list` (running background jobs with progress, then recently finished ones with their result or error), `jobs_cancel` (one job by id, or every running job)
 - bridge only: `ui_inspect`, `ui_screenshot`, `ui_pointer`, `ui_menu_invoke`, `ui_set`, `control_call`
+
+`doc_export_layers` in workspace headless mode returns `{files, count, skipped}`. `count` is
+only the number of files written. Each skipped top-level layer is reported as
+`{layer, name, reason}` (session id, original name, explanation); `skipped` is `[]` when every
+layer exports. Hidden layers are reported when `visible_only` is true (the default; `visibleOnly` in the engine/serve params), and
+standalone adjustments are reported because they have no pixels of their own. Groups still
+export merged, so their children are not separate skips. Filename numbering is unchanged;
+encoding or write failures remain errors. The engine command and trusted-local exports add
+the same `skipped` array to their existing `{files}` response. See the
+[`doc.exportLayers` protocol entry](control-protocol.md#headless-server) for details.
 
 Claude Code (`.mcp.json` in the repo root, or `claude mcp add`):
 
@@ -350,6 +366,24 @@ can't run.
 - **UI:** unit tests for widgets and state, plus screenshot checks through the control channel.
 
 ## Performance notes
+
+- The CPU canvas records whether an uploaded image is entirely opaque, so software window
+  adapters do not rasterize a transparency checker that the image completely hides. An edit
+  that introduces transparency restores the checker; partial uploads conservatively retain it
+  until a full upload proves the image opaque again. Pan/zoom frames reuse this metadata.
+  Pattern Preview retains every legacy checker pass: opaque texels alone do not establish
+  identical coverage between repeated copies on every adapter.
+  Compare the old checker pass with the optimized path on a synthetic 24 MP document using
+  `cargo test --release -p photocraft-ui-egui --lib cpu_canvas_background_benchmark -- --ignored --nocapture`.
+  The benchmark alternates both paths on the same cached image and reports the adapter and
+  per-frame p50/p95, including offscreen rasterization and synchronous readback. It checks
+  identical rendered pixels for opaque and transparent images. This measures warm canvas
+  presentation, not input-to-photon latency or document recompositing. Set the test-only
+  `PHOTOCRAFT_CPU_BENCH_OUTPUT` to a directory to save its JSON and before/after PNGs.
+  For the small pixel-identity regression, set `PHOTOCRAFT_CPU_PIXEL_OUTPUT` and run
+  `cargo test -p photocraft-ui-egui --lib omitting_an_occluded_checker_preserves_cpu_canvas_pixels -- --nocapture`.
+  This reports the adapter and saves per-view reference/optimized PNGs and exact difference
+  counts/bounds without relaxing the pixel comparison.
 
 - The canvas is presented by a custom WGSL shader (`ui-egui/src/gpu_canvas.rs`): mip-mapped/nearest sampling, procedural checkerboard, pixel grid, tiling. Brush strokes upload only their damage rect.
 - **The canvas composites on the GPU** (`photocraft-gpu`, driven from `gpu_canvas.rs`), layer effects included. What the planner can't express returns `Unsupported` and the canvas falls back to the CPU compositor (`photocraft-compose`, also the reference for export and tests): Multichannel documents, and documents or effect regions over the texture limit. Pieces the GPU can't derive itself are rasterised once on the CPU and cached (`compose::masks` for vector masks, `compose::shape_split` for stroked shapes with clipped layers, effect distance fields). Timings of the interactive paths: `cargo run --release -p photocraft-ui-egui --example interactive_bench`; effects: `--example fx_bench` (`--compare files…` for GPU vs CPU); the cost of changing a chisel bevel's size (a dragged slider, GPU and CPU, ellipse and text): `--example bevel_bench`; large documents (open, refresh, thumbnails, a filter, a stroke, saves; one operation per run so `/usr/bin/time -l` gives its peak memory): `--example large_image_bench -- --size 14000x14000 --op psd`. The app requests the adapter's own texture limit (egui's default is 8192 px; see `gpu_canvas::use_adapter_limits`); beyond it the CPU fallback composites and uploads in bands (`compose::render_bands`), and exports, thumbnails and flattening stream bands too, so no full-size float composite is ever held. Rendering fidelity: `cargo run --release -p photocraft-io --example oracle_diff -- corpus/psd` (the whole PSD oracle table in seconds). `ui.inspect` → `perf.timings.gpuFallback` names the reason (`null` on the GPU path).

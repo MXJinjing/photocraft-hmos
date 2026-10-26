@@ -13,7 +13,7 @@ use std::sync::Arc;
 
 use egui::{Color32, Stroke, TextureHandle, pos2, vec2};
 use photocraft_algo::puppet::{ITERATIONS, PuppetDensity, PuppetMesh, PuppetMode, PuppetPin, PuppetSolver, PuppetWarp, build_mesh};
-use photocraft_doc::{Document, LayerId};
+use photocraft_doc::{DocId, Document, LayerId};
 use photocraft_geom::Rect;
 use photocraft_raster::Surface;
 use serde_json::{Value, json};
@@ -23,6 +23,8 @@ use crate::canvas::{ToolEvent, ViewXform};
 
 pub struct PuppetSession {
     pub key: u64,
+    /// Document this session belongs to (#5115).
+    pub document: DocId,
     pub layer: LayerId,
     /// Command to commit with (`edit.puppetWarp` or `layer.smartObjects.puppetWarp`).
     command: String,
@@ -98,6 +100,7 @@ impl PuppetSession {
 
     pub fn describe(&self) -> Value {
         json!({
+            "document": self.document.0,
             "layer": self.layer.0,
             "pins": self.warp.pins,
             "mode": self.warp.mode,
@@ -202,6 +205,7 @@ pub fn begin(app: &mut PhotocraftApp, ctx: &egui::Context, command: &str) -> Res
     let texture = ctx.load_texture(format!("puppet-{key}"), img, egui::TextureOptions::LINEAR);
     let mut s = PuppetSession {
         key,
+        document: st.doc.id,
         layer,
         command: command.to_string(),
         surface,
@@ -760,10 +764,13 @@ mod tests {
         crate::distort_ui::drop_foreign(&mut app);
         assert!(app.distort.puppet.is_some());
         app.session.execute("file.new", json!({"width": 32, "height": 32, "depth": 8})).unwrap();
-        assert!(crate::distort_ui::display_doc(&app, 1).is_some());
+        let active = app.session.active_index().unwrap();
+        // The session stays until drop_foreign; the preview must not follow this document (#5115).
+        assert!(app.distort.puppet.is_some());
+        assert!(crate::distort_ui::display_doc(&app, active).is_none());
         crate::distort_ui::drop_foreign(&mut app);
         assert!(app.distort.puppet.is_none());
-        assert!(crate::distort_ui::display_doc(&app, 1).is_none());
+        assert!(crate::distort_ui::display_doc(&app, active).is_none());
         // Closing the document it was started on drops it too.
         assert!(app.session.set_active(0));
         crate::distort_ui::menu(&mut app, &ctx, "edit.puppetWarp", &json!({})).unwrap().unwrap();

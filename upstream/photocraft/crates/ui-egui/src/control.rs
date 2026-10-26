@@ -133,7 +133,8 @@ pub enum Outcome {
 /// field's value is validated before the first one is applied, so a typo, an unknown field, a
 /// bad value or a bad nested key can't reply with success while nothing — or only half of it —
 /// changed (#412).
-pub const UI_SET_FIELDS: [&str; 38] = [
+pub const UI_SET_FIELDS: [&str; 39] = [
+    "updatesOpen",
     "tool",
     "strokeTrace",
     "panels",
@@ -245,7 +246,7 @@ fn merged_object<T: serde::Serialize + serde::de::DeserializeOwned>(current: &T,
     serde_json::from_value(cur).map(Some).map_err(|e| format!("{field}: {e}"))
 }
 
-/// A `ui.set` object field applied by whole-value replacement (e.g. `dock`, `colorPanel`):
+/// A `ui.set` object field applied by whole-value replacement (e.g. `dock`):
 /// unknown nested keys are rejected like [`merged_object`] does, but the value replaces the
 /// state instead of merging into it.
 fn whole_object<T: serde::Serialize + serde::de::DeserializeOwned>(current: &T, v: Option<&Value>, field: &str) -> std::result::Result<Option<T>, String> {
@@ -427,16 +428,16 @@ fn dispatch(app: &mut PhotocraftApp, ctx: &egui::Context, req: &ControlRequest) 
             let Some(id) = s("command").or(s("id")) else { return err("missing `command`") };
             let params = p.get("params").cloned().unwrap_or(json!({}));
             // A control-channel menu click must respect the same modal gate as the native menu.
-            // Camera Raw's documented `ui` requests operate its already-open dialog rather
-            // than click a menu. Only that continuation may pass its own modal gate.
-            // engine.execute is deliberately not subject to the UI's menu-click semantics.
-            let camera_raw_continuation = id == "filter.cameraRaw"
-                && app.camera_raw.is_some()
+            // The documented `ui` requests of Camera Raw and the full-window workspaces operate
+            // the already-open one rather than click a menu. Only that continuation may pass its
+            // own modal gate. engine.execute is deliberately not subject to the UI's menu-click semantics.
+            let open_modal = if app.camera_raw.is_some() { Some("filter.cameraRaw") } else { crate::distort_ui::modal_workspace(app) };
+            let continuation = open_modal == Some(id)
                 && params.as_object().is_some_and(|fields| fields.len() == 1 && fields.get("ui").is_some_and(Value::is_object))
                 && app.ui.dialogs.is_empty()
                 && app.discard.is_none()
                 && !crate::crop_ui::blocks(app, id);
-            if req.method == "ui.menu.invoke" && !camera_raw_continuation && !crate::menus::modal_allows(app, id) {
+            if req.method == "ui.menu.invoke" && !continuation && !crate::menus::modal_allows(app, id) {
                 return err("menu command is unavailable while a modal dialog is open");
             }
             if let Some(authorize) = app.services.automation_command.as_ref()
@@ -471,7 +472,14 @@ fn dispatch(app: &mut PhotocraftApp, ctx: &egui::Context, req: &ControlRequest) 
                 None => err("`job` must be a job id"),
             }
         }
-        "ui.menu.list" => ok(serde_json::to_value(crate::menus::menu_items(app)).unwrap_or_default()),
+        "ui.menu.list" => {
+            // Report the same enablement the native menu shows, so a listed item is invokable.
+            let mut items = crate::menus::menu_items(app);
+            for item in &mut items {
+                item.enabled &= crate::menus::modal_allows(app, &item.id);
+            }
+            ok(serde_json::to_value(items).unwrap_or_default())
+        }
         "ui.inspect" => ok(inspect(app, ctx)),
         "ui.set" => {
             if let Some(field) = p.as_object().and_then(|o| o.keys().find(|k| !UI_SET_FIELDS.contains(&k.as_str()))) {
@@ -581,12 +589,13 @@ fn dispatch(app: &mut PhotocraftApp, ctx: &egui::Context, req: &ControlRequest) 
                 }
                 let panels = merged_object(&app.ui.panels, p.get("panels"), "panels")?;
                 let mask_target = bool_field(p, "maskTarget")?;
+                let updates_open = bool_field(p, "updatesOpen")?;
                 let vector_mask_target = bool_field(p, "vectorMaskTarget")?;
                 let selection_mode = uint_field(p, "selectionMode")?;
                 let dock_tabs = merged_object(&app.ui.dock_tabs, p.get("dockTabs"), "dockTabs")?;
                 let dock = whole_object(&app.ui.dock, p.get("dock"), "dock")?;
                 // Which chip the Color panel edits.
-                let color_panel = whole_object(&app.ui.color_panel, p.get("colorPanel"), "colorPanel")?;
+                let color_panel = merged_object(&app.ui.color_panel, p.get("colorPanel"), "colorPanel")?;
                 let dock_width = f32_field(p, "dockWidth")?;
                 let zoom = f32_field(p, "zoom")?;
                 let rotation = f32_field(p, "rotation")?;
@@ -746,6 +755,9 @@ fn dispatch(app: &mut PhotocraftApp, ctx: &egui::Context, req: &ControlRequest) 
                     app.ui.properties_layer = None;
                     app.ui.vector_mask_target &= !m;
                     app.sync_mask_targets();
+                }
+                if let Some(open) = updates_open {
+                    app.ui.updates_open = open;
                 }
                 if let Some(m) = vector_mask_target {
                     app.ui.vector_mask_target = m;
@@ -1394,6 +1406,8 @@ pub fn inspect(app: &PhotocraftApp, ctx: &egui::Context) -> Value {
         "status": app.ui.status,
         "statusError": app.ui.status_error,
         "notices": app.ui.notices,
+        "updatesOpen": app.ui.updates_open,
+        "updates": {"supported": app.session.updates.check.is_some(), "currentVersion": photocraft_engine::build_info::VERSION, "result": app.session.updates.status},
         "gpuFallbackNotice": app.ui.gpu_fallback_notice,
         "kysOffer": app.ui.kys_offer,
         "frame": app.frame,
@@ -1565,6 +1579,57 @@ mod tests {
         app.services.automation_command = None;
         assert_eq!(call(&mut app, &ctx, "ui.menu.invoke", cancel)["ok"], true);
         assert!(app.camera_raw.is_none());
+    }
+
+    #[test]
+    fn full_window_workspaces_are_modal_for_menu_invocations() {
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        let ctx = egui::Context::default();
+        app.run("file.new", json!({"width":32,"height":32})).unwrap();
+        app.run("file.new", json!({"width":32,"height":32})).unwrap();
+        app.run("layer.new.layer", json!({})).unwrap();
+        app.run("edit.fill", json!({"color":"#808080"})).unwrap();
+        app.run("select.rect", json!({"x":8,"y":8,"width":8,"height":8})).unwrap();
+        for workspace in ["filter.liquify", "edit.contentAwareFill", "filter.filterGallery", "filter.adaptiveWideAngle"] {
+            let opened = call(&mut app, &ctx, "ui.menu.invoke", json!({"id":workspace}));
+            assert_eq!(opened["ok"], true, "{workspace}: {opened}");
+            assert_eq!(crate::distort_ui::modal_workspace(&app), Some(workspace));
+            let doc = app.session.active().unwrap().doc.id;
+            for request in [
+                json!({"id":"window.document.0"}),
+                json!({"id":"select.all"}),
+                json!({"id":"view.zoomIn"}),
+                json!({"id":"filter.cameraRaw"}),
+                json!({"id":workspace,"params":{"ui":null}}),
+            ] {
+                let blocked = call(&mut app, &ctx, "ui.menu.invoke", request.clone());
+                assert_eq!(blocked["ok"], false, "{workspace}: {request} → {blocked}");
+                assert!(!crate::menus::modal_allows(&app, request["id"].as_str().unwrap()), "{workspace}: native menu greys {request}");
+            }
+            let listed = call(&mut app, &ctx, "ui.menu.list", json!({}));
+            let enabled = |id: &str| listed["result"].as_array().unwrap().iter().find(|it| it["id"] == id).map(|it| it["enabled"].clone());
+            assert_eq!(enabled("select.all"), Some(json!(false)), "{workspace}: ui.menu.list greys what invoke refuses");
+            assert_eq!(crate::distort_ui::modal_workspace(&app), Some(workspace), "{workspace} stays open with its work");
+            assert_eq!(app.session.active().unwrap().doc.id, doc);
+            // An open dialog still takes precedence over the workspace's own requests.
+            app.ui.open_dialog(DialogKind::About, Default::default());
+            let cancel = json!({"id":workspace,"params":{"ui":{"cancel":true}}});
+            assert_eq!(call(&mut app, &ctx, "ui.menu.invoke", cancel.clone())["ok"], false);
+            app.ui.dialogs.clear();
+            let cancelled = call(&mut app, &ctx, "ui.menu.invoke", cancel);
+            assert_eq!(cancelled["ok"], true, "{workspace}: {cancelled}");
+            assert_eq!(crate::distort_ui::modal_workspace(&app), None);
+            assert!(crate::menus::modal_allows(&app, "select.all"), "{workspace}: menus are free again");
+            let listed = call(&mut app, &ctx, "ui.menu.list", json!({}));
+            assert!(
+                listed["result"].as_array().unwrap().iter().any(|it| it["id"] == "select.all" && it["enabled"] == true),
+                "{workspace}: listed as enabled again"
+            );
+        }
+        // engine.execute stays programmatic: it is not a menu click.
+        assert_eq!(call(&mut app, &ctx, "ui.menu.invoke", json!({"id":"filter.liquify"}))["ok"], true);
+        let executed = call(&mut app, &ctx, "engine.execute", json!({"command":"select.all"}));
+        assert_eq!(executed["ok"], true, "{executed}");
     }
 
     #[test]
@@ -2348,17 +2413,17 @@ mod tests {
     }
 
     #[test]
-    fn ui_set_color_panel_slider_mode() {
-        use crate::state::ColorPanelSliderMode;
+    fn ui_set_color_panel_mode() {
+        use crate::state::ColorPanelMode;
         let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
         let ctx = egui::Context::default();
-        assert_eq!(app.ui.color_panel.slider_mode, ColorPanelSliderMode::Hsb);
-        assert_eq!(call(&mut app, &ctx, "ui.set", json!({"colorPanel": {"slider_mode": "rgb"}}))["ok"], true);
-        assert_eq!(app.ui.color_panel.slider_mode, ColorPanelSliderMode::Rgb);
-        assert_eq!(call(&mut app, &ctx, "ui.set", json!({"colorPanel": {"slider_mode": "hsb"}}))["ok"], true);
-        assert_eq!(app.ui.color_panel.slider_mode, ColorPanelSliderMode::Hsb);
-        assert_eq!(call(&mut app, &ctx, "ui.set", json!({"colorPanel": {"slider_mode": "cmyk"}}))["ok"], false);
-        assert_eq!(app.ui.color_panel.slider_mode, ColorPanelSliderMode::Hsb);
+        assert_eq!(app.ui.color_panel.mode, ColorPanelMode::HueCube);
+        assert_eq!(call(&mut app, &ctx, "ui.set", json!({"colorPanel": {"mode": "rgbSliders"}}))["ok"], true);
+        assert_eq!(app.ui.color_panel.mode, ColorPanelMode::RgbSliders);
+        assert_eq!(call(&mut app, &ctx, "ui.set", json!({"colorPanel": {"mode": "hsbSliders"}}))["ok"], true);
+        assert_eq!(app.ui.color_panel.mode, ColorPanelMode::HsbSliders);
+        assert_eq!(call(&mut app, &ctx, "ui.set", json!({"colorPanel": {"mode": "nope"}}))["ok"], false);
+        assert_eq!(app.ui.color_panel.mode, ColorPanelMode::HsbSliders);
     }
 
     #[test]

@@ -675,6 +675,26 @@ fn customized_panel_menus_and_rail_remain_reachable_after_float_and_restore() {
     assert!(menu.query_all_by_label("New Swatch…").count() > 0);
 }
 
+/// A floated Color panel's menu still picks its mode (#6000): the shared docking renderer has
+/// its own panel menu, separate from the legacy dock's.
+#[test]
+fn floated_color_panel_menu_picks_the_mode() {
+    let mut app = app();
+    app.run("window.panel.float", json!({"panel":"color","x":20,"y":40})).unwrap();
+    let mut h = harness(app, vec2(1280.0, 800.0));
+    let floating = h.ctx.memory(|memory| memory.area_rect(egui::Id::new("photocraft-panel-docking").with(("floating", &"color".to_string())))).unwrap();
+    let button = h.query_all_by_label("Panel menu").find(|node| floating.contains_rect(node.rect())).unwrap().rect().center();
+    h.hover_at(button);
+    for pressed in [true, false] {
+        h.event(Event::PointerButton { pos: button, button: PointerButton::Primary, pressed, modifiers: Modifiers::NONE });
+        h.run_steps(1);
+    }
+    h.run_steps(2);
+    h.get_by_label("   RGB Sliders").click();
+    h.run_steps(2);
+    assert_eq!(h.state().ui.color_panel.mode, crate::state::ColorPanelMode::RgbSliders);
+}
+
 #[test]
 fn actions_panel_menu_includes_load_and_save_actions() {
     let mut ready = false;

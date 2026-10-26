@@ -162,6 +162,14 @@ mod tests {
         ViewXform::active(h.state()).unwrap()
     }
 
+    // Pixel alignment derives a presentation camera within half a display pixel of the
+    // stored target; interrupting an animation must keep that same target and its zoom.
+    fn assert_camera_center(h: &Harness<'static, PhotocraftApp>, target: &View) {
+        let xf = view_xf(h);
+        let delta = (xf.to_screen(target.center[0], target.center[1]) - xf.rect.center()) * h.ctx.pixels_per_point();
+        assert!(delta.x.abs() <= 0.501 && delta.y.abs() <= 0.501, "camera differs by {delta:?} display pixels");
+    }
+
     fn press(h: &mut Harness<'static, PhotocraftApp>, p: Pos2, pressed: bool) {
         h.event(Event::PointerButton { pos: p, button: PointerButton::Primary, pressed, modifiers: Default::default() });
         h.step();
@@ -396,7 +404,7 @@ mod tests {
             let target = &h.state().ui.views[0];
             assert!(!target.zoom_animating, "{command}");
             assert_eq!(view_xf(&h).zoom, target.zoom);
-            assert_eq!(view_xf(&h).center, target.center);
+            assert_camera_center(&h, target);
         }
     }
 
@@ -429,7 +437,7 @@ mod tests {
             h.step();
             let target = &h.state().ui.views[0];
             assert_eq!(view_xf(&h).zoom, target.zoom, "gesture {gesture}");
-            assert_eq!(view_xf(&h).center, target.center, "gesture {gesture}");
+            assert_camera_center(&h, target);
         }
     }
 

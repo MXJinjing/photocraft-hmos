@@ -80,7 +80,7 @@ pub(crate) fn paint_surface<'a>(doc: &'a mut Document, id: LayerId, p: &Value) -
     }
 }
 
-fn check_all_unlocked(doc: &Document, id: LayerId) -> Result<()> {
+pub(crate) fn check_all_unlocked(doc: &Document, id: LayerId) -> Result<()> {
     let locks = doc.effective_locks(id);
     let l = doc.layer(id).ok_or(EngineError::NoLayer(id))?;
     if locks.all {
@@ -282,6 +282,10 @@ pub(crate) fn color_param(cmd: &str, p: &Value, key: &str, default: [f32; 4]) ->
 }
 pub(crate) fn parse_hex(s: &str) -> Option<[f32; 4]> {
     let s = s.trim_start_matches('#');
+    // `from_str_radix` accepts a leading '+', so "+f" would read as 0x0f.
+    if !s.bytes().all(|c| c.is_ascii_hexdigit()) {
+        return None;
+    }
     let b = |i: usize| u8::from_str_radix(s.get(i..i + 2)?, 16).ok().map(|v| v as f32 / 255.0);
     match s.len() {
         6 => Some([b(0)?, b(2)?, b(4)?, 1.0]),
@@ -461,10 +465,11 @@ fn destructive_adjust(s: &mut Session, label: &str, adj: Adjustment, p: &Value) 
         // The targeted layer mask (#780): ⌘I inverts it, as in Photoshop.
         let id = layer_param(s, &Value::Null)?;
         return s.edit(label, |doc, _| {
+            check_all_unlocked(doc, id)?;
             let sel = doc.selection.clone();
             let l = doc.layer_mut(id).ok_or(EngineError::NoLayer(id))?;
             let mask = l.mask.as_mut().ok_or_else(|| EngineError::Other("layer has no mask".into()))?;
-            pixels::adjust_mask(&mut mask.surface, &adj, sel.as_ref());
+            pixels::adjust_mask(&mut mask.surface, &adj, sel.as_ref()).map_err(EngineError::Other)?;
             Ok(Value::Null)
         });
     }
@@ -474,7 +479,7 @@ fn destructive_adjust(s: &mut Session, label: &str, adj: Adjustment, p: &Value) 
         return s.edit(label, |doc, _| {
             let sel = doc.selection.clone();
             if let Some(surf) = crate::channel_cmds::channel_surface_for_filter(doc, None, p)? {
-                pixels::adjust_mask(surf, &adj, sel.as_ref());
+                pixels::adjust_mask(surf, &adj, sel.as_ref()).map_err(EngineError::Other)?;
             }
             Ok(Value::Null)
         });
@@ -484,7 +489,7 @@ fn destructive_adjust(s: &mut Session, label: &str, adj: Adjustment, p: &Value) 
         let sel = doc.selection.clone();
         let mode = doc.mode;
         let surf = paint_surface(doc, id, &Value::Null)?;
-        pixels::adjust_surface(surf, &adj, sel.as_ref(), mode);
+        pixels::adjust_surface(surf, &adj, sel.as_ref(), mode).map_err(EngineError::Other)?;
         Ok(())
     })?;
     Ok(Value::Null)
@@ -1135,7 +1140,7 @@ fn build() -> Vec<CommandSpec> {
             "Reorder Layer",
             [],
             None,
-            r##"{"layer":id?| "layers":[id,…]?, "target":id,"position":"above|below|into"="above","copy":bool=false} (layers: one undoable move, document order preserved; copy: place duplicates there and leave the layers, as ⌥-dragging a Layers panel row)"##,
+            r##"{"layer":id?| "layers":[id,…]?, "target":id|name,"targetOccurrence":n? (which of several layers named `target`, in document order),"position":"above|below|into"="above","copy":bool=false} (layers: one undoable move, document order preserved; copy: place duplicates there and leave the layers, as ⌥-dragging a Layers panel row; a recorded action keeps the target by name)"##,
             has_layer,
             crate::layer_multi_cmds::move_to
         ),
@@ -1508,6 +1513,7 @@ fn build() -> Vec<CommandSpec> {
     v.extend(crate::brush_preset_cmds::specs());
     v.extend(crate::eraser_cmds::specs());
     v.extend(crate::preset_import_cmds::specs());
+    v.extend(crate::style_asl_cmds::specs());
     v.extend(crate::atn_cmds::specs());
     v.extend(crate::actions_edit_cmds::specs());
     v.extend(crate::swatch_cmds::specs());
@@ -1524,6 +1530,7 @@ fn build() -> Vec<CommandSpec> {
     v.extend(crate::file_cmds::specs());
     v.extend(crate::exr_cmds::specs());
     v.extend(crate::type_extra_cmds::specs());
+    v.extend(crate::type_area_cmds::specs());
     v.extend(crate::type_styles_cmds::specs());
     v.extend(crate::type_spell_cmds::specs());
     v.extend(crate::type_caret_cmds::specs());
@@ -1531,6 +1538,7 @@ fn build() -> Vec<CommandSpec> {
     v.extend(crate::layer_multi_cmds::specs());
     v.extend(crate::layer_copy_cmds::specs());
     v.extend(crate::prefs::specs());
+    v.extend(crate::updates_cmds::specs());
     v.extend(crate::edit_menu_cmds::specs());
     v.extend(crate::fill_key_cmds::specs());
     v.extend(crate::sample_cmds::specs());
@@ -1691,6 +1699,7 @@ fn set_mask_with(s: &mut Session, p: &Value, label: &str, mask: Option<LayerMask
     s.edit(label, |doc, _| {
         let mask = mask.clone().map(|mask| mask_at_depth(mask, doc.depth)).transpose()?;
         for id in &ids {
+            check_all_unlocked(doc, *id)?;
             if mask.is_some() {
                 crate::extra_cmds::background_to_layer_for_mask(doc, *id);
             }
@@ -1837,5 +1846,20 @@ mod set_props_tests {
         }
         s.execute("layer.setProps", json!({"opacity": 0, "fill": 1})).unwrap();
         assert_eq!(layer(&s), (0.0, 1.0));
+    }
+}
+
+#[cfg(test)]
+mod parse_hex_tests {
+    use super::parse_hex;
+
+    #[test]
+    fn signs_and_other_non_hex_characters_are_rejected() {
+        for bad in ["#+f+f+f", "+f+f+f+f", "#-f0000", "#gg0000", "#0f0f+f"] {
+            assert_eq!(parse_hex(bad), None, "{bad:?} is not hex digits");
+        }
+        let g = 15.0 / 255.0;
+        assert_eq!(parse_hex("#0f0f0f"), Some([g, g, g, 1.0]));
+        assert_eq!(parse_hex("#0f0f0fff"), Some([g, g, g, 1.0]));
     }
 }

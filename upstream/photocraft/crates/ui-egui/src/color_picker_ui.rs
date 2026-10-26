@@ -484,7 +484,7 @@ fn color_field(ui: &mut egui::Ui, f: &mut Map<String, Value>) {
     // Photoshop updates the colour on the press itself, not only when the button is released
     // (#6937): `is_pointer_button_down_on` is true from the press frame onwards (it covers
     // dragging too), while `clicked` fires on release and `dragged` only after a move.
-    if let Some(p) = resp.interact_pointer_pos().filter(|_| resp.is_pointer_button_down_on() || resp.clicked()) {
+    if let Some(p) = widgets::pick_pos(&resp) {
         let (x, y) = (((p.x - field.left()) / field.width()).clamp(0.0, 1.0), ((p.y - field.top()) / field.height()).clamp(0.0, 1.0));
         let c = field_color(&mode, fz, x, y);
         let keep = match mode.as_str() {
@@ -503,7 +503,7 @@ fn color_field(ui: &mut egui::Ui, f: &mut Map<String, Value>) {
         let tri = vec![pos2(x, sy), pos2(x - 6.0 * dir, sy - 4.0), pos2(x - 6.0 * dir, sy + 4.0)];
         ui.painter().add(egui::Shape::convex_polygon(tri, t.text, Stroke::NONE));
     }
-    if let Some(p) = sresp.interact_pointer_pos().filter(|_| sresp.is_pointer_button_down_on() || sresp.clicked()) {
+    if let Some(p) = widgets::pick_pos(&sresp) {
         let z = 1.0 - ((p.y - strip.top()) / strip.height()).clamp(0.0, 1.0);
         let h = match mode.as_str() {
             "h" => Some([z * 360.0, hsv[1], hsv[2]]),
@@ -567,7 +567,7 @@ fn swatches(ui: &mut egui::Ui, f: &mut Map<String, Value>) {
 }
 
 /// ⚠: a filled triangle with an exclamation mark cut out of it.
-fn warning_triangle(p: &egui::Painter, r: Rect, ink: Color32, cut: Color32) {
+pub(crate) fn warning_triangle(p: &egui::Painter, r: Rect, ink: Color32, cut: Color32) {
     let tri = vec![pos2(r.center().x, r.top()), pos2(r.right(), r.bottom()), pos2(r.left(), r.bottom())];
     p.add(egui::Shape::convex_polygon(tri, ink, Stroke::NONE));
     let x = r.center().x;
@@ -576,7 +576,7 @@ fn warning_triangle(p: &egui::Painter, r: Rect, ink: Color32, cut: Color32) {
 }
 
 /// A cube seen corner-on: a hexagon with three edges meeting in the middle.
-fn web_cube(p: &egui::Painter, r: Rect, ink: Color32) {
+pub(crate) fn web_cube(p: &egui::Painter, r: Rect, ink: Color32) {
     let (c, rad) = (r.center(), r.width() / 2.0);
     let corner = |k: f32| {
         let a = std::f32::consts::FRAC_PI_3 * k - std::f32::consts::FRAC_PI_2;
@@ -803,8 +803,7 @@ pub fn confirm(app: &mut PhotocraftApp, f: &Map<String, Value>) -> Result<Value,
     }
     let r = app.run("tools.setColors", params)?;
     if target == "foreground" {
-        crate::type_tool::foreground_changed(app);
-        crate::shape_fill_ui::foreground_changed(app, None);
+        crate::apply_color::foreground_changed(app, None);
     }
     Ok(r)
 }
@@ -862,6 +861,95 @@ mod tests {
 
     fn color(h: &Harness<'static, Map<String, Value>>) -> String {
         h.state().get("color").and_then(Value::as_str).unwrap().to_string()
+    }
+
+    /// Press at `at` and hold, with no release and no time passing, then run one frame.
+    fn press<S>(h: &mut Harness<'static, S>, at: egui::Pos2) {
+        press_button(h, at, egui::PointerButton::Primary, true);
+    }
+
+    fn press_button<S>(h: &mut Harness<'static, S>, at: egui::Pos2, button: egui::PointerButton, pressed: bool) {
+        h.event(egui::Event::PointerMoved(at));
+        h.event(egui::Event::PointerButton { pos: at, button, pressed, modifiers: egui::Modifiers::NONE });
+        h.run_steps(1);
+    }
+
+    /// #7793: the field and the slider pick on the frame the button goes down, not after the
+    /// pointer has travelled past egui's click threshold or been held for a while, and follow
+    /// moves of a few points.
+    #[test]
+    fn field_and_slider_pick_on_press_and_follow_small_moves() {
+        let mut f = Map::new();
+        f.insert("color".into(), json!("#336699"));
+        let mut h = Harness::builder().with_size(vec2(400.0, 300.0)).build_ui_state(
+            |ui, f: &mut Map<String, Value>| {
+                ui.horizontal(|ui| {
+                    let o = ui.cursor().min;
+                    let gap = ui.spacing().item_spacing.x;
+                    ui.data_mut(|d| d.insert_temp(egui::Id::new("test-origin"), (o, gap)));
+                    color_field(ui, f);
+                });
+            },
+            f,
+        );
+        h.run_steps(2);
+        let (o, gap) = h.ctx.data(|d| d.get_temp::<(egui::Pos2, f32)>(egui::Id::new("test-origin"))).unwrap();
+        // Field: saturation across, brightness down (hue mode).
+        let at = o + vec2(FIELD * 0.5, FIELD * 0.5);
+        press(&mut h, at);
+        let picked = color(&h);
+        assert_ne!(picked, "#336699", "the press itself picks");
+        let hsv = rgb_to_hsb(parse_hex(&picked).unwrap());
+        assert!((hsv[1] - 0.5).abs() < 0.02 && (hsv[2] - 0.5).abs() < 0.02, "{picked} {hsv:?}");
+        // A 3-point nudge (under the 6-point click threshold) moves the pick.
+        h.event(egui::Event::PointerMoved(at + vec2(3.0, 0.0)));
+        h.run_steps(1);
+        assert_ne!(color(&h), picked, "a small drag adjusts the pick");
+        h.event(egui::Event::PointerButton {
+            pos: at + vec2(3.0, 0.0),
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: egui::Modifiers::NONE,
+        });
+        h.run_steps(2);
+        // Hue slider: a press near the bottom picks a hue near 0 at once.
+        let before = color(&h);
+        press(&mut h, o + vec2(FIELD + gap + 9.0, FIELD * 0.95));
+        assert_ne!(color(&h), before, "the slider picks on press");
+        let hue = rgb_to_hsb(parse_hex(&color(&h)).unwrap())[0];
+        assert!(hue < 30.0 || hue > 330.0, "hue {hue}");
+    }
+
+    /// Only the primary button picks: a right or middle press (and its release) on the field or
+    /// the slider leaves the colour alone.
+    #[test]
+    fn field_and_slider_ignore_secondary_and_middle_presses() {
+        let mut f = Map::new();
+        f.insert("color".into(), json!("#336699"));
+        let mut h = Harness::builder().with_size(vec2(400.0, 300.0)).build_ui_state(
+            |ui, f: &mut Map<String, Value>| {
+                ui.horizontal(|ui| {
+                    let o = ui.cursor().min;
+                    let gap = ui.spacing().item_spacing.x;
+                    ui.data_mut(|d| d.insert_temp(egui::Id::new("test-origin"), (o, gap)));
+                    color_field(ui, f);
+                });
+            },
+            f,
+        );
+        h.run_steps(2);
+        let (o, gap) = h.ctx.data(|d| d.get_temp::<(egui::Pos2, f32)>(egui::Id::new("test-origin"))).unwrap();
+        for at in [o + vec2(FIELD * 0.5, FIELD * 0.5), o + vec2(FIELD + gap + 9.0, FIELD * 0.95)] {
+            for button in [egui::PointerButton::Secondary, egui::PointerButton::Middle] {
+                press_button(&mut h, at, button, true);
+                assert_eq!(color(&h), "#336699", "{button:?} press at {at:?}");
+                h.event(egui::Event::PointerMoved(at + vec2(3.0, 0.0)));
+                h.run_steps(1);
+                press_button(&mut h, at + vec2(3.0, 0.0), button, false);
+                h.run_steps(1);
+                assert_eq!(color(&h), "#336699", "{button:?} drag and release at {at:?}");
+            }
+        }
     }
 
     #[test]

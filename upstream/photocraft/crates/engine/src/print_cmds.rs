@@ -1183,13 +1183,14 @@ fn package(s: &mut Session, p: &Value) -> Result<Value> {
                     missing.push(path.clone());
                     continue;
                 };
-                match read_file(&file.to_string_lossy()) {
-                    Ok(bytes) => {
+                // Only a file PhotoCraft can place is copied; anything else is packaged as missing.
+                match read_file(&file.to_string_lossy()).ok().filter(|bytes| crate::file_cmds::import(&fname, bytes).is_ok()) {
+                    Some(bytes) => {
                         write_file(&t, &bytes)?;
                         copied.push((path.clone(), t.clone()));
                         t
                     }
-                    Err(_) => {
+                    None => {
                         missing.push(path.clone());
                         continue;
                     }

@@ -1896,6 +1896,10 @@ mod tests {
         assert_eq!(checked(&app, "view.lockSlices"), Some(false));
         crate::menus::invoke(&mut app, &ctx, "view.lockSlices", json!({})).unwrap();
         assert_eq!(checked(&app, "view.lockSlices"), Some(true));
+        // Generator is opt-in (Preferences ▸ Plug-ins), as in Photoshop: the menu item is
+        // unavailable until it is enabled.
+        assert!(crate::menus::invoke(&mut app, &ctx, "file.generate.imageAssets", json!({})).is_err());
+        app.run("prefs.set", json!({"path": "plugIns.generatorEnabled", "value": true})).unwrap();
         crate::menus::invoke(&mut app, &ctx, "file.generate.imageAssets", json!({})).unwrap();
         assert_eq!(checked(&app, "file.generate.imageAssets"), Some(true));
         // Form dialogs open for the rest.

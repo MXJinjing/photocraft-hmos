@@ -583,6 +583,7 @@ pub fn body(app: &mut crate::PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<Strin
                         ui.spacing_mut().item_spacing.x = 8.0;
                         for c in row {
                             let (r, resp) = ui.allocate_exact_size(card, Sense::click());
+                            let resp = resp.on_hover_cursor(egui::CursorIcon::PointingHand);
                             let (w, h, _) = c.size(&units);
                             let on = match c {
                                 Card::Builtin(p) => chosen == p.0,

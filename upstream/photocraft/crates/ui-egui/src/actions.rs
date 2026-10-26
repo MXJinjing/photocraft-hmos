@@ -1747,6 +1747,74 @@ mod tests {
         assert!(!b_changed && !a_changed);
     }
 
+    /// Loads a Photoshop set holding Invert + a Save As into `dest` and plays it on a PSD.
+    /// Returns the played result, whether the PSD changed on disk and the files in `out`.
+    fn play_imported_save_as(dest: &str) -> (Value, bool, Vec<String>) {
+        use photocraft_psd::atn::{AtnAction, AtnEvent, AtnFile, AtnItem};
+        use photocraft_psd::descriptor::{Descriptor, UnicodeString, Value as D};
+        let dir = std::env::temp_dir().join(format!("photocraft-atn-save-as-{}-{}", dest.len(), std::process::id()));
+        let out = dir.join("out");
+        std::fs::create_dir_all(&out).unwrap();
+        let src = dir.join("src.psd").to_string_lossy().into_owned();
+        let path = |text: &str| {
+            let units: Vec<u16> = text.encode_utf16().chain(std::iter::once(0)).collect();
+            let mut b = b"txtu".to_vec();
+            b.extend_from_slice(&((12 + units.len() * 2) as u32).to_le_bytes());
+            b.extend_from_slice(&(units.len() as u32).to_le_bytes());
+            units.iter().for_each(|u| b.extend_from_slice(&u.to_le_bytes()));
+            D::Path(b)
+        };
+        let save = Descriptor::new("null")
+            .with("As  ", D::Descriptor(Descriptor::new("PNGF")))
+            .with("In  ", path(&out.join(dest).to_string_lossy()))
+            .with("DocI", D::Integer(53));
+        let item = |code: &[u8; 4], label: &str, d: Option<Descriptor>| AtnItem {
+            event: AtnEvent::Code(*code),
+            dictionary: label.into(),
+            descriptor: d,
+            ..Default::default()
+        };
+        let set = AtnFile {
+            name: UnicodeString::new_nul("Export"),
+            actions: vec![AtnAction {
+                name: UnicodeString::new_nul("Invert and save"),
+                items: vec![item(b"Invr", "Invert", None), item(b"save", "Save", Some(save))],
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let mut app = disk_app(vec![]);
+        app.run("file.new", json!({"width": 16, "height": 16})).unwrap();
+        app.save_as(Some(src.clone())).unwrap();
+        let before = std::fs::read(&src).unwrap();
+        app.run("actions.load", json!({"data": photocraft_engine::paint::tile::b64_encode(&photocraft_psd::atn::write(&set).unwrap())})).unwrap();
+        app.open_path(&src).unwrap();
+        let played = app.run("actions.play", json!({"action": 0})).unwrap();
+        let mut written: Vec<String> = std::fs::read_dir(&out).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+        written.sort();
+        let r = (played, std::fs::read(&src).unwrap() != before, written);
+        let _ = std::fs::remove_dir_all(&dir);
+        r
+    }
+
+    #[test]
+    fn imported_save_as_writes_the_recorded_file_not_the_played_one() {
+        // #7102: the Save As imported as File › Save, which wrote over src.psd.
+        let (played, src_changed, written) = play_imported_save_as("result.png");
+        assert!(played.get("failed").is_none(), "{played}");
+        assert!(!src_changed, "the Save As wrote over the file the action was played on");
+        assert_eq!(written, ["result.png"]);
+    }
+
+    #[test]
+    fn imported_save_as_into_a_folder_stops_before_writing() {
+        // A folder destination isn't mapped yet (#5430): playback stops on it, nothing is saved.
+        let (played, src_changed, written) = play_imported_save_as("folder");
+        assert!(played.get("failed").is_some(), "{played}");
+        assert!(!src_changed);
+        assert!(written.is_empty(), "{written:?}");
+    }
+
     #[test]
     fn set_folders_group_actions_and_collapse() {
         use egui_kittest::{Harness, kittest::Queryable};

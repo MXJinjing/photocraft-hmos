@@ -54,15 +54,42 @@ fn png_dimensions(data: &[u8]) -> Option<(u32, u32)> {
 /// Returns `Some(Some((w, h)))` when the format is PNG/WebP and its header parses cleanly,
 /// `Some(None)` when the format is PNG/WebP (by MIME or magic bytes under `"text/plain"`)
 /// and its header is malformed, or `None` for other formats.
+/// A JPEG's size from its frame header (the first SOF marker), without decoding anything.
+fn jpeg_dimensions(data: &[u8]) -> Option<(u32, u32)> {
+    let mut i = 2;
+    loop {
+        if *data.get(i)? != 0xFF {
+            return None;
+        }
+        let marker = *data.get(i + 1)?;
+        match marker {
+            0xFF => i += 1,
+            // SOF0..SOF15, but for DHT (C4), JPG (C8) and DAC (CC).
+            0xC0..=0xCF if !matches!(marker, 0xC4 | 0xC8 | 0xCC) => {
+                let h = u16::from_be_bytes([*data.get(i + 5)?, *data.get(i + 6)?]);
+                let w = u16::from_be_bytes([*data.get(i + 7)?, *data.get(i + 8)?]);
+                return Some((u32::from(w), u32::from(h)));
+            }
+            // Start of scan or end of image before any frame header.
+            0xD8..=0xDA => return None,
+            0x01 | 0xD0..=0xD7 => i += 2,
+            _ => i += 2 + usize::from(u16::from_be_bytes([*data.get(i + 2)?, *data.get(i + 3)?])),
+        }
+    }
+}
+
 fn embedded_image_dimensions(mime: &str, data: &[u8]) -> Option<Option<(u32, u32)>> {
     match mime {
         "image/png" => Some(png_dimensions(data)),
-        "image/webp" => Some(photocraft_codecs::probe_size(data).ok()),
+        "image/webp" | "image/gif" => Some(photocraft_codecs::probe_size(data).ok()),
+        "image/jpeg" | "image/jpg" => Some(jpeg_dimensions(data)),
         "text/plain" => {
             if data.starts_with(&[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A]) {
                 Some(png_dimensions(data))
-            } else if data.get(0..4) == Some(b"RIFF") && data.get(8..12) == Some(b"WEBP") {
+            } else if (data.get(0..4) == Some(b"RIFF") && data.get(8..12) == Some(b"WEBP")) || data.starts_with(b"GIF8") {
                 Some(photocraft_codecs::probe_size(data).ok())
+            } else if data.starts_with(&[0xFF, 0xD8, 0xFF]) {
+                Some(jpeg_dimensions(data))
             } else {
                 None
             }
@@ -672,7 +699,25 @@ impl Conv {
             _ => FillRule::NonZero,
         };
         let mut sh = ShapeLayer { path: Path { subpaths, fill_rule, inverted: false }, fill, stroke, ..Default::default() };
-        sh.cache = Some(photocraft_vector::render_shape(&sh, self.fmt, self.canvas));
+        // The pixel cache is optional, so it is charged like any other retained raster and left
+        // out (the shape renders from its path) once the budget is spent: compact geometry can
+        // cover the whole canvas in every one of thousands of shapes.
+        let b = data.bounds();
+        let reach = sh.stroke.as_ref().map_or(0.0, |s| s.width);
+        let area = Rect::new(
+            (b.left() - reach).floor() as i32,
+            (b.top() - reach).floor() as i32,
+            (b.right() + reach).ceil() as i32,
+            (b.bottom() + reach).ceil() as i32,
+        )
+        .intersect(&self.canvas);
+        let pixels = u64::from(area.width()) * u64::from(area.height());
+        if self.can_retain_pixels(pixels) {
+            sh.cache = Some(photocraft_vector::render_shape(&sh, self.fmt, self.canvas));
+            let bytes = pixels * self.fmt.bytes_per_pixel() as u64;
+            self.pixel_budget -= bytes;
+            self.retained_pixel_bytes += bytes;
+        }
         Some(Layer::new(self.name(p.id(), 0), LayerContent::Shape(sh)))
     }
 
@@ -1151,6 +1196,26 @@ mod tests {
         let bad_webp = b"RIFF\x10\x00\x00\x00WEBPVP8 ".to_vec();
         assert!(resolve("image/webp", Arc::new(bad_webp.clone()), &opt).is_none());
         assert!(resolve("text/plain", Arc::new(bad_webp), &opt).is_none());
+    }
+
+    #[test]
+    fn jpeg_dimensions_come_from_the_frame_header_and_oversized_jpegs_are_refused() {
+        // SOI, an APP0 segment of length 4, then SOF0 (length 11): 8 bits, height 40000, width 30000.
+        let jpeg = |h: u16, w: u16| {
+            let mut v = vec![0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x04, 0, 0, 0xFF, 0xC0, 0x00, 0x0B, 8];
+            v.extend(h.to_be_bytes());
+            v.extend(w.to_be_bytes());
+            v.extend([1, 1, 0x11, 0]);
+            v
+        };
+        assert_eq!(jpeg_dimensions(&jpeg(40_000, 30_000)), Some((30_000, 40_000)));
+        assert_eq!(jpeg_dimensions(&[0xFF, 0xD8, 0xFF, 0xDA, 0, 2]), None);
+        assert_eq!(jpeg_dimensions(&[0xFF, 0xD8]), None);
+        let opt = options(Arc::new(usvg::fontdb::Database::new()));
+        let resolve = &opt.image_href_resolver.resolve_data;
+        // 1.2 billion pixels would be 4.8 GB of RGBA before resvg scaled anything down.
+        assert!(resolve("image/jpeg", Arc::new(jpeg(40_000, 30_000)), &opt).is_none());
+        assert!(resolve("text/plain", Arc::new(jpeg(40_000, 30_000)), &opt).is_none());
     }
 
     #[test]

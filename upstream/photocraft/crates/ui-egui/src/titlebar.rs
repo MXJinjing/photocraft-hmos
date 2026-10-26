@@ -729,6 +729,25 @@ mod tests {
         assert!(cmds.iter().any(|c| matches!(c, ViewportCommand::Close)), "{cmds:?}");
     }
 
+    /// After the window's GPU device is lost, the prompt asking about unsaved work could never be
+    /// drawn: the close button quits instead of opening it (see `discard_ui::intercept`).
+    #[test]
+    fn close_quits_without_a_prompt_once_the_window_device_is_lost() {
+        let mut w = Win::new(1100.0);
+        w.app.run("file.new", json!({"width": 8, "height": 8})).unwrap();
+        w.app.run("layer.new.layer", json!({})).unwrap();
+        w.frame(vec![]);
+        let close = w.caption(Caption::Close).center();
+        let asks = w.click(close);
+        assert!(!asks.iter().any(|c| matches!(c, ViewportCommand::Close)), "a window that can draw asks first: {asks:?}");
+        assert!(w.app.discard.is_some());
+        w.app.discard = None;
+        w.app.window_lost = true;
+        let quits = w.click(close);
+        assert!(quits.iter().any(|c| matches!(c, ViewportCommand::Close)), "{quits:?}");
+        assert!(w.app.discard.is_none(), "no prompt opened");
+    }
+
     #[test]
     fn minimize_and_maximize_follow_the_window_state() {
         let mut w = Win::new(1100.0);
