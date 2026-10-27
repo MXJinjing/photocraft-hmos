@@ -471,6 +471,37 @@ fn bitmap_rejects_bad_resolutions_and_patterns_without_editing_the_document() {
 }
 
 #[test]
+fn bitmap_output_resolution_budgets_the_whole_conversion_not_just_the_resample() {
+    // 100 x 100 px at 1 ppi to 200 ppi is 20000 x 20000 px: 400 MP. Resampling an 8/16-bit gray
+    // document to it fits the resample budget (under 2 GB), but the conversion's f32 working
+    // buffers at that size (~40 B/px, 16 GB) don't: it is refused before anything is allocated.
+    for depth in [8, 16] {
+        let mut s = ramp(100, 100, depth, 1.0);
+        let d = &s.active().unwrap().doc;
+        assert!(crate::image_cmds::check_resample_budget("t", d, 20_000, 20_000, "").is_ok(), "{depth}");
+        let before = s.active().unwrap().history.past_len();
+        let e = s.execute("image.mode.bitmap", json!({"method": "diffusion", "resolution": 200})).unwrap_err().to_string();
+        assert!(e.contains("megapixels") && e.contains("Output resolution"), "{depth}: {e}");
+        assert_eq!(s.active().unwrap().history.past_len(), before, "{depth}");
+        let d = doc(&s);
+        assert_eq!((d.mode, d.size.width, d.resolution_dpi), (ColorMode::Grayscale, 100, 1.0), "{depth}");
+        // A side past the 300,000 px document limit is refused, not clamped (that would change
+        // the print size): 20000 px at 72 ppi is 333,333 px at 1200 ppi.
+        let mut wide = ramp(20_000, 1, depth, 72.0);
+        let e = wide.execute("image.mode.bitmap", json!({"method": "threshold", "resolution": 1200})).unwrap_err().to_string();
+        assert!(e.contains("300000 px"), "{depth}: {e}");
+        assert_eq!((doc(&wide).mode, doc(&wide).size.width), (ColorMode::Grayscale, 20_000), "{depth}");
+        // 18000 px to 300,000 px exactly is allowed.
+        let mut edge = ramp(18_000, 1, depth, 72.0);
+        edge.execute("image.mode.bitmap", json!({"method": "threshold", "resolution": 1200})).unwrap();
+        assert_eq!(doc(&edge).size.width, 300_000, "{depth}");
+        // A size that fits is still converted.
+        s.execute("image.mode.bitmap", json!({"method": "diffusion", "resolution": 3})).unwrap();
+        assert_eq!((doc(&s).size.width, doc(&s).mode), (300, ColorMode::Bitmap), "{depth}");
+    }
+}
+
+#[test]
 fn duotone_inks_and_display() {
     let mut s = session(16, 8, 8, "gray");
     paint(&mut s, |x, _| [x as f32 / 15.0; 4].map(|v| v.min(1.0)));

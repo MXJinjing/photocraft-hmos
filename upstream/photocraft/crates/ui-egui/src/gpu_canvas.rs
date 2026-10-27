@@ -325,7 +325,8 @@ impl GpuCanvas {
         if let Some(b) = budget {
             comp.set_memory_budget(b);
         }
-        let fit = LayerFit { doc: doc.id.0, needed: comp.working_set(doc, doc.bounds()), budget: comp.resident_budget() };
+        let needed = comp.working_set(doc, doc.bounds());
+        let fit = LayerFit { doc: doc.id.0, needed, budget: comp.fit_layers(needed, true) };
         res.layer_fit = Some(fit);
         Some(fit)
     }
@@ -508,7 +509,8 @@ impl GpuCanvas {
         // as hiding a big layer (#4024); small edits in the view stay on the GPU.
         let large = region.width() as u64 * region.height() as u64 >= DEFER_PX;
         if region == doc.bounds() || large {
-            let fit = LayerFit { doc: doc.id.0, needed: comp.working_set(doc, region), budget: comp.resident_budget() };
+            let needed = comp.working_set(doc, region);
+            let fit = LayerFit { doc: doc.id.0, needed, budget: comp.fit_layers(needed, region == doc.bounds()) };
             res.layer_fit = Some(fit);
             if !fit.fits() {
                 res.compositor = Some(comp);
@@ -1135,6 +1137,14 @@ impl GpuInfo {
                 let template = "Driver: {driver}";
                 crate::i18n::fmt(tl!(template), &[("driver", &or(&self.driver, "unknown"))])
             },
+        ];
+        // The card's own memory caps the GPU budgets, so it explains a huge canvas falling back
+        // to the CPU. Only discrete cards report one (integrated GPUs share system memory).
+        if let Some(mb) = self.video_memory_mb {
+            let template = "Graphics memory: {size}";
+            v.push(crate::i18n::fmt(tl!(template), &[("size", &crate::chrome_ui::fmt_bytes(mb.saturating_mul(1 << 20)))]));
+        }
+        v.extend([
             {
                 let template = "GPU backend preference: {backend}";
                 crate::i18n::fmt(tl!(template), &[("backend", &or(&self.preference, "auto"))])
@@ -1163,7 +1173,7 @@ impl GpuInfo {
                 };
                 crate::i18n::fmt(tl!(template), &[("renderer", tl!(renderer))])
             },
-        ];
+        ]);
         if let Some(f) = &self.fallback {
             v.push({
                 let template = "Fallback: {reason}";
@@ -1399,8 +1409,9 @@ impl LayerFit {
 /// Floor of the compositor's memory budget: enough for a viewport's pages of a dozen layers.
 pub const MIN_GPU_BUDGET: u64 = 512 << 20;
 
-/// Why a full refresh whose layer pages don't fit [`memory_budget`] goes to the CPU compositor.
-pub const OVER_BUDGET: &str = "layers exceed the GPU memory budget; full refresh on the CPU";
+/// Why a full refresh whose layer pages don't fit [`memory_budget`] (or GPU memory) goes to the
+/// CPU compositor.
+pub const OVER_BUDGET: &str = photocraft_gpu::OVER_BUDGET;
 
 /// GPU memory the wgpu compositor may hold for layer pages and effect maps.
 ///
@@ -2843,6 +2854,19 @@ mod tests {
             assert_eq!(detect_video_memory(d.VendorId, d.DeviceId), Some(first.DedicatedVideoMemory as u64));
         }
         assert_eq!(detect_video_memory(0xdead, 0xbeef), None, "no such adapter");
+    }
+
+    /// System Info names the card's own memory, after the driver, when the card reports one; an
+    /// integrated GPU or an unknown card shows no such line.
+    #[test]
+    fn system_info_shows_the_cards_memory() {
+        let info = GpuInfo { adapter: "Card".into(), driver: "Driver 1".into(), video_memory_mb: Some(8192), ..Default::default() };
+        let lines = info.lines();
+        assert_eq!(lines.get(2).map(String::as_str), Some("Driver: Driver 1"));
+        assert_eq!(lines.get(3).map(String::as_str), Some("Graphics memory: 8.0G"));
+        let none = GpuInfo { video_memory_mb: None, ..info }.lines();
+        assert!(none.iter().all(|l| !l.starts_with("Graphics memory")), "{none:?}");
+        assert_eq!(none.len() + 1, lines.len());
     }
 
     /// The Linux reader finds the card by its PCI ids in a `/sys/class/drm`-shaped folder and reads

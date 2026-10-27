@@ -200,7 +200,7 @@ pub fn run(app: &mut PhotocraftApp, id: &str, params: Value) -> Result<Value, St
 /// replaces it when decoded. `path` is remembered for File › Save and Open Recent.
 pub fn start_open(app: &mut PhotocraftApp, name: &str, path: Option<String>, source: OpenSource) -> Result<(), String> {
     let name = &app.open_name(name);
-    match app.session.start_open(name, source).map_err(|e| e.to_string())? {
+    match app.session.start_open_for_user(name, source).map_err(|e| e.to_string())? {
         // Inline (wasm): finish now, like a background open that ended at once.
         Started::Done(v) => finish_open(app, name, path.as_deref(), &v, None),
         Started::Job(job) => {
@@ -545,13 +545,14 @@ fn on_event(app: &mut PhotocraftApp, ctx: &egui::Context, e: JobEvent) {
 }
 
 /// What [`crate::PhotocraftApp::open_bytes`] does after decoding, for a background open's result
-/// (`{document, warnings, color}`).
+/// (`{document, docId, warnings, color}` or `{held, …}`).
 fn finish_open(app: &mut PhotocraftApp, name: &str, path: Option<&str>, v: &Value, slot: Option<usize>) -> Result<(), String> {
     let warnings: Vec<String> =
         v.get("warnings").and_then(Value::as_array).map(|a| a.iter().filter_map(|w| w.as_str().map(str::to_string)).collect()).unwrap_or_default();
     let held = |doc, read_only, question, policy_applied| crate::open_prompt::Held {
         doc,
         read_only,
+        damage_pending: v.get("damaged").and_then(Value::as_bool).unwrap_or(false),
         name: name.to_string(),
         path: path.map(str::to_string),
         warnings: warnings.clone(),
@@ -563,11 +564,14 @@ fn finish_open(app: &mut PhotocraftApp, name: &str, path: Option<&str>, v: &Valu
     // Held back for the profile prompt (Ask When Opening).
     if let Some(id) = v.get("held").and_then(Value::as_u64) {
         let (doc, read_only) = app.session.take_held_open(id).ok_or("the open job's document is gone")?;
-        crate::open_prompt::arrive(app, held(doc, read_only, v.get("color").cloned(), false));
+        crate::open_prompt::arrive(app, held(doc, read_only, v.get("color").filter(|q| !q.is_null()).cloned(), false));
         return Ok(());
     }
-    let mut index = v.get("document").and_then(Value::as_u64).ok_or("the open job returned no document")? as usize;
-    // An earlier file is waiting on its prompt: this one opens after it, in order.
+    // poll_jobs applies all ready jobs before the shell handles their events. An earlier
+    // handler may have moved or closed tabs, so the apply-time index is no longer authority.
+    let document = v.get("docId").and_then(Value::as_u64).map(DocId).ok_or("the open job returned no document identity")?;
+    let index = app.session.documents().iter().position(|st| st.doc.id == document).ok_or("the open job's document is missing")?;
+    // An earlier file is waiting on its prompt: this document waits after it, in order.
     if crate::open_prompt::waiting(app)
         && let Some(st) = app.session.close(index)
     {
@@ -576,20 +580,25 @@ fn finish_open(app: &mut PhotocraftApp, name: &str, path: Option<&str>, v: &Valu
         crate::open_prompt::arrive(app, held(doc, read_only, None, true));
         return Ok(());
     }
-    if let Some(slot) = slot
-        && let Ok(moved) = app.run("document.move", json!({"document": index, "to": slot}))
-    {
-        index = moved.get("document").and_then(Value::as_u64).map_or(index, |i| i as usize);
+    if let Some(slot) = slot {
+        let _ = app.run("document.move", json!({"document": index, "to": slot}));
     }
-    app.session.set_active(index);
-    after_open(app, name, path, &warnings, None);
-    Ok(())
+    after_open(app, document, name, path, &warnings, None)
 }
 
-/// What every open does once its document is the active one: remember where it came from, say
+/// What every open does for its admitted document: remember where it came from, say
 /// so, show the import warnings (a raw opens in Camera Raw first, developed from `path` or
 /// `bytes`) and fire the "Open Document" script events.
-pub(crate) fn after_open(app: &mut PhotocraftApp, name: &str, path: Option<&str>, warnings: &[String], bytes: Option<&[u8]>) {
+pub(crate) fn after_open(
+    app: &mut PhotocraftApp,
+    document: DocId,
+    name: &str,
+    path: Option<&str>,
+    warnings: &[String],
+    bytes: Option<&[u8]>,
+) -> Result<(), String> {
+    let index = app.session.documents().iter().position(|st| st.doc.id == document).ok_or("the opened document is missing")?;
+    app.session.set_active(index);
     if let Some(p) = path {
         app.opened_from(p);
     }
@@ -602,7 +611,7 @@ pub(crate) fn after_open(app: &mut PhotocraftApp, name: &str, path: Option<&str>
     app.ui.status_error = false;
     // A raw opens in Camera Raw first; the dialog says how it was developed.
     if crate::camera_raw_ui::wants_open_dialog(app, warnings) {
-        crate::camera_raw_ui::queue_open_dialog(app, name, path, bytes);
+        crate::camera_raw_ui::queue_open_dialog(app, document, name, path, bytes, warnings)?;
         notices::io_warnings(app, &opened, &crate::camera_raw_ui::without_develop_note(warnings));
     } else {
         notices::io_warnings(app, &opened, warnings);
@@ -610,6 +619,7 @@ pub(crate) fn after_open(app: &mut PhotocraftApp, name: &str, path: Option<&str>
     // Script events bound to "Open Document".
     photocraft_engine::automate_cmds::document_opened(&mut app.session);
     app.sync_views();
+    Ok(())
 }
 
 // ------------------------------------------------------------------------------------- drawing

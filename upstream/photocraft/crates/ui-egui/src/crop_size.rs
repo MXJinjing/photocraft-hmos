@@ -99,7 +99,10 @@ pub fn normalize_length(typed: &str, previous: &str) -> String {
         return String::new();
     }
     match parse_length(typed, field_unit(previous)) {
-        Some((v, u)) => format_length(v, u),
+        Some((v, u)) => {
+            let text = format_length(v, u);
+            if parse_length(&text, u).is_some() { text } else { previous.to_string() }
+        }
         None => previous.to_string(),
     }
 }
@@ -223,13 +226,19 @@ pub fn clear(o: &mut ToolOptions) {
     o.crop_resolution.clear();
 }
 
-/// Swaps W and H (the ⇄ button, X). False outside W x H x Resolution mode.
+/// Swaps W and H for the Crop tool's X. False outside W x H x Resolution mode.
 pub fn swap(o: &mut ToolOptions) -> bool {
     if o.crop_ratio != WHR {
         return false;
     }
-    std::mem::swap(&mut o.crop_width, &mut o.crop_height);
+    swap_fields(o);
     true
+}
+
+/// The ⇄ button between the W and H fields: always swaps, as Perspective Crop shows the fields
+/// without the Crop tool's W x H x Resolution mode.
+fn swap_fields(o: &mut ToolOptions) {
+    std::mem::swap(&mut o.crop_width, &mut o.crop_height);
 }
 
 /// After the preset dropdown chose `crop_ratio`: a size preset fills the fields and Front Image
@@ -295,7 +304,7 @@ fn text_field(ui: &mut egui::Ui, id: &str, value: &mut String, hint: &str, width
 pub fn fields(o: &mut ToolOptions, ui: &mut egui::Ui) {
     text_field(ui, "crop-width", &mut o.crop_width, tl!("Width"), 64.0, normalize_length);
     if crate::icons::button(ui, "arrow-left-right", 22.0, false, tl!("Swaps height and width")).clicked() {
-        swap(o);
+        swap_fields(o);
     }
     text_field(ui, "crop-height", &mut o.crop_height, tl!("Height"), 64.0, normalize_length);
     text_field(ui, "crop-resolution", &mut o.crop_resolution, tl!("Resolution"), 64.0, normalize_resolution);
@@ -314,6 +323,15 @@ pub fn fields(o: &mut ToolOptions, ui: &mut egui::Ui) {
 mod tests {
     use super::*;
     use photocraft_doc::{Color, ColorMode, Document, SampleType, Size};
+
+    #[test]
+    fn normalize_length_keeps_previous_when_rounding_gives_zero() {
+        assert_eq!(normalize_length("0.001", "100 px"), "100 px");
+        for typed in ["0.004 in", "0.0001 cm"] {
+            let out = normalize_length(typed, "100 px");
+            assert!(parse_length(&out, Unit::Pixels).is_some(), "{typed} -> {out}");
+        }
+    }
 
     fn app(depth: SampleType) -> PhotocraftApp {
         let mut doc = Document::with_background("crop", Size::new(400, 300), ColorMode::Rgb, depth, Color::WHITE);

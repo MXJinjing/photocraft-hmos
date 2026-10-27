@@ -21,7 +21,7 @@ use serde_json::{Value, json};
 use crate::PhotocraftApp;
 use crate::theme::Tokens;
 use crate::tone::{self, HistSource, Histograms};
-use crate::widgets;
+use crate::widgets::{self, hue_color};
 
 /// Kinds edited here (Selective Color and Color Lookup have their own editors; Invert has none).
 pub const KINDS: [&str; 13] = [
@@ -357,6 +357,27 @@ fn gradient_bar(p: &egui::Painter, r: Rect, from: Color32, to: Color32, vertical
 const CURVE_HANDLE_SIZE: f32 = 7.0;
 const CURVE_GRAPH_PADDING: f32 = 5.0;
 
+/// The room left on screen for the Curves dialog's other rows (title, channel and mode, Input and
+/// Output, eyedroppers, buttons) when its graph is as tall as it can be.
+const CURVES_CHROME: f32 = 360.0;
+/// The smallest and the default largest side of the Curves graph: 300 points was the fixed
+/// size until #8984.
+const CURVE_SIDE: (f32, f32) = (120.0, 300.0);
+
+/// The Curves graph's side (#8984): the width it is given, in the Properties panel and in the
+/// resizable dialog, and no taller than the window leaves room for beside the other rows.
+fn curve_side(ui: &egui::Ui) -> f32 {
+    let tallest = curve_side_max(ui.ctx());
+    let width = ui.available_width();
+    if width.is_finite() { width.clamp(CURVE_SIDE.0, tallest) } else { CURVE_SIDE.1 }
+}
+
+/// The largest the Curves graph gets in this window: as tall as the window leaves room for beside
+/// the dialog's other rows, and never under the old 300 points. The Curves dialog is no wider.
+pub(crate) fn curve_side_max(ctx: &egui::Context) -> f32 {
+    (ctx.content_rect().height() - CURVES_CHROME).max(CURVE_SIDE.1)
+}
+
 fn curve_graph(full: Rect, side: f32) -> Rect {
     let base = Rect::from_min_size(full.min + vec2(14.0, 0.0), vec2(side - 14.0, side - 14.0));
     Rect::from_min_max(base.min + vec2(CURVE_GRAPH_PADDING, CURVE_GRAPH_PADDING), base.max - vec2(CURVE_GRAPH_PADDING, CURVE_GRAPH_PADDING))
@@ -461,7 +482,7 @@ fn curves(ui: &mut egui::Ui, v: &mut Value, cx: &EditorCx) -> Edit {
     let pencil = v.get("pencil").and_then(Value::as_bool).unwrap_or(false);
     let mut pts = read_curve(v, key);
     let mut map = read_map(v, key);
-    let side = ui.available_width().clamp(120.0, 300.0);
+    let side = curve_side(ui);
     ui.add_space(4.0);
     let (full, resp) = ui.allocate_exact_size(vec2(side, side + 14.0), Sense::click_and_drag());
     let graph = curve_graph(full, side);
@@ -848,11 +869,6 @@ fn threshold(ui: &mut egui::Ui, v: &mut Value, cx: &EditorCx) -> Edit {
 
 const RANGE_LABELS: [&str; 6] = ["Reds", "Yellows", "Greens", "Cyans", "Blues", "Magentas"];
 
-fn hue_color(deg: f32) -> Color32 {
-    let rgb = egui::ecolor::Hsva::new(deg.rem_euclid(360.0) / 360.0, 1.0, 1.0, 1.0).to_srgb();
-    Color32::from_rgb(rgb[0], rgb[1], rgb[2])
-}
-
 /// The Saturation slider's track: grey to the hue at full saturation (UI-217-16).
 fn saturation_track(hue_deg: f32) -> [Color32; 2] {
     [Color32::from_gray(128), hue_color(hue_deg)]
@@ -886,7 +902,7 @@ fn adjusted_spectrum(v: &Value, n: usize) -> Vec<Color32> {
     let rect = photocraft_geom::Rect::new(0, 0, n as i32, 1);
     let px = (0..n)
         .map(|i| {
-            let c = egui::ecolor::Hsva::new(i as f32 / (n - 1).max(1) as f32, 1.0, 1.0, 1.0).to_rgb();
+            let c = photocraft_color::convert::hsb_to_rgb([i as f32 / (n - 1).max(1) as f32 * 360.0, 1.0, 1.0]);
             [c[0], c[1], c[2], 1.0]
         })
         .collect();
