@@ -381,7 +381,7 @@ pub struct Services {
     /// When set, Save from the unsaved-changes prompt is not finished when `write` returns. The
     /// HarmonyOS wrapper shows a system save picker after the download; quitting before it closes
     /// throws the save away. Absent on native and in a plain browser, where `write` is the save.
-    pub save_dialog: Option<save_dialog::SaveDialog>,
+    pub save_dialog: Option<crate::save_dialog::SaveDialog>,
     /// Show an Open or Save dialog without waiting for it (see `file_dialog`).
     pub file_dialog: Option<FileDialogFn>,
     /// Size and modification time of a file (native); `None` on the web, where Save never
@@ -439,7 +439,7 @@ pub struct Services {
     pub photoshop_shortcuts: Option<PhotoshopShortcutsFn>,
     pub system_theme: Option<SystemThemeFn>,
     /// Host-window full screen (HarmonyOS): shows the status-bar button and Window menu item.
-    pub window_fullscreen: Option<window_fullscreen::WindowFullscreen>,
+    pub window_fullscreen: Option<crate::window_fullscreen::WindowFullscreen>,
     /// The native window is connected directly to a Wayland compositor.
     pub is_wayland: bool,
     /// On Wayland, the shell command that starts this install under XWayland, where native file

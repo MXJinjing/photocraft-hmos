@@ -617,7 +617,7 @@ fn only_themes_with_a_dot_pattern_tile_the_canvas_surround() {
     let uploaded = |ctx: &egui::Context| ctx.tex_manager().read().allocated().filter(|(_, meta)| meta.name == "canvas-dots").count();
     for kind in ThemeKind::ALL {
         let ctx = egui::Context::default();
-        let dotted = matches!(kind, ThemeKind::Studio | ThemeKind::StudioLight | ThemeKind::SolarizedDark);
+        let dotted = matches!(kind, ThemeKind::Studio | ThemeKind::StudioLight | ThemeKind::SolarizedDark | ThemeKind::ArkuiLight | ThemeKind::ArkuiDark | ThemeKind::ArkuiProLight | ThemeKind::ArkuiProDark);
         assert_eq!(tiles(&ctx, kind), dotted, "{kind:?}");
         assert_eq!(uploaded(&ctx), usize::from(dotted), "{kind:?}");
     }

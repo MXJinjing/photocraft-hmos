@@ -30,6 +30,7 @@ use std::num::NonZeroU64;
 use std::sync::atomic::Ordering;
 
 use egui_wgpu::{self, CallbackResources, CallbackTrait, RenderState, ScreenDescriptor};
+pub(super) use egui_wgpu::wgpu;
 
 use crate::render_path::CpuReason;
 

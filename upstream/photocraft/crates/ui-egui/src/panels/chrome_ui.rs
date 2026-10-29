@@ -164,10 +164,15 @@ pub fn status_bar_pro(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     );
     let mut pct = app.ui.views[i].zoom * 100.0;
     let control_h = crate::panels::status_bar_heights(&t).1;
-    if widgets::compact_wrapping_value_field(ui, &mut pct, crate::zoom_levels::percent_range(&app.ui.views[i]), "%", vec2(64.0, control_h))
-        .accessible_name(tl!("Zoom"))
-        .changed()
-    {
+    let (zoom_response, zoom_rect) = widgets::compact_value_field_with_rect(
+        ui,
+        &mut pct,
+        crate::zoom_levels::percent_range(&app.ui.views[i]),
+        "%",
+        64.0,
+        control_h,
+    );
+    if zoom_response.accessible_name(tl!("Zoom")).changed() {
         app.ui.views[i].zoom = crate::zoom_levels::clamp(pct / 100.0, app.ui.views[i].doc_size);
         app.ui.views[i].zoom_animating = false;
         app.ui.views[i].zoom_anchor = None;

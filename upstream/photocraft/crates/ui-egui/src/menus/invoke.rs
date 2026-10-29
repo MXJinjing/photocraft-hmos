@@ -133,7 +133,7 @@ fn invoke_shell_commands(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str,
         // Window › Brushes opens the Brush Settings window on its presets tab.
         app.ui.panels.brush_settings = true;
         app.ui.brush_tab = 1;
-        return Ok(Value::Null);
+        return Some(Ok(Value::Null));
     }
     if id == "window.panel.brushSettings" {
         app.ui.brush_tab = 0;
@@ -654,6 +654,14 @@ fn invoke_window_command(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str)
         "window.theme.toggle" => {
             crate::prefs_ui::cycle_appearance(app, ctx);
             Some(Ok(Value::Null))
+        }
+        crate::window_fullscreen::COMMAND => {
+            if !crate::window_fullscreen::available(app) {
+                Some(Err("full screen is not available on this host".into()))
+            } else {
+                crate::window_fullscreen::toggle(app);
+                Some(Ok(Value::Null))
+            }
         }
         "view.darkenInterface" | "view.lightenInterface" => {
             Some(crate::prefs_ui::step_brightness(app, ctx, id == "view.lightenInterface").map(|()| json!({"theme": app.ui.theme.id()})))

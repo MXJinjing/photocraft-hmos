@@ -1,3 +1,4 @@
+use super::display::load_display_texture;
 use super::display::{GPU_OUTPUT, cache_key, canvas_display, display_doc, display_image, texture_key};
 use super::filter_preview::filter_channel_preview;
 use super::navigator::navigator_waits_for_drag;
@@ -8,7 +9,7 @@ use super::{CanvasCache, CpuTextures, DRect, DetailTexture, Document, InView, La
 /// Largest texture side we upload; bigger documents are uploaded downsampled, with the part in
 /// view added at the screen's resolution when zoomed in (`detail_plan`).
 pub const MAX_TEXTURE: u32 = 4096;
-const PEN_HOVER_TIP_OPACITY: f32 = 0.3;
+pub(super) const PEN_HOVER_TIP_OPACITY: f32 = 0.3;
 
 /// The largest texture side to upload on this device: [`MAX_TEXTURE`], or less where the GPU
 /// allows less (2048 on some older or low-end GPUs and WebGL contexts). Past the device's limit
@@ -562,10 +563,12 @@ pub(super) fn ensure_gpu(app: &mut PhotocraftApp, ctx: &egui::Context, idx: usiz
     if r.kind == "lost" || r.kind == crate::gpu_canvas::REFRESH_OVER_BUDGET {
         // The device is gone (`gpu_status` then drops the GPU canvas) or the canvas is over the
         // texture budget: draw this frame on the CPU path.
-        app.perf.gpu_fallback = r.fallback;
-        crate::background_redraw::cancel(app, id);
         if let Some(reason) = r.fallback {
+            app.perf.gpu_fallback = Some(reason.to_string());
+            crate::background_redraw::cancel(app, id);
             crate::render_path::note(app, id.0, crate::render_path::Path::Cpu(reason));
+        } else {
+            crate::background_redraw::cancel(app, id);
         }
         return false;
     }

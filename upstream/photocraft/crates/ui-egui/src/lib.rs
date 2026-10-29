@@ -19,6 +19,16 @@ pub mod dialogs;
 pub mod dock;
 pub mod file_dialog;
 pub mod path_pick;
+pub mod save_dialog;
+pub mod list_drag;
+pub mod touch_nav;
+pub mod stylus_debug;
+pub mod stylus_protocol;
+mod tooltips;
+#[cfg(target_arch = "wasm32")]
+pub mod web_host;
+pub mod window_fullscreen;
+pub mod status_panel_controls;
 pub mod file_open;
 pub mod gpu_status;
 pub mod i18n;

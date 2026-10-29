@@ -315,7 +315,10 @@ fn eye_column(app: &mut PhotocraftApp, ui: &mut egui::Ui, l: &Layer, row: RowSel
     let eye_cell = eye_cell(rect);
     // The whole eye column takes drags too (so a drag starting on it never reorders the row): dragging down
     // the eyes gives every row swept over the visibility the first eye toggled to (#8467).
-    let eye_resp = ui.interact(eye_cell, ui.scope_id().with(("eye", l.id.0)), Sense::click_and_drag());
+    // Touch/pen: click-only so a drag scrolls the list instead of sweeping visibility (Hmos).
+    let source = app.stylus.feed.source();
+    let eye_sense = if crate::list_drag::prefers_scroll(source) { Sense::click() } else { Sense::click_and_drag() };
+    let eye_resp = ui.interact(eye_cell, ui.scope_id().with(("eye", l.id.0)), eye_sense);
     // A hidden layer's eye box is left empty (still clickable; the whole column takes the click, #8467).
     if l.visible {
         // Centre the drawing in the column while preserving the visibility hit area.

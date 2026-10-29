@@ -1,3 +1,4 @@
+use super::display::load_display_texture;
 use super::display::{canvas_display, display_doc, display_image};
 use super::strokes::live_stroke;
 use super::textures::{effect_reach, ensure_texture};

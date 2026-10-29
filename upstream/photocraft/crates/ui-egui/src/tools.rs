@@ -37,7 +37,6 @@ pub(super) mod shape_options;
 pub(super) mod shape_paint_ui;
 pub mod shape_stroke_ui;
 pub mod slice_ui;
-mod status_panel_controls;
 pub mod stroke_constraint;
 pub mod stroke_trace;
 pub mod stroke_trail;

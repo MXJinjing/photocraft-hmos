@@ -677,7 +677,7 @@ pub(super) fn print_confirm(app: &mut PhotocraftApp, f: &Map<String, Value>) -> 
             fields.remove("send");
         }
         if b(f, "__save_pdf", false) {
-            let suggested = format!("{}.pdf", doc_stem(app));
+            let suggested = format!("{}.pdf", super::doc_stem(app));
             let target = app.services.pick_save.as_mut().and_then(|pick| pick(&suggested)).ok_or("cancelled")?;
             p["output"] = json!(target);
             p["send"] = json!(false);

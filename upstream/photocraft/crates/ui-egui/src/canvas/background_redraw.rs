@@ -15,6 +15,7 @@
 //! going back to a state drawn a moment ago (⌥-click on an eye and again, an undo and its redo)
 //! uploads those blocks instead of compositing every layer again.
 
+use egui_wgpu::wgpu;
 use std::collections::VecDeque;
 #[cfg(test)]
 use std::sync::atomic::AtomicU64;
@@ -115,7 +116,7 @@ pub(crate) struct Redraw {
     doc: Arc<Document>,
     display: u64,
     text_gamma: u32,
-    format: eframe::wgpu::TextureFormat,
+    format: wgpu::TextureFormat,
     /// Uploaded blocks of `doc` kept for [`Kept`] (empty once over `cap`), and their bytes.
     collected: Vec<Option<Vec<u8>>>,
     collected_bytes: u64,
@@ -159,7 +160,7 @@ pub(crate) struct Kept {
     id: DocId,
     display: u64,
     text_gamma: u32,
-    format: eframe::wgpu::TextureFormat,
+    format: wgpu::TextureFormat,
     blocks: Vec<Rect>,
     texels: Vec<Vec<u8>>,
     bytes: u64,
@@ -171,7 +172,7 @@ impl Kept {
     /// else it holds), so a stale composite can't come back; Arc-shared tiles compare without
     /// reading their pixels. Besides the document, the display transform and the text gamma
     /// ([`text_gamma`]) decide the texels.
-    fn matches(&self, doc: &Arc<Document>, display: u64, text_gamma: u32, format: eframe::wgpu::TextureFormat, blocks: &[Rect]) -> bool {
+    fn matches(&self, doc: &Arc<Document>, display: u64, text_gamma: u32, format: wgpu::TextureFormat, blocks: &[Rect]) -> bool {
         self.display == display
             && self.text_gamma == text_gamma
             && self.format == format
@@ -190,7 +191,7 @@ pub(crate) struct KeptComposites {
 
 impl KeptComposites {
     /// The kept redraw of exactly this state, now the newest.
-    fn find(&mut self, doc: &Arc<Document>, display: u64, text_gamma: u32, format: eframe::wgpu::TextureFormat, blocks: &[Rect]) -> Option<&Kept> {
+    fn find(&mut self, doc: &Arc<Document>, display: u64, text_gamma: u32, format: wgpu::TextureFormat, blocks: &[Rect]) -> Option<&Kept> {
         let i = self.entries.iter().position(|k| k.matches(doc, display, text_gamma, format, blocks))?;
         let k = self.entries.remove(i)?;
         self.entries.push_front(k);
@@ -448,7 +449,7 @@ struct Spawn {
     display: Option<Arc<CanvasDisplay>>,
     display_key: u64,
     text_gamma: u32,
-    format: eframe::wgpu::TextureFormat,
+    format: wgpu::TextureFormat,
     visible: Rect,
     blocks: Vec<Rect>,
     pending: Vec<bool>,

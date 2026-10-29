@@ -47,7 +47,7 @@ pub(crate) use fields::compact_wrapping_value_field;
 #[cfg(test)]
 use fields::{FieldOpts, NUMERIC_INPUT_LIMIT, value_field_in};
 pub use fields::{
-    POPUP_ARROW_W, PopupFieldResponse, VALUE_FIELD_H, compact_value_field, elided_label, elided_label_sensed, popup_value_field, value_field, value_field_named,
+    POPUP_ARROW_W, PopupFieldResponse, VALUE_FIELD_H, compact_value_field, compact_value_field_with_rect, elided_label, elided_label_sensed, popup_value_field, value_field, value_field_named,
 };
 pub(crate) use panel::body_margin;
 pub use panel::{
@@ -150,3 +150,4 @@ mod screen_color_tests {
 #[cfg(test)]
 #[path = "widgets/numeric_input_tests.rs"]
 mod numeric_input_tests;
+pub use dropdown::menu_anchor;

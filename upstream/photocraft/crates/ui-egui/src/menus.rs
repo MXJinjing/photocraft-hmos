@@ -312,3 +312,4 @@ mod window_documents_tests {
         assert_eq!(app.session.active_index(), Some(0));
     }
 }
+pub use bar::MENU_BAR_HAMBURGER_WIDTH;

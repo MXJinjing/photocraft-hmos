@@ -704,12 +704,12 @@ pub(super) fn open_on_double_click(app: &mut PhotocraftApp, ui: &egui::Ui, area:
 /// gesture and consume all subsequent contacts.
 pub(crate) fn finish_touch_stroke(app: &mut PhotocraftApp) -> bool {
     let Some(tool) = app.drag.as_ref().map(|d| d.tool) else { return false };
-    if !strokes_live(tool) {
+    if !super::strokes_live(tool) {
         return false;
     }
     let Some(mut d) = app.drag.take() else { return false };
     d.track(d.live);
-    finish_gesture(app, d);
+    super::finish_gesture(app, d);
     crate::move_mods::finish(app);
     app.press_stroke = false;
     true

@@ -252,11 +252,6 @@ impl Default for ToolState {
     }
 }
 
-/// Native PDF handoff; the platform owns preview and eventual job completion.
-pub type PrintService = fn(&[u8], &Value) -> std::result::Result<String, String>;
-/// Write a print PDF to a host-authorized target (which may be an opaque URI token).
-pub type PrintSaveService = fn(&str, &[u8]) -> std::result::Result<(), String>;
-
 /// Layer › Layer Style › Copy Layer Style: the effects and the Blending Options, as Photoshop
 /// copies them (Paste Layer Style puts them all on each target).
 #[derive(Clone, Debug)]

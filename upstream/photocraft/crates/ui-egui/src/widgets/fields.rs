@@ -57,7 +57,7 @@ pub fn compact_value_field_with_rect(
     width: f32,
     height: f32,
 ) -> (Response, Rect) {
-    value_field_box(ui, value, range, suffix, vec2(width, height), 0.0, FieldOpts { wrap_drag: true, ..Default::default() })
+    value_field_box(ui, value, range, suffix, vec2(width, height), 0.0, FieldOpts { wrap_drag: true, ..Default::default() }, None)
 }
 
 /// A compact field whose mouse scrub wraps at the native fullscreen viewport's horizontal edges.

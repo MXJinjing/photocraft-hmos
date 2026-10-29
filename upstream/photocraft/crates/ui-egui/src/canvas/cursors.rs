@@ -39,7 +39,7 @@ pub(crate) fn pencil_tip_is_round(size: f32) -> bool {
 /// cursor. Other brushes follow Preferences › Cursors › Show Crosshair in Brush Tip, as in
 /// Photoshop; the Background Eraser always shows its sampling hotspot.
 /// Keep the HarmonyOS pen preference scoped to the painted brush cursor, never UI hit testing.
-fn hide_pen_hover_tip(ohos: bool, source: crate::stylus::PointerSource, preview: bool, down: bool) -> bool {
+pub(super) fn hide_pen_hover_tip(ohos: bool, source: crate::stylus::PointerSource, preview: bool, down: bool) -> bool {
     ohos && source == crate::stylus::PointerSource::Pen && !preview && !down
 }
 

@@ -10,7 +10,7 @@
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
-use eframe::wgpu;
+use egui_wgpu::wgpu;
 use photocraft_algo::camera_raw::CameraRaw;
 use photocraft_gpu::{CameraRawDevelop, DeviceHealth};
 

@@ -498,7 +498,8 @@ pub(crate) fn browser(
                 for (ii, it) in g.items.iter().enumerate() {
                     let (cx, cy) = ((ii % cols) as f32, (ii / cols) as f32);
                     let r = Rect::from_min_size(area.min + vec2(pad + cx * (cell.x + gap), cy * (cell.y + gap)), cell);
-                    let resp = ui.interact(r, ui.scope_id().with((panel, gi, ii)), Sense::click_and_drag());
+                    let item = ui.scope_id().with((panel, gi, ii));
+                    let resp = ui.interact(r, item, Sense::click_and_drag());
                     resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &it.name));
                     let is_sel = selected.as_deref() == Some(&it.key);
                     if list {

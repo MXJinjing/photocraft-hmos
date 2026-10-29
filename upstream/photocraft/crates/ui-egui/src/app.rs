@@ -1,10 +1,10 @@
 use super::services::{ExportSettings, FormatChoices, SAVE_OPTIONS_OPEN, SaveKind, Services, plain_raster, saved_revision_after_write};
 use super::{
     ControlRequest, DocId, Document, HashMap, PhotocraftApp, Receiver, Session, SyntheticTarget, Tool, UiState, Value, actions, analysis_ui, brush_panel,
-    brush_picker, camera_raw_ui, canvas, dds_options_ui, delete_layer_prompt, dialogs, discard_ui, distort_ui, dock, field_wheel, file_open, gpu_canvas,
+    brush_picker, camera_raw_ui, canvas, chrome_ui, dds_options_ui, delete_layer_prompt, dialogs, discard_ui, distort_ui, dock, field_wheel, file_open, gpu_canvas,
     gpu_status, gradient_ui, histogram_panel, i18n, jobs_ui, jpeg_options_ui, json, kys_import, last_brush, layers_panel_ui, mask_thumbs_ui, mask_trash_prompt,
     monitor_status, native_menu, notices, open_prompt, paint_mouse, palette, panel_docking, panels, prefs_ui, preset_files_ui, preset_panels, rasterize_prompt,
-    screen_picker, shape_stroke_ui, shortcuts, single_line_drag, state, stroke_trace, stylus, targa_options_ui, text_field_menu, theme, tiff_options_ui,
+    screen_picker, shape_stroke_ui, shortcuts, single_line_drag, state, stroke_trace, stylus, stylus_debug, targa_options_ui, text_field_menu, theme, tiff_options_ui,
     timeline_ui, titlebar, tool_cursor, tool_memory, transform_tool, type_panels_ui, type_tool, type_transform, updates_ui, vector_ui, view_cmds, wheel_nav,
     wide_angle_ui, widgets, work_area, workspace_ui,
 };
@@ -211,6 +211,8 @@ impl PhotocraftApp {
     }
 }
 
+
+impl PhotocraftApp {
     pub fn host_logic(&mut self, ctx: &egui::Context) {
         self.host_logic_parent(ctx, None);
         // Release a pending screenshot's image budget and answer its control request; the
@@ -219,8 +221,8 @@ impl PhotocraftApp {
         self.finish_captures(finished);
     }
 
-    fn host_logic_parent(&mut self, ctx: &egui::Context, parent: Option<&file_dialog::ParentFrame>) {
-        self.logic_frame(ctx, frame);
+    pub(crate) fn host_logic_parent(&mut self, ctx: &egui::Context, parent: Option<&super::file_dialog::ParentFrame>) {
+        self.logic_frame(ctx, parent);
         self.finish_type_reset_logic(ctx);
     }
 
@@ -262,15 +264,17 @@ impl PhotocraftApp {
         }
     }
 
+
     pub fn host_ui(&mut self, ui: &mut egui::Ui) {
         self.host_ui_parent(ui, None);
     }
 
-    fn host_ui_parent(&mut self, ui: &mut egui::Ui, parent: Option<&file_dialog::ParentFrame>) {
-        self.ui_frame(ui, frame);
+    pub(crate) fn host_ui_parent(&mut self, ui: &mut egui::Ui, parent: Option<&super::file_dialog::ParentFrame>) {
+        self.ui_frame(ui, parent);
         self.finish_type_reset_pass(ui.ctx());
     }
 }
+
 
 #[cfg(test)]
 mod clipboard_tests;

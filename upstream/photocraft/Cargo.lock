@@ -5432,8 +5432,8 @@ dependencies = [
  "unicode-bidi",
  "wasm-bindgen",
  "web-sys",
- "wgpu",
  "web-time",
+ "wgpu",
  "winsafe",
 ]
 

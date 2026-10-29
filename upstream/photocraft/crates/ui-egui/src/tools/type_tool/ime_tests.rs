@@ -1035,8 +1035,8 @@ fn reset_harness(app: PhotocraftApp) -> egui_kittest::Harness<'static, ResetHarn
         .build_ui_state(
             |ui, state: &mut ResetHarness| {
                 let mut frame = eframe::Frame::_new_kittest();
-                state.app.logic_frame(ui.ctx(), &mut frame);
-                state.app.ui_frame(ui, &mut frame);
+                state.app.logic_frame(ui.ctx(), Some(&frame));
+                state.app.ui_frame(ui, Some(&frame));
                 if state.stock {
                     egui::Window::new("Reset font fixture").show(ui.ctx(), |ui| {
                         let button = ui.make_persistent_id(egui::IdSalt::new("reset-font"));

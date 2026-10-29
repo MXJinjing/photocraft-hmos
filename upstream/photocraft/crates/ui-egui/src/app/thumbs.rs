@@ -364,7 +364,7 @@ mod channel_tint_tests {
 #[cfg(feature = "eframe-host")]
 impl eframe::App for PhotocraftApp {
     fn on_exit(&mut self) {
-        if let Err(err) = tool_memory::save_on_exit(self) {
+        if let Err(err) = crate::tool_memory::save_on_exit(self) {
             log::warn!("Preferences: could not save the final tool selection: {err}");
         }
     }

@@ -241,6 +241,16 @@ fn default_dir(app: &PhotocraftApp) -> String {
     crate::path_pick::documents_output_dir(app, "")
 }
 
+/// Empty on sandboxed hosts (user must Choose…); otherwise [`default_dir`].
+fn default_input_dir(app: &PhotocraftApp) -> String {
+    if app.services.path_pickers_only {
+        String::new()
+    } else {
+        default_dir(app)
+    }
+}
+
+
 pub(super) fn front(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str, params: &Value) -> Option<Result<Value, String>> {
     if id == "file.closeAll" || id == "file.closeOthers" {
         // Keep the remaining document's view (views are index-aligned with documents).

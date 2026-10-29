@@ -77,7 +77,7 @@ pub(crate) fn display_image(display: Option<&photocraft_engine::display_color::C
 /// profile. Native hosts converting ordinary egui sRGB textures must leave these alone.
 pub const DISPLAY_TEXTURE_PREFIX: &str = "photocraft-display:";
 
-fn load_display_texture(ctx: &egui::Context, name: impl std::fmt::Display, image: egui::ColorImage, options: TextureOptions) -> egui::TextureHandle {
+pub(super) fn load_display_texture(ctx: &egui::Context, name: impl std::fmt::Display, image: egui::ColorImage, options: TextureOptions) -> egui::TextureHandle {
     ctx.load_texture(format!("{DISPLAY_TEXTURE_PREFIX}{name}"), image, options)
 }
 

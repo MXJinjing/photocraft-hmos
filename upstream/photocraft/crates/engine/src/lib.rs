@@ -181,6 +181,11 @@ pub(crate) fn active_layer_of(s: &Session) -> std::result::Result<&photocraft_do
     d.active_layer.and_then(|id| d.doc.layer(id)).ok_or_else(|| "no active layer".into())
 }
 
+/// Native PDF handoff; the platform owns preview and eventual job completion.
+pub type PrintService = fn(&[u8], &serde_json::Value) -> std::result::Result<String, String>;
+/// Write a print PDF to a host-authorized target (which may be an opaque URI token).
+pub type PrintSaveService = fn(&str, &[u8]) -> std::result::Result<(), String>;
+
 #[derive(Default)]
 pub struct Session {
     docs: Vec<DocState>,

@@ -1,9 +1,9 @@
 use super::{
-    PhotocraftApp, analysis_ui, brush_panel, brush_picker, camera_raw_ui, canvas, dds_options_ui, dialogs, discard_ui, distort_ui, field_wheel, file_open,
-    gpu_canvas, gpu_status, gradient_ui, i18n, jobs_ui, jpeg_options_ui, kys_import, last_brush, layers_panel_ui, monitor_status, native_menu, notices,
-    paint_mouse, palette, panels, prefs_ui, preset_panels, rasterize_prompt, screen_picker, shape_stroke_ui, shortcuts, targa_options_ui, text_field_menu,
-    theme, tiff_options_ui, timeline_ui, titlebar, tool_cursor, tool_memory, transform_tool, type_panels_ui, type_tool, updates_ui, vector_ui, view_cmds,
-    wide_angle_ui, work_area, workspace_ui,
+    PhotocraftApp, analysis_ui, brush_panel, brush_picker, camera_raw_ui, canvas, chrome_ui, dds_options_ui, dialogs, discard_ui, distort_ui, field_wheel,
+    file_open, gpu_canvas, gpu_status, gradient_ui, i18n, jobs_ui, jpeg_options_ui, kys_import, last_brush, layers_panel_ui, monitor_status, native_menu,
+    notices, paint_mouse, palette, panels, prefs_ui, preset_panels, rasterize_prompt, screen_picker, shape_stroke_ui, shortcuts, stylus_debug,
+    targa_options_ui, text_field_menu, theme, tiff_options_ui, timeline_ui, titlebar, tool_cursor, tool_memory, transform_tool, type_panels_ui, type_tool,
+    updates_ui, vector_ui, view_cmds, wide_angle_ui, work_area, workspace_ui,
 };
 
 impl PhotocraftApp {
@@ -22,7 +22,7 @@ impl PhotocraftApp {
 
 impl PhotocraftApp {
     /// Shared logic body. A wrapping host owns the final reset tail after its own work.
-    pub fn logic_frame(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+    pub fn logic_frame(&mut self, ctx: &egui::Context, parent: Option<&crate::file_dialog::ParentFrame>) {
         self.cap_frame_rate();
         i18n::set_current(i18n::Lang::from_pref(&self.session.prefs().interface.language));
         // Caps Lock state read from the OS once per frame (see `Services::caps_lock`): the canvas
@@ -142,7 +142,7 @@ impl PhotocraftApp {
 
     /// Shared UI body. A wrapping host must call `finish_type_reset_pass` after return,
     /// including when this body returns early without drawing an editor.
-    pub fn ui_frame(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+    pub fn ui_frame(&mut self, ui: &mut egui::Ui, parent: Option<&crate::file_dialog::ParentFrame>) {
         let ctx = ui.ctx().clone();
         // One control owner even when this callback cannot draw the custom editor.
         if !self.fonts_ready
@@ -232,7 +232,7 @@ impl PhotocraftApp {
         // In Full Screen Mode, Tab shows the menu bar, options bar, toolbar and dock (#6760).
         let tabbed_in = !chrome && self.ui.panels.full_screen_chrome;
         if !chrome && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
-            let _ = menus::invoke(self, &ctx, "view.screenMode.standard", serde_json::json!({}));
+            let _ = crate::menus::invoke(self, &ctx, "view.screenMode.standard", serde_json::json!({}));
         }
         if (chrome || tabbed_in) && self.ui.panels.menu_bar {
             panels::title_bar(self, ui);
@@ -258,6 +258,9 @@ impl PhotocraftApp {
             });
             panels::properties_window(self, &ctx);
         }
+        // Finish this frame's pen release before placing a queued squeeze menu.
+        chrome_ui::drain_stylus_gestures(self, &ctx);
+        stylus_debug::window(self, &ctx);
         brush_panel::window(self, &ctx);
         preset_panels::windows(self, &ctx);
         gradient_ui::editor_window(self, &ctx);
