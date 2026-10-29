@@ -487,6 +487,7 @@ impl State {
                         phase: egui::TouchPhase::Move,
                         delta: egui::vec2(input.dx / scale, input.dy / scale),
                         modifiers: self.modifiers,
+                        source: egui::MouseWheelSource::Unknown,
                     });
                 }
                 if input.action == 3 || input.action == 4 {
@@ -668,6 +669,7 @@ impl State {
                 phase: egui::TouchPhase::Move,
                 delta: egui::vec2(input.x, input.y),
                 modifiers: self.modifiers,
+                source: egui::MouseWheelSource::Unknown,
             }),
             "key" => {
                 let pressed = input.action == 0;

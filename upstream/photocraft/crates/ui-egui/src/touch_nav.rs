@@ -384,8 +384,8 @@ pub fn abort_tools(app: &mut PhotocraftApp, ctx: &Context) {
     crate::move_mods::finish(app);
     crate::crop_ui::abort_drag(app);
     crate::gradient_ui::abort_drag(app);
-    crate::transform_tool::abort_pointer(app);
-    crate::zoom_tool::abort(ctx);
+    crate::tools::transform_tool::abort_pointer(app);
+    crate::tools::zoom_tool::abort(ctx);
 }
 
 #[cfg(test)]

@@ -55,6 +55,7 @@ pub fn reveal_canvas_caret(
 ) -> bool {
     let Some(ime) = output
         .ime
+        .clone()
         .filter(|i| i.rect == i.cursor_rect && app.ui.text_edit.is_some())
     else {
         return false;
@@ -117,12 +118,12 @@ impl ImeSync {
         // The canvas Type tool publishes IMEOutput without an egui TextEdit widget.
         let canvas = app
             .and_then(|a| a.ui.text_edit.as_ref())
-            .filter(|_| output.ime.is_some_and(|i| i.rect == i.cursor_rect))
+            .filter(|_| output.ime.as_ref().is_some_and(|i| i.rect == i.cursor_rect))
             .map(|edit| (edit.layer, edit.session.clone()));
         let focused = if canvas.is_some() {
             None
         } else {
-            output.ime.and_then(|_| ctx.memory(|m| m.focused()))
+            output.ime.as_ref().and_then(|_| ctx.memory(|m| m.focused()))
         };
         if self.focused != focused || self.canvas != canvas {
             self.generation = self.generation.saturating_add(1);
@@ -132,13 +133,13 @@ impl ImeSync {
             self.canvas.clone_from(&canvas);
         }
         let mut state = ImeState::default();
-        if let Some(ime) = output.ime
+        if let Some(ime) = output.ime.clone()
             && (focused.is_some() || canvas.is_some())
         {
             if let Some(id) = focused {
                 for event in &output.events {
                     let info = event.widget_info();
-                    if info.typ == egui::WidgetType::TextEdit
+                    if info.role == egui::Role::TextInput
                         && let Some(text) = &info.current_text_value
                     {
                         self.text.clone_from(text);
