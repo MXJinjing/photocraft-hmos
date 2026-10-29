@@ -378,12 +378,19 @@ struct GroupHeaderContext<'a> {
     state: &'a mut PresetUi,
     tokens: &'a Tokens,
     events: &'a mut Vec<Ev>,
+    /// Mouse keeps press-drag reorder; touch/pen scroll unless double-press-and-hold.
+    pointer: crate::stylus::PointerSource,
 }
 
 fn draw_group_header(ui: &mut egui::Ui, group: &GroupView, context: GroupHeaderContext<'_>) -> (Rect, Option<Pos2>, Option<Pos2>) {
-    let GroupHeaderContext { panel, open, state, tokens, events } = context;
-    let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), 22.0), Sense::click_and_drag());
-    if response.hovered() || response.dragged() {
+    let GroupHeaderContext { panel, open, state, tokens, events, pointer } = context;
+    // Same list_drag gate as brushes/layers: touch scroll by default; reorder after double-press-hold.
+    let item = ui.scope_id().with((panel, "group", group.name.as_str()));
+    let sense = crate::list_drag::row_sense(ui.ctx(), pointer, item);
+    let (rect, raw) = ui.allocate_exact_size(vec2(ui.available_width(), 22.0), sense);
+    let response = crate::list_drag::after_row(ui.ctx(), pointer, item, &raw);
+    let can_drag = !crate::list_drag::prefers_scroll(pointer) || crate::list_drag::is_armed(ui.ctx(), item);
+    if response.hovered() || (can_drag && response.dragged()) {
         ui.painter().rect_filled(rect, 2.0, tokens.hover.gamma_multiply(0.5));
     }
     let triangle = Rect::from_center_size(pos2(rect.left() + 9.0, rect.center().y), vec2(12.0, 12.0));
@@ -407,11 +414,11 @@ fn draw_group_header(ui: &mut egui::Ui, group: &GroupView, context: GroupHeaderC
             ui.close();
         }
     });
-    let drag = if response.dragged() { ui.ctx().pointer_interact_pos() } else { None };
+    let drag = if can_drag && response.dragged() { ui.ctx().pointer_interact_pos() } else { None };
     if drag.is_some() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
     }
-    let released = if response.drag_stopped() { ui.ctx().pointer_interact_pos() } else { None };
+    let released = if can_drag && response.drag_stopped() { ui.ctx().pointer_interact_pos() } else { None };
     (rect, drag, released)
 }
 
@@ -473,7 +480,7 @@ pub(crate) fn browser(
             for &gi in &display {
                 let Some(g) = groups.get(gi) else { continue };
                 let open = group_open(st, panel, gi, &g.name);
-                let (hr, header_drag, header_release) = draw_group_header(ui, g, GroupHeaderContext { panel, open, state: st, tokens: &t, events: &mut ev });
+                let (hr, header_drag, header_release) = draw_group_header(ui, g, GroupHeaderContext { panel, open, state: st, tokens: &t, events: &mut ev, pointer });
                 if let Some(position) = header_drag {
                     drag = Some((gi, position));
                 }
@@ -499,7 +506,9 @@ pub(crate) fn browser(
                     let (cx, cy) = ((ii % cols) as f32, (ii / cols) as f32);
                     let r = Rect::from_min_size(area.min + vec2(pad + cx * (cell.x + gap), cy * (cell.y + gap)), cell);
                     let item = ui.scope_id().with((panel, gi, ii));
-                    let resp = ui.interact(r, item, Sense::click_and_drag());
+                    let sense = crate::list_drag::row_sense(ui.ctx(), pointer, item);
+                    let raw = ui.interact(r, item, sense);
+                    let resp = crate::list_drag::after_row(ui.ctx(), pointer, item, &raw);
                     resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &it.name));
                     let is_sel = selected.as_deref() == Some(&it.key);
                     if list {
