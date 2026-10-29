@@ -7,6 +7,11 @@ import { BusinessError, deviceInfo } from '@kit.BasicServicesKit';
 // Full screen = setWindowLayoutFullScreen(true) + hidden system bars; the page fills the whole
 // window and egui paints edge-to-edge (no inset padding). Leaving restores the avoided layout and
 // both bars, and the caller repaints the theme colour on them (SystemBars.ets).
+//
+// Desire (AppStorage) vs applied immersion: tablet → free multi-window (FLOATING / MAXIMIZE /
+// SPLIT) pauses immersion — bars and avoided layout come back — but keeps the user's desire.
+// Returning to FULL_SCREEN (平板模式) re-applies hide-bars + layout full screen. Without that
+// restore, the window could fill the display while status / navigation bars stayed visible.
 
 export const FULLSCREEN_KEY: string = 'photocraftFullscreen';
 
@@ -26,12 +31,13 @@ export function fullscreenOn(): boolean {
   return AppStorage.get<boolean>(FULLSCREEN_KEY) === true;
 }
 
-// Full screen only makes sense for a window that fills the display; floating and split windows
-// keep their system bars and avoid areas.
+// Immersive full screen only belongs to tablet/phone FULL_SCREEN. Free multi-window maximized
+// reports MAXIMIZE and still shows the system caption / bars — treating it like FULL_SCREEN left
+// desire on while the system re-showed bars, so returning to tablet filled the screen without
+// hiding them again.
 export function windowAllowsFullscreen(win: window.Window): boolean {
   try {
-    let status: window.WindowStatusType = win.getWindowStatus();
-    return status === window.WindowStatusType.FULL_SCREEN || status === window.WindowStatusType.MAXIMIZE;
+    return win.getWindowStatus() === window.WindowStatusType.FULL_SCREEN;
   } catch (error) {
     // Status unavailable on this system version: do not block the user's request.
     return true;
@@ -48,7 +54,8 @@ export async function exitFullscreen(win: window.Window): Promise<void> {
   await win.setWindowSystemBarEnable(['status', 'navigation']);
 }
 
-// Tell Rust the real state so the button icon and menu text follow it (also after system exits).
+// Tell Rust the real applied state so the button icon and menu text follow the window
+// (also after system exits / freeform pause).
 export function reportFullscreen(on: boolean): void {
   try {
     native.input(JSON.stringify(new FullscreenState(on)));
@@ -57,43 +64,71 @@ export function reportFullscreen(on: boolean): void {
   }
 }
 
-// Apply a request from Rust. Always ends by reporting the resulting state, even on failure, so the
-// egui controls never show a state the window is not in. `repaint` recolours the restored bars.
+// Apply a request from Rust. Always ends by reporting the resulting *applied* state, even on
+// failure, so the egui controls never show a state the window is not in. `repaint` recolours the
+// restored bars. Desire is stored in AppStorage; freeform refuses a fresh enter without clearing
+// an already-paused desire.
 export async function requestFullscreen(win: window.Window, on: boolean, repaint: () => void): Promise<void> {
-  let target: boolean = on && fullscreenAvailable() && windowAllowsFullscreen(win);
-  if (target === fullscreenOn()) {
-    reportFullscreen(target);
+  if (!on) {
+    if (!fullscreenOn()) {
+      reportFullscreen(false);
+      return;
+    }
+    try {
+      await exitFullscreen(win);
+    } catch (error) {
+      let failure = error as BusinessError;
+      console.info(`PhotoCraft fullscreen exit: ${failure.code} ${failure.message}`);
+      reportFullscreen(false);
+      return;
+    }
+    AppStorage.setOrCreate(FULLSCREEN_KEY, false);
+    repaint();
+    reportFullscreen(false);
+    return;
+  }
+
+  if (!fullscreenAvailable() || !windowAllowsFullscreen(win)) {
+    // Fresh enter refused in freeform/split/2in1. A paused desire stays so tablet restore works.
+    reportFullscreen(false);
     return;
   }
   try {
-    if (target) {
-      await enterFullscreen(win);
-    } else {
-      await exitFullscreen(win);
-    }
+    await enterFullscreen(win);
   } catch (error) {
     let failure = error as BusinessError;
-    console.info(`PhotoCraft fullscreen ${target ? 'enter' : 'exit'}: ${failure.code} ${failure.message}`);
-    reportFullscreen(fullscreenOn());
+    console.info(`PhotoCraft fullscreen enter: ${failure.code} ${failure.message}`);
+    AppStorage.setOrCreate(FULLSCREEN_KEY, false);
+    reportFullscreen(false);
     return;
   }
-  AppStorage.setOrCreate(FULLSCREEN_KEY, target);
-  if (!target) { repaint(); }
-  reportFullscreen(target);
+  AppStorage.setOrCreate(FULLSCREEN_KEY, true);
+  reportFullscreen(true);
 }
 
-// Keeps the state honest when the system changes the window by itself (floating / split window
-// from a system gesture) and re-asserts hidden bars after the app returns to the foreground.
+// Keeps desire honest across window-mode changes: pause immersion when leaving FULL_SCREEN
+// (free multi-window / split), re-apply when returning to tablet FULL_SCREEN; reassert on
+// foreground if desire is still on.
 export class FullscreenSync {
   private win: window.Window;
   private repaint: () => void;
   private watching: boolean = false;
   private statusChanged = (status: window.WindowStatusType): void => {
     if (!fullscreenOn()) { return; }
-    if (status !== window.WindowStatusType.FULL_SCREEN && status !== window.WindowStatusType.MAXIMIZE) {
-      requestFullscreen(this.win, false, this.repaint)
-        .catch((error: BusinessError) => { console.info(`PhotoCraft fullscreen sync: ${error.code} ${error.message}`); });
+    if (status === window.WindowStatusType.FULL_SCREEN) {
+      enterFullscreen(this.win)
+        .then(() => { reportFullscreen(true); })
+        .catch((error: BusinessError) => {
+          console.info(`PhotoCraft fullscreen restore: ${error.code} ${error.message}`);
+        });
+      return;
     }
+    // Pause: show bars again for freeform chrome, keep AppStorage desire for later restore.
+    exitFullscreen(this.win)
+      .then(() => { this.repaint(); reportFullscreen(false); })
+      .catch((error: BusinessError) => {
+        console.info(`PhotoCraft fullscreen pause: ${error.code} ${error.message}`);
+      });
   };
 
   constructor(win: window.Window, repaint: () => void) { this.win = win; this.repaint = repaint; }
@@ -123,7 +158,11 @@ export class FullscreenSync {
   // Resume: the system may have restored the bars while backgrounded.
   reassert(): void {
     if (!fullscreenOn()) { return; }
-    this.win.setWindowSystemBarEnable([]).catch((error: BusinessError) => {
+    if (!windowAllowsFullscreen(this.win)) {
+      reportFullscreen(false);
+      return;
+    }
+    enterFullscreen(this.win).catch((error: BusinessError) => {
       console.info(`PhotoCraft fullscreen resume: ${error.code} ${error.message}`);
     });
     reportFullscreen(true);
