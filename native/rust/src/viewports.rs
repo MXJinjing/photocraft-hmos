@@ -235,7 +235,42 @@ impl Registry {
     }
 
     /// Stash a finished child pass: textures in pass order, shapes of the latest pass.
+    /// Turn title/size commands queued for a child viewport into host commands.
+    fn apply_commands(&mut self, id: ViewportId, commands: &[egui::ViewportCommand]) {
+        let ppp = self.ppp();
+        let Some(child) = self.children.get_mut(&id) else {
+            return;
+        };
+        for command in commands {
+            match command {
+                egui::ViewportCommand::Title(title) if child.title != *title => {
+                    child.title = title.clone();
+                    self.outbox.push(Command::Title {
+                        key: child.key,
+                        title: title.clone(),
+                    });
+                }
+                egui::ViewportCommand::InnerSize(size) => {
+                    let width = to_px(size.x, ppp, MIN_SIZE.x);
+                    let height = to_px(size.y, ppp, MIN_SIZE.y);
+                    self.outbox.push(Command::Resize {
+                        key: child.key,
+                        width,
+                        height,
+                    });
+                }
+                _ => {}
+            }
+        }
+    }
+
     fn collect(&mut self, id: ViewportId, mut output: FullOutput) {
+        // egui 0.37 returns an immediate viewport's own commands with its nested pass output
+        // instead of the root pass's `viewport_output`.
+        if let Some(own) = output.viewport_output.get(&id) {
+            let commands = own.commands.clone();
+            self.apply_commands(id, &commands);
+        }
         self.textures
             .append(std::mem::take(&mut output.textures_delta));
         for command in &output.platform_output.commands {
@@ -261,32 +296,8 @@ impl Registry {
         &mut self,
         viewports: &egui::OrderedViewportIdMap<egui::ViewportOutput>,
     ) -> Finished {
-        let ppp = self.ppp();
         for (id, output) in viewports {
-            let Some(child) = self.children.get_mut(id) else {
-                continue;
-            };
-            for command in &output.commands {
-                match command {
-                    egui::ViewportCommand::Title(title) if child.title != *title => {
-                        child.title = title.clone();
-                        self.outbox.push(Command::Title {
-                            key: child.key,
-                            title: title.clone(),
-                        });
-                    }
-                    egui::ViewportCommand::InnerSize(size) => {
-                        let width = to_px(size.x, ppp, MIN_SIZE.x);
-                        let height = to_px(size.y, ppp, MIN_SIZE.y);
-                        self.outbox.push(Command::Resize {
-                            key: child.key,
-                            width,
-                            height,
-                        });
-                    }
-                    _ => {}
-                }
-            }
+            self.apply_commands(*id, &output.commands);
         }
         let gone: Vec<ViewportId> = self
             .children
