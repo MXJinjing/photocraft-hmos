@@ -268,6 +268,8 @@ impl FontDb {
             }
             #[cfg(target_os = "linux")]
             files.extend(fontconfig_font_paths());
+            // Host-supplied files, e.g. fonts installed in HarmonyOS Settings (photocraft-hmos).
+            files.extend(crate::extra_fonts::extra_font_paths());
             // Core Text knows every font macOS offers, also those activated from outside the
             // font folders (#6683).
             #[cfg(target_os = "macos")]
