@@ -13,6 +13,11 @@ PhotoCraft 是一款开源图像编辑器，支持图层、蒙版、文字、画
 > [!NOTE]
 > 本仓库为个人对 PhotoCraft 的鸿蒙适配，**与上游 PhotoCraft / ArtCraft 团队无关**，未获其官方支持或背书。当前仍是早期开发版本，功能与稳定性仍在完善中，**请谨慎用于实际生产场景**，编辑过程中请及时保存文件内容。如遇问题，欢迎通过 Issue 反馈。
 
+> [!TIP]
+> 本应用已更名为 **ArtForge Photo（艺工坊·修图）** 并上架华为应用市场：[AppGallery 页面](https://appgallery.huawei.com/app/detail?id=io.github.mxjinjing.artforge.photo)（包名 `io.github.mxjinjing.artforge.photo`）。市场版源码见 [MXJinjing/artforge-photo](https://github.com/MXJinjing/artforge-photo)，会定期合入本仓库 `main` 的改动。本仓库仍以包名 `io.github.storytold.photocraft.hmos` 构建开源版。
+
+当前 `main` 基于上游 PhotoCraft **v0.18.0**（`upstream/photocraft/Cargo.toml`），应用版本见 `AppScope/app.json5`。
+
 完整功能与桌面版能力说明，请参阅上游项目：[storytold/photocraft](https://github.com/storytold/photocraft) · 官网介绍：[getartcraft.com/apps/photocraft](https://getartcraft.com/apps/photocraft)
 
 ---
@@ -24,6 +29,11 @@ PhotoCraft 是一款开源图像编辑器，支持图层、蒙版、文字、画
 - **触屏优化** — 针对手指操作调整交互与手势，支持双指平移 / 缩放，更适合平板与手机
 - **华为 M-Pencil 适配** — 连接手写笔后可使用压感、双击笔身和轻捏笔身；同时支持屏蔽手指输入（具体效果因机型与笔型号而异）
 - **系统色彩管理** — 协商 SDR Display P3 输出，不支持时回退到 sRGB；预览仍为 8-bit，不包含 HDR 输出
+- **触屏列表与面板** — 列表、色板、预设面板支持触屏拖动与滚动；状态栏提供隐藏面板的触屏按钮（[touch-panel-controls](docs/native/touch-panel-controls.md)、[touchscreen-navigation](docs/native/touchscreen-navigation.md)、[touch-cancellation](docs/native/touch-cancellation.md)）
+- **可选全屏** — 状态栏最右侧按钮与「窗口 › 主题」中的全屏开关；进入自由多窗口时暂停沉浸、回到平板模式后恢复（[fullscreen-optional](docs/native/fullscreen-optional.md)）
+- **系统文件选择器** — 打开 / 保存 / 另存为均走鸿蒙沙箱路径选择器（[sandbox-path-pickers](docs/native/sandbox-path-pickers.md)）
+- **原生子窗口** — 浮动文档窗口（「窗口 › 排列 › 浮动」或把标签拖出标签栏）使用鸿蒙原生子窗口（[native-subwindows](docs/native/native-subwindows.md)）
+- **系统与用户安装字体** — 除 `/system/fonts` 外，还会加载「设置 › 字体安装和管理」中用户安装的字体（[system-fonts](docs/native/system-fonts.md)、[installed-fonts](docs/native/installed-fonts.md)）
 
 其余图层、PSD、调整、选区等能力以设备上实际表现为准；完整能力清单以上游说明为准。
 
@@ -45,7 +55,7 @@ PhotoCraft 是一款开源图像编辑器，支持图层、蒙版、文字、画
 
 ## 安装方式
 
-目前尚未上架华为应用市场，需自行下载安装包。请根据是否具备鸿蒙开发环境，选择对应方式：
+**普通用户推荐直接从华为应用市场安装 [ArtForge Photo（艺工坊·修图）](https://appgallery.huawei.com/app/detail?id=io.github.mxjinjing.artforge.photo)。** 如需安装本仓库的开源构建，请根据是否具备鸿蒙开发环境，选择对应方式：
 
 **无 DevEco / 开发者套件（普通用户）**
 
@@ -72,7 +82,7 @@ PhotoCraft 是一款开源图像编辑器，支持图层、蒙版、文字、画
 - 仍为早期开发版本，请谨慎用于生产环境；处理大图或复杂 PSD 时可能出现性能不足或偶发卡顿，请及时保存
 - 「最近打开」尚不能可靠地直接重新打开文件（需通过系统文件选择器再次选择）
 - 系统剪贴板、自动恢复草稿等能力仍在完善中
-- 未签名安装包无法直接安装至真机；应用市场分发尚未提供
+- 本仓库 Releases 中的未签名安装包无法直接安装至真机，需先签名（应用市场版见上文）
 
 上游桌面版的能力对照说明，见 [parity 文档](https://github.com/storytold/photocraft/blob/main/docs/roadmap.md)。
 
@@ -112,6 +122,39 @@ hdc shell aa start -a EntryAbility -b io.github.storytold.photocraft.hmos
 
 未配置本地调试签名时，脚本会提示先在 DevEco Studio 中完成签名配置。重新部署或执行 `launch` 会关闭当前窗口，请事先保存文档。更详细的原生适配与架构说明，见仓库内 [`native/README.md`](native/README.md)。
 
+### GitHub Actions 构建（build-hap.yml）
+
+[`.github/workflows/build-hap.yml`](.github/workflows/build-hap.yml) 为手动触发（`workflow_dispatch`）的未签名 HAP 构建，输入：
+
+| 输入 | 说明 |
+|---|---|
+| `version_name` | 写入 `AppScope/app.json5` 的 versionName，如 `0.18.0.1` |
+| `version_code` | versionCode；留空则用 workflow run number。本仓库惯例：`0.18.0.1` → `180001` |
+| `build_mode` | `release` / `debug` |
+| `runner` | `ubuntu-latest`（从 `commandline_tools_url` 下载 DevEco 命令行工具）或 `self-hosted`（使用 runner 上已装的 DevEco Studio） |
+| `commandline_tools_url` | 华为下载页的命令行工具 zip 链接（需登录获取、有时效；托管 runner 必填，日志中会被遮蔽） |
+| `publish` | `none` / `prerelease` / `release`：是否发布到 GitHub Release |
+| `release_tag` | 留空则为 `v<version_name>` |
+
+产物为 `photocraft-hmos-<版本>-<模式>-unsigned.hap`，签名材料不进入仓库与 CI。
+
+### 主机测试
+
+```sh
+cd native/rust && cargo check                       # 主机侧编译检查
+npm i --prefix /tmp/ts5 typescript@5                # test_fullscreen.cjs 需要 TypeScript 5（6 及以上不兼容）
+NODE_PATH=/tmp/ts5/node_modules node scripts/test_fullscreen.cjs
+```
+
+`scripts/` 下另有其它 `test_*.cjs` / `test_*.py` 主机脚本。
+
+---
+
+## 分支
+
+- `main` — 鸿蒙版主线，正式版本从此分支构建
+- `upstream-track` — 长期追踪分支：上游 PhotoCraft 经 `git subtree` 同步到 `upstream/photocraft/`，同步与修复 PR 先合入此分支，验证后再合入 `main`
+
 ---
 
 ## 原生架构与验证
@@ -127,6 +170,7 @@ PhotoCraft Rust 库通过 XComponent / NativeWindow 与 wgpu GLES/EGL 绘制 egu
 ## 反馈与上游
 
 - 本仓库问题与建议：[Issues](https://github.com/MXJinjing/photocraft-hmos/issues)
+- 应用市场版 ArtForge Photo：[AppGallery](https://appgallery.huawei.com/app/detail?id=io.github.mxjinjing.artforge.photo) · 源码 [MXJinjing/artforge-photo](https://github.com/MXJinjing/artforge-photo)
 - 上游 PhotoCraft（桌面 / Web）：[storytold/photocraft](https://github.com/storytold/photocraft)
 - ArtCraft 社区 Discord：[discord.gg/artcraft](https://discord.gg/artcraft)
 
@@ -135,6 +179,8 @@ PhotoCraft Rust 库通过 XComponent / NativeWindow 与 wgpu GLES/EGL 绘制 egu
 ---
 
 ## 许可与声明
+
+Copyright (c) 2026 MXJinjing (PhotoCraft HarmonyOS port)；上游 PhotoCraft 版权归 ArtCraft Team 及 PhotoCraft 贡献者，详见 [LICENSE](LICENSE)。
 
 本项目与上游一致，采用 [MIT](LICENSE-MIT) 或 [Apache-2.0](LICENSE-APACHE) 双许可，可任选其一（`MIT OR Apache-2.0`）。贡献默认采用相同许可。
 
