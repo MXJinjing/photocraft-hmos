@@ -317,6 +317,8 @@ fn floating_document_windows_become_native_windows_without_embedding_the_rest() 
         document: 0,
         view: Default::default(),
         open: true,
+        floating: true,
+        focused: false,
         position: Some([20., 30.]),
     });
     let run = |app: &mut PhotocraftApp| {
@@ -364,6 +366,8 @@ fn without_native_support_floating_windows_stay_embedded() {
         document: 0,
         view: Default::default(),
         open: true,
+        floating: true,
+        focused: false,
         position: None,
     });
     registry.borrow_mut().begin_frame(0.0, None, 1.0);

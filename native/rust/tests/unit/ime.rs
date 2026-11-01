@@ -180,6 +180,11 @@ fn canvas_type_session_opens_ime_and_accepts_composition_and_unicode_deletion() 
         cursor_rect: rect,
         purpose: egui::IMEPurpose::Normal,
         should_interrupt_composition: false,
+        owner: egui::Id::NULL,
+        context_generation: 0,
+        reset_request: None,
+        change_cause: egui::output::ImeChangeCause::Other,
+        surrounding_text: egui::output::IMESurroundingText::Unavailable,
     });
     let mut sync = ImeSync::default();
     sync.update(&ctx, &output, Some(&app));
