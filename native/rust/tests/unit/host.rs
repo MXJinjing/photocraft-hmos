@@ -116,3 +116,18 @@ fn custom_host_exposes_font_definitions_before_platform_registration() {
     textures.clear();
     assert!(ctx.fonts(|fonts| !fonts.definitions().font_data.is_empty()));
 }
+
+/// egui 0.37 split the emoji faces out of `default_fonts`; without `monochrome_emoji_fonts`
+/// the menu check mark (`✔`, U+2714) has no face and renders as Inter's `.notdef` tofu.
+#[test]
+fn ui_fonts_draw_the_menu_check_mark() {
+    let ctx = egui::Context::default();
+    photocraft_ui_egui::theme::install_fonts(&ctx);
+    let mut output = ctx.run_ui(Default::default(), |_| {});
+    output.textures_delta.clear();
+    let mark = photocraft_ui_egui::menu_keys::CHECK_MARK.trim();
+    for family in [egui::FontFamily::Proportional, egui::FontFamily::Name("medium".into())] {
+        let id = egui::FontId::new(14.0, family);
+        assert!(ctx.fonts_mut(|f| f.has_glyphs(&id, mark)), "{id:?} lacks {mark}");
+    }
+}
