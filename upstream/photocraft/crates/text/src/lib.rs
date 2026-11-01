@@ -22,6 +22,8 @@ pub mod cjk;
 pub mod craft_fonts;
 mod embolden;
 pub mod engine_data;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod extra_fonts;
 pub mod font_class;
 pub mod fonts;
 pub mod glyphs;

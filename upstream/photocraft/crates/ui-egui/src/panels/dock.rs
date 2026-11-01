@@ -14,8 +14,11 @@ pub fn dock_area(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     if app.ui.panels.rail && !t.pro {
         rail(app, ui, &t);
     }
-    egui::CentralPanel::default().frame(egui::Frame::NONE).show(ui, |ui| crate::panel_docking::show(app, ui));
+    // craft-ui leaves the gaps between the dock, its columns and its groups unpainted; fill them
+    // with the chrome so they don't show the cleared (black) framebuffer (#9819, #10486).
+    egui::CentralPanel::default().frame(egui::Frame::NONE.fill(t.chrome)).show(ui, |ui| crate::panel_docking::show(app, ui));
     crate::dock::persist(app, ui.ctx());
+    crate::color_panel_ui::persist(app);
 }
 
 /// The docking layout's protected canvas panel: the document area, with the icon rail on its end
@@ -117,5 +120,36 @@ pub(crate) fn dock_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, group: crate
         (Group::Layers, 1) => channels(app, ui),
         (Group::Layers, _) => crate::vector_ui::paths_panel(app, ui),
         (Group::Brushes, _) => crate::brushes_tab::show(app, ui),
+    }
+}
+
+#[cfg(test)]
+mod gap_fill_tests {
+    use super::*;
+
+    /// The dock's gaps (between the canvas and the dock, its columns and groups) show the chrome,
+    /// not the cleared framebuffer (#9819, #10486).
+    #[test]
+    fn dock_area_backs_its_gaps_with_the_chrome() {
+        let mut ready = false;
+        let mut harness = egui_kittest::Harness::builder().with_size(egui::vec2(900.0, 600.0)).build_ui_state(
+            move |ui, app: &mut PhotocraftApp| {
+                if !ready {
+                    crate::theme::install_fonts(ui.ctx());
+                    ready = true;
+                    return;
+                }
+                dock_area(app, ui);
+            },
+            PhotocraftApp::new(photocraft_engine::Session::new(), Default::default()),
+        );
+        harness.run_steps(3);
+        let chrome = Tokens::get(&harness.ctx).chrome;
+        let screen = harness.ctx.content_rect();
+        let backed = harness.output().shapes.iter().any(|clipped| match &clipped.shape {
+            egui::epaint::Shape::Rect(rect) => rect.fill == chrome && rect.rect.contains_rect(screen.shrink(1.0)),
+            _ => false,
+        });
+        assert!(backed, "no chrome fill behind the dock area");
     }
 }

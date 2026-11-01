@@ -560,6 +560,10 @@ pub(crate) fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let mut style = craft_ui::docking::DockStyle::from_ui(ui);
     style.tab_height = if t.pro { 28.0 } else { 40.0 };
     style.min_pane = 0.0;
+    // No gap between the canvas and the dock or between split panes: the gap showed as a
+    // stripe beside the tab strips (#9819, #10486). The dock's column dividers keep their own
+    // hit areas on the column edges.
+    style.gap = 0.0;
     style.background = t.card;
     // Studio themes leave the strip transparent over the dock's card; a floating group has no
     // card behind it, so the canvas showed through its titles (#4509).
