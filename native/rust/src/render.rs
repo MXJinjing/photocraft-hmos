@@ -149,10 +149,6 @@ impl GpuRender {
             queue: self.queue.clone(),
             target_format: self.config.format,
             renderer: self.renderer.clone(),
-            surface_config: egui_wgpu::SurfaceConfig {
-                present_mode: self.config.present_mode,
-                desired_maximum_frame_latency: Some(self.config.desired_maximum_frame_latency),
-            },
         }
     }
     pub fn resize(&mut self, w: u32, h: u32) -> Result<(), String> {

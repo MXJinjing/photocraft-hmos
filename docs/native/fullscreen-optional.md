@@ -15,14 +15,18 @@ Both exist only when the host installs `Services::window_fullscreen` (`upstream/
 
 1. egui click → `bridge::notify(0, "fullscreen", "enter" | "exit")`.
 2. `Index.ets` → `requestFullscreen()` (`Fullscreen.ets`): `setWindowLayoutFullScreen(true)` + `setWindowSystemBarEnable([])`; exit restores `setWindowLayoutFullScreen(false)` + `['status', 'navigation']` and repaints the theme colour through `SystemBars.ets`.
-3. ArkTS → Rust `native.input({"kind":"fullscreen_state","text":"on"|"off"})` after **every** request (also on failure or refusal). Rust only mirrors this state, so the icon and menu text never get ahead of the window.
-4. `FullscreenSync` (EntryAbility) listens to `windowStatusChange`: if the system turns the window into a floating/split window while full screen is on, it leaves full screen and reports `off`. On foreground it re-hides the bars if full screen is on.
+3. ArkTS → Rust `native.input({"kind":"fullscreen_state","text":"on"|"off"})` after **every** request (also on failure or refusal). Rust only mirrors the *applied* window state, so the icon and menu text never get ahead of the window.
+4. `FullscreenSync` (EntryAbility) listens to `windowStatusChange`:
+   - Immersion is applied only while status is `FULL_SCREEN` (平板全屏). Free multi-window maximized is `MAXIMIZE`, floating is `FLOATING`, split is `SPLIT_SCREEN` — none of these enter immersion.
+   - Leaving `FULL_SCREEN` while the user still wants full screen **pauses**: layout and system bars are restored for freeform chrome, but `photocraftFullscreen` desire stays true and Rust is told `off`.
+   - Returning to `FULL_SCREEN` with desire still true **restores**: layout full screen + hidden bars again (fixes the case where the app filled the display but status / home indicator stayed visible).
+   - On foreground, `reassert()` re-applies immersion only when desire is on and status is still `FULL_SCREEN`.
 
 Full screen draws edge to edge: no inset padding is applied. `setKeyboardAvoidMode(RESIZE)` is untouched.
 
 ## 2in1
 
-Not offered: `fullscreenAvailable()` is false, ArkTS sends `fullscreen:false` in the native config, Rust installs no service, and neither the button nor the menu item appears. Freeform windows share the title strip with `WindowChrome`; immersive layout would fight it. Floating and split windows on tablets refuse to enter full screen for the same reason.
+Not offered: `fullscreenAvailable()` is false, ArkTS sends `fullscreen:false` in the native config, Rust installs no service, and neither the button nor the menu item appears. Freeform windows share the title strip with `WindowChrome`; immersive layout would fight it. Floating, split, and free multi-window maximized windows on tablets refuse to enter full screen for the same reason.
 
 ## Risk
 
