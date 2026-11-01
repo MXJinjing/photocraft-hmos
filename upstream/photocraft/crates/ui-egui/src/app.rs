@@ -48,6 +48,7 @@ impl PhotocraftApp {
             checker: None,
             touch_nav: false,
             drag: None,
+            cancelled_vector_drag: false,
             move_blocked: false,
             tool_override: None,
             live_stroke: None,
@@ -101,6 +102,7 @@ impl PhotocraftApp {
             tab_strip: None,
             drop_places: Default::default(),
             view_docs: Vec::new(),
+            path_document: None,
             fps: 0.0,
             last_frame_time: 0.0,
             thumbs: HashMap::new(),
@@ -125,6 +127,7 @@ impl PhotocraftApp {
             synthetic_reinject: false,
             synthetic_snapshot: None,
             automation_input: false,
+            run_depth: 0,
             paused_playbacks: Default::default(),
             channel_thumbs: None,
             channel_views: HashMap::new(),
@@ -177,6 +180,7 @@ impl PhotocraftApp {
             perf: Default::default(),
             stroke_trace: stroke_trace::StrokeTrace::from_env(),
             render_path: Default::default(),
+            slow_frames: Default::default(),
             prefs_rt: Default::default(),
             updates_rt: Default::default(),
             discard: None,
@@ -258,10 +262,9 @@ impl PhotocraftApp {
         if self.custom_titlebar {
             titlebar::release_after_os_resize(ctx, raw_input);
         }
-        if self.stroke_trace.enabled() {
-            let moves = raw_input.events.iter().filter(|e| matches!(e, egui::Event::PointerMoved(_))).count();
-            self.stroke_trace.begin_frame(frame_start, moves);
-        }
+        // The OS's moves and the control channel's (injected just above).
+        let moves = raw_input.events.iter().filter(|e| matches!(e, egui::Event::PointerMoved(_))).count();
+        self.perf.stage.start(frame_start, moves);
     }
 
 

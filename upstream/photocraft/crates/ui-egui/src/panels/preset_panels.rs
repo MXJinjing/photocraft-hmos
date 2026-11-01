@@ -393,6 +393,7 @@ fn draw_group_header(ui: &mut egui::Ui, group: &GroupView, context: GroupHeaderC
     if response.hovered() || (can_drag && response.dragged()) {
         ui.painter().rect_filled(rect, 2.0, tokens.hover.gamma_multiply(0.5));
     }
+    response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, ui.is_enabled(), open, &group.name));
     let triangle = Rect::from_center_size(pos2(rect.left() + 9.0, rect.center().y), vec2(12.0, 12.0));
     crate::icons::paint(ui, triangle, if open { "chevron-down" } else { "chevron-right" }, 10.0, tokens.text_dim);
     let folder = Rect::from_center_size(pos2(rect.left() + 25.0, rect.center().y), vec2(14.0, 14.0));

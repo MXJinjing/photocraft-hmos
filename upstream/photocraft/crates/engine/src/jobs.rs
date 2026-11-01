@@ -860,6 +860,10 @@ impl Session {
         self.coalesce_request = None;
         self.color_restrict = None;
         self.filter_mask_layer = None;
+        #[cfg(any(test, debug_assertions))]
+        {
+            self.hint_before = None;
+        }
         let pending = self.jobs.pending.take();
         match (r, pending) {
             (Err(e), Some(job)) => {
@@ -951,6 +955,7 @@ impl Session {
                 "layerComp.apply" => crate::comps_cmds::recorded_apply(self, params),
                 _ => crate::layer_multi_cmds::recorded_step(self, id, params, pre_selected),
             };
+            let params = crate::actions_cmds::recorded_params(self, id, params);
             self.journal.push((id.to_string(), params));
         }
     }
