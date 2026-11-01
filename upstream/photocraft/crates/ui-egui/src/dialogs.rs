@@ -367,17 +367,20 @@ fn dialog_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, d: &Dialog, fields: &
             // tab is a dialog field, so automation can switch it with `ui.dialog.set`.
             let tab = about_tab(fields);
             let mut chosen = tab;
-            ui.horizontal(|ui| {
-                for (key, label) in [("about", tl!("About")), ("contributors", tl!("Contributors")), ("models", tl!("Models"))] {
-                    if crate::widgets::pill_tab(ui, label, tab == key).clicked() {
-                        chosen = key;
+            // HarmonyOS hides Contributors and Models (no project links on that host).
+            if crate::links::SHOW_PROJECT_LINKS {
+                ui.horizontal(|ui| {
+                    for (key, label) in [("about", tl!("About")), ("contributors", tl!("Contributors")), ("models", tl!("Models"))] {
+                        if crate::widgets::pill_tab(ui, label, tab == key).clicked() {
+                            chosen = key;
+                        }
                     }
+                });
+                if chosen != tab {
+                    fields.insert("tab".into(), json!(chosen));
                 }
-            });
-            if chosen != tab {
-                fields.insert("tab".into(), json!(chosen));
+                ui.add_space(8.0);
             }
-            ui.add_space(8.0);
             about_tab_body(app, ui, chosen);
         }
         DialogKind::Command => outcome = command_body(app, ui, d, fields, id, interactive),
