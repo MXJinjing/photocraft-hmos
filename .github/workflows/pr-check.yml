@@ -1,0 +1,144 @@
+name: PR check
+
+# Required checks for main. Fork jobs (native/rust, fullscreen, HAP) plus the Linux quality gates
+# ported from upstream storytold/photocraft's ci.yml, run inside upstream/photocraft/.
+# Not ported: Windows/FreeBSD/Nix/arm64 legs, fuzz, perf and corpus jobs, sonarcloud (needs an
+# upstream secret), docs/release publishing.
+on:
+  pull_request:
+    branches: [main, upstream-track]
+  push:
+    branches: [upstream-track]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-check-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_INCREMENTAL: 0
+  CARGO_NET_RETRY: 10
+  CARGO_TERM_COLOR: always
+  APT_PACKAGES: >-
+    libxkbcommon-dev libwayland-dev libx11-dev libxrandr-dev libxi-dev libgl1-mesa-dev
+    libgtk-3-dev
+
+jobs:
+  rust:
+    name: rust
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Linux build dependencies
+        run: sudo apt-get update -q && sudo apt-get install -yq --no-install-recommends $APT_PACKAGES
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: native/rust
+          shared-key: native
+          save-if: ${{ github.event_name != 'pull_request' || github.base_ref == 'main' }}
+      - name: cargo check (native/rust, host)
+        working-directory: native/rust
+        run: cargo check --locked --all-targets
+      - name: cargo test (native/rust)
+        working-directory: native/rust
+        run: cargo test --locked
+      - name: cargo fmt --check (native/rust, informational)
+        continue-on-error: true
+        working-directory: native/rust
+        run: cargo fmt --check
+      - name: cargo clippy (native/rust, informational)
+        continue-on-error: true
+        working-directory: native/rust
+        run: cargo clippy --locked --all-targets -- -D warnings
+
+  fullscreen-test:
+    name: fullscreen-test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install typescript 5
+        run: |
+          if [ -f scripts/package.json ]; then
+            npm ci --prefix scripts
+          else
+            npm i --no-save --prefix scripts typescript@5
+            echo "NODE_PATH=$PWD/scripts/node_modules" >> "$GITHUB_ENV"
+          fi
+      - name: test_fullscreen.cjs
+        run: node scripts/test_fullscreen.cjs
+
+  # Ported from upstream ci.yml `gate` (craft-common-actions gate.yml runs `cargo xtask ci`).
+  upstream-gate:
+    name: upstream-gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 100
+    env:
+      PHOTOCRAFT_NO_PRINT: 1
+      LPDEST: photocraft-no-such-printer
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Linux build dependencies
+        run: sudo apt-get update -q && sudo apt-get install -yq --no-install-recommends $APT_PACKAGES
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: upstream/photocraft
+          shared-key: upstream
+          save-if: ${{ github.event_name != 'pull_request' || github.base_ref == 'main' }}
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
+      - name: cargo xtask ci
+        working-directory: upstream/photocraft
+        run: cargo xtask ci
+
+  # Ported from upstream ci.yml `test-without-heif`.
+  upstream-test-without-heif:
+    name: upstream-test-without-heif
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Linux build dependencies
+        run: sudo apt-get update -q && sudo apt-get install -yq --no-install-recommends $APT_PACKAGES
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: upstream/photocraft
+          shared-key: upstream-noheif
+          save-if: ${{ github.event_name != 'pull_request' || github.base_ref == 'main' }}
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
+      - name: Test without heif
+        working-directory: upstream/photocraft
+        run: cargo nextest run -p photocraft-heif -p photocraft-codecs -p photocraft-io --locked --profile ci
+
+  hap-build:
+    name: hap-build
+    uses: ./.github/workflows/build-hap.yml
+    permissions:
+      contents: write
+    with:
+      version_name: 0.0.0.1
+      version_code: "1"
+      build_mode: debug
+      runner: ubuntu-latest
+      # The hosted runner cannot download the DevEco tools without a signed per-run link, so PR
+      # builds reuse the tools cache that manual `Build unsigned HAP` runs on main keep warm.
+      tools_cache_name: commandline-tools-linux-x64-26.0.0.851.zip
+      publish: none
