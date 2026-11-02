@@ -39,19 +39,12 @@ pub fn status_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                     let (w, h, mode, bits, layers) =
                         (st.doc.size.width, st.doc.size.height, crate::canvas::mode_label(&st.doc), st.doc.depth.bits(), st.doc.layer_count());
                     let mut pct = app.ui.views[i].zoom * 100.0;
-                    let (zoom_response, zoom_rect) = widgets::compact_value_field_with_rect(
-                        ui,
-                        &mut pct,
-                        crate::zoom_levels::percent_range(&app.ui.views[i]),
-                        "%",
-                        78.0,
-                        control_h,
-                    );
-                    if zoom_response.accessible_name(tl!("Zoom")).changed() {
-                        app.ui.views[i].zoom = crate::zoom_levels::clamp(pct / 100.0, app.ui.views[i].doc_size);
-                        app.ui.views[i].zoom_animating = false;
-                        app.ui.views[i].zoom_anchor = None;
-                        app.ui.views[i].fit_pending = false;
+                    let (field, zoom_rect) =
+                        widgets::compact_value_field_with_rect(ui, &mut pct, crate::zoom_levels::percent_range(&app.ui.views[i]), "%", 78.0, control_h);
+                    let field = field.accessible_name(tl!("Zoom"));
+                    if field.changed() {
+                        let animated = app.session.prefs().general.animated_zoom;
+                        crate::zoom_levels::set_from_field(&mut app.ui.views[i], field.dragged() || field.drag_started(), pct, animated);
                     }
                     crate::status_panel_controls::fit_button(app, ui, zoom_rect);
                     widgets::vline(ui, 16.0);
