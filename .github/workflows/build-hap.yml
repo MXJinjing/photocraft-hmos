@@ -19,6 +19,20 @@ name: Build unsigned HAP
 # material stays local, as it does for scripts/dev.sh and scripts/package_offline.sh.
 
 on:
+  workflow_call:
+    inputs:
+      version_name: {required: true, type: string}
+      version_code: {required: false, default: "", type: string}
+      build_mode: {required: false, default: debug, type: string}
+      runner: {required: false, default: ubuntu-latest, type: string}
+      commandline_tools_url: {required: false, default: "", type: string}
+      tools_cache_name:
+        description: "Reuse the cached tools archive of this name when commandline_tools_url is empty (PR checks)"
+        required: false
+        default: ""
+        type: string
+      publish: {required: false, default: none, type: string}
+      release_tag: {required: false, default: "", type: string}
   workflow_dispatch:
     inputs:
       version_name:
@@ -71,7 +85,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: build-hap-${{ github.ref }}
+  group: build-hap-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -87,6 +101,7 @@ jobs:
       INPUT_TOOLS_URL: ${{ inputs.commandline_tools_url }}
       INPUT_PUBLISH: ${{ inputs.publish }}
       INPUT_RELEASE_TAG: ${{ inputs.release_tag }}
+      INPUT_TOOLS_CACHE_NAME: ${{ inputs.tools_cache_name }}
 
     steps:
       - name: Checkout
@@ -130,7 +145,7 @@ jobs:
           fi
 
           url="$INPUT_TOOLS_URL"
-          if [ "$INPUT_RUNNER" = "ubuntu-latest" ] && [ -z "$url" ]; then
+          if [ "$INPUT_RUNNER" = "ubuntu-latest" ] && [ -z "$url" ] && [ -z "${INPUT_TOOLS_CACHE_NAME:-}" ]; then
             echo "::error::The hosted runner needs commandline_tools_url. Sign in at https://developer.huawei.com/consumer/cn/download/command-line-tools-for-hmos, generate a fresh download link for Linux x64 and paste it here, or run with runner=self-hosted."
             exit 1
           fi
@@ -144,7 +159,11 @@ jobs:
           # A fresh link is generated for every run, but its path still ends in the archive
           # name, which is stable per tool version. Key the tool cache on that name so a new
           # link for the same version still hits, falling back to a URL hash when there is none.
-          name="$(basename "${url%%\?*}")"
+          if [ -n "$url" ]; then
+            name="$(basename "${url%%\?*}")"
+          else
+            name="${INPUT_TOOLS_CACHE_NAME:-}"
+          fi
           if [ -z "$name" ] || [ "$name" = "." ]; then
             name="$(printf '%s' "$url" | sha256sum | cut -c1-16)"
           fi
@@ -193,6 +212,10 @@ jobs:
           if [ -x "$dir/bin/hvigorw" ]; then
             echo "Reusing the cached command-line tools."
           else
+            if [ -z "$TOOLS_URL" ]; then
+              echo "::error::cached command-line tools ($INPUT_TOOLS_CACHE_NAME) not found and no commandline_tools_url given. Run Build unsigned HAP manually on main with a fresh link to refill the cache."
+              exit 1
+            fi
             rm -rf "$dir" "$RUNNER_TEMP/tools-unpacked"
             mkdir -p "$dir"
 
