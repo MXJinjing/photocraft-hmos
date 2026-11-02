@@ -52,11 +52,11 @@ jobs:
       - name: cargo fmt --check (native/rust, informational)
         continue-on-error: true
         working-directory: native/rust
-        run: cargo fmt --check
+        run: cargo fmt --check  # fails on main today
       - name: cargo clippy (native/rust, informational)
         continue-on-error: true
         working-directory: native/rust
-        run: cargo clippy --locked --all-targets -- -D warnings
+        run: cargo clippy --locked --all-targets -- -D warnings  # fails on main today
 
   fullscreen-test:
     name: fullscreen-test
@@ -102,48 +102,50 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-nextest
-      # The steps of upstream `cargo xtask ci`, split so each one reports on its own.
-      - name: fmt
+      # The steps of upstream `cargo xtask ci`, split so each one reports on its own. Only the ones
+      # that pass on main gate the job; the rest fail on today's main (fork changes are not
+      # upstream-fmt/clippy clean, the upstream ui-egui tests and wasm build do not compile with the
+      # harmonyos-ui fork changes) and stay informational until fixed.
+      - name: fmt (informational, fails on main today)
         id: fmt
         continue-on-error: true
         working-directory: upstream/photocraft
         run: cargo fmt --all -- --check
-      - name: clippy
+      - name: clippy (informational, fails on main today)
         id: clippy
         continue-on-error: true
         working-directory: upstream/photocraft
         run: cargo clippy --workspace --locked --features heif --all-targets --keep-going -- -D warnings
       - name: layers
         id: layers
-        continue-on-error: true
         working-directory: upstream/photocraft
         run: cargo xtask layers
-      - name: scorecard
+      - name: scorecard (informational, fails on main today)
         id: scorecard
         continue-on-error: true
         working-directory: upstream/photocraft
         run: cargo xtask scorecard --check
-      - name: test
+      - name: test (informational, fails on main today)
         id: test
         continue-on-error: true
         working-directory: upstream/photocraft
         run: cargo nextest run --profile ci --workspace --locked --features heif
-      - name: panic_hunt
+      - name: panic_hunt (informational, fails on main today)
         id: panic_hunt
         continue-on-error: true
         working-directory: upstream/photocraft
         run: cargo nextest run --profile ci --workspace --locked --features heif --run-ignored only -E 'binary_id(photocraft-engine::panic_hunt)'
       - name: doctest
         id: doctest
-        continue-on-error: true
         working-directory: upstream/photocraft
         run: cargo test --workspace --locked --features heif --doc
-      - name: wasm
+      - name: wasm (informational, fails on main today)
         id: wasm
         continue-on-error: true
         working-directory: upstream/photocraft
         run: cargo xtask wasm
       - name: summary
+        if: always()
         run: |
           echo "fmt: ${{ steps.fmt.outcome }}"
           echo "clippy: ${{ steps.clippy.outcome }}"
