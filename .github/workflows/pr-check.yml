@@ -102,9 +102,57 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-nextest
-      - name: cargo xtask ci
+      # The steps of upstream `cargo xtask ci`, split so each one reports on its own.
+      - name: fmt
+        id: fmt
+        continue-on-error: true
         working-directory: upstream/photocraft
-        run: cargo xtask ci
+        run: cargo fmt --all -- --check
+      - name: clippy
+        id: clippy
+        continue-on-error: true
+        working-directory: upstream/photocraft
+        run: cargo clippy --workspace --locked --features heif --all-targets --keep-going -- -D warnings
+      - name: layers
+        id: layers
+        continue-on-error: true
+        working-directory: upstream/photocraft
+        run: cargo xtask layers
+      - name: scorecard
+        id: scorecard
+        continue-on-error: true
+        working-directory: upstream/photocraft
+        run: cargo xtask scorecard --check
+      - name: test
+        id: test
+        continue-on-error: true
+        working-directory: upstream/photocraft
+        run: cargo nextest run --profile ci --workspace --locked --features heif
+      - name: panic_hunt
+        id: panic_hunt
+        continue-on-error: true
+        working-directory: upstream/photocraft
+        run: cargo nextest run --profile ci --workspace --locked --features heif --run-ignored only -E 'binary_id(photocraft-engine::panic_hunt)'
+      - name: doctest
+        id: doctest
+        continue-on-error: true
+        working-directory: upstream/photocraft
+        run: cargo test --workspace --locked --features heif --doc
+      - name: wasm
+        id: wasm
+        continue-on-error: true
+        working-directory: upstream/photocraft
+        run: cargo xtask wasm
+      - name: summary
+        run: |
+          echo "fmt: ${{ steps.fmt.outcome }}"
+          echo "clippy: ${{ steps.clippy.outcome }}"
+          echo "layers: ${{ steps.layers.outcome }}"
+          echo "scorecard: ${{ steps.scorecard.outcome }}"
+          echo "test: ${{ steps.test.outcome }}"
+          echo "panic_hunt: ${{ steps.panic_hunt.outcome }}"
+          echo "doctest: ${{ steps.doctest.outcome }}"
+          echo "wasm: ${{ steps.wasm.outcome }}"
 
   # Ported from upstream ci.yml `test-without-heif`.
   upstream-test-without-heif:
