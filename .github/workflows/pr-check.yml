@@ -190,7 +190,7 @@ jobs:
       runner: ubuntu-latest
       # The DevEco tools come from the actions cache, refilled on a miss from the private
       # release in MXJinjing/ci-toolchains via CI_TOOLCHAINS_TOKEN.
-      tools_cache_name: commandline-tools-linux-x64-26.0.0.851.zip
+      tools_cache_name: commandline-tools-linux-x64-26.0.0.865.zip
       publish: none
     secrets:
       CI_TOOLCHAINS_TOKEN: ${{ secrets.CI_TOOLCHAINS_TOKEN }}

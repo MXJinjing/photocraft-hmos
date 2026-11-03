@@ -108,10 +108,10 @@ jobs:
       INPUT_TOOLS_CACHE_NAME: ${{ inputs.tools_cache_name }}
       # Persistent copy of the DevEco tools in a PRIVATE release (proprietary; never public).
       TOOLCHAINS_REPO: MXJinjing/ci-toolchains
-      TOOLCHAINS_TAG: deveco-tools-26.0.0.851
-      TOOLCHAINS_ASSET: commandline-tools-linux-x64-26.0.0.851.zip
-      # TODO: fill in after uploading the zip (sha256sum of the asset). Empty = verification skipped with a warning.
-      TOOLCHAINS_SHA256: ""
+      TOOLCHAINS_TAG: deveco-tools-26.0.0.865
+      TOOLCHAINS_ASSET: commandline-tools-linux-x64-26.0.0.865.zip
+      # sha256 of the reassembled zip.
+      TOOLCHAINS_SHA256: e5fda7d37eef11263588203d724d1b72380273d3c07535bb7d361a1d0e95cf34
 
     steps:
       - name: Checkout
@@ -238,11 +238,17 @@ jobs:
               }
             elif [ -n "${GH_TOKEN:-}" ]; then
               echo "Downloading $TOOLCHAINS_ASSET from the private release $TOOLCHAINS_REPO@$TOOLCHAINS_TAG."
-              gh release download "$TOOLCHAINS_TAG" -R "$TOOLCHAINS_REPO" -p "$TOOLCHAINS_ASSET" -O "$zip" --clobber || {
+              # The zip exceeds GitHub's 2 GB asset limit, so it is stored as ordered parts.
+              parts="$RUNNER_TEMP/toolchain-parts"
+              rm -rf "$parts"; mkdir -p "$parts"
+              gh release download "$TOOLCHAINS_TAG" -R "$TOOLCHAINS_REPO" -p "$TOOLCHAINS_ASSET.part*" -D "$parts" || {
                 status=$?
                 echo "::error::could not download $TOOLCHAINS_ASSET from $TOOLCHAINS_REPO@$TOOLCHAINS_TAG (exit $status). Check that CI_TOOLCHAINS_TOKEN is valid (Contents: read on $TOOLCHAINS_REPO) and the asset exists."
                 exit $status
               }
+              cat "$parts"/"$TOOLCHAINS_ASSET".part* > "$zip"
+              rm -rf "$parts"
+              echo "Fetched from private release (not cache, not manual link): $(stat -c %s "$zip") bytes"
               if [ -n "$TOOLCHAINS_SHA256" ]; then
                 echo "$TOOLCHAINS_SHA256  $zip" | sha256sum -c - || {
                   echo "::error::sha256 mismatch for $TOOLCHAINS_ASSET"
