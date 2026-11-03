@@ -188,7 +188,9 @@ jobs:
       version_code: "1"
       build_mode: debug
       runner: ubuntu-latest
-      # The hosted runner cannot download the DevEco tools without a signed per-run link, so PR
-      # builds reuse the tools cache that manual `Build unsigned HAP` runs on main keep warm.
+      # The DevEco tools come from the actions cache, refilled on a miss from the private
+      # release in MXJinjing/ci-toolchains via CI_TOOLCHAINS_TOKEN.
       tools_cache_name: commandline-tools-linux-x64-26.0.0.851.zip
       publish: none
+    secrets:
+      CI_TOOLCHAINS_TOKEN: ${{ secrets.CI_TOOLCHAINS_TOKEN }}
