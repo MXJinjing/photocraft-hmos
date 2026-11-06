@@ -3,7 +3,7 @@ resolver = "3"
 
 [package]
 name = "photocraft-hmos"
-version = "0.18.0"
+version = "0.20.2"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 
