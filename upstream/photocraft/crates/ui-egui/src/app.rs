@@ -43,6 +43,7 @@ impl PhotocraftApp {
             display_memo: HashMap::new(),
             navigator_gpu: HashMap::new(),
             navigator_plain: std::collections::HashSet::new(),
+            streams: HashMap::new(),
             info_samplers: None,
             monitors: Default::default(),
             checker: None,
@@ -167,6 +168,7 @@ impl PhotocraftApp {
             raw_redevelop: Vec::new(),
             wide_angle: None,
             dialog_edits: Default::default(),
+            color_picker_live: Vec::new(),
             pending_after_prompt: None,
             tone_hist: None,
             doc_hist: None,
@@ -190,12 +192,15 @@ impl PhotocraftApp {
             discard: None,
             file_dialog: None,
             tiff_options: None,
+            tiff_remembered: Default::default(),
             save_dirs: HashMap::new(),
             disk_stamps: HashMap::new(),
             targa_options: None,
             jpeg_options: None,
             dds_options: None,
             held_opens: Default::default(),
+            held_memory_prompts: Default::default(),
+            prompt_order: Default::default(),
             held_preset_import: None,
             allow_close: false,
             stylus: Default::default(),
@@ -278,6 +283,14 @@ impl PhotocraftApp {
     }
 
     pub(crate) fn host_ui_parent(&mut self, ui: &mut egui::Ui, parent: Option<&super::file_dialog::ParentFrame>) {
+        photocraft_compose::discard_unreadable_pixel_caches();
+        if let Err(error) = photocraft_raster::spill::check_integrity() {
+            self.ui.status = error;
+            self.ui.status_error = true;
+        } else if let Some(error) = photocraft_raster::spill::last_error() {
+            self.ui.status = error;
+            self.ui.status_error = true;
+        }
         self.ui_frame(ui, parent);
         self.finish_type_reset_pass(ui.ctx());
     }
