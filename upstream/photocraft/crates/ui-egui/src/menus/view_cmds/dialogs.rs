@@ -465,13 +465,14 @@ pub(super) fn front(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str, para
         "file.export.dataSetsAsFiles" => {
             #[cfg(target_arch = "wasm32")]
             {
-                let _ = (app, dir, doc);
+                let _ = (app, doc);
                 Some(Err(tl!("Data Sets as Files is unavailable on the web").to_string()))
             }
             #[cfg(not(target_arch = "wasm32"))]
             {
                 let (_, _, _) = doc?;
-                dialog(app, json!({"dir": dir, "naming": "{name}", "format": "png"}), json!({"format": ["png", "jpg", "psd", "tiff", "webp", "bmp"]}))
+                let out = crate::path_pick::documents_output_dir(app, "datasets");
+                dialog(app, json!({"dir": out, "naming": "{name}", "format": "png"}), json!({"format": ["png", "jpg", "psd", "tiff", "webp", "bmp"]}))
             }
         }
         "layer.new.artboard" => {
