@@ -16,7 +16,7 @@ pub use panel_state::{
 };
 pub use tool::Tool;
 pub use tool_options::{SampleAllLayers, ToolOptions};
-use tool_options::{default_brush_tool, default_layer_filter_mode, yes};
+use tool_options::{default_brush_tool, default_layer_filter_mode, layer_filter_mode_or_normal, yes};
 pub use transform::{
     BoxResize, CamTransform, ContentAwareOptions, Extras, MadeLayer, TextEdit, TransformMode, TransformSession, TypeInsertionStyle, TypeTransform,
 };
@@ -223,6 +223,11 @@ pub struct UiState {
     /// Inline type editing session, if any.
     #[serde(default)]
     pub text_edit: Option<TextEdit>,
+    /// Whether the text being edited overflows its paragraph box (the box's lower-right handle
+    /// shows the overflow "+").
+    /// Read by automation while a session edits that box; never written to settings.
+    #[serde(skip)]
+    pub type_box_overflow: bool,
     /// Font for subsequent typing at this caret, separate from existing character runs.
     #[serde(default)]
     pub type_insertion_style: Option<TypeInsertionStyle>,
@@ -333,6 +338,9 @@ pub struct UiState {
     /// A live rectangle's corner radius widget being dragged (TOOL-214-12).
     #[serde(skip)]
     pub corner_radius: Option<crate::corner_radius::Drag>,
+    /// The bounding box of several selected shape layers, a handle being dragged.
+    #[serde(skip)]
+    pub shape_box: Option<crate::shape_bounds_box::Drag>,
     /// Selected row in the Paths panel ("work" or a saved path name).
     #[serde(default)]
     pub selected_path: Option<String>,
@@ -344,6 +352,9 @@ pub struct UiState {
     /// Layers panel kind filter ("pixel", "adjustment", "type", "shape", "smart"); empty = all.
     #[serde(default)]
     pub layer_filter: Vec<String>,
+    /// Layers panel Smart Object filter ("linked", "missing", "embedded"); empty = all.
+    #[serde(default)]
+    pub layer_filter_smart: Vec<String>,
     /// Thumbnail dimensions, content cropping and filter-strip visibility.
     #[serde(default)]
     pub layers_panel_options: LayersPanelOptions,
@@ -357,8 +368,17 @@ pub struct UiState {
     #[serde(default)]
     pub layer_filter_name: String,
     /// Layers panel blend-mode filter.
-    #[serde(default = "default_layer_filter_mode")]
+    #[serde(default = "default_layer_filter_mode", deserialize_with = "layer_filter_mode_or_normal")]
     pub layer_filter_mode: photocraft_color::BlendMode,
+    /// Layers panel effect filter (#10880).
+    #[serde(default)]
+    pub layer_filter_effect: crate::layer_filter_ui::effect::EffectKind,
+    /// Layers panel attribute filter (#10881).
+    #[serde(default)]
+    pub layer_filter_attribute: crate::layer_filter_ui::attribute::Attribute,
+    /// Layers panel colour filter (#5898): the label colour listed (None: layers without one).
+    #[serde(default)]
+    pub layer_filter_color: photocraft_doc::LabelColor,
     /// Actions panel: which row is selected and which are expanded. The list lives on the session.
     #[serde(default)]
     pub actions: crate::actions::ActionsUi,
@@ -517,12 +537,13 @@ pub struct UiState {
 impl Default for UiState {
     fn default() -> Self {
         Self {
-            tool: Tool::Brush,
+            tool: Tool::Move,
             group_tools: Vec::new(),
             spring: None,
             recent_files: Vec::new(),
             recent_fonts: Vec::new(),
             text_edit: None,
+            type_box_overflow: false,
             type_insertion_style: None,
             caret_blink_time: 0.0,
             text_edit_return_tool: None,
@@ -566,6 +587,7 @@ impl Default for UiState {
             shell: Default::default(),
             stylus_debug: Default::default(),
             layer_filter: Vec::new(),
+            layer_filter_smart: Vec::new(),
             layers_panel_options: LayersPanelOptions::default(),
             histogram_panel: Default::default(),
             histogram_range: None,
@@ -573,11 +595,15 @@ impl Default for UiState {
             layer_filter_by: Default::default(),
             layer_filter_name: String::new(),
             layer_filter_mode: default_layer_filter_mode(),
+            layer_filter_effect: Default::default(),
+            layer_filter_attribute: Default::default(),
+            layer_filter_color: Default::default(),
             pen: None,
             pen_doc: None,
             stroke_editor: None,
             direct_selection: Default::default(),
             corner_radius: None,
+            shape_box: None,
             selected_path: None,
             hidden_work_path: None,
             panels: Panels::default(),
@@ -721,10 +747,10 @@ mod tests {
         assert_eq!(Tool::from_name("Vertical Type Mask Tool"), Some(Tool::VerticalTypeMask));
         assert_eq!(Tool::from_name("addAnchorPoint"), Some(Tool::AddAnchorPoint));
         assert_eq!(Tool::from_name("Delete Anchor Point Tool"), Some(Tool::DeleteAnchorPoint));
-        assert_eq!(Tool::DeleteAnchorPoint.key(), 'P');
+        assert_eq!(Tool::DeleteAnchorPoint.key(), ' ');
         assert_eq!(Tool::from_name("convertPoint"), Some(Tool::ConvertPoint));
         assert_eq!(Tool::from_name("Convert Point Tool"), Some(Tool::ConvertPoint));
-        assert_eq!(Tool::ConvertPoint.key(), 'P', "it shares the Pen's key");
+        assert_eq!(Tool::ConvertPoint.key(), ' ', "P never reaches it");
         assert!(!Tool::ConvertPoint.is_brushlike());
         assert_eq!(Tool::from_name("Remove Tool"), Some(Tool::Remove));
         assert_eq!(Tool::Remove.key(), 'J');
@@ -775,7 +801,7 @@ mod tests {
     fn ui_state_serializes() {
         let s = UiState::default();
         let v = serde_json::to_value(&s).unwrap();
-        assert_eq!(v["tool"], "Brush");
+        assert_eq!(v["tool"], "Move");
         let back: UiState = serde_json::from_value(v).unwrap();
         assert_eq!(back, s);
     }
