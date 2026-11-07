@@ -31,6 +31,7 @@ mod fullscreen;
 mod ime;
 mod input;
 mod installed_fonts;
+mod memory_probe;
 #[cfg(any(target_env = "ohos", test))]
 mod recovery;
 #[cfg(any(target_env = "ohos", test))]
@@ -310,6 +311,7 @@ pub unsafe extern "C" fn pc_init(ptr: *const u8, len: usize, notify: bridge::Not
         return false;
     }
     bridge::init(notify);
+    memory_probe::log_current();
     let (tx, rx) = mpsc::channel();
     if SEND.set(tx).is_err() {
         return true;

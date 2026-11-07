@@ -804,6 +804,28 @@ mod tests {
         assert_eq!(b_caller_high.soft_limit, 4 * gb);
     }
 
+    /// hmos regression: a 162 MiB small-PSD estimate was refused because the sandboxed cgroup
+    /// was unreadable and the probe reported `Some(0)`. With the measured fallback it opens,
+    /// while genuinely low measured memory still refuses.
+    #[test]
+    fn hmos_unreadable_probe_with_measured_memory_admits_small_psd() {
+        if cfg!(target_arch = "wasm32") {
+            return;
+        }
+        use photocraft_raster::memory::system::SystemMemory;
+        let required = 170_134_172u64;
+        let mib = 1u64 << 20;
+        let measured = SystemMemory { available_ram: Some(3 * 1024 * mib), swap_free: None, commit_headroom: None, constraint_unreadable: true };
+        for spillable in [0, required] {
+            assert!(evaluate_psd_admission_for(Platform::Native, required, spillable, 0, false, None, measured.into()).is_ok(), "spillable={spillable}");
+        }
+        let fail_closed = SystemMemory { available_ram: Some(0), swap_free: Some(0), commit_headroom: None, constraint_unreadable: true };
+        assert!(evaluate_psd_admission_for(Platform::Native, required, 0, 0, false, None, fail_closed.into()).is_err());
+        let low = SystemMemory { available_ram: Some(64 * mib), swap_free: None, commit_headroom: None, constraint_unreadable: true };
+        assert!(evaluate_psd_admission_for(Platform::Native, required, 0, 0, false, None, low.into()).is_err(), "real low memory still refuses");
+        assert!(evaluate_psd_admission_for(Platform::Native, required, 0, 0, true, Some(required), low.into()).is_err(), "even with approval");
+    }
+
     #[test]
     fn zero_available_ram_is_not_unknown() {
         if cfg!(target_arch = "wasm32") {
