@@ -15,7 +15,7 @@ pub(super) type Slot = Arc<Mutex<BuildState>>;
 pub(super) type Completion = Arc<Mutex<Option<Result<(), (String, bool)>>>>;
 
 #[cfg(not(target_arch = "wasm32"))]
-pub(super) fn start(device: &eframe::wgpu::Device, format: eframe::wgpu::TextureFormat, ctx: &egui::Context, slot: &Slot, completion: &Completion) {
+pub(super) fn start(device: &wgpu::Device, format: wgpu::TextureFormat, ctx: &egui::Context, slot: &Slot, completion: &Completion) {
     let mut state = slot.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     if !matches!(*state, BuildState::NotStarted) {
         return;
