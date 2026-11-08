@@ -458,7 +458,13 @@ fn evaluate_psd_admission_for(
     snapshot: MemorySnapshot,
 ) -> Result<AdmissionOutcome, IoError> {
     let limit_opt = (caller_limit > 0).then_some(caller_limit);
-    let budget = resolve_budget_credited(platform, snapshot, limit_opt, scratch_credit_for(platform, spillable.min(required)));
+    let credit = scratch_credit_for(platform, spillable.min(required));
+    let budget = resolve_budget_credited(platform, snapshot, limit_opt, credit);
+    #[cfg(target_env = "ohos")]
+    photocraft_raster::spill::log_sandbox_diagnostic(&format!(
+        "PSD admission: required={required} tile_bytes={spillable} nonspill={} available_ram={:?} scratch_credit={credit} hard_limit={} soft_limit={} approved={high_memory_approved} scratch={:?}",
+        required.saturating_sub(spillable), snapshot.available_ram, budget.hard_limit, budget.soft_limit, photocraft_raster::spill::stats()
+    ));
 
     let authorized_total = match budget.decide(required) {
         BudgetDecision::Automatic => {
@@ -802,6 +808,28 @@ mod tests {
         let b_caller_high = resolve_budget(snap8, Some(20 * gb));
         assert_eq!(b_caller_high.hard_limit, 6 * gb);
         assert_eq!(b_caller_high.soft_limit, 4 * gb);
+    }
+
+    /// hmos regression: a 162 MiB small-PSD estimate was refused because the sandboxed cgroup
+    /// was unreadable and the probe reported `Some(0)`. With the measured fallback it opens,
+    /// while genuinely low measured memory still refuses.
+    #[test]
+    fn hmos_unreadable_probe_with_measured_memory_admits_small_psd() {
+        if cfg!(target_arch = "wasm32") {
+            return;
+        }
+        use photocraft_raster::memory::system::SystemMemory;
+        let required = 170_134_172u64;
+        let mib = 1u64 << 20;
+        let measured = SystemMemory { available_ram: Some(3 * 1024 * mib), swap_free: None, commit_headroom: None, constraint_unreadable: true };
+        for spillable in [0, required] {
+            assert!(evaluate_psd_admission_for(Platform::Native, required, spillable, 0, false, None, measured.into()).is_ok(), "spillable={spillable}");
+        }
+        let fail_closed = SystemMemory { available_ram: Some(0), swap_free: Some(0), commit_headroom: None, constraint_unreadable: true };
+        assert!(evaluate_psd_admission_for(Platform::Native, required, 0, 0, false, None, fail_closed.into()).is_err());
+        let low = SystemMemory { available_ram: Some(64 * mib), swap_free: None, commit_headroom: None, constraint_unreadable: true };
+        assert!(evaluate_psd_admission_for(Platform::Native, required, 0, 0, false, None, low.into()).is_err(), "real low memory still refuses");
+        assert!(evaluate_psd_admission_for(Platform::Native, required, 0, 0, true, Some(required), low.into()).is_err(), "even with approval");
     }
 
     #[test]

@@ -29,6 +29,7 @@ import { pickFolder, sandboxDocumentDirectory, ensureOutputSubdirs } from '../fo
 
 class NativeConfig {
   files: string;
+  cache: string;
   documents: string;
   scale: number;
   language: string;
@@ -36,11 +37,12 @@ class NativeConfig {
   systemTheme: string;
   // Whether the egui status-bar button / Window menu item for full screen are offered (not on 2in1).
   fullscreen: boolean;
-  constructor(files: string, documents: string, scale: number, language: string, displayP3: boolean, systemTheme: string, fullscreen: boolean) {
+  constructor(files: string, documents: string, scale: number, language: string, displayP3: boolean, systemTheme: string, fullscreen: boolean, cache: string) {
     this.files = files; this.documents = documents; this.scale = scale; this.language = language;
     this.displayP3 = displayP3;
     this.systemTheme = systemTheme;
     this.fullscreen = fullscreen;
+    this.cache = cache;
   }
 }
 class NativeMessage { kind: string = ''; text: string = ''; }
@@ -195,7 +197,7 @@ struct Index {
       if (systemTheme !== SYSTEM_THEME_DARK && systemTheme !== SYSTEM_THEME_LIGHT) {
         systemTheme = '';
       }
-      native.init(JSON.stringify(new NativeConfig(this.context.filesDir, documents, scale, i18n.System.getSystemLanguage(), displayP3, systemTheme, fullscreenAvailable())),
+      native.init(JSON.stringify(new NativeConfig(this.context.filesDir, documents, scale, i18n.System.getSystemLanguage(), displayP3, systemTheme, fullscreenAvailable(), this.context.cacheDir)),
         (id: number, message: string, data: ArrayBuffer) => { this.receive(id, message, data); });
       // A recreated page can start while the window is still full screen: bring Rust in line.
       if (fullscreenOn()) { reportFullscreen(true); }

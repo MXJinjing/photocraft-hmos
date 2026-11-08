@@ -269,6 +269,8 @@ struct Config {
     size_cap: Option<u64>,
     /// Scratch bytes the volume allows, as of the last answer; `None` = unmeasured.
     room: Option<u64>,
+    /// Raw measurement behind the current room (not a cached admission allowance).
+    volume_space: Option<(u64, u64)>,
 }
 
 struct Pause {
@@ -341,7 +343,7 @@ static M: Manager = Manager {
     recovering: AtomicBool::new(false),
     space_unmeasured: AtomicBool::new(false),
     registry: Mutex::new(Registry { cells: Vec::new(), hand: 0 }),
-    config: Mutex::new(Config { dir: None, file: None, last_error: None, budget: 0, paused: None, backoff: RETRY_FIRST, size_cap: None, room: None }),
+    config: Mutex::new(Config { dir: None, file: None, last_error: None, budget: 0, paused: None, backoff: RETRY_FIRST, size_cap: None, room: None, volume_space: None }),
     evictions: AtomicU64::new(0),
     reloads: AtomicU64::new(0),
     written: AtomicU64::new(0),
@@ -466,6 +468,8 @@ impl Manager {
         if c.dir.as_deref() != Some(dir) || done.as_ref().is_some_and(|d| d.finished()) {
             return;
         }
+        #[cfg(target_env = "ohos")]
+        log_sandbox_diagnostic(&format!("scratch query: no completed measurement dir={dir:?} active_threads={}", QUERY_THREADS.load(Ordering::Acquire)));
         let used = c.file.as_ref().map_or(0, |f| f.used());
         apply_space(&mut c, used, None);
     }
@@ -608,6 +612,7 @@ impl Manager {
 
 /// Record a volume's answer (`None` = it didn't say) and derive the growth limit from it.
 fn apply_space(c: &mut Config, used: u64, space: Option<(u64, u64)>) {
+    c.volume_space = space;
     M.space_unmeasured.store(space.is_none(), Ordering::Relaxed);
     c.room = space.map(|(available, total)| used.saturating_add(available.saturating_sub(RESERVE_MIN.max(total / 20))));
     store_limit(c);
@@ -632,6 +637,8 @@ fn start_query(dir: &Path, prepare: bool) -> Option<(Arc<QueryDone>, Instant)> {
         return Some((q.done.clone(), q.deadline));
     }
     if QUERY_THREADS.load(Ordering::Acquire) >= MAX_QUERIES {
+        #[cfg(target_env = "ohos")]
+        log_sandbox_diagnostic(&format!("scratch query: thread limit reached dir={dir:?}"));
         return None;
     }
     let now = Instant::now();
@@ -641,7 +648,11 @@ fn start_query(dir: &Path, prepare: bool) -> Option<(Arc<QueryDone>, Instant)> {
     let (job_dir, job_done) = (dir.to_path_buf(), done.clone());
     QUERY_THREADS.fetch_add(1, Ordering::AcqRel);
     let spawned = std::thread::Builder::new().name("pc-scratch-query".into()).spawn(move || run_query(job_dir, prepare, job_done));
-    if spawned.is_err() {
+    if let Err(error) = spawned {
+        #[cfg(target_env = "ohos")]
+        log_sandbox_diagnostic(&format!("scratch query: thread spawn failed dir={dir:?} error={error}"));
+        #[cfg(not(target_env = "ohos"))]
+        let _ = error;
         QUERY_THREADS.fetch_sub(1, Ordering::AcqRel);
         queries.pop();
         return None;
@@ -664,17 +675,74 @@ fn run_query(dir: PathBuf, prepare: bool, done: Arc<QueryDone>) {
     }
     // Before measuring: writes made during the query come off the free space and must not be
     // counted again on top of it. Another folder's file says nothing about this one.
-    let (open, used) = {
+    let (open, used, backing) = {
         let c = M.config();
         let current = c.file.as_ref().filter(|_| c.dir.as_deref() == Some(dir.as_path()));
-        (prepare && current.is_none(), current.map_or(0, |f| f.used()))
+        (prepare && current.is_none(), current.map_or(0, |f| f.used()), current.cloned())
     };
     let file = open.then(|| std::fs::create_dir_all(&dir).and_then(|()| ScratchFile::create(&dir)));
-    let space = free_space(&dir);
+    // A sandbox may allow file creation yet refuse real I/O. On OHOS establish that the
+    // backing supports the exact positioned-write/read + CRC path before crediting it.
+    #[cfg(target_env = "ohos")]
+    let file = file.map(|result| result.and_then(verify_sandbox_backing));
+    // Re-measure the verified, still-open backing, not a second path lookup. OHOS
+    // cache paths may disappear/change visibility after startup (e.g. cache eviction).
+    // Never retain a stale startup capacity when this fresh query fails or times out.
+    let backing = backing.as_deref().or_else(|| file.as_ref().and_then(|r| r.as_ref().ok()));
+    let sandbox = cfg!(target_env = "ohos") || host_scratch_dir().as_deref() == Some(dir.as_path());
+    let space = query_space(&dir, backing, sandbox);
     // Forget it first: a caller that joined it can rely on the answer, and a later caller asks anew.
     QUERIES.lock().unwrap_or_else(PoisonError::into_inner).retain(|q| !Arc::ptr_eq(&q.done, &done));
     M.settle(&dir, prepare, file, used, space, &done);
     QUERY_THREADS.fetch_sub(1, Ordering::AcqRel);
+}
+
+/// A bounded real backing-file round trip, run on the existing query thread (not the UI).
+#[cfg(any(target_env = "ohos", test))]
+fn verify_sandbox_backing(file: ScratchFile) -> std::io::Result<ScratchFile> {
+    let pattern = [0x5a; 4096];
+    let extent = file.write(&pattern)?;
+    let mut read = Vec::new();
+    let result = file.read_into(extent, &mut read);
+    file.free(extent);
+    result?;
+    if read != pattern {
+        return Err(std::io::Error::other("sandbox scratch verification mismatch"));
+    }
+    Ok(file)
+}
+
+/// Keep the directory-based upstream behavior for ordinary desktop disks. Sandboxed
+/// hosts measure the volume of their verified backing instead: its fd remains usable
+/// after a cache-directory rename/unlink and identifies exactly the volume tiles use.
+fn query_space(dir: &Path, backing: Option<&ScratchFile>, sandbox: bool) -> Option<(u64, u64)> {
+    #[cfg(unix)]
+    if sandbox && let Some(backing) = backing {
+        let result = backing.volume_space();
+        #[cfg(target_env = "ohos")]
+        log_sandbox_diagnostic(&format!("scratch query: source=verified_backing_fd dir={dir:?} result={result:?}"));
+        // A failed fd query earns no credit. A path may now name a different volume;
+        // falling back to it would promise space on the wrong backing.
+        return result.ok().and_then(|(available, total)| known_space(available, total));
+    }
+    let _ = (backing, sandbox);
+    free_space(dir)
+}
+
+/// The native host owns the platform logger; upstream raster remains unsafe-free.
+static SANDBOX_LOGGER: std::sync::OnceLock<fn(&str)> = std::sync::OnceLock::new();
+
+#[doc(hidden)]
+pub fn set_sandbox_diagnostic_logger(logger: fn(&str)) {
+    let _ = SANDBOX_LOGGER.set(logger);
+}
+
+/// No callback/formatting dependency on a particular sandbox OS in upstream code.
+#[doc(hidden)]
+pub fn log_sandbox_diagnostic(line: &str) {
+    if let Some(logger) = SANDBOX_LOGGER.get() {
+        logger(line);
+    }
 }
 
 /// Whether a query about `dir` is past its wait without an answer.
@@ -916,6 +984,26 @@ pub fn set_size_cap(cap: Option<u64>) {
     }
 }
 
+/// Sandboxed native hosts cannot use the OS-wide temporary directory. Install the app's
+/// private cache directory before creating a session; no environment mutation is needed.
+/// Only the OHOS engine's `(system temp)` preference consults this override. Explicit scratch
+/// preferences, including disabling all disks, keep their original meaning.
+static HOST_SCRATCH_DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+pub fn set_host_scratch_dir(dir: PathBuf) -> Result<(), String> {
+    if !dir.is_absolute() {
+        return Err("host scratch directory must be absolute".into());
+    }
+    if let Some(current) = HOST_SCRATCH_DIR.get() {
+        return if current == &dir { Ok(()) } else { Err("host scratch directory already initialized".into()) };
+    }
+    HOST_SCRATCH_DIR.set(dir).map_err(|_| "host scratch directory already initialized".into())
+}
+
+pub fn host_scratch_dir() -> Option<PathBuf> {
+    HOST_SCRATCH_DIR.get().cloned()
+}
+
 /// Turn the scratch disk on (`dir` and a non-zero `budget_bytes`) or off. Tiles already on disk
 /// stay readable either way. Changing the directory starts a new scratch file there; the old one
 /// is deleted once its last tile is freed or changed. A directory that can't be used is kept and
@@ -926,6 +1014,7 @@ pub fn configure(dir: Option<&Path>, budget_bytes: usize) -> Result<(), String> 
     let mut c = M.config();
     let old = if dir != c.dir {
         c.room = None;
+        c.volume_space = None;
         c.file.take()
     } else {
         None
@@ -1003,6 +1092,8 @@ pub struct SpillStats {
     pub size_cap_bytes: Option<u64>,
     /// Spilling is on but the scratch directory's volume won't report its free space ([`free_space_unmeasured`]).
     pub free_space_unmeasured: bool,
+    /// Latest raw available bytes and volume size; absent after a failed/timed-out query.
+    pub volume_space: Option<(u64, u64)>,
 }
 
 pub fn stats() -> SpillStats {
@@ -1019,6 +1110,7 @@ pub fn stats() -> SpillStats {
         last_error: c.last_error.clone(),
         paused: c.paused.is_some(),
         size_cap_bytes: c.size_cap,
+        volume_space: c.volume_space,
         free_space_unmeasured: enabled() && (M.space_unmeasured.load(Ordering::Relaxed) || query_overdue(c.dir.as_deref())),
     }
 }
@@ -1337,6 +1429,7 @@ mod tests {
                 backoff: RETRY_FIRST,
                 size_cap: None,
                 room: None,
+                volume_space: None,
             }),
             evictions: AtomicU64::new(0),
             reloads: AtomicU64::new(0),
@@ -1400,5 +1493,18 @@ mod tests {
         assert!(check_integrity().is_ok());
         assert!(check_since(dropped_generation).is_err(), "dropping the failed tile must also reject its placeholder result");
         let _ = std::fs::remove_dir(&dir);
+    }
+}
+
+#[cfg(test)]
+mod sandbox_backing_tests {
+    #[test]
+    fn writable_backing_is_verified_before_ohos_credit() {
+        let dir = std::env::temp_dir().join(format!("photocraft-backing-check-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = super::ScratchFile::create(&dir).unwrap();
+        let file = super::verify_sandbox_backing(file).unwrap();
+        assert_eq!(file.used(), 0, "the verification extent is released");
+        assert_eq!(file.duplicate_handle().unwrap().metadata().unwrap().len(), 0);
     }
 }

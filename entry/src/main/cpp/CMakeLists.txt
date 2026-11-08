@@ -15,6 +15,8 @@ if(NOT EXISTS "${RUST_LIBRARY}")
   message(FATAL_ERROR "Run scripts/build_native.sh before building HAP: ${RUST_LIBRARY}")
 endif()
 add_library(photocraft SHARED bridge.cpp)
+# chrono/iana-time-zone on OHOS requires the system time-zone service.
+target_link_libraries(photocraft PRIVATE time_service_ndk)
 target_link_libraries(photocraft PRIVATE "${RUST_LIBRARY}" ace_napi.z ace_ndk.z native_window native_vsync hilog_ndk.z native_drawing EGL GLESv3 dl m pthread)
 
 target_link_options(photocraft PRIVATE "-Wl,--gc-sections" "-Wl,--exclude-libs,ALL")
