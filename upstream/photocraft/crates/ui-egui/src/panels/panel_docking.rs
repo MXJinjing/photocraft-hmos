@@ -1210,6 +1210,10 @@ fn panel_menu(app: &mut PhotocraftApp, ui: &mut egui::Ui, panel: &str) {
             crate::histogram_panel::panel_menu(app, ui);
             ui.separator();
         }
+        "channels" => {
+            crate::channels_panel::panel_menu(app, ui);
+            ui.separator();
+        }
         _ => {}
     }
 }
