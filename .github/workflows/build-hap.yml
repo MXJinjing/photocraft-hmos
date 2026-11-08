@@ -19,6 +19,24 @@ name: Build unsigned HAP
 # material stays local, as it does for scripts/dev.sh and scripts/package_offline.sh.
 
 on:
+  workflow_call:
+    inputs:
+      version_name: {required: true, type: string}
+      version_code: {required: false, default: "", type: string}
+      build_mode: {required: false, default: debug, type: string}
+      runner: {required: false, default: ubuntu-latest, type: string}
+      commandline_tools_url: {required: false, default: "", type: string}
+      tools_cache_name:
+        description: "Reuse the cached tools archive of this name when commandline_tools_url is empty (PR checks)"
+        required: false
+        default: ""
+        type: string
+      publish: {required: false, default: none, type: string}
+      release_tag: {required: false, default: "", type: string}
+    secrets:
+      CI_TOOLCHAINS_TOKEN:
+        description: "Fine-grained token, Contents: read on MXJinjing/ci-toolchains (private toolchain releases)"
+        required: false
   workflow_dispatch:
     inputs:
       version_name:
@@ -71,7 +89,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: build-hap-${{ github.ref }}
+  group: build-hap-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -87,6 +105,13 @@ jobs:
       INPUT_TOOLS_URL: ${{ inputs.commandline_tools_url }}
       INPUT_PUBLISH: ${{ inputs.publish }}
       INPUT_RELEASE_TAG: ${{ inputs.release_tag }}
+      INPUT_TOOLS_CACHE_NAME: ${{ inputs.tools_cache_name }}
+      # Persistent copy of the DevEco tools in a PRIVATE release (proprietary; never public).
+      TOOLCHAINS_REPO: MXJinjing/ci-toolchains
+      TOOLCHAINS_TAG: deveco-tools-26.0.0.865
+      TOOLCHAINS_ASSET: commandline-tools-linux-x64-26.0.0.865.zip
+      # sha256 of the reassembled zip.
+      TOOLCHAINS_SHA256: e5fda7d37eef11263588203d724d1b72380273d3c07535bb7d361a1d0e95cf34
 
     steps:
       - name: Checkout
@@ -105,6 +130,8 @@ jobs:
 
       - name: Resolve and validate inputs
         id: cfg
+        env:
+          HAS_TOOLCHAINS_TOKEN: ${{ secrets.CI_TOOLCHAINS_TOKEN != '' }}
         run: |
           set -euo pipefail
 
@@ -130,7 +157,7 @@ jobs:
           fi
 
           url="$INPUT_TOOLS_URL"
-          if [ "$INPUT_RUNNER" = "ubuntu-latest" ] && [ -z "$url" ]; then
+          if [ "$INPUT_RUNNER" = "ubuntu-latest" ] && [ -z "$url" ] && [ -z "${INPUT_TOOLS_CACHE_NAME:-}" ] && [ "$HAS_TOOLCHAINS_TOKEN" != "true" ]; then
             echo "::error::The hosted runner needs commandline_tools_url. Sign in at https://developer.huawei.com/consumer/cn/download/command-line-tools-for-hmos, generate a fresh download link for Linux x64 and paste it here, or run with runner=self-hosted."
             exit 1
           fi
@@ -144,7 +171,11 @@ jobs:
           # A fresh link is generated for every run, but its path still ends in the archive
           # name, which is stable per tool version. Key the tool cache on that name so a new
           # link for the same version still hits, falling back to a URL hash when there is none.
-          name="$(basename "${url%%\?*}")"
+          if [ -n "$url" ]; then
+            name="$(basename "${url%%\?*}")"
+          else
+            name="${INPUT_TOOLS_CACHE_NAME:-$TOOLCHAINS_ASSET}"
+          fi
           if [ -z "$name" ] || [ "$name" = "." ]; then
             name="$(printf '%s' "$url" | sha256sum | cut -c1-16)"
           fi
@@ -186,6 +217,7 @@ jobs:
         if: inputs.runner == 'ubuntu-latest'
         env:
           TOOLS_URL: ${{ steps.cfg.outputs.tools_url }}
+          GH_TOKEN: ${{ secrets.CI_TOOLCHAINS_TOKEN }}
         run: |
           set -euo pipefail
 
@@ -197,12 +229,38 @@ jobs:
             mkdir -p "$dir"
 
             zip="$RUNNER_TEMP/commandline-tools.zip"
-            echo "Downloading the command-line tools archive."
-            curl -fL --retry 3 --retry-delay 5 -o "$zip" "$TOOLS_URL" || {
-              status=$?
-              echo "::error::downloading the command-line tools failed (curl exit $status). A 403 usually means the link expired or was not generated for a signed-in account: sign in at https://developer.huawei.com/consumer/cn/download/command-line-tools-for-hmos, generate a fresh link and rerun, or use runner=self-hosted."
-              exit $status
-            }
+            if [ -n "$TOOLS_URL" ]; then
+              echo "Downloading the command-line tools archive from the supplied link."
+              curl -fL --retry 3 --retry-delay 5 -o "$zip" "$TOOLS_URL" || {
+                status=$?
+                echo "::error::downloading the command-line tools failed (curl exit $status). A 403 usually means the link expired or was not generated for a signed-in account: sign in at https://developer.huawei.com/consumer/cn/download/command-line-tools-for-hmos, generate a fresh link and rerun, or use runner=self-hosted."
+                exit $status
+              }
+            elif [ -n "${GH_TOKEN:-}" ]; then
+              echo "Downloading $TOOLCHAINS_ASSET from the private release $TOOLCHAINS_REPO@$TOOLCHAINS_TAG."
+              # The zip exceeds GitHub's 2 GB asset limit, so it is stored as ordered parts.
+              parts="$RUNNER_TEMP/toolchain-parts"
+              rm -rf "$parts"; mkdir -p "$parts"
+              gh release download "$TOOLCHAINS_TAG" -R "$TOOLCHAINS_REPO" -p "$TOOLCHAINS_ASSET.part*" -D "$parts" || {
+                status=$?
+                echo "::error::could not download $TOOLCHAINS_ASSET from $TOOLCHAINS_REPO@$TOOLCHAINS_TAG (exit $status). Check that CI_TOOLCHAINS_TOKEN is valid (Contents: read on $TOOLCHAINS_REPO) and the asset exists."
+                exit $status
+              }
+              cat "$parts"/"$TOOLCHAINS_ASSET".part* > "$zip"
+              rm -rf "$parts"
+              echo "Fetched from private release (not cache, not manual link): $(stat -c %s "$zip") bytes"
+              if [ -n "$TOOLCHAINS_SHA256" ]; then
+                echo "$TOOLCHAINS_SHA256  $zip" | sha256sum -c - || {
+                  echo "::error::sha256 mismatch for $TOOLCHAINS_ASSET"
+                  exit 1
+                }
+              else
+                echo "::warning::TOOLCHAINS_SHA256 is empty; skipping checksum verification."
+              fi
+            else
+              echo "::error::command-line tools not cached, no commandline_tools_url given and no CI_TOOLCHAINS_TOKEN secret. Add the secret (Contents: read on $TOOLCHAINS_REPO) or run Build unsigned HAP with a fresh link."
+              exit 1
+            fi
 
             unzip -q "$zip" -d "$RUNNER_TEMP/tools-unpacked"
             inner="$(find "$RUNNER_TEMP/tools-unpacked" -maxdepth 2 -type d -name command-line-tools -print -quit)"

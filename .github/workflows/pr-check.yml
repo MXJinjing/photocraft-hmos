@@ -1,0 +1,196 @@
+name: PR check
+
+# Required checks for main. Fork jobs (native/rust, fullscreen, HAP) plus the Linux quality gates
+# ported from upstream storytold/photocraft's ci.yml, run inside upstream/photocraft/.
+# Not ported: Windows/FreeBSD/Nix/arm64 legs, fuzz, perf and corpus jobs, sonarcloud (needs an
+# upstream secret), docs/release publishing.
+on:
+  pull_request:
+    branches: [main, upstream-track]
+  push:
+    branches: [upstream-track]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-check-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_INCREMENTAL: 0
+  CARGO_NET_RETRY: 10
+  CARGO_TERM_COLOR: always
+  APT_PACKAGES: >-
+    libxkbcommon-dev libwayland-dev libx11-dev libxrandr-dev libxi-dev libgl1-mesa-dev
+    libgtk-3-dev
+
+jobs:
+  rust:
+    name: rust
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Linux build dependencies
+        run: sudo apt-get update -q && sudo apt-get install -yq --no-install-recommends $APT_PACKAGES
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: native/rust
+          shared-key: native
+          save-if: ${{ github.event_name != 'pull_request' || github.base_ref == 'main' }}
+      - name: cargo check (native/rust, host)
+        working-directory: native/rust
+        run: cargo check --locked --all-targets
+      - name: cargo test (native/rust)
+        working-directory: native/rust
+        run: cargo test --locked
+      - name: cargo fmt --check (native/rust, informational)
+        continue-on-error: true
+        working-directory: native/rust
+        run: cargo fmt --check  # fails on main today
+      - name: cargo clippy (native/rust, informational)
+        continue-on-error: true
+        working-directory: native/rust
+        run: cargo clippy --locked --all-targets -- -D warnings  # fails on main today
+
+  fullscreen-test:
+    name: fullscreen-test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install typescript 5
+        run: |
+          if [ -f scripts/package.json ]; then
+            npm ci --prefix scripts
+          else
+            npm i --no-save --prefix scripts typescript@5
+            echo "NODE_PATH=$PWD/scripts/node_modules" >> "$GITHUB_ENV"
+          fi
+      - name: test_fullscreen.cjs
+        run: node scripts/test_fullscreen.cjs
+
+  # Ported from upstream ci.yml `gate` (craft-common-actions gate.yml runs `cargo xtask ci`).
+  upstream-gate:
+    name: upstream-gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 100
+    env:
+      PHOTOCRAFT_NO_PRINT: 1
+      LPDEST: photocraft-no-such-printer
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Linux build dependencies
+        run: sudo apt-get update -q && sudo apt-get install -yq --no-install-recommends $APT_PACKAGES
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: upstream/photocraft
+          shared-key: upstream
+          save-if: ${{ github.event_name != 'pull_request' || github.base_ref == 'main' }}
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
+      # The steps of upstream `cargo xtask ci`, split so each one reports on its own. Only the ones
+      # that pass on main gate the job; the rest fail on today's main (fork changes are not
+      # upstream-fmt/clippy clean, the upstream ui-egui tests and wasm build do not compile with the
+      # harmonyos-ui fork changes) and stay informational until fixed.
+      - name: fmt (informational, fails on main today)
+        id: fmt
+        continue-on-error: true
+        working-directory: upstream/photocraft
+        run: cargo fmt --all -- --check
+      - name: clippy (informational, fails on main today)
+        id: clippy
+        continue-on-error: true
+        working-directory: upstream/photocraft
+        run: cargo clippy --workspace --locked --features heif --all-targets --keep-going -- -D warnings
+      - name: layers
+        id: layers
+        working-directory: upstream/photocraft
+        run: cargo xtask layers
+      - name: scorecard (informational, fails on main today)
+        id: scorecard
+        continue-on-error: true
+        working-directory: upstream/photocraft
+        run: cargo xtask scorecard --check
+      - name: test (informational, fails on main today)
+        id: test
+        continue-on-error: true
+        working-directory: upstream/photocraft
+        run: cargo nextest run --profile ci --workspace --locked --features heif
+      - name: panic_hunt (informational, fails on main today)
+        id: panic_hunt
+        continue-on-error: true
+        working-directory: upstream/photocraft
+        run: cargo nextest run --profile ci --workspace --locked --features heif --run-ignored only -E 'binary_id(photocraft-engine::panic_hunt)'
+      - name: doctest
+        id: doctest
+        working-directory: upstream/photocraft
+        run: cargo test --workspace --locked --features heif --doc
+      - name: wasm (informational, fails on main today)
+        id: wasm
+        continue-on-error: true
+        working-directory: upstream/photocraft
+        run: cargo xtask wasm
+      - name: summary
+        if: always()
+        run: |
+          echo "fmt: ${{ steps.fmt.outcome }}"
+          echo "clippy: ${{ steps.clippy.outcome }}"
+          echo "layers: ${{ steps.layers.outcome }}"
+          echo "scorecard: ${{ steps.scorecard.outcome }}"
+          echo "test: ${{ steps.test.outcome }}"
+          echo "panic_hunt: ${{ steps.panic_hunt.outcome }}"
+          echo "doctest: ${{ steps.doctest.outcome }}"
+          echo "wasm: ${{ steps.wasm.outcome }}"
+
+  # Ported from upstream ci.yml `test-without-heif`.
+  upstream-test-without-heif:
+    name: upstream-test-without-heif
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Linux build dependencies
+        run: sudo apt-get update -q && sudo apt-get install -yq --no-install-recommends $APT_PACKAGES
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: upstream/photocraft
+          shared-key: upstream-noheif
+          save-if: ${{ github.event_name != 'pull_request' || github.base_ref == 'main' }}
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
+      - name: Test without heif
+        working-directory: upstream/photocraft
+        run: cargo nextest run -p photocraft-heif -p photocraft-codecs -p photocraft-io --locked --profile ci
+
+  hap-build:
+    name: hap-build
+    uses: ./.github/workflows/build-hap.yml
+    permissions:
+      contents: write
+    with:
+      version_name: 0.0.0.1
+      version_code: "1"
+      build_mode: debug
+      runner: ubuntu-latest
+      # The DevEco tools come from the actions cache, refilled on a miss from the private
+      # release in MXJinjing/ci-toolchains via CI_TOOLCHAINS_TOKEN.
+      tools_cache_name: commandline-tools-linux-x64-26.0.0.865.zip
+      publish: none
+    secrets:
+      CI_TOOLCHAINS_TOKEN: ${{ secrets.CI_TOOLCHAINS_TOKEN }}
