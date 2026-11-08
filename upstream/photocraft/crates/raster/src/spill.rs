@@ -670,11 +670,30 @@ fn run_query(dir: PathBuf, prepare: bool, done: Arc<QueryDone>) {
         (prepare && current.is_none(), current.map_or(0, |f| f.used()))
     };
     let file = open.then(|| std::fs::create_dir_all(&dir).and_then(|()| ScratchFile::create(&dir)));
+    // A sandbox may allow file creation yet refuse real I/O. On OHOS establish that the
+    // backing supports the exact positioned-write/read + CRC path before crediting it.
+    #[cfg(target_env = "ohos")]
+    let file = file.map(|result| result.and_then(verify_sandbox_backing));
     let space = free_space(&dir);
     // Forget it first: a caller that joined it can rely on the answer, and a later caller asks anew.
     QUERIES.lock().unwrap_or_else(PoisonError::into_inner).retain(|q| !Arc::ptr_eq(&q.done, &done));
     M.settle(&dir, prepare, file, used, space, &done);
     QUERY_THREADS.fetch_sub(1, Ordering::AcqRel);
+}
+
+/// A bounded real backing-file round trip, run on the existing query thread (not the UI).
+#[cfg(any(target_env = "ohos", test))]
+fn verify_sandbox_backing(file: ScratchFile) -> std::io::Result<ScratchFile> {
+    let pattern = [0x5a; 4096];
+    let extent = file.write(&pattern)?;
+    let mut read = Vec::new();
+    let result = file.read_into(extent, &mut read);
+    file.free(extent);
+    result?;
+    if read != pattern {
+        return Err(std::io::Error::other("sandbox scratch verification mismatch"));
+    }
+    Ok(file)
 }
 
 /// Whether a query about `dir` is past its wait without an answer.
@@ -914,6 +933,26 @@ pub fn set_size_cap(cap: Option<u64>) {
         c.backoff = RETRY_FIRST;
         M.retry_now(c);
     }
+}
+
+/// Sandboxed native hosts cannot use the OS-wide temporary directory. Install the app's
+/// private cache directory before creating a session; no environment mutation is needed.
+/// Only the OHOS engine's `(system temp)` preference consults this override. Explicit scratch
+/// preferences, including disabling all disks, keep their original meaning.
+static HOST_SCRATCH_DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+pub fn set_host_scratch_dir(dir: PathBuf) -> Result<(), String> {
+    if !dir.is_absolute() {
+        return Err("host scratch directory must be absolute".into());
+    }
+    if let Some(current) = HOST_SCRATCH_DIR.get() {
+        return if current == &dir { Ok(()) } else { Err("host scratch directory already initialized".into()) };
+    }
+    HOST_SCRATCH_DIR.set(dir).map_err(|_| "host scratch directory already initialized".into())
+}
+
+pub fn host_scratch_dir() -> Option<PathBuf> {
+    HOST_SCRATCH_DIR.get().cloned()
 }
 
 /// Turn the scratch disk on (`dir` and a non-zero `budget_bytes`) or off. Tiles already on disk
@@ -1400,5 +1439,18 @@ mod tests {
         assert!(check_integrity().is_ok());
         assert!(check_since(dropped_generation).is_err(), "dropping the failed tile must also reject its placeholder result");
         let _ = std::fs::remove_dir(&dir);
+    }
+}
+
+#[cfg(test)]
+mod sandbox_backing_tests {
+    #[test]
+    fn writable_backing_is_verified_before_ohos_credit() {
+        let dir = std::env::temp_dir().join(format!("photocraft-backing-check-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = super::ScratchFile::create(&dir).unwrap();
+        let file = super::verify_sandbox_backing(file).unwrap();
+        assert_eq!(file.used(), 0, "the verification extent is released");
+        assert_eq!(file.duplicate_handle().unwrap().metadata().unwrap().len(), 0);
     }
 }

@@ -21,3 +21,11 @@ fn genuinely_low_memory_still_refuses_reference_psd() {
     let b = resolve_budget_with_scratch(m.into(), None, 0);
     assert!(b.hard_limit < REFERENCE_ESTIMATE, "{b:?}");
 }
+
+#[test]
+fn probe_reports_scratch_state_after_host_configuration() {
+    let line = describe(SystemMemory { available_ram: Some(6 << 30), ..Default::default() });
+    for key in ["scratch_dir=", "scratch_capacity=", "scratch_budget=", "scratch_backing_verified=", "scratch_paused=", "scratch_unmeasured=", "scratch_written=", "scratch_error="] {
+        assert!(line.contains(key), "{line}");
+    }
+}

@@ -601,3 +601,39 @@ fn real_import_admits_tile_pixels_against_scratch_room_only_while_spilling() {
         });
     });
 }
+
+
+/// The real open path has no hidden 2 GiB ceiling: charge a tiny fixture rather than allocate
+/// gigabytes. A 12 GiB tablet might have only 6 GiB currently available; decode workspace still
+/// needs RAM, while retained tiles may use only the measured scratch room.
+#[test]
+fn large_tablet_psd_uses_measured_ram_and_scratch_not_the_legacy_two_gib_constant() {
+    if cfg!(any(target_arch = "wasm32", target_pointer_width = "32")) {
+        return;
+    }
+    use crate::memory::{MemorySnapshot, with_mock_memory, with_mock_scratch};
+    let gib = 1u64 << 30;
+    let bytes = testgen::small(Version::Psd, Compression::Zip).to_bytes().unwrap();
+    let normal = crate::ImportOptions::default();
+    let approved = crate::ImportOptions { psd_high_memory_approved: true, ..Default::default() };
+    let snapshot = MemorySnapshot { available_ram: Some(6 * gib), swap_free: None, commit_headroom: None };
+    with_test_estimate_charge(2 * gib + (64 << 20), || with_test_tile_charge(4 * gib, || {
+        with_mock_memory(snapshot, || {
+            with_mock_scratch(Some(8 * gib), || {
+                assert!(crate::import_with_options("large-tablet.psd", &bytes, &normal).is_ok(), "over 6 GiB total fits RAM workspace plus real scratch");
+                let lowered = crate::ImportOptions { psd_max_pixel_bytes: DEFAULT_PSD_IMPORT_PIXEL_BYTES, ..Default::default() };
+                assert!(matches!(crate::import_with_options("large-tablet.psd", &bytes, &lowered), Err(IoError::PsdImportBudget { .. })));
+            });
+            with_mock_scratch(None, || {
+                assert!(matches!(crate::import_with_options("large-tablet.psd", &bytes, &approved), Err(IoError::PsdImportBudget { .. })));
+            });
+        });
+        with_mock_memory(MemorySnapshot { available_ram: Some(64 << 20), ..snapshot }, || with_mock_scratch(None, || {
+            assert!(matches!(crate::import_with_options("large-tablet.psd", &bytes, &approved), Err(IoError::PsdImportBudget { .. })));
+        }));
+        // Scratch cannot pay for the non-spillable workspace, even with approval.
+        with_mock_memory(MemorySnapshot { available_ram: Some(64 << 20), ..snapshot }, || with_mock_scratch(Some(8 * gib), || {
+            assert!(matches!(crate::import_with_options("large-tablet.psd", &bytes, &approved), Err(IoError::PsdImportBudget { .. })));
+        }));
+    }));
+}

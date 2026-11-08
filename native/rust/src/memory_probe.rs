@@ -13,9 +13,12 @@ pub(crate) fn describe(m: SystemMemory) -> String {
     let plain = resolve_budget_with_scratch(snap, None, 0);
     let spill = resolve_budget_with_scratch(snap, None, REFERENCE_ESTIMATE);
     let credit = spill.hard_limit.saturating_sub(plain.hard_limit);
+    let capacity = photocraft_raster::spill::scratch_capacity();
+    let stats = photocraft_raster::spill::stats();
     format!(
-        "memory probe: available_ram={:?} swap_free={:?} constraint_unreadable={} hard_limit={} soft_limit={} scratch_credit({}B)={} hard_limit_with_scratch={}",
-        m.available_ram, m.swap_free, m.constraint_unreadable, plain.hard_limit, plain.soft_limit, REFERENCE_ESTIMATE, credit, spill.hard_limit
+        "memory probe: available_ram={:?} swap_free={:?} constraint_unreadable={} hard_limit={} soft_limit={} scratch_credit({}B)={} hard_limit_with_scratch={} scratch_dir={:?} scratch_capacity={:?} scratch_budget={} scratch_backing_verified={} scratch_paused={} scratch_unmeasured={} scratch_written={} scratch_error={:?}",
+        m.available_ram, m.swap_free, m.constraint_unreadable, plain.hard_limit, plain.soft_limit, REFERENCE_ESTIMATE, credit, spill.hard_limit,
+        stats.dir, capacity, stats.budget_bytes, cfg!(target_env = "ohos") && stats.budget_bytes > 0 && !stats.paused, stats.paused, stats.free_space_unmeasured, stats.written_bytes, stats.last_error
     )
 }
 

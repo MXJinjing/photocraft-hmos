@@ -14,6 +14,9 @@ use crate::IoError;
 
 /// Default allowance for PSD layer, mask and merged-image pixels, including conversion
 /// workspace and tile padding. Other format/parser limits still apply. Callers may lower it.
+// Historical explicit allowance for `check()` callers/tests, NOT a default cap on the
+// production PSD/PSB open path. import_psd uses adaptive RAM + measured scratch admission;
+// ImportOptions::default().psd_max_pixel_bytes == 0 adds no caller cap (including on OHOS).
 pub const DEFAULT_PSD_IMPORT_PIXEL_BYTES: u64 = if cfg!(target_arch = "wasm32") { 1 << 30 } else { 2 << 30 };
 
 /// Structured memory estimate for a PSD/PSB import.

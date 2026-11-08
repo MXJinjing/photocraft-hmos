@@ -32,6 +32,8 @@ mod ime;
 mod input;
 mod installed_fonts;
 mod memory_probe;
+#[cfg_attr(not(target_env = "ohos"), allow(dead_code))]
+mod scratch;
 #[cfg(any(target_env = "ohos", test))]
 mod recovery;
 #[cfg(any(target_env = "ohos", test))]
@@ -61,6 +63,8 @@ use std::time::Instant;
 #[cfg_attr(not(target_env = "ohos"), allow(dead_code))]
 struct Config {
     files: String,
+    #[serde(default)]
+    cache: String,
     #[serde(default)]
     documents: String,
     #[serde(default = "default_scale")]
@@ -311,6 +315,7 @@ pub unsafe extern "C" fn pc_init(ptr: *const u8, len: usize, notify: bridge::Not
         return false;
     }
     bridge::init(notify);
+    #[cfg(not(target_env = "ohos"))]
     memory_probe::log_current();
     let (tx, rx) = mpsc::channel();
     if SEND.set(tx).is_err() {
@@ -529,6 +534,10 @@ fn worker(config: Config, rx: mpsc::Receiver<Message>) {
         bridge::notify(0, "diagnostic", &message, &[]);
     }
     photocraft_engine::installed_profiles::set_app_profile_dir(Some(profiles));
+    if let Err(error) = scratch::initialize(&config.cache, &config.files) {
+        // Leave the default scratch disk off/paused rather than promising nonexistent room.
+        bridge::notify(0, "diagnostic", &error, &[]);
+    }
     let ctx = egui::Context::default();
     PhotocraftApp::setup_context(&ctx, Default::default());
     bridge::notify(0, "stage", "egui context ready", &[]);
@@ -537,6 +546,9 @@ fn worker(config: Config, rx: mpsc::Receiver<Message>) {
         photocraft_engine::Session::new(),
         services(&config.files, document_files, documents.clone(), &appearance),
     );
+    // Session construction and preference loading configure spilling. Logging in pc_init
+    // was too early and always reported zero scratch credit, even for a working disk.
+    memory_probe::log_current();
     let host_fullscreen = fullscreen::Fullscreen::default();
     if config.fullscreen {
         app.services.window_fullscreen = Some(host_fullscreen.service(|kind| {
