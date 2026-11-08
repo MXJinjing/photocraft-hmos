@@ -611,7 +611,7 @@ fn alt_scroll_zooms_while_a_temporary_tool_is_held() {
     assert!((zoom(&h) / z0 - 1.1f32.powi(2)).abs() < 1e-3, "{z0} -> {}", zoom(&h));
     h.event(egui::Event::Key { key: Key::Space, physical_key: None, pressed: false, repeat: false, modifiers: Modifiers::NONE });
     h.run_steps(2);
-    assert_eq!(h.state().ui.tool, crate::state::Tool::Brush);
+    assert_eq!(h.state().ui.tool, crate::state::Tool::Move);
 }
 
 /// #8049 (Windows 11): the Alt key's press arrives, but the modifier state stays without Alt, so
@@ -1499,6 +1499,75 @@ fn wheel_zoom_over_the_image_still_anchors_on_the_pointer() {
     h.run_steps(20);
     let d1 = doc_at(&h, p);
     assert!((d1[0] - d0[0]).abs() < 0.1 && (d1[1] - d0[1]).abs() < 0.1, "{d0:?} -> {d1:?}");
+}
+
+/// #10488: a Windows reporter pressed Ctrl + Alt + the wheel over the canvas and nothing happened.
+/// winit reports a held Ctrl as both `ctrl` and `command`, so the Alt zoom gesture has to accept
+/// `command` when `ctrl` is set as well. Ctrl + Alt + wheel now zooms like ⌥ + wheel, ×1.1 a notch
+/// around the pointer, and holds the document point under it fixed.
+#[test]
+fn ctrl_alt_wheel_zooms_the_canvas_like_alt_wheel() {
+    let mut h = harness();
+    // Animated Zoom off: a notch is one instant step, so the frame count does not matter here.
+    h.state_mut().session.edit_prefs(|p| p.general.animated_zoom = false);
+    let r = h.state().last_canvas_rect;
+    let p = pos2(r.center().x - 150.0, r.center().y - 100.0);
+    h.hover_at(p);
+    h.run_steps(2);
+    let (z0, d0) = (zoom(&h), doc_at(&h, p));
+    assert!(d0[0] > 0.0 && d0[1] > 0.0, "the pointer starts on the image: {d0:?}");
+    let ctrl_alt = Modifiers { alt: true, ctrl: true, command: true, ..Modifiers::NONE };
+    for _ in 0..5 {
+        wheel(&h, 1.0, ctrl_alt);
+        h.run_steps(3);
+    }
+    h.run_steps(20);
+    let (z1, d1) = (zoom(&h), doc_at(&h, p));
+    assert!((z1 / z0 - 1.1f32.powi(5)).abs() < 1e-3, "five Ctrl + Alt notches, ×1.1 each: {z0} -> {z1}");
+    assert!((d1[0] - d0[0]).abs() < 0.1 && (d1[1] - d0[1]).abs() < 0.1, "the point under the pointer held: {d0:?} -> {d1:?}");
+    // A plain Ctrl + wheel keeps its sideways scroll (#635).
+    let ca = h.state().ui.views[0].center;
+    let za = zoom(&h);
+    wheel(&h, -1.0, Modifiers { ctrl: true, command: true, ..Modifiers::NONE });
+    h.run_steps(40);
+    assert_eq!(zoom(&h), za, "Ctrl + wheel does not zoom");
+    let c1 = h.state().ui.views[0].center;
+    assert!(c1[0] > ca[0] && c1[1] == ca[1], "Ctrl + wheel still pans sideways: {ca:?} -> {c1:?}");
+}
+
+/// #4658: with the Move tool's Show Transform Controls, the band just outside the box shows the
+/// curved rotate arrow, not a plain pointer, and one drag from there rotates the layer.
+#[test]
+fn move_tool_controls_rotate_from_just_outside_the_box() {
+    let mut h = harness();
+    h.state_mut().run("shape.create", json!({"kind": "rect", "rect": [150, 100, 100, 100], "fill": "#ff0000"})).unwrap();
+    h.state_mut().ui.tool = crate::state::Tool::Move;
+    h.state_mut().ui.tool_options.move_show_transform = true;
+    h.run_steps(3);
+    let screen = |h: &Harness<'static, PhotocraftApp>, x: f32, y: f32| {
+        let v = &h.state().ui.views[0];
+        let c = h.state().last_canvas_rect.center();
+        pos2(c.x + (x - v.center[0]) * v.zoom, c.y + (y - v.center[1]) * v.zoom)
+    };
+    let zoom = h.state().ui.views[0].zoom;
+    // Just outside the top edge, a quarter of the way along: the rotation band.
+    let at = screen(&h, 175.0, 100.0) - vec2(0.0, 12.0);
+    h.hover_at(at);
+    h.run_steps(2);
+    assert_eq!(h.output().platform_output.cursor_icon, egui::CursorIcon::None, "the drawn rotate arrow replaces the pointer");
+    press(&mut h, at, true);
+    let centre = screen(&h, 200.0, 150.0);
+    // A quarter turn around the box's centre.
+    for k in 1..=10 {
+        let a = std::f32::consts::FRAC_PI_2 * k as f32 / 10.0;
+        let (dx, dy) = (at.x - centre.x, at.y - centre.y);
+        let q = centre + vec2(dx * a.cos() - dy * a.sin(), dx * a.sin() + dy * a.cos());
+        h.hover_at(q);
+        h.run_steps(1);
+    }
+    let end = h.state().ui.transform.as_ref().map(|t| t.quad).expect("the drag opened Free Transform");
+    let tilt = (end[1][1] - end[0][1]).atan2(end[1][0] - end[0][0]).to_degrees();
+    assert!((tilt - 90.0).abs() < 8.0 || (tilt + 270.0).abs() < 8.0, "rotated about a quarter turn, got {tilt}° (zoom {zoom})");
 }
 
 /// HarmonyOS paints its tip; desktop roots upload an OS cursor bitmap.
