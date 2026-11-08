@@ -1,4 +1,6 @@
 use super::*;
+// Platform helpers are in validate, not re-exported by the preference model.
+use super::validate::{is_desktop_linux, is_hidden_for};
 
 #[test]
 fn system_title_bar_defaults_to_integrated_and_preserves_saved_choices() {
@@ -510,6 +512,20 @@ fn svg_group_rasterization_threshold_is_bounded_by_document_depth() {
     assert_eq!(s.prefs().file_handling.rasterize_svg_groups_deeper_than, 0, "zero disables the preference threshold");
     assert!(s.execute("prefs.set", json!({"path": pref, "value": photocraft_doc::MAX_GROUP_DEPTH + 1})).is_err());
     assert_eq!(s.prefs().file_handling.rasterize_svg_groups_deeper_than, 0, "out-of-range preferences leave the valid value unchanged");
+}
+
+#[test]
+fn tablet_input_pref_defaults_to_windows_ink() {
+    let mut s = session();
+    assert_eq!(s.prefs().tools.tablet_input, TabletInput::WindowsInk);
+    assert_eq!(s.execute("prefs.get", json!({"path": "tools.tabletInput"})).unwrap(), json!("windowsInk"));
+    assert_eq!(choices("tools.tabletInput"), Some(TabletInput::NAMES));
+    s.execute("prefs.set", json!({"path": "tools.tabletInput", "value": "winTab"})).unwrap();
+    assert_eq!(s.prefs().tools.tablet_input, TabletInput::WinTab);
+    for bad in [json!("ink"), json!(1), json!(true), json!(null)] {
+        assert!(s.execute("prefs.set", json!({"path": "tools.tabletInput", "value": bad})).is_err());
+    }
+    assert_eq!(s.prefs().tools.tablet_input, TabletInput::WinTab, "rejected values change nothing");
 }
 
 #[test]
@@ -1074,6 +1090,25 @@ fn a_wrongly_typed_value_resets_only_that_field() {
     assert_eq!(paths, ["fileHandling.recentFileCount", "shortcuts.file.open"]);
     assert_eq!(invalid[0].value, json!("ten"));
     assert_eq!(invalid[1].keys, ["shortcuts", "file.open"]);
+}
+
+#[test]
+fn the_removed_enable_animations_preference_still_loads_and_is_unknown() {
+    // #9479: Interface › Enable animations is gone (Photoshop has no such setting). Files saved
+    // with it still load whole, without a reported bad value, and the key isn't written back.
+    let mut s = Session::new();
+    let invalid =
+        s.load_prefs_json(r#"{"version": 2, "interface": {"enableAnimations": false, "showTooltips": false}, "performance": {"historyStates": 20}}"#).unwrap();
+    assert!(invalid.is_empty(), "{invalid:?}");
+    assert!(!s.prefs().interface.show_tooltips, "its neighbours load");
+    assert_eq!(s.prefs().performance.history_states, 20);
+    assert!(!s.prefs_to_json().contains("enableAnimations"));
+    for value in [json!(true), json!(false), json!("nope")] {
+        let e = s.execute("prefs.set", json!({"values": {"interface.enableAnimations": value}})).unwrap_err();
+        assert!(e.to_string().contains("unknown preference"), "{e}");
+        assert!(s.execute("prefs.set", json!({"path": "interface.enableAnimations", "value": value})).is_err());
+    }
+    assert!(s.execute("prefs.get", json!({"path": "interface.enableAnimations"})).is_err());
 }
 
 #[test]

@@ -14,6 +14,9 @@ use crate::IoError;
 
 /// Default allowance for PSD layer, mask and merged-image pixels, including conversion
 /// workspace and tile padding. Other format/parser limits still apply. Callers may lower it.
+// Historical explicit allowance for `check()` callers/tests, NOT a default cap on the
+// production PSD/PSB open path. import_psd uses adaptive RAM + measured scratch admission;
+// ImportOptions::default().psd_max_pixel_bytes == 0 adds no caller cap (including on OHOS).
 pub const DEFAULT_PSD_IMPORT_PIXEL_BYTES: u64 = if cfg!(target_arch = "wasm32") { 1 << 30 } else { 2 << 30 };
 
 /// Structured memory estimate for a PSD/PSB import.
@@ -242,6 +245,11 @@ pub fn estimate(file: &PsdFile) -> Result<PsdMemoryEstimate, IoError> {
     budget.retain(charge)?;
     budget.tile(tile_charge)?;
     let total_bytes = budget.required()?;
+    #[cfg(target_env = "ohos")]
+    photocraft_raster::spill::log_sandbox_diagnostic(&format!(
+        "PSD estimate: total={} retained={} tile_bytes={} workspace={} nonspill_retained={}",
+        total_bytes, budget.retained, budget.tiles, budget.workspace, budget.retained.saturating_sub(budget.tiles)
+    ));
     Ok(PsdMemoryEstimate { retained_bytes: budget.retained, workspace_bytes: budget.workspace, total_bytes, tile_bytes: budget.tiles })
 }
 
@@ -249,7 +257,7 @@ pub fn estimate(file: &PsdFile) -> Result<PsdMemoryEstimate, IoError> {
 pub fn check(file: &PsdFile, limit: u64) -> Result<PsdMemoryEstimate, IoError> {
     let est = estimate(file)?;
     if est.total_bytes > limit {
-        return Err(IoError::PsdImportBudget { required: est.total_bytes, limit });
+        return Err(IoError::PsdImportBudget { required: est.total_bytes, limit, free_memory: None });
     }
     Ok(est)
 }

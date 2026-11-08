@@ -152,6 +152,11 @@ pub(super) mod linux {
         let (cgroup_ram, cgroup_swap) = match cgroup_limits(proc_root, sys_root) {
             CgroupLimits::NotConstrained => (None, None),
             CgroupLimits::Limited { ram, swap } => (ram, swap),
+            // HarmonyOS (hmos): the app sandbox hides the memory cgroup, so an unreadable
+            // constraint there falls back to measured host memory instead of zero.
+            #[cfg(target_env = "ohos")]
+            CgroupLimits::Unreadable => return ohos_unreadable_fallback(host_ram, host_swap, sysinfo_available),
+            #[cfg(not(target_env = "ohos"))]
             CgroupLimits::Unreadable => return SystemMemory { available_ram: Some(0), swap_free: Some(0), commit_headroom: None, constraint_unreadable: true },
         };
 
@@ -168,6 +173,26 @@ pub(super) mod linux {
             (None, None) => None,
         };
         SystemMemory { available_ram, swap_free, commit_headroom: None, constraint_unreadable: false }
+    }
+
+    /// HarmonyOS (hmos): an unreadable memory cgroup is the normal state of the app sandbox, not
+    /// evidence of a hidden limit, and the fail-closed `Some(0)` refused every document. Use the
+    /// measured `/proc/meminfo` `MemAvailable`, else `sysinfo`'s available memory; with neither
+    /// measurement the fail-closed zero stays. `constraint_unreadable` remains set.
+    #[cfg(any(target_env = "ohos", test))]
+    pub(crate) fn ohos_unreadable_fallback(host_ram: Option<u64>, host_swap: Option<u64>, sysinfo_available: impl FnOnce() -> Option<u64>) -> SystemMemory {
+        match host_ram.or_else(|| sysinfo_available().filter(|&v| v > 0)) {
+            Some(ram) => SystemMemory { available_ram: Some(ram), swap_free: host_swap, commit_headroom: None, constraint_unreadable: true },
+            None => SystemMemory { available_ram: Some(0), swap_free: Some(0), commit_headroom: None, constraint_unreadable: true },
+        }
+    }
+
+    /// hmos: `sysinfo` available memory (sysinfo reads `/proc/meminfo` itself, then `sysinfo(2)`).
+    #[cfg(target_env = "ohos")]
+    fn sysinfo_available() -> Option<u64> {
+        let mut s = sysinfo::System::new().ok()?;
+        s.refresh_memory();
+        Some(s.available_memory())
     }
 
     pub(super) fn available() -> Option<u64> {
@@ -832,6 +857,26 @@ mod tests {
             std::fs::create_dir_all(parent).unwrap();
         }
         std::fs::write(path, text).unwrap();
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn ohos_unreadable_cgroup_uses_measured_memory_not_zero() {
+        let mib = 1u64 << 20;
+        let m = linux::ohos_unreadable_fallback(Some(3 * 1024 * mib), Some(mib), || panic!("meminfo first"));
+        assert_eq!(m.available_ram, Some(3 * 1024 * mib));
+        assert!(m.constraint_unreadable);
+        let m = linux::ohos_unreadable_fallback(None, None, || Some(2 * 1024 * mib));
+        assert_eq!(m.available_ram, Some(2 * 1024 * mib));
+        // Genuinely low memory is reported as measured, so admission still refuses large opens.
+        let m = linux::ohos_unreadable_fallback(Some(20 * mib), None, || None);
+        assert_eq!(m.available_ram, Some(20 * mib));
+        // No measurement at all keeps the fail-closed zero.
+        for sys in [None, Some(0)] {
+            let m = linux::ohos_unreadable_fallback(None, None, || sys);
+            assert_eq!(m.available_ram, Some(0));
+            assert!(m.constraint_unreadable);
+        }
     }
 
     #[cfg(target_os = "linux")]

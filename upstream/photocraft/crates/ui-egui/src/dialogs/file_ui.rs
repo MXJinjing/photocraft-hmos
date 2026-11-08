@@ -113,8 +113,8 @@ pub fn invoke(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str, params: &V
             let Some(action) = crate::actions::selected_action(app) else {
                 return Some(Err("record an action in the Actions panel first".into()));
             };
-            let steps = crate::actions::action_steps(action);
-            let name = action.name.clone();
+            let (name, set) = (action.name.clone(), action.set.clone());
+            let (names, sets) = crate::actions::action_form_choices(app);
             let (exports, out) = if crate::path_pick::documents_root(app).is_some() {
                 (
                     crate::path_pick::documents_output_dir(app, "exports"),
@@ -124,14 +124,15 @@ pub fn invoke(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str, params: &V
                 let base = droplet_default_dir(app);
                 (base.clone(), format!("{base}/droplet-output"))
             };
-            form(
-                app,
-                id,
-                tl!("Create Droplet"),
-                json!({"path": format!("{exports}/{name}.pcdroplet"), "name": name, "steps": steps, "output": out, "format": "same"}),
-                json!({"format": ["same", "png", "jpg", "psd", "tiff"]}),
-            )
-        },
+            let mut fields =
+                json!({"path": format!("{exports}/{name}.pcdroplet"), "name": name, "action": name, "output": out, "format": "same"});
+            // The Set dropdown picks between same-named actions; an action outside any set has none.
+            if let Some(set) = set {
+                fields["set"] = json!(set);
+            }
+            form(app, id, tl!("Create Droplet"), fields, json!({"set": sets, "action": names, "format": ["same", "png", "jpg", "psd", "tiff"]}))
+        }
+
         "file.scripts.statistics" => json!({"dialog": crate::stack_dialog::open_statistics(app)}),
         "file.scripts.browse" => {
             return Some(app.pick_file_bytes_filtered(SCRIPT_EXTENSIONS, |app, name, bytes| {

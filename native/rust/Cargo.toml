@@ -3,7 +3,7 @@ resolver = "3"
 
 [package]
 name = "photocraft-hmos"
-version = "0.20.2"
+version = "0.21.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 
@@ -20,6 +20,7 @@ photocraft-text = { path = "../../upstream/photocraft/crates/text" }
 photocraft-engine = { path = "../../upstream/photocraft/crates/engine" }
 photocraft-cms = { path = "../../upstream/photocraft/crates/cms" }
 photocraft-io = { path = "../../upstream/photocraft/crates/io" }
+photocraft-raster = { path = "../../upstream/photocraft/crates/raster" }
 photocraft-format = { path = "../../upstream/photocraft/crates/format" }
 egui = { version = "0.37", features = ["default_fonts", "monochrome_emoji_fonts"] }
 egui-wgpu = { version = "0.37", default-features = false }

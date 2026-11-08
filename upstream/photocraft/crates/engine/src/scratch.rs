@@ -123,6 +123,16 @@ pub(crate) fn configure(prefs: &Preferences) {
     });
     #[cfg(not(target_arch = "wasm32"))]
     {
+        #[cfg(target_env = "ohos")]
+        let dir = prefs
+            .scratch_disks
+            .disks
+            .iter()
+            .find(|d| d.enabled && !d.path.trim().is_empty())
+            // OHOS has no writable OS-wide /tmp. Resolve only the default placeholder
+            // through the host's cacheDir; missing host configuration earns no scratch credit.
+            .and_then(|d| sandbox_scratch_dir(d.path.trim(), photocraft_raster::spill::host_scratch_dir()));
+        #[cfg(not(target_env = "ohos"))]
         let dir = prefs
             .scratch_disks
             .disks
@@ -143,4 +153,24 @@ pub(crate) fn configure(prefs: &Preferences) {
     }
     #[cfg(target_arch = "wasm32")]
     let _ = (prefs, budget);
+}
+
+/// A missing sandbox path is not permission to fall back to an inaccessible global /tmp.
+#[cfg(any(target_env = "ohos", test))]
+fn sandbox_scratch_dir(path: &str, host: Option<std::path::PathBuf>) -> Option<std::path::PathBuf> {
+    if path == "(system temp)" { host } else { Some(std::path::PathBuf::from(path)) }
+}
+
+#[cfg(test)]
+mod sandbox_tests {
+    use super::sandbox_scratch_dir;
+    use std::path::PathBuf;
+
+    #[test]
+    fn system_temp_uses_only_the_private_cache_and_custom_paths_are_preserved() {
+        let cache = PathBuf::from("/sandbox/cache/photocraft-scratch");
+        assert_eq!(sandbox_scratch_dir("(system temp)", Some(cache.clone())), Some(cache.clone()));
+        assert_eq!(sandbox_scratch_dir("(system temp)", None), None);
+        assert_eq!(sandbox_scratch_dir("/custom", Some(cache)), Some(PathBuf::from("/custom")));
+    }
 }
