@@ -1,4 +1,6 @@
 use super::*;
+// Platform helpers are in validate, not re-exported by the preference model.
+use super::validate::{is_desktop_linux, is_hidden_for};
 
 #[test]
 fn system_title_bar_defaults_to_integrated_and_preserves_saved_choices() {
