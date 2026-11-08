@@ -458,7 +458,13 @@ fn evaluate_psd_admission_for(
     snapshot: MemorySnapshot,
 ) -> Result<AdmissionOutcome, IoError> {
     let limit_opt = (caller_limit > 0).then_some(caller_limit);
-    let budget = resolve_budget_credited(platform, snapshot, limit_opt, scratch_credit_for(platform, spillable.min(required)));
+    let credit = scratch_credit_for(platform, spillable.min(required));
+    let budget = resolve_budget_credited(platform, snapshot, limit_opt, credit);
+    #[cfg(target_env = "ohos")]
+    photocraft_raster::spill::log_sandbox_diagnostic(&format!(
+        "PSD admission: required={required} tile_bytes={spillable} nonspill={} available_ram={:?} scratch_credit={credit} hard_limit={} soft_limit={} approved={high_memory_approved} scratch={:?}",
+        required.saturating_sub(spillable), snapshot.available_ram, budget.hard_limit, budget.soft_limit, photocraft_raster::spill::stats()
+    ));
 
     let authorized_total = match budget.decide(required) {
         BudgetDecision::Automatic => {

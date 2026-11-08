@@ -16,9 +16,9 @@ pub(crate) fn describe(m: SystemMemory) -> String {
     let capacity = photocraft_raster::spill::scratch_capacity();
     let stats = photocraft_raster::spill::stats();
     format!(
-        "memory probe: available_ram={:?} swap_free={:?} constraint_unreadable={} hard_limit={} soft_limit={} scratch_credit({}B)={} hard_limit_with_scratch={} scratch_dir={:?} scratch_capacity={:?} scratch_budget={} scratch_backing_verified={} scratch_paused={} scratch_unmeasured={} scratch_written={} scratch_error={:?}",
+        "memory probe: available_ram={:?} swap_free={:?} constraint_unreadable={} hard_limit={} soft_limit={} scratch_credit({}B)={} hard_limit_with_scratch={} scratch_dir={:?} scratch_capacity={:?} scratch_budget={} scratch_backing_verified={} scratch_paused={} scratch_unmeasured={} scratch_written={} scratch_error={:?} scratch_volume_space={:?}",
         m.available_ram, m.swap_free, m.constraint_unreadable, plain.hard_limit, plain.soft_limit, REFERENCE_ESTIMATE, credit, spill.hard_limit,
-        stats.dir, capacity, stats.budget_bytes, cfg!(target_env = "ohos") && stats.budget_bytes > 0 && !stats.paused, stats.paused, stats.free_space_unmeasured, stats.written_bytes, stats.last_error
+        stats.dir, capacity, stats.budget_bytes, cfg!(target_env = "ohos") && stats.budget_bytes > 0 && !stats.paused, stats.paused, stats.free_space_unmeasured, stats.written_bytes, stats.last_error, stats.volume_space
     )
 }
 
@@ -28,7 +28,7 @@ pub(crate) fn log_current() {
 }
 
 #[cfg(target_env = "ohos")]
-fn log(line: &str) {
+pub(crate) fn log(line: &str) {
     use std::ffi::{CString, c_char, c_int, c_uint};
     unsafe extern "C" {
         fn OH_LOG_Print(kind: c_int, level: c_int, domain: c_uint, tag: *const c_char, fmt: *const c_char, ...) -> c_int;
@@ -39,7 +39,7 @@ fn log(line: &str) {
 }
 
 #[cfg(not(target_env = "ohos"))]
-fn log(line: &str) {
+pub(crate) fn log(line: &str) {
     eprintln!("photocraft-hmos: {line}");
 }
 

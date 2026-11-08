@@ -142,6 +142,14 @@ impl ScratchFile {
         self.main.try_clone()
     }
 
+    /// Ask the volume of the actual backing, even if its sandbox directory was
+    /// renamed or cannot be canonicalized. Unix scratch files are already unlinked.
+    #[cfg(unix)]
+    pub(crate) fn volume_space(&self) -> std::io::Result<(u64, u64)> {
+        let vfs = rustix::io::retry_on_intr(|| rustix::fs::fstatvfs(&self.main))?;
+        Ok((vfs.f_bavail.saturating_mul(vfs.f_frsize), vfs.f_blocks.saturating_mul(vfs.f_frsize)))
+    }
+
     pub fn path(&self) -> &Path {
         &self.path
     }

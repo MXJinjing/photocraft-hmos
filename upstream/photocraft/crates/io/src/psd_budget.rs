@@ -245,6 +245,11 @@ pub fn estimate(file: &PsdFile) -> Result<PsdMemoryEstimate, IoError> {
     budget.retain(charge)?;
     budget.tile(tile_charge)?;
     let total_bytes = budget.required()?;
+    #[cfg(target_env = "ohos")]
+    photocraft_raster::spill::log_sandbox_diagnostic(&format!(
+        "PSD estimate: total={} retained={} tile_bytes={} workspace={} nonspill_retained={}",
+        total_bytes, budget.retained, budget.tiles, budget.workspace, budget.retained.saturating_sub(budget.tiles)
+    ));
     Ok(PsdMemoryEstimate { retained_bytes: budget.retained, workspace_bytes: budget.workspace, total_bytes, tile_bytes: budget.tiles })
 }
 

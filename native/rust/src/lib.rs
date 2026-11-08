@@ -534,6 +534,8 @@ fn worker(config: Config, rx: mpsc::Receiver<Message>) {
         bridge::notify(0, "diagnostic", &message, &[]);
     }
     photocraft_engine::installed_profiles::set_app_profile_dir(Some(profiles));
+    #[cfg(target_env = "ohos")]
+    photocraft_raster::spill::set_sandbox_diagnostic_logger(memory_probe::log);
     if let Err(error) = scratch::initialize(&config.cache, &config.files) {
         // Leave the default scratch disk off/paused rather than promising nonexistent room.
         bridge::notify(0, "diagnostic", &error, &[]);

@@ -637,3 +637,28 @@ fn large_tablet_psd_uses_measured_ram_and_scratch_not_the_legacy_two_gib_constan
         }));
     }));
 }
+
+/// Reproduce the tablet's exact total and hard limit without allocating GB buffers.
+/// Restoring measured scratch changes a hard refusal into an approval request, not an
+/// unconditional pass: enough non-spillable working RAM must still be present.
+#[test]
+fn tablet_refusal_rechecks_measured_scratch_and_preserves_workspace_limits() {
+    if cfg!(any(target_arch = "wasm32", target_pointer_width = "32")) { return; }
+    let file = testgen::small(Version::Psd, Compression::Zip);
+    let bytes = file.to_bytes().unwrap();
+    let bare = super::estimate(&file).unwrap();
+    let required = 2_261_674_272;
+    let tile_charge = 1_500_000_000;
+    let plain_charge = required - bare.total_bytes - tile_charge;
+    let snap = crate::memory::MemorySnapshot { available_ram: Some(1_160_069_120), swap_free: None, commit_headroom: None };
+    crate::memory::with_mock_memory(snap, || with_test_tile_charge(tile_charge, || with_test_estimate_charge(plain_charge, || {
+        let opts = crate::ImportOptions { psd_high_memory_approved: true, ..Default::default() };
+        let import = || crate::import_with_options("tablet.psd", &bytes, &opts);
+        crate::memory::with_mock_scratch(None, || assert!(matches!(import(), Err(IoError::PsdImportBudget { required: r, limit: 870_051_840, .. }) if r == required)));
+        // Startup's measured space would cover the shortfall (1,391,622,432 bytes).
+        crate::memory::with_mock_scratch(Some(1_478_082_816), || assert!(import().is_ok()));
+        // A full/unknown disk or insufficient spillable tiles remains fail-closed.
+        crate::memory::with_mock_scratch(Some(1_000_000_000), || assert!(matches!(import(), Err(IoError::PsdImportBudget { .. }))));
+    })));
+    assert!(required - 1_478_082_816 <= 870_051_840);
+}

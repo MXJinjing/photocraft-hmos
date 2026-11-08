@@ -74,3 +74,40 @@ bit depth, layers, compression, current RAM, disk space and other apps all matte
 
 Real-device acceptance with the user's large PSD/PSB is still required; emulator
 startup and synthetic admission tests are not proof that that file opens.
+
+## Open-time capacity refresh (400 MB tablet report)
+
+The startup probe is not a reservation: every admission re-queries scratch. Previously
+that query canonicalized the configured directory and called path `statvfs`; any path
+lookup failure, zero total, thread-start failure or 2-second timeout erased its measured
+room. The error-dialog hint reads current global state, not an admission-time snapshot.
+There is one process-wide spill manager, not a separate UI/import instance.
+
+Sandbox hosts now use fresh `fstatvfs` on the verified, still-open backing descriptor.
+This identifies the exact volume holding tiles even when a cache directory stops
+resolving; it does not reuse stale startup free space. Failed/zero/overdue descriptor
+queries still earn no unbounded credit. Ordinary desktop directory behavior is retained.
+A dedicated regression renames the configured cache after startup, proves its path no
+longer resolves, then checks positive measured open-time capacity and explicit caps.
+
+OHOS logs `scratch query` (descriptor source/result), `PSD estimate` (retained, tiles,
+workspace, nonspill retained), and `PSD admission` (current RAM, credit, limits, state).
+The startup probe also reports raw `(available, total)` disk bytes. Existing reserve
+max(1 GiB, 5% volume) and 1/64 allocator margin are unchanged.
+
+For the reported total 2,261,674,272 and RAM hard limit 870,051,840 bytes, at least
+1,391,622,432 bytes must be spillable and backed by measured scratch. Startup room
+1,478,082,816 would clear the hard limit by only 86,460,384 bytes, if tiles are large
+enough; automatic/approval thresholds remain distinct. The exact real-file tile/workspace
+split is not inferable from total alone; collect the new estimate log when retried.
+Fresh retained logs of the old failure contained the picker/open notification only,
+not statvfs errno or the estimate breakdown, so the original path failure/timeout cause
+cannot be established retroactively from hilog.
+
+A fresh emulator `df -k /data` after the user's attempt reported 6,302,466,048 bytes
+volume size and 2,069,262,336 available bytes. Here the 1 GiB minimum reserve dominates
+5% (315,123,302 bytes), leaving only 979,965,504 bytes of uncompressed scratch credit
+after margin. At the reported 870,051,840-byte RAM hard limit, even fully measured
+scratch of that size would still refuse this 2,261,674,272-byte estimate. These disk and
+RAM readings are from different times; they explain the tight capacity, not an exact
+reconstruction of the failed attempt. The safety reserve is intentionally not relaxed.
