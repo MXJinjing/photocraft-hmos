@@ -3,7 +3,7 @@ resolver = "3"
 
 [package]
 name = "photocraft-hmos"
-version = "0.21.0"
+version = "0.22.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 
@@ -44,6 +44,11 @@ egui_extras = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799
 egui_kittest = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
 egui_system_font_provider = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
 eframe = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+# craft-pdf's vendored Hayro trees: same craft-libs revision as upstream/photocraft/Cargo.toml.
+hayro = { git = "https://github.com/storytold/craft-libs", rev = "1b34eba41e62138fc2438d2734523b302840b45d" }
+hayro-syntax = { git = "https://github.com/storytold/craft-libs", rev = "1b34eba41e62138fc2438d2734523b302840b45d" }
+hayro-interpret = { git = "https://github.com/storytold/craft-libs", rev = "1b34eba41e62138fc2438d2734523b302840b45d" }
+hayro-jbig2 = { git = "https://github.com/storytold/craft-libs", rev = "1b34eba41e62138fc2438d2734523b302840b45d" }
 
 
 [profile.dev]

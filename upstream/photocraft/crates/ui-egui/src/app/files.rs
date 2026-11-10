@@ -151,6 +151,7 @@ impl PhotocraftApp {
                 order,
                 question,
                 policy_applied: false,
+                smart_object: false,
             },
         );
         Ok(warnings)
