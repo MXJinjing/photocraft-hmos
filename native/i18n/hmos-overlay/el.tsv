@@ -1,0 +1,174 @@
+# HarmonyOS host additions retained during upstream sync
+	Double-tap pen body	Διπλό πάτημα στο σώμα της γραφίδας
+	Current tool and Eraser	Τρέχον εργαλείο και Γόμα
+	Previous tool	Προηγούμενο εργαλείο
+	Squeeze pen body	Πίεση του σώματος της γραφίδας
+
+# Stylus diagnostics
+	Hovering	Αιώρηση
+	Stylus Debug…	Διάγνωση γραφίδας…
+	Stylus Debug	Διάγνωση γραφίδας
+	Use a real Pad and a pen that supports tilt, double-tap and squeeze.	Χρησιμοποιήστε πραγματικό tablet και γραφίδα με κλίση, διπλό άγγιγμα και πίεση σώματος.
+	No connection reported	Δεν αναφέρθηκε σύνδεση
+	Latest pen sample	Τελευταίο δείγμα γραφίδας
+	Tilt from vertical	Κλίση από την κατακόρυφο
+	Screen bearing	Κατεύθυνση στην οθόνη
+	Waiting for pen input	Αναμονή εισόδου γραφίδας
+	Samples	Δείγματα
+	Pen contact	Επαφή γραφίδας
+	No pen contact — values are retained	Χωρίς επαφή — οι τιμές διατηρούνται
+	Arrow: screen-projected tilt direction, not barrel rotation. Upright: no direction.	Βέλος: προβολή κλίσης στην οθόνη, όχι περιστροφή γραφίδας. Κατακόρυφα: χωρίς κατεύθυνση.
+	Zero tilt may mean an upright pen or unavailable hardware data.	Μηδενική κλίση μπορεί να σημαίνει κατακόρυφη γραφίδα ή μη διαθέσιμα δεδομένα υλικού.
+	HarmonyOS contact input does not currently report barrel rotation.	Η είσοδος επαφής HarmonyOS δεν αναφέρει προς το παρόν περιστροφή γραφίδας.
+	Received	Ελήφθη
+	Test gestures only (do not run shortcuts)	Μόνο δοκιμή χειρονομιών (χωρίς εκτέλεση συντομεύσεων)
+	No indicator means no event received, not necessarily unsupported hardware.	Χωρίς ένδειξη σημαίνει ότι δεν ελήφθη συμβάν, όχι απαραίτητα μη υποστηριζόμενο υλικό.
+	Test area — does not change the document	Περιοχή δοκιμής — δεν αλλάζει το έγγραφο
+	Draw here with the pen	Σχεδιάστε εδώ με τη γραφίδα
+	Reset test	Επαναφορά δοκιμής
+	Readings are before the pressure curve and remain available with tablet pressure off.	Τιμές πριν από την καμπύλη πίεσης, διαθέσιμες και με απενεργοποιημένη πίεση tablet.
+	Eraser end	Άκρο γόμας
+	Pen tip	Μύτη γραφίδας
+	Connected	Συνδεδεμένο
+	Show or hide context menu	Εμφάνιση ή απόκρυψη μενού περιβάλλοντος
+	Choose printer, copies and duplex in the system print dialog.	Επιλέξτε εκτυπωτή, αντίγραφα και εκτύπωση διπλής όψης στο παράθυρο εκτύπωσης του συστήματος.
+	System print preview opened	Άνοιξε η προεπισκόπηση εκτύπωσης του συστήματος
+	Stylus	Γραφίδα
+	Block finger input	Αποκλεισμός εισόδου δακτύλου
+	Stylus hover preview	Προεπισκόπηση αιώρησης γραφίδας
+	Only show canvas	Εμφάνιση μόνο του καμβά
+	Right sidebar	Δεξιά πλαϊνή στήλη
+	Connected pen	Συνδεδεμένη γραφίδα
+	No pen connected	Δεν έχει συνδεθεί γραφίδα
+
+# Window full screen (HarmonyOS host)
+	Enter Full Screen	Είσοδος σε πλήρη οθόνη
+	Exit Full Screen	Έξοδος από πλήρη οθόνη
+
+# Icon-only toolbar controls
+	Show tools in one column	Εμφάνιση εργαλείων σε μία στήλη
+	Show tools in two columns	Εμφάνιση εργαλείων σε δύο στήλες
+	Open the Color Picker	Άνοιγμα επιλογέα χρώματος
+	Scroll All Windows	Κύλιση όλων των παραθύρων
+	The path was kept as the Work Path	Η διαδρομή διατηρήθηκε ως διαδρομή εργασίας
+	The path was discarded	Η διαδρομή απορρίφθηκε
+# Art History Brush (#213).
+	Art History Brush Tool	Πινέλο ιστορικού τέχνης (Art History Brush Tool)
+	Tight Short	Σφιχτό κοντό
+	Tight Medium	Σφιχτό μεσαίο
+	Tight Long	Σφιχτό μακρύ
+	Loose Medium	Χαλαρό μεσαίο
+	Loose Long	Χαλαρό μακρύ
+	Dab	Πινελιά
+	Tight Curl	Σφιχτή μπούκλα
+	Loose Curl	Χαλαρή μπούκλα
+	Stylized dabs from a history state	Στυλιζαρισμένες πινελιές από μια κατάσταση ιστορικού
+	Target	Στόχος
+	Font size presets	Προεπιλογές μεγέθους γραμματοσειράς
+	Leading presets	Προεπιλογές διάστιχου
+	Tracking presets	Προεπιλογές διαστήματος χαρακτήρων
+
+	The GPU compositor is still being prepared	The GPU compositor is still being prepared
+	Invalid numeric entry. An integer between {min}% and {max}% is required. Previous value was inserted.	Μη έγκυρη αριθμητική τιμή. Απαιτείται ακέραιος αριθμός μεταξύ {min}% και {max}%. Εισήχθη η προηγούμενη τιμή.
+	Color Aware	Με βάση το χρώμα
+	Decontaminate Colors	Απολύμανση χρωμάτων
+	Edge Detection	Ανίχνευση άκρης
+	Global Refinements	Καθολικές βελτιώσεις
+	High Quality Preview	Προεπισκόπηση υψηλής ποιότητας
+	Object Aware	Με βάση το αντικείμενο
+	Real-Time Refinement	Βελτίωση σε πραγματικό χρόνο
+	Refine Edge Brush Tool	Εργαλείο πινέλου βελτίωσης ακμής
+	Refine Hair	Βελτίωση μαλλιών
+	Refine Mode	Λειτουργία βελτίωσης
+	Remember Settings	Απομνημόνευση ρυθμίσεων
+	View Mode	Λειτουργία προβολής
+	Object Aware needs a segmentation model, which isn't available yet	Η λειτουργία Με βάση το αντικείμενο χρειάζεται μοντέλο τμηματοποίησης, που δεν είναι ακόμη διαθέσιμο
+	Refine Hair needs hair detection, which isn't available yet	Η Βελτίωση μαλλιών χρειάζεται ανίχνευση μαλλιών, που δεν είναι ακόμη διαθέσιμη
+	Select and Mask was closed: its document is no longer the active one	Η Επιλογή και μάσκα έκλεισε: το έγγραφό της δεν είναι πλέον το ενεργό
+	Select and Mask was closed: another layer was selected	Η Επιλογή και μάσκα έκλεισε: επιλέχθηκε άλλο επίπεδο
+	Select Layer Under Cursor	Επιλογή επιπέδου κάτω από τον δρομέα
+
+# Shape Fill/Stroke popover and colour swatches opening the Color Picker
+	Recently Used Colors	Χρώματα που χρησιμοποιήθηκαν πρόσφατα
+	Stop Color	Χρώμα στάσης
+	Shapes can't use patterns yet	Τα σχήματα δεν μπορούν ακόμη να χρησιμοποιούν μοτίβα
+	Edit Brush…	Επεξεργασία πινέλου…
+
+# Action Stop message (#8386)
+	Message	Μήνυμα
+# Playback Options (#5212)
+	Playback Options…	Επιλογές αναπαραγωγής…
+	Playback Options	Επιλογές αναπαραγωγής
+	Accelerated	Επιταχυνόμενη
+	Step by Step	Βήμα προς βήμα
+	Pause For:	Παύση για:
+	Pause For	Παύση για
+	seconds	δευτερόλεπτα
+	Create a single history state	Δημιουργία μίας κατάστασης ιστορικού
+	Generator enabled	Ενεργοποίηση γεννήτριας
+	Drag to move the active shape's path or the Work Path	Σύρετε για μετακίνηση της διαδρομής του ενεργού σχήματος ή της διαδρομής εργασίας
+	Move Up	Μετακίνηση επάνω
+	Move Down	Μετακίνηση κάτω
+	Grid view	Προβολή πλέγματος
+	List view	Προβολή λίστας
+	On your computer	Στον υπολογιστή σας
+	New file	Νέο αρχείο
+	Learn	Εκμάθηση
+	Website	Ιστότοπος
+
+# Frame Tool and other branch translations.
+	A frame supports affine transforms; select its image for perspective transforms	Το πλαίσιο υποστηρίζει αφινικούς μετασχηματισμούς· επιλέξτε την εικόνα του για μετασχηματισμούς προοπτικής
+	A frame supports affine transforms; select its image to warp it	Το πλαίσιο υποστηρίζει αφινικούς μετασχηματισμούς· επιλέξτε την εικόνα του για στρέβλωση
+	Convert to Frame…	Μετατροπή σε πλαίσιο…
+	Create a new custom frame	Δημιουργία νέου προσαρμοσμένου πλαισίου
+	Create a new polygonal frame	Δημιουργία νέου πολυγωνικού πλαισίου
+	Create a new triangular frame	Δημιουργία νέου τριγωνικού πλαισίου
+	Fit Content to Frame	Προσαρμογή περιεχομένου στο πλαίσιο
+	Fit Frame to Content	Προσαρμογή πλαισίου στο περιεχόμενο
+	Frame coordinates must be finite and within 600000 pixels	Οι συντεταγμένες του πλαισίου πρέπει να είναι πεπερασμένες και εντός 600000 pixel
+	Import Image…	Εισαγωγή εικόνας…
+	Invalid frame transform	Μη έγκυρος μετασχηματισμός πλαισίου
+	Invalid nested file drop	Μη έγκυρη ένθετη απόθεση αρχείου
+	New Frame	Νέο πλαίσιο
+	Replace Image…	Αντικατάσταση εικόνας…
+	The frame is locked	Το πλαίσιο είναι κλειδωμένο
+	The frame is unavailable	Το πλαίσιο δεν είναι διαθέσιμο
+	X	X
+	Y	Y
+
+# Channels panel menu (#11451)
+	New Channel…	Νέο κανάλι…
+	Duplicate Channel	Δημιουργία αντιγράφου καναλιού
+	Delete Channel	Διαγραφή καναλιού
+	New Spot Channel…	Νέο κανάλι πλακάτου χρώματος…
+	Merge Spot Channel	Συγχώνευση καναλιού πλακάτου χρώματος
+	Channel Options…	Επιλογές καναλιού…
+	Split Channels	Διαχωρισμός καναλιών
+	Merge Channels…	Συγχώνευση καναλιών…
+	Specify Channels:	Καθορισμός καναλιών:
+	Not enough grayscale documents for this mode.	Δεν υπάρχουν αρκετά έγγραφα σε κλίμακα του γκρι για αυτή τη λειτουργία.
+	Pick a different document for each channel.	Επιλέξτε διαφορετικό έγγραφο για κάθε κανάλι.
+	A picked document is no longer open.	Ένα από τα επιλεγμένα έγγραφα δεν είναι πλέον ανοιχτό.
+	A picked document is no longer a grayscale document of the same size.	Ένα από τα επιλεγμένα έγγραφα δεν είναι πλέον έγγραφο σε κλίμακα του γκρι ίδιου μεγέθους.
+	Netscape Gray	Γκρι Netscape
+# Move tool options bar (#11381)
+	Align top edges	Στοίχιση πάνω άκρων
+	Align vertical centers	Στοίχιση κατακόρυφων κέντρων
+	Align bottom edges	Στοίχιση κάτω άκρων
+	Distribute vertically	Κατανομή κατακόρυφα
+	Distribute horizontally	Κατανομή οριζόντια
+	Show layer bounds on hover	Εμφάνιση ορίων στρώσης στο πέρασμα του δείκτη
+	Expand layer group on click	Ανάπτυξη ομάδας στρώσεων με κλικ
+	Show hover bounds from Layers	Εμφάνιση ορίων στο πέρασμα από τις Στρώσεις
+	Saved RAW Develop settings to {file}	Οι ρυθμίσεις Επεξεργασία RAW αποθηκεύτηκαν στο {file}
+	Save the settings to each raw's sidecar without opening it	Αποθήκευση των ρυθμίσεων στο συνοδευτικό αρχείο κάθε raw χωρίς άνοιγμα
+	No settings saved: these raws can't keep a sidecar here	Δεν αποθηκεύτηκε τίποτα: αυτά τα raw δεν μπορούν να έχουν συνοδευτικό αρχείο εδώ
+	Some settings could not be saved; the raws stay open	Ορισμένες ρυθμίσεις δεν ήταν δυνατό να αποθηκευτούν· τα raw παραμένουν ανοιχτά
+	Nothing to save: these raws are at their default settings	Τίποτα για αποθήκευση: αυτά τα raw έχουν τις προεπιλεγμένες ρυθμίσεις
+# Artboard tool options bar (#11385)
+	Distribute Widths	Κατανομή πλατών
+	Distribute Heights	Κατανομή υψών
+	Auto-nest Layers	Αυτόματη ένθεση επιπέδων
+	Auto-size Canvas	Αυτόματη αλλαγή μεγέθους καμβά
+	Keep Relative Position During Layer Reordering	Διατήρηση σχετικής θέσης κατά την αναδιάταξη επιπέδων
+	Shrinkwrap Canvas on Save	Σμίκρυνση καμβά στο περιεχόμενο κατά την αποθήκευση
