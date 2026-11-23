@@ -8,11 +8,13 @@ TSVs were deleted with that change.
 
 These files keep the HarmonyOS-only rows that used to live in those TSVs
 (the `# HarmonyOS host additions retained during upstream sync` blocks),
-so the strings are not lost. They are not yet embedded: `crates/ui-egui/build.rs`
-reads `CRAFT_I18N_DIR`, and this overlay is not wired into that embedder yet.
-Without `CRAFT_I18N_DIR`, the HarmonyOS UI falls back to English, same as a
-PhotoCraft build that has not checked out craft-i18n.
+so the strings are not lost. `scripts/build_native.sh` embeds them: it runs `scripts/prepare_craft_i18n.py`,
+which fetches craft-i18n at the commit in `upstream/photocraft/craft-i18n.rev`
+(cached under `native/i18n/.craft-i18n-cache/`), appends the rows here that the
+catalogs lack (a row craft-i18n already has keeps its translation), and builds
+with `CRAFT_I18N_DIR` pointing at the merged copy and `CRAFT_I18N_REQUIRED=1`.
+Upstream `build.rs` is unchanged.
 
-To restore translated Hmos strings, either set `CRAFT_I18N_DIR` to a
-craft-i18n checkout at the pinned revision and merge these rows into the
-catalogs, or extend `build.rs` to load this overlay.
+- Offline: set `PHOTOCRAFT_CRAFT_I18N_SRC` (or `CRAFT_I18N_DIR`) to a local
+  craft-i18n checkout; the overlay is still merged on top.
+- `PHOTOCRAFT_I18N=off` builds an English-only UI.
