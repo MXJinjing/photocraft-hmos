@@ -5804,6 +5804,7 @@ dependencies = [
  "flate2",
  "icu_casemap",
  "icu_locale_core",
+ "js-sys",
  "log",
  "photocraft-algo",
  "photocraft-cms",
