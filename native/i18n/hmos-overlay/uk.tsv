@@ -1,0 +1,174 @@
+# HarmonyOS host additions retained during upstream sync
+	Double-tap pen body	Подвійне торкання корпусу пера
+	Current tool and Eraser	Поточний інструмент і Гумка
+	Previous tool	Попередній інструмент
+	Squeeze pen body	Стискання корпусу пера
+
+# Stylus diagnostics
+	Hovering	Наведення
+	Stylus Debug…	Діагностика пера…
+	Stylus Debug	Діагностика пера
+	Use a real Pad and a pen that supports tilt, double-tap and squeeze.	Використовуйте справжній планшет і перо з нахилом, подвійним дотиком та стисканням.
+	No connection reported	З’єднання не повідомлено
+	Latest pen sample	Останні дані пера
+	Tilt from vertical	Нахил від вертикалі
+	Screen bearing	Напрямок на екрані
+	Waiting for pen input	Очікування введення пером
+	Samples	Відліки
+	Pen contact	Перо торкається екрана
+	No pen contact — values are retained	Немає контакту — значення збережено
+	Arrow: screen-projected tilt direction, not barrel rotation. Upright: no direction.	Стрілка: проєкція нахилу на екран, не обертання пера. Вертикально: напрямку немає.
+	Zero tilt may mean an upright pen or unavailable hardware data.	Нульовий нахил означає вертикальне перо або відсутність даних обладнання.
+	HarmonyOS contact input does not currently report barrel rotation.	Контактне введення HarmonyOS наразі не повідомляє обертання пера.
+	Received	Отримано
+	Test gestures only (do not run shortcuts)	Лише перевірка жестів (без виконання швидких команд)
+	No indicator means no event received, not necessarily unsupported hardware.	Немає індикатора — подію не отримано; це не обов’язково означає несумісне обладнання.
+	Test area — does not change the document	Область перевірки — не змінює документ
+	Draw here with the pen	Малюйте тут пером
+	Reset test	Скинути перевірку
+	Readings are before the pressure curve and remain available with tablet pressure off.	Дані до кривої натиску, доступні й за вимкненого натиску планшета.
+	Eraser end	Кінець із гумкою
+	Pen tip	Кінчик пера
+	Connected	Підключено
+	Show or hide context menu	Показати або приховати контекстне меню
+	Choose printer, copies and duplex in the system print dialog.	Виберіть принтер, кількість копій і двосторонній друк у системному діалозі друку.
+	System print preview opened	Відкрито системний попередній перегляд друку
+	Stylus	Стилус
+	Block finger input	Блокувати введення пальцем
+	Stylus hover preview	Попередній перегляд стилуса при наведенні
+	Only show canvas	Показати лише полотно
+	Right sidebar	Права бічна панель
+	Connected pen	Підключене перо
+	No pen connected	Перо не підключено
+
+# Window full screen (HarmonyOS host)
+	Enter Full Screen	Повноекранний режим
+	Exit Full Screen	Вийти з повноекранного режиму
+
+# Icon-only toolbar controls
+	Show tools in one column	Показати інструменти в один стовпець
+	Show tools in two columns	Показати інструменти у два стовпці
+	Open the Color Picker	Відкрити палітру кольорів
+	Scroll All Windows	Прокручувати всі вікна
+	The path was kept as the Work Path	Контур збережено як робочий контур
+	The path was discarded	Контур видалено
+# Art History Brush (#213).
+	Art History Brush Tool	Інструмент «Художній пензель історії»
+	Tight Short	Щільний короткий
+	Tight Medium	Щільний середній
+	Tight Long	Щільний довгий
+	Loose Medium	Вільний середній
+	Loose Long	Вільний довгий
+	Dab	Мазок
+	Tight Curl	Щільний завиток
+	Loose Curl	Вільний завиток
+	Stylized dabs from a history state	Стилізовані мазки зі стану історії
+	Target	Ціль
+	Font size presets	Набори розмірів шрифту
+	Leading presets	Набори інтерліньяжу
+	Tracking presets	Набори трекінгу
+
+	The GPU compositor is still being prepared	The GPU compositor is still being prepared
+	Invalid numeric entry. An integer between {min}% and {max}% is required. Previous value was inserted.	Неприпустиме числове значення. Потрібне ціле число від {min}% до {max}%. Вставлено попереднє значення.
+	Clear Selection	Очистити виділення
+	Color Aware	З урахуванням кольору
+	Decontaminate Colors	Очистити кольори
+	Edge Detection	Виявлення краю
+	Global Refinements	Глобальне уточнення
+	High Quality Preview	Високоякісний перегляд
+	Object Aware	З урахуванням об'єктів
+	Real-Time Refinement	Уточнення в реальному часі
+	Refine Edge Brush Tool	Інструмент «Пензель уточнення краю»
+	Refine Hair	Уточнити волосся
+	Refine Mode	Режим уточнення
+	Remember Settings	Запам'ятати параметри
+	View Mode	Режим перегляду
+	Object Aware needs a segmentation model, which isn't available yet	Для режиму «З урахуванням об'єктів» потрібна модель сегментації, яка ще недоступна
+	Refine Hair needs hair detection, which isn't available yet	Для уточнення волосся потрібне розпізнавання волосся, яке ще недоступне
+	Select and Mask was closed: its document is no longer the active one	Вікно «Виділити та маскувати» закрито: його документ більше не активний
+	Select and Mask was closed: another layer was selected	Вікно «Виділити та маскувати» закрито: вибрано інший шар
+
+# Shape Fill/Stroke popover and colour swatches opening the Color Picker
+	Color Picker	Вибір кольору
+	Recently Used Colors	Нещодавно використані кольори
+	Stop Color	Колір контрольної точки
+	Shapes can't use patterns yet	Фігури поки не можуть використовувати візерунки
+	Edit Brush…	Редагувати пензель…
+
+# Action Stop message (#8386)
+	Message	Повідомлення
+# Playback Options (#5212)
+	Playback Options…	Параметри відтворення…
+	Playback Options	Параметри відтворення
+	Accelerated	Прискорене
+	Step by Step	Покрокове
+	Pause For:	Пауза на:
+	Pause For	Пауза на
+	seconds	с
+	Create a single history state	Створювати один стан історії
+	Drag to move the active shape's path or the Work Path	Перетягніть, щоб перемістити контур активної фігури або робочий контур
+	Generator enabled	Генератор увімкнено
+	Move Up	Перемістити вгору
+	Move Down	Перемістити вниз
+	Grid view	Режим сітки
+	List view	Режим списку
+	On your computer	На вашому комп’ютері
+	New file	Новий файл
+	Learn	Навчання
+	No recent files	Немає останніх файлів
+	Website	Вебсайт
+
+# Frame Tool and other branch translations.
+	A frame supports affine transforms; select its image for perspective transforms	Рамка підтримує афінні перетворення; для перспективних перетворень виберіть її зображення
+	A frame supports affine transforms; select its image to warp it	Рамка підтримує афінні перетворення; для деформації виберіть її зображення
+	Convert to Frame…	Перетворити на рамку…
+	Create a new custom frame	Створити нову довільну рамку
+	Create a new polygonal frame	Створити нову багатокутну рамку
+	Create a new triangular frame	Створити нову трикутну рамку
+	Fit Content to Frame	Припасувати вміст до рамки
+	Fit Frame to Content	Припасувати рамку до вмісту
+	Frame coordinates must be finite and within 600000 pixels	Координати рамки мають бути скінченними та в межах 600000 пікселів
+	Import Image…	Імпортувати зображення…
+	Invalid frame transform	Неприпустиме перетворення рамки
+	Invalid nested file drop	Неприпустиме вкладене перетягування файлу
+	New Frame	Нова рамка
+	Replace Image…	Замінити зображення…
+	The frame is locked	Рамку заблоковано
+	The frame is unavailable	Рамка недоступна
+
+# Channels panel menu (#11451)
+	New Channel…	Новий канал…
+	Duplicate Channel	Дублювати канал
+	Delete Channel	Видалити канал
+	New Spot Channel…	Новий канал плашкового кольору…
+	Merge Spot Channel	Об'єднати канал плашкового кольору
+	Channel Options…	Параметри каналу…
+	Split Channels	Розділити канали
+	Merge Channels…	Об'єднати канали…
+	Specify Channels:	Вказати канали:
+	Not enough grayscale documents for this mode.	Недостатньо документів у градаціях сірого для цього режиму.
+	Pick a different document for each channel.	Виберіть окремий документ для кожного каналу.
+	A picked document is no longer open.	Один із вибраних документів більше не відкрито.
+	A picked document is no longer a grayscale document of the same size.	Один із вибраних документів більше не є документом у градаціях сірого того самого розміру.
+	Netscape Gray	Сірий Netscape
+# Move tool options bar (#11381)
+	Align top edges	Вирівняти верхні краї
+	Align vertical centers	Вирівняти центри по вертикалі
+	Align bottom edges	Вирівняти нижні краї
+	Distribute vertically	Розподілити по вертикалі
+	Distribute horizontally	Розподілити по горизонталі
+	Show layer bounds on hover	Показувати межі шару під час наведення
+	Expand layer group on click	Розгортати групу шарів за клацанням
+	Show hover bounds from Layers	Показувати межі під час наведення з панелі «Шари»
+	Saved RAW Develop settings to {file}	Налаштування Обробка RAW збережено в {file}
+	Save the settings to each raw's sidecar without opening it	Зберегти налаштування в супровідний файл кожного raw, не відкриваючи його
+	No settings saved: these raws can't keep a sidecar here	Нічого не збережено: ці raw тут не можуть мати супровідного файлу
+	Some settings could not be saved; the raws stay open	Не вдалося зберегти деякі налаштування; raw залишаються відкритими
+	Nothing to save: these raws are at their default settings	Нічого зберігати: ці raw мають типові налаштування
+# Artboard tool options bar (#11385)
+	Distribute Widths	Розподілити ширину
+	Distribute Heights	Розподілити висоту
+	Auto-nest Layers	Автоматично вкладати шари
+	Auto-size Canvas	Автоматично змінювати розмір полотна
+	Keep Relative Position During Layer Reordering	Зберігати відносне положення під час зміни порядку шарів
+	Shrinkwrap Canvas on Save	Зменшувати полотно до вмісту під час збереження

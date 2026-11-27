@@ -1,0 +1,168 @@
+# HarmonyOS host additions retained during upstream sync
+	Stylus	Stylus
+	Block finger input	Blokovat zadávání prstem
+	Stylus hover preview	Náhled při najetí stylusu
+	Double-tap pen body	Dvojité klepnutí na tělo pera
+	Current tool and Eraser	Aktuální nástroj a guma
+	Previous tool	Předchozí nástroj
+	Squeeze pen body	Stisknutí těla pera
+
+# Stylus diagnostics
+	Hovering	Pero nad plochou
+	Stylus Debug…	Diagnostika pera…
+	Stylus Debug	Diagnostika pera
+	Use a real Pad and a pen that supports tilt, double-tap and squeeze.	Použijte skutečný tablet a pero podporující náklon, dvojité klepnutí a stisk těla.
+	No connection reported	Připojení nebylo hlášeno
+	Latest pen sample	Poslední vzorek pera
+	Tilt from vertical	Náklon od svislice
+	Screen bearing	Směr na obrazovce
+	Waiting for pen input	Čekání na vstup pera
+	Samples	Vzorky
+	Pen contact	Kontakt pera
+	No pen contact — values are retained	Bez kontaktu — hodnoty zachovány
+	Arrow: screen-projected tilt direction, not barrel rotation. Upright: no direction.	Šipka: průmět náklonu na obrazovku, nikoli otáčení pera. Svisle: bez směru.
+	Zero tilt may mean an upright pen or unavailable hardware data.	Nulový náklon může znamenat svislé pero nebo nedostupná hardwarová data.
+	HarmonyOS contact input does not currently report barrel rotation.	Kontaktní vstup HarmonyOS aktuálně nehlásí otáčení pera.
+	Received	Přijato
+	Test gestures only (do not run shortcuts)	Testovat pouze gesta (bez spouštění zkratek)
+	No indicator means no event received, not necessarily unsupported hardware.	Bez indikátoru nebyla přijata událost; nemusí to znamenat nepodporovaný hardware.
+	Test area — does not change the document	Testovací plocha — nemění dokument
+	Draw here with the pen	Kreslete zde perem
+	Reset test	Obnovit test
+	Readings are before the pressure curve and remain available with tablet pressure off.	Hodnoty před křivkou přítlaku, dostupné i při vypnutém přítlaku tabletu.
+	Eraser end	Konec s gumou
+	Pen tip	Hrot pera
+	Connected	Připojeno
+	Show or hide context menu	Zobrazit nebo skrýt místní nabídku
+	Choose printer, copies and duplex in the system print dialog.	Vyberte tiskárnu, počet kopií a oboustranný tisk v systémovém dialogu.
+	System print preview opened	Systémový náhled tisku otevřen
+	Only show canvas	Zobrazit pouze plátno
+	Right sidebar	Pravý postranní panel
+	Connected pen	Připojené pero
+	No pen connected	Žádné pero není připojeno
+
+# Window full screen (HarmonyOS host)
+	Enter Full Screen	Přejít na celou obrazovku
+	Exit Full Screen	Ukončit celou obrazovku
+	Choose…	Vybrat…
+	Import…	Importovat…
+
+# Icon-only toolbar controls
+	Show tools in one column	Zobrazit nástroje v jednom sloupci
+	Show tools in two columns	Zobrazit nástroje ve dvou sloupcích
+	Open the Color Picker	Otevřít výběr barvy
+	Scroll All Windows	Posouvat všechna okna
+	The path was kept as the Work Path	Cesta byla zachována jako pracovní cesta
+	The path was discarded	Cesta byla zahozena
+# Art History Brush (#213).
+	Art History Brush	Štětec umělecké historie
+	Art History Brush Tool	Nástroj štětec umělecké historie
+	Tight Short	Těsný krátký
+	Tight Medium	Těsný střední
+	Tight Long	Těsný dlouhý
+	Loose Medium	Volný střední
+	Loose Long	Volný dlouhý
+	Dab	Šmouha
+	Tight Curl	Těsná smyčka
+	Loose Curl	Volná smyčka
+	Stylized dabs from a history state	Stylizované šmouhy ze stavu historie
+	Aspect Ratio	Poměr stran
+	Font size presets	Předvolby velikosti písma
+	Leading presets	Předvolby prokladu
+	Tracking presets	Předvolby prostrkání
+
+	The GPU compositor is still being prepared	The GPU compositor is still being prepared
+	Invalid numeric entry. An integer between {min}% and {max}% is required. Previous value was inserted.	Neplatná číselná hodnota. Je vyžadováno celé číslo mezi {min}% a {max}%. Byla vložena předchozí hodnota.
+	Color Aware	Podle barev
+	Decontaminate Colors	Dekontaminovat barvy
+	Edge Detection	Detekce okraje
+	Global Refinements	Globální upřesnění
+	High Quality Preview	Náhled ve vysoké kvalitě
+	Object Aware	Podle objektů
+	Real-Time Refinement	Upřesnění v reálném čase
+	Refine Edge Brush Tool	Nástroj štětec pro upřesnění okraje
+	Refine Hair	Upřesnit vlasy
+	Refine Mode	Režim upřesnění
+	Remember Settings	Zapamatovat nastavení
+	View Mode	Režim zobrazení
+	Object Aware needs a segmentation model, which isn't available yet	Režim Podle objektů vyžaduje segmentační model, který zatím není k dispozici
+	Refine Hair needs hair detection, which isn't available yet	Upřesnit vlasy vyžaduje detekci vlasů, která zatím není k dispozici
+	Select and Mask was closed: its document is no longer the active one	Vybrat a maskovat bylo zavřeno: jeho dokument již není aktivní
+	Select and Mask was closed: another layer was selected	Vybrat a maskovat bylo zavřeno: byla vybrána jiná vrstva
+	Drag to move the selected path	Tažením přesunete vybranou cestu
+
+# Shape Fill/Stroke popover and colour swatches opening the Color Picker
+	Recently Used Colors	Nedávno použité barvy
+	Stop Color	Barva zarážky
+	Shapes can't use patterns yet	Tvary zatím nemohou používat vzorky
+	Edit Brush…	Upravit štětec…
+
+# Action Stop message (#8386)
+	Message	Zpráva
+# Playback Options (#5212)
+	Playback Options…	Možnosti přehrávání…
+	Playback Options	Možnosti přehrávání
+	Accelerated	Zrychlené
+	Step by Step	Krok za krokem
+	Pause For:	Pozastavit na:
+	Pause For	Pozastavit na
+	seconds	sekund
+	Create a single history state	Vytvořit jeden stav historie
+	Drag to move the active shape's path or the Work Path	Tažením přesunete cestu aktivního tvaru nebo pracovní cestu
+	Generator enabled	Generátor zapnut
+	This Layer:	Tato vrstva:
+	Move Up	Přesunout nahoru
+	Move Down	Přesunout dolů
+	On your computer	V tomto počítači
+	New file	Nový soubor
+	Learn	Učit se
+	No recent files	Žádné nedávné soubory
+	Website	Web
+
+# Frame Tool and other branch translations.
+	A frame supports affine transforms; select its image for perspective transforms	Rámeček podporuje afinní transformace; pro perspektivní transformace vyberte jeho obrázek
+	A frame supports affine transforms; select its image to warp it	Rámeček podporuje afinní transformace; pro pokřivení vyberte jeho obrázek
+	Convert to Frame…	Převést na rámeček…
+	Create a new custom frame	Vytvořit nový vlastní rámeček
+	Create a new polygonal frame	Vytvořit nový mnohoúhelníkový rámeček
+	Create a new triangular frame	Vytvořit nový trojúhelníkový rámeček
+	Fit Content to Frame	Přizpůsobit obsah rámečku
+	Fit Frame to Content	Přizpůsobit rámeček obsahu
+	Frame coordinates must be finite and within 600000 pixels	Souřadnice rámečku musí být konečné a v rozsahu 600000 pixelů
+	Import Image…	Importovat obrázek…
+	Invalid frame transform	Neplatná transformace rámečku
+	Invalid nested file drop	Neplatné vnořené přetažení souboru
+	New Frame	Nový rámeček
+	Replace Image…	Nahradit obrázek…
+	The frame is locked	Rámeček je zamčený
+	The frame is unavailable	Rámeček není dostupný
+
+# Channels panel menu (#11451)
+	Channel Options…	Možnosti kanálu…
+	Specify Channels:	Určit kanály:
+	Not enough grayscale documents for this mode.	Pro tento režim není dost dokumentů ve stupních šedi.
+	Pick a different document for each channel.	Pro každý kanál vyberte jiný dokument.
+	A picked document is no longer open.	Jeden z vybraných dokumentů už není otevřený.
+	A picked document is no longer a grayscale document of the same size.	Jeden z vybraných dokumentů už není dokument ve stupních šedi stejné velikosti.
+	Netscape Gray	Šedá Netscape
+# Move tool options bar (#11381)
+	Align top edges	Zarovnat horní okraje
+	Align vertical centers	Zarovnat svislé středy
+	Align bottom edges	Zarovnat dolní okraje
+	Distribute vertically	Rozmístit svisle
+	Distribute horizontally	Rozmístit vodorovně
+	Show layer bounds on hover	Zobrazit hranice vrstvy při najetí
+	Expand layer group on click	Rozbalit skupinu vrstev kliknutím
+	Show hover bounds from Layers	Zobrazit hranice při najetí z panelu Vrstvy
+	Saved RAW Develop settings to {file}	Nastavení Vyvolání RAW uložena do {file}
+	Save the settings to each raw's sidecar without opening it	Uložit nastavení do souboru sidecar každého snímku raw bez jeho otevření
+	No settings saved: these raws can't keep a sidecar here	Nic neuloženo: tyto snímky raw zde nemohou mít soubor sidecar
+	Some settings could not be saved; the raws stay open	Některá nastavení nelze uložit; snímky raw zůstávají otevřené
+	Nothing to save: these raws are at their default settings	Není co ukládat: tyto snímky raw mají výchozí nastavení
+# Artboard tool options bar (#11385)
+	Distribute Widths	Rozmístit šířky
+	Distribute Heights	Rozmístit výšky
+	Auto-nest Layers	Automaticky vnořovat vrstvy
+	Auto-size Canvas	Automaticky měnit velikost plátna
+	Keep Relative Position During Layer Reordering	Zachovat relativní polohu při změně pořadí vrstev
+	Shrinkwrap Canvas on Save	Při uložení zmenšit plátno na obsah

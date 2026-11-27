@@ -1,0 +1,174 @@
+# HarmonyOS host additions retained during upstream sync
+	Double-tap pen body	Dwukrotne stuknięcie w korpus pióra
+	Current tool and Eraser	Bieżące narzędzie i Gumka
+	Previous tool	Poprzednie narzędzie
+	Squeeze pen body	Ściśnięcie korpusu pióra
+
+# Stylus diagnostics
+	Hovering	Pióro w powietrzu
+	Stylus Debug…	Diagnostyka pióra…
+	Stylus Debug	Diagnostyka pióra
+	Use a real Pad and a pen that supports tilt, double-tap and squeeze.	Użyj prawdziwego tabletu i pióra z obsługą pochylenia, podwójnego stuknięcia i ściskania.
+	No connection reported	Nie zgłoszono połączenia
+	Latest pen sample	Ostatni odczyt pióra
+	Tilt from vertical	Pochylenie od pionu
+	Screen bearing	Kierunek na ekranie
+	Waiting for pen input	Oczekiwanie na pióro
+	Samples	Próbki
+	Pen contact	Kontakt pióra
+	No pen contact — values are retained	Brak kontaktu — wartości zachowane
+	Arrow: screen-projected tilt direction, not barrel rotation. Upright: no direction.	Strzałka: rzut pochylenia na ekran, nie obrót pióra. Pionowo: bez kierunku.
+	Zero tilt may mean an upright pen or unavailable hardware data.	Zerowe pochylenie może oznaczać pionowe pióro lub brak danych sprzętowych.
+	HarmonyOS contact input does not currently report barrel rotation.	Wejście kontaktowe HarmonyOS obecnie nie zgłasza obrotu pióra.
+	Received	Odebrano
+	Test gestures only (do not run shortcuts)	Testuj tylko gesty (bez wykonywania skrótów)
+	No indicator means no event received, not necessarily unsupported hardware.	Brak wskaźnika oznacza brak odebranego zdarzenia, niekoniecznie brak obsługi sprzętowej.
+	Test area — does not change the document	Obszar testowy — nie zmienia dokumentu
+	Draw here with the pen	Rysuj tutaj piórem
+	Reset test	Zresetuj test
+	Readings are before the pressure curve and remain available with tablet pressure off.	Odczyty przed krzywą nacisku, dostępne także przy wyłączonym nacisku tabletu.
+	Eraser end	Końcówka gumki
+	Pen tip	Końcówka pióra
+	Connected	Połączono
+	Show or hide context menu	Pokaż lub ukryj menu kontekstowe
+	Choose printer, copies and duplex in the system print dialog.	Wybierz drukarkę, liczbę kopii i druk dwustronny w systemowym oknie drukowania.
+	System print preview opened	Otwarto systemowy podgląd wydruku
+	Stylus	Rysik
+	Block finger input	Blokuj dotyk palcem
+	Stylus hover preview	Podgląd rysika podczas najechania
+	Only show canvas	Pokaż tylko płótno
+	Right sidebar	Prawy panel boczny
+	Connected pen	Podłączone pióro
+	No pen connected	Brak podłączonego pióra
+
+# Window full screen (HarmonyOS host)
+	Enter Full Screen	Przejdź do pełnego ekranu
+	Exit Full Screen	Wyjdź z pełnego ekranu
+
+# Icon-only toolbar controls
+	Show tools in one column	Pokaż narzędzia w jednej kolumnie
+	Show tools in two columns	Pokaż narzędzia w dwóch kolumnach
+	Open the Color Picker	Otwórz próbnik kolorów
+	Scroll All Windows	Przewijaj wszystkie okna
+	The path was kept as the Work Path	Ścieżka została zachowana jako ścieżka robocza
+	The path was discarded	Ścieżka została odrzucona
+# Art History Brush (#213).
+	Art History Brush Tool	Narzędzie Pędzel historii artystycznej
+	Tight Short	Ścisły krótki
+	Tight Medium	Ścisły średni
+	Tight Long	Ścisły długi
+	Loose Medium	Luźny średni
+	Loose Long	Luźny długi
+	Dab	Plama
+	Tight Curl	Ścisły lok
+	Loose Curl	Luźny lok
+	Stylized dabs from a history state	Stylizowane plamy ze stanu historii
+	Target	Cel
+	Font size presets	Ustawienia wstępne rozmiaru czcionki
+	Leading presets	Ustawienia wstępne interlinii
+	Tracking presets	Ustawienia wstępne światła
+
+	The GPU compositor is still being prepared	The GPU compositor is still being prepared
+	Invalid numeric entry. An integer between {min}% and {max}% is required. Previous value was inserted.	Nieprawidłowa wartość liczbowa. Wymagana jest liczba całkowita od {min}% do {max}%. Wstawiono poprzednią wartość.
+	Clear Selection	Wyczyść zaznaczenie
+	Color Aware	Według kolorów
+	Decontaminate Colors	Odkażanie kolorów
+	Edge Detection	Wykrywanie krawędzi
+	Global Refinements	Dopracowanie globalne
+	High Quality Preview	Podgląd wysokiej jakości
+	Object Aware	Według obiektów
+	Real-Time Refinement	Dopracowanie w czasie rzeczywistym
+	Refine Edge Brush Tool	Narzędzie Pędzel dopracowania krawędzi
+	Refine Hair	Dopracuj włosy
+	Refine Mode	Tryb dopracowania
+	Remember Settings	Zapamiętaj ustawienia
+	View Mode	Tryb widoku
+	Object Aware needs a segmentation model, which isn't available yet	Tryb Według obiektów wymaga modelu segmentacji, który nie jest jeszcze dostępny
+	Refine Hair needs hair detection, which isn't available yet	Dopracowanie włosów wymaga wykrywania włosów, które nie jest jeszcze dostępne
+	Select and Mask was closed: its document is no longer the active one	Zamknięto Zaznacz i maskuj: jego dokument nie jest już aktywny
+	Select and Mask was closed: another layer was selected	Zamknięto Zaznacz i maskuj: wybrano inną warstwę
+	Select Layer Under Cursor	Zaznacz warstwę pod kursorem
+
+# Shape Fill/Stroke popover and colour swatches opening the Color Picker
+	Color Picker	Próbnik kolorów
+	Recently Used Colors	Ostatnio używane kolory
+	Stop Color	Kolor punktu
+	Shapes can't use patterns yet	Kształty nie mogą jeszcze używać wzorków
+	Edit Brush…	Edytuj pędzel…
+
+# Action Stop message (#8386)
+	Message	Komunikat
+# Playback Options (#5212)
+	Playback Options…	Opcje odtwarzania…
+	Playback Options	Opcje odtwarzania
+	Accelerated	Przyspieszone
+	Step by Step	Krok po kroku
+	Pause For:	Wstrzymaj na:
+	Pause For	Wstrzymaj na
+	seconds	s
+	Create a single history state	Utwórz jeden stan historii
+	Generator enabled	Generator włączony
+	Move Up	Przesuń w górę
+	Move Down	Przesuń w dół
+	Grid view	Widok siatki
+	List view	Widok listy
+	On your computer	Na tym komputerze
+	New file	Nowy plik
+	Learn	Nauka
+	No recent files	Brak ostatnich plików
+	Website	Strona internetowa
+
+# Frame Tool and other branch translations.
+	A frame supports affine transforms; select its image for perspective transforms	Ramka obsługuje przekształcenia afiniczne; do przekształceń perspektywicznych wybierz jej obraz
+	A frame supports affine transforms; select its image to warp it	Ramka obsługuje przekształcenia afiniczne; aby ją wypaczyć, wybierz obraz
+	Convert to Frame…	Konwertuj na ramkę…
+	Create a new custom frame	Utwórz nową ramkę niestandardową
+	Create a new polygonal frame	Utwórz nową ramkę wielokątną
+	Create a new triangular frame	Utwórz nową ramkę trójkątną
+	Fit Content to Frame	Dopasuj zawartość do ramki
+	Fit Frame to Content	Dopasuj ramkę do zawartości
+	Frame coordinates must be finite and within 600000 pixels	Współrzędne ramki muszą być skończone i mieścić się w granicach 600000 pikseli
+	Import Image…	Importuj obraz…
+	Invalid frame transform	Nieprawidłowe przekształcenie ramki
+	Invalid nested file drop	Nieprawidłowe zagnieżdżone upuszczenie pliku
+	New Frame	Nowa ramka
+	Replace Image…	Zastąp obraz…
+	The frame is locked	Ramka jest zablokowana
+	The frame is unavailable	Ramka jest niedostępna
+
+# Channels panel menu (#11451)
+	New Channel…	Nowy kanał…
+	Duplicate Channel	Duplikuj kanał
+	Delete Channel	Usuń kanał
+	New Spot Channel…	Nowy kanał kolorów dodatkowych…
+	Merge Spot Channel	Scal kanał kolorów dodatkowych
+	Channel Options…	Opcje kanału…
+	Split Channels	Podziel kanały
+	Merge Channels…	Scal kanały…
+	Specify Channels:	Określ kanały:
+	Not enough grayscale documents for this mode.	Za mało dokumentów w skali szarości dla tego trybu.
+	Pick a different document for each channel.	Wybierz inny dokument dla każdego kanału.
+	A picked document is no longer open.	Jeden z wybranych dokumentów nie jest już otwarty.
+	A picked document is no longer a grayscale document of the same size.	Jeden z wybranych dokumentów nie jest już dokumentem w skali szarości o tym samym rozmiarze.
+	Netscape Gray	Szarość Netscape
+# Move tool options bar (#11381)
+	Align top edges	Wyrównaj górne krawędzie
+	Align vertical centers	Wyrównaj środki w pionie
+	Align bottom edges	Wyrównaj dolne krawędzie
+	Distribute vertically	Rozmieść w pionie
+	Distribute horizontally	Rozmieść w poziomie
+	Show layer bounds on hover	Pokaż granice warstwy po najechaniu
+	Expand layer group on click	Rozwiń grupę warstw po kliknięciu
+	Show hover bounds from Layers	Pokaż granice po najechaniu z panelu Warstwy
+	Saved RAW Develop settings to {file}	Zapisano ustawienia Wywoływanie RAW w {file}
+	Save the settings to each raw's sidecar without opening it	Zapisz ustawienia w pliku sidecar każdego pliku raw bez otwierania go
+	No settings saved: these raws can't keep a sidecar here	Nic nie zapisano: te pliki raw nie mogą tu mieć pliku sidecar
+	Some settings could not be saved; the raws stay open	Nie udało się zapisać niektórych ustawień; pliki raw pozostają otwarte
+	Nothing to save: these raws are at their default settings	Nic do zapisania: te pliki raw mają ustawienia domyślne
+# Artboard tool options bar (#11385)
+	Distribute Widths	Rozmieść szerokości równomiernie
+	Distribute Heights	Rozmieść wysokości równomiernie
+	Auto-nest Layers	Automatycznie zagnieżdżaj warstwy
+	Auto-size Canvas	Automatycznie zmieniaj rozmiar płótna
+	Keep Relative Position During Layer Reordering	Zachowaj położenie względne przy zmianie kolejności warstw
+	Shrinkwrap Canvas on Save	Przytnij płótno do zawartości przy zapisie
