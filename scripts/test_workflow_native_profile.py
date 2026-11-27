@@ -47,6 +47,14 @@ class NativeProfileTests(unittest.TestCase):
                 shutil.copyfile(ROOT / 'AppScope/app.json5', path / 'AppScope/app.json5')
                 shutil.copyfile(ROOT / 'scripts/build_native.sh', path / 'scripts/build_native.sh')
                 shutil.copyfile(ROOT / 'scripts/clean_rust_debug.py', path / 'scripts/clean_rust_debug.py')
+                shutil.copyfile(ROOT / 'scripts/prepare_craft_i18n.py', path / 'scripts/prepare_craft_i18n.py')
+                (path / 'upstream/photocraft').mkdir(parents=True)
+                (path / 'upstream/photocraft/craft-i18n.rev').write_text('e' * 40 + '\n')
+                (path / 'native/i18n/hmos-overlay').mkdir(parents=True)
+                (path / 'native/i18n/hmos-overlay/zh-hans.tsv').write_text('\tStylus\t手写笔\n', encoding='utf-8')
+                i18n_src = path / 'craft-i18n/locales/zh-hans'
+                i18n_src.mkdir(parents=True)
+                (i18n_src / 'photocraft.tsv').write_text('\tOpen\t打开\n', encoding='utf-8')
                 debug = path / 'native/rust/target/debug'
                 (debug / 'deps').mkdir(parents=True)
                 (debug / 'deps/stale.rlib').write_bytes(b'x' * 8192)
@@ -70,18 +78,22 @@ class NativeProfileTests(unittest.TestCase):
                     (path / 'sysroot/lib/rustlib' / target).mkdir(parents=True)
                 for name, body in {
                     'rustc': '#!/bin/sh\nprintf "%s\\n" "$TEST_SYSROOT"\n',
-                    'cargo': '#!/bin/sh\n[ "$PHOTOCRAFT_HAP_VERSION" = "$TEST_HAP_VERSION" ] || exit 3\n[ "$TEST_BUILD_FAIL" != 1 ] || exit 2\n[ -f "$TEST_DEBUG_ARTIFACT" ] || exit 1\nprintf "%s\\n" "$*" >> "$TEST_CARGO_LOG"\nprintf library > "$TEST_ARM64_LIBRARY"\n',
+                    'cargo': '#!/bin/sh\n[ "$PHOTOCRAFT_HAP_VERSION" = "$TEST_HAP_VERSION" ] || exit 3\n[ "$CRAFT_I18N_REQUIRED" = 1 ] || exit 4\ngrep -q "手写笔" "$CRAFT_I18N_DIR/locales/zh-hans/photocraft.tsv" || exit 5\n[ "$TEST_BUILD_FAIL" != 1 ] || exit 2\n[ -f "$TEST_DEBUG_ARTIFACT" ] || exit 1\nprintf "%s\\n" "$*" >> "$TEST_CARGO_LOG"\nprintf library > "$TEST_ARM64_LIBRARY"\n',
                 }.items():
                     (bin_dir / name).write_text(body)
                     (bin_dir / name).chmod(0o755)
                 log = path / 'cargo.log'
                 env = dict(os.environ, PATH=str(bin_dir) + os.pathsep + os.environ['PATH'],
                            PHOTOCRAFT_NATIVE_SDK=str(sdk), PHOTOCRAFT_RUST_PROFILE=mode,
+                           PHOTOCRAFT_CRAFT_I18N_SRC=str(path / 'craft-i18n'),
+                           PHOTOCRAFT_CRAFT_I18N_CACHE=str(path / 'i18n-cache'),
                            TEST_SYSROOT=str(path / 'sysroot'), TEST_CARGO_LOG=str(log),
                            TEST_HAP_VERSION=json.loads((path / 'AppScope/app.json5').read_text())['app']['versionName'],
                            TEST_DEBUG_ARTIFACT=str(debug / 'deps/stale.rlib'),
                            TEST_ARM64_LIBRARY=str(library), TEST_BUILD_FAIL='1' if failed else '0')
                 env.pop('PHOTOCRAFT_NATIVE_TARGETS', None)
+                env.pop('CRAFT_I18N_DIR', None)
+                env.pop('PHOTOCRAFT_I18N', None)
                 result = subprocess.run(['bash', str(path / 'scripts/build_native.sh')], env=env, capture_output=True, text=True)
                 if failed:
                     self.assertNotEqual(result.returncode, 0)

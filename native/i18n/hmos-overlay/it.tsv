@@ -1,0 +1,161 @@
+# HarmonyOS host additions retained during upstream sync
+	Stylus	Stilo
+	Block finger input	Blocca input dito
+	Stylus hover preview	Anteprima stilo al passaggio
+	Double-tap pen body	Doppio tocco sul corpo della penna
+	Current tool and Eraser	Strumento attuale e gomma
+	Previous tool	Strumento precedente
+	Squeeze pen body	Stringi il corpo della penna
+
+# Stylus diagnostics
+	Hovering	Puntatore sospeso
+	Stylus Debug…	Diagnostica penna…
+	Stylus Debug	Diagnostica penna
+	Use a real Pad and a pen that supports tilt, double-tap and squeeze.	Usa un tablet reale e una penna che supporti inclinazione, doppio tocco e pressione del corpo.
+	No connection reported	Nessuna connessione segnalata
+	Latest pen sample	Ultimo campione della penna
+	Tilt from vertical	Inclinazione dalla verticale
+	Screen bearing	Direzione sullo schermo
+	Waiting for pen input	In attesa della penna
+	Samples	Campioni
+	Pen contact	Penna a contatto
+	No pen contact — values are retained	Nessun contatto — valori conservati
+	Arrow: screen-projected tilt direction, not barrel rotation. Upright: no direction.	Freccia: inclinazione proiettata sullo schermo, non rotazione della penna. Verticale: nessuna direzione.
+	Zero tilt may mean an upright pen or unavailable hardware data.	Un’inclinazione nulla può indicare una penna verticale o dati hardware non disponibili.
+	HarmonyOS contact input does not currently report barrel rotation.	L’input di contatto HarmonyOS non segnala attualmente la rotazione della penna.
+	Received	Ricevuto
+	Test gestures only (do not run shortcuts)	Prova solo i gesti (senza eseguire scorciatoie)
+	No indicator means no event received, not necessarily unsupported hardware.	Nessun indicatore significa nessun evento ricevuto, non necessariamente hardware non supportato.
+	Test area — does not change the document	Area di prova — non modifica il documento
+	Draw here with the pen	Disegna qui con la penna
+	Reset test	Reimposta prova
+	Readings are before the pressure curve and remain available with tablet pressure off.	Valori precedenti alla curva di pressione, disponibili anche con la pressione del tablet disattivata.
+	Eraser end	Estremità gomma
+	Pen tip	Punta della penna
+	Connected	Connesso
+	Show or hide context menu	Mostra o nascondi il menu contestuale
+	Choose printer, copies and duplex in the system print dialog.	Scegli stampante, copie e fronte-retro nella finestra di stampa del sistema.
+	System print preview opened	Anteprima di stampa del sistema aperta
+	Only show canvas	Mostra solo la tela
+	Right sidebar	Barra laterale destra
+	Connected pen	Penna connessa
+	No pen connected	Nessuna penna connessa
+
+# Window full screen (HarmonyOS host)
+	Enter Full Screen	Attiva schermo intero
+	Exit Full Screen	Esci da schermo intero
+
+# Icon-only toolbar controls
+	Show tools in one column	Mostra strumenti in una colonna
+	Show tools in two columns	Mostra strumenti in due colonne
+	Open the Color Picker	Apri il selettore colore
+	Scroll All Windows	Scorri tutte le finestre
+	The path was kept as the Work Path	Il tracciato è stato conservato come tracciato di lavoro
+	The path was discarded	Il tracciato è stato scartato
+# Art History Brush (#213).
+	Art History Brush Tool	Strumento Pennello storia artistica
+	Tight Short	Corto stretto
+	Tight Medium	Medio stretto
+	Tight Long	Lungo stretto
+	Loose Medium	Medio largo
+	Loose Long	Lungo largo
+	Dab	Tocco
+	Tight Curl	Riccio stretto
+	Loose Curl	Riccio largo
+	Stylized dabs from a history state	Tocchi stilizzati da uno stato della storia
+	Font size presets	Predefiniti dimensione font
+	Leading presets	Predefiniti interlinea
+	Tracking presets	Predefiniti spaziatura
+
+	The GPU compositor is still being prepared	The GPU compositor is still being prepared
+	Invalid numeric entry. An integer between {min}% and {max}% is required. Previous value was inserted.	Valore numerico non valido. È richiesto un numero intero compreso tra {min}% e {max}%. È stato inserito il valore precedente.
+	Color Aware	In base al colore
+	Decontaminate Colors	Decontamina colori
+	Edge Detection	Rilevamento bordi
+	Global Refinements	Perfezionamenti globali
+	High Quality Preview	Anteprima di alta qualità
+	Object Aware	In base all'oggetto
+	Real-Time Refinement	Perfezionamento in tempo reale
+	Refine Edge Brush Tool	Strumento Pennello per migliorare il bordo
+	Refine Hair	Migliora capelli
+	Refine Mode	Metodo di perfezionamento
+	Remember Settings	Ricorda impostazioni
+	View Mode	Modalità di visualizzazione
+	Object Aware needs a segmentation model, which isn't available yet	In base all'oggetto richiede un modello di segmentazione, non ancora disponibile
+	Refine Hair needs hair detection, which isn't available yet	Migliora capelli richiede il rilevamento dei capelli, non ancora disponibile
+	Select and Mask was closed: its document is no longer the active one	Seleziona e maschera è stato chiuso: il suo documento non è più quello attivo
+	Select and Mask was closed: another layer was selected	Seleziona e maschera è stato chiuso: è stato selezionato un altro livello
+
+# Shape Fill/Stroke popover and colour swatches opening the Color Picker
+	Recently Used Colors	Colori usati di recente
+	Stop Color	Colore del punto
+	Shapes can't use patterns yet	Le forme non possono ancora usare pattern
+	Edit Brush…	Modifica pennello…
+
+# Action Stop message (#8386)
+	Message	Messaggio
+# Playback Options (#5212)
+	Playback Options…	Opzioni di riproduzione…
+	Playback Options	Opzioni di riproduzione
+	Accelerated	Accelerata
+	Step by Step	Passo dopo passo
+	Pause For:	Pausa di:
+	Pause For	Pausa di
+	seconds	secondi
+	Create a single history state	Crea un solo stato di storia
+	Generator enabled	Generatore abilitato
+	This Layer:	Questo livello:
+	Move Up	Sposta su
+	Move Down	Sposta giù
+	On your computer	Sul computer
+	New file	Nuovo file
+	Learn	Impara
+	Website	Sito web
+
+# Frame Tool and other branch translations.
+	A frame supports affine transforms; select its image for perspective transforms	Una cornice supporta trasformazioni affini; selezionate la sua immagine per le trasformazioni prospettiche
+	A frame supports affine transforms; select its image to warp it	Una cornice supporta trasformazioni affini; selezionate la sua immagine per alterarla
+	Convert to Frame…	Converti in cornice…
+	Create a new custom frame	Crea una nuova cornice personalizzata
+	Create a new polygonal frame	Crea una nuova cornice poligonale
+	Create a new triangular frame	Crea una nuova cornice triangolare
+	Fit Content to Frame	Adatta contenuto alla cornice
+	Fit Frame to Content	Adatta cornice al contenuto
+	Frame coordinates must be finite and within 600000 pixels	Le coordinate della cornice devono essere finite e comprese entro 600000 pixel
+	Import Image…	Importa immagine…
+	Invalid frame transform	Trasformazione della cornice non valida
+	Invalid nested file drop	Rilascio di file annidato non valido
+	New Frame	Nuova cornice
+	Replace Image…	Sostituisci immagine…
+	The frame is locked	La cornice è bloccata
+	The frame is unavailable	La cornice non è disponibile
+
+# Channels panel menu (#11451)
+	Channel Options…	Opzioni canale…
+	Specify Channels:	Specifica canali:
+	Not enough grayscale documents for this mode.	Documenti in scala di grigio insufficienti per questo metodo.
+	Pick a different document for each channel.	Scegli un documento diverso per ogni canale.
+	A picked document is no longer open.	Uno dei documenti scelti non è più aperto.
+	A picked document is no longer a grayscale document of the same size.	Uno dei documenti scelti non è più un documento in scala di grigio delle stesse dimensioni.
+	Netscape Gray	Grigio Netscape
+# Move tool options bar (#11381)
+	Align top edges	Allinea i bordi superiori
+	Align vertical centers	Allinea i centri verticali
+	Align bottom edges	Allinea i bordi inferiori
+	Distribute vertically	Distribuisci verticalmente
+	Distribute horizontally	Distribuisci orizzontalmente
+	Show layer bounds on hover	Mostra i limiti del livello al passaggio del mouse
+	Expand layer group on click	Espandi il gruppo di livelli al clic
+	Show hover bounds from Layers	Mostra i limiti al passaggio dal pannello Livelli
+	Saved RAW Develop settings to {file}	Impostazioni Sviluppo RAW salvate in {file}
+	Save the settings to each raw's sidecar without opening it	Salva le impostazioni nel file sidecar di ogni raw senza aprirlo
+	No settings saved: these raws can't keep a sidecar here	Nulla salvato: questi raw non possono avere un file sidecar qui
+	Some settings could not be saved; the raws stay open	Alcune impostazioni non sono state salvate; i raw restano aperti
+	Nothing to save: these raws are at their default settings	Niente da salvare: questi raw hanno le impostazioni predefinite
+# Artboard tool options bar (#11385)
+	Distribute Widths	Distribuisci larghezze
+	Distribute Heights	Distribuisci altezze
+	Auto-nest Layers	Annida livelli automaticamente
+	Auto-size Canvas	Ridimensiona quadro automaticamente
+	Keep Relative Position During Layer Reordering	Mantieni la posizione relativa durante il riordino dei livelli
+	Shrinkwrap Canvas on Save	Riduci il quadro al contenuto al salvataggio

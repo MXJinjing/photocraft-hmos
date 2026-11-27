@@ -24,3 +24,4 @@ entry/.cxx/
 /work/
 __pycache__/
 *.pyc
+/native/i18n/.craft-i18n-cache/

@@ -1,0 +1,162 @@
+# HarmonyOS host additions retained during upstream sync
+	Stylus	Caneta
+	Block finger input	Bloquear entrada por dedo
+	Stylus hover preview	Visualização da caneta ao pairar
+	Double-tap pen body	Toque duplo no corpo da caneta
+	Current tool and Eraser	Ferramenta atual e borracha
+	Previous tool	Ferramenta anterior
+	Squeeze pen body	Apertar o corpo da caneta
+
+# Stylus diagnostics
+	Hovering	Pairando
+	Stylus Debug…	Diagnóstico da caneta…
+	Stylus Debug	Diagnóstico da caneta
+	Use a real Pad and a pen that supports tilt, double-tap and squeeze.	Use um tablet real e uma caneta com inclinação, toque duplo e aperto do corpo.
+	No connection reported	Nenhuma conexão informada
+	Latest pen sample	Última amostra da caneta
+	Tilt from vertical	Inclinação em relação à vertical
+	Screen bearing	Direção na tela
+	Waiting for pen input	Aguardando entrada da caneta
+	Samples	Amostras
+	Pen contact	Caneta em contato
+	No pen contact — values are retained	Sem contato — valores mantidos
+	Arrow: screen-projected tilt direction, not barrel rotation. Upright: no direction.	Seta: inclinação projetada na tela, não rotação da caneta. Vertical: sem direção.
+	Zero tilt may mean an upright pen or unavailable hardware data.	Inclinação zero pode indicar uma caneta vertical ou dados de hardware indisponíveis.
+	HarmonyOS contact input does not currently report barrel rotation.	A entrada de contato do HarmonyOS ainda não informa a rotação da caneta.
+	Received	Recebido
+	Test gestures only (do not run shortcuts)	Testar apenas gestos (sem executar atalhos)
+	No indicator means no event received, not necessarily unsupported hardware.	Sem indicador significa nenhum evento recebido, não necessariamente hardware incompatível.
+	Test area — does not change the document	Área de teste — não altera o documento
+	Draw here with the pen	Desenhe aqui com a caneta
+	Reset test	Redefinir teste
+	Readings are before the pressure curve and remain available with tablet pressure off.	Leituras anteriores à curva de pressão, disponíveis mesmo com a pressão do tablet desativada.
+	Eraser end	Extremidade da borracha
+	Pen tip	Ponta da caneta
+	Connected	Conectado
+	Show or hide context menu	Mostrar ou ocultar o menu de contexto
+	Choose printer, copies and duplex in the system print dialog.	Escolha impressora, cópias e frente e verso na janela de impressão do sistema.
+	System print preview opened	Pré-visualização de impressão do sistema aberta
+	Only show canvas	Mostrar apenas a tela
+	Right sidebar	Barra lateral direita
+	Connected pen	Caneta conectada
+	No pen connected	Nenhuma caneta conectada
+
+# Window full screen (HarmonyOS host)
+	Enter Full Screen	Entrar em tela cheia
+	Exit Full Screen	Sair da tela cheia
+
+# Icon-only toolbar controls
+	Show tools in one column	Mostrar ferramentas em uma coluna
+	Show tools in two columns	Mostrar ferramentas em duas colunas
+	Open the Color Picker	Abrir o seletor de cores
+	Scroll All Windows	Rolar todas as janelas
+	The path was kept as the Work Path	O demarcador foi mantido como demarcador de trabalho
+	The path was discarded	O demarcador foi descartado
+# Art History Brush (#213).
+	Art History Brush Tool	Ferramenta Pincel do histórico da arte
+	Tight Short	Curto cerrado
+	Tight Medium	Médio cerrado
+	Tight Long	Longo cerrado
+	Loose Medium	Médio solto
+	Loose Long	Longo solto
+	Dab	Toque
+	Tight Curl	Curva cerrada
+	Loose Curl	Curva solta
+	Stylized dabs from a history state	Toques estilizados a partir de um estado do histórico
+	Font size presets	Predefinições de tamanho da fonte
+	Leading presets	Predefinições de entrelinha
+	Tracking presets	Predefinições de tracking
+
+	The GPU compositor is still being prepared	The GPU compositor is still being prepared
+	Invalid numeric entry. An integer between {min}% and {max}% is required. Previous value was inserted.	Entrada numérica inválida. É necessário um número inteiro entre {min}% e {max}%. O valor anterior foi inserido.
+	Color Aware	Com reconhecimento de cor
+	Decontaminate Colors	Descontaminar cores
+	Edge Detection	Detecção de borda
+	Global Refinements	Refinamentos globais
+	High Quality Preview	Visualização de alta qualidade
+	Object Aware	Com reconhecimento de objeto
+	Real-Time Refinement	Refinamento em tempo real
+	Refine Edge Brush Tool	Ferramenta Pincel de refinamento de borda
+	Refine Hair	Refinar cabelo
+	Refine Mode	Modo de refinamento
+	Remember Settings	Lembrar configurações
+	View Mode	Modo de exibição
+	Object Aware needs a segmentation model, which isn't available yet	Com reconhecimento de objeto requer um modelo de segmentação, ainda não disponível
+	Refine Hair needs hair detection, which isn't available yet	Refinar cabelo requer detecção de cabelo, ainda não disponível
+	Select and Mask was closed: its document is no longer the active one	Selecionar e mascarar foi fechado: o documento dele não está mais ativo
+	Select and Mask was closed: another layer was selected	Selecionar e mascarar foi fechado: outra camada foi selecionada
+	Drag to move the selected path	Arraste para mover o demarcador selecionado
+
+# Shape Fill/Stroke popover and colour swatches opening the Color Picker
+	Recently Used Colors	Cores usadas recentemente
+	Stop Color	Cor da parada
+	Shapes can't use patterns yet	Formas ainda não podem usar padrões
+	Edit Brush…	Editar pincel…
+
+# Action Stop message (#8386)
+	Message	Mensagem
+# Playback Options (#5212)
+	Playback Options…	Opções de reprodução…
+	Playback Options	Opções de reprodução
+	Accelerated	Acelerada
+	Step by Step	Passo a passo
+	Pause For:	Pausar por:
+	Pause For	Pausar por
+	seconds	segundos
+	Create a single history state	Criar um único estado de histórico
+	Drag to move the active shape's path or the Work Path	Arraste para mover o demarcador da forma ativa ou o demarcador de trabalho
+	Generator enabled	Gerador ativado
+	Move Up	Mover para cima
+	Move Down	Mover para baixo
+	On your computer	No seu computador
+	New file	Novo arquivo
+	Learn	Aprender
+	Website	Site
+
+# Frame Tool and other branch translations.
+	A frame supports affine transforms; select its image for perspective transforms	Uma moldura permite transformações afins; selecione sua imagem para transformações de perspectiva
+	A frame supports affine transforms; select its image to warp it	Uma moldura permite transformações afins; selecione sua imagem para deformá-la
+	Convert to Frame…	Converter em moldura…
+	Create a new custom frame	Criar nova moldura personalizada
+	Create a new polygonal frame	Criar nova moldura poligonal
+	Create a new triangular frame	Criar nova moldura triangular
+	Fit Content to Frame	Ajustar conteúdo à moldura
+	Fit Frame to Content	Ajustar moldura ao conteúdo
+	Frame coordinates must be finite and within 600000 pixels	As coordenadas da moldura devem ser finitas e estar dentro de 600000 pixels
+	Import Image…	Importar imagem…
+	Invalid frame transform	Transformação de moldura inválida
+	Invalid nested file drop	Soltura de arquivo aninhada inválida
+	New Frame	Nova moldura
+	Replace Image…	Substituir imagem…
+	The frame is locked	A moldura está bloqueada
+	The frame is unavailable	A moldura não está disponível
+
+# Channels panel menu (#11451)
+	Channel Options…	Opções de canal…
+	Specify Channels:	Especificar canais:
+	Not enough grayscale documents for this mode.	Não há documentos em tons de cinza suficientes para este modo.
+	Pick a different document for each channel.	Escolha um documento diferente para cada canal.
+	A picked document is no longer open.	Um dos documentos escolhidos não está mais aberto.
+	A picked document is no longer a grayscale document of the same size.	Um dos documentos escolhidos não é mais um documento em tons de cinza do mesmo tamanho.
+	Netscape Gray	Cinza Netscape
+# Move tool options bar (#11381)
+	Align top edges	Alinhar bordas superiores
+	Align vertical centers	Alinhar centros verticais
+	Align bottom edges	Alinhar bordas inferiores
+	Distribute vertically	Distribuir verticalmente
+	Distribute horizontally	Distribuir horizontalmente
+	Show layer bounds on hover	Mostrar limites da camada ao passar o cursor
+	Expand layer group on click	Expandir grupo de camadas ao clicar
+	Show hover bounds from Layers	Mostrar limites ao passar o cursor em Camadas
+	Saved RAW Develop settings to {file}	Configurações do Revelação RAW salvas em {file}
+	Save the settings to each raw's sidecar without opening it	Salvar as configurações no arquivo sidecar de cada raw sem abri-lo
+	No settings saved: these raws can't keep a sidecar here	Nada foi salvo: estes raw não podem ter um arquivo sidecar aqui
+	Some settings could not be saved; the raws stay open	Não foi possível salvar algumas configurações; os raw continuam abertos
+	Nothing to save: these raws are at their default settings	Nada para salvar: estes raw estão nas configurações padrão
+# Artboard tool options bar (#11385)
+	Distribute Widths	Distribuir larguras
+	Distribute Heights	Distribuir alturas
+	Auto-nest Layers	Aninhar camadas automaticamente
+	Auto-size Canvas	Ajustar tamanho da tela automaticamente
+	Keep Relative Position During Layer Reordering	Manter a posição relativa ao reordenar camadas
+	Shrinkwrap Canvas on Save	Reduzir a tela ao conteúdo ao salvar

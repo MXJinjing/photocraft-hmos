@@ -1,0 +1,185 @@
+# HarmonyOS host additions retained during upstream sync
+	Stylus	Stylus
+	Block finger input	Blokir masukan jari
+	Stylus hover preview	Pratinjau saat stylus melayang
+	Double-tap pen body	Ketuk dua kali badan stylus
+	Current tool and Eraser	Alat saat ini dan penghapus
+	Previous tool	Alat sebelumnya
+	Squeeze pen body	Remas badan stylus
+
+# Stylus diagnostics
+	Hovering	Melayang
+	Stylus Debug…	Diagnostik stylus…
+	Stylus Debug	Diagnostik stylus
+	Use a real Pad and a pen that supports tilt, double-tap and squeeze.	Gunakan tablet nyata dan pena yang mendukung kemiringan, ketuk dua kali, dan remasan.
+	No connection reported	Tidak ada koneksi yang dilaporkan
+	Latest pen sample	Sampel pena terbaru
+	Tilt from vertical	Kemiringan dari vertikal
+	Screen bearing	Arah pada layar
+	Waiting for pen input	Menunggu masukan pena
+	Samples	Sampel
+	Pen contact	Pena menyentuh
+	No pen contact — values are retained	Tidak menyentuh — nilai dipertahankan
+	Arrow: screen-projected tilt direction, not barrel rotation. Upright: no direction.	Panah: proyeksi arah kemiringan pada layar, bukan putaran pena. Tegak: tanpa arah.
+	Zero tilt may mean an upright pen or unavailable hardware data.	Kemiringan nol dapat berarti pena tegak atau data perangkat keras tidak tersedia.
+	HarmonyOS contact input does not currently report barrel rotation.	Masukan sentuh HarmonyOS saat ini tidak melaporkan putaran pena.
+	Received	Diterima
+	Test gestures only (do not run shortcuts)	Uji gestur saja (jangan jalankan pintasan)
+	No indicator means no event received, not necessarily unsupported hardware.	Tanpa indikator berarti tidak ada peristiwa diterima, bukan berarti perangkat keras pasti tidak didukung.
+	Test area — does not change the document	Area uji — tidak mengubah dokumen
+	Draw here with the pen	Gambar di sini dengan pena
+	Reset test	Atur ulang pengujian
+	Readings are before the pressure curve and remain available with tablet pressure off.	Nilai sebelum kurva tekanan, tetap tersedia saat tekanan tablet dimatikan.
+	Eraser end	Ujung penghapus
+	Pen tip	Ujung pena
+	Connected	Terhubung
+	Show or hide context menu	Tampilkan atau sembunyikan menu konteks
+	Choose printer, copies and duplex in the system print dialog.	Pilih printer, jumlah salinan dan dupleks di dialog cetak sistem.
+	System print preview opened	Pratinjau cetak sistem dibuka
+	Only show canvas	Tampilkan kanvas saja
+	Right sidebar	Bilah sisi kanan
+	Connected pen	Pena terhubung
+	No pen connected	Tidak ada pena terhubung
+
+# Window full screen (HarmonyOS host)
+	Enter Full Screen	Masuk layar penuh
+	Exit Full Screen	Keluar dari layar penuh
+
+# Icon-only toolbar controls
+	Show tools in one column	Tampilkan alat dalam satu kolom
+	Show tools in two columns	Tampilkan alat dalam dua kolom
+	Open the Color Picker	Buka pemilih warna
+	Scroll All Windows	Gulir Semua Jendela
+	The path was kept as the Work Path	Path dipertahankan sebagai Work Path
+	The path was discarded	Path dibuang
+# Art History Brush (#213).
+	Art History Brush Tool	Alat Kuas riwayat artistik
+	Tight Short	Rapet pendek
+	Tight Medium	Rapet sedang
+	Tight Long	Rapet panjang
+	Loose Medium	Longgar sedang
+	Loose Long	Longgar panjang
+	Dab	Cap
+	Tight Curl	Ikal rapat
+	Loose Curl	Ikal longgar
+	Area	Area
+	Stylized dabs from a history state	Cap bergaya dari sebuah keadaan riwayat
+	Color Table	Tabel Warna
+	Gamma	Gamma
+	Profile	Profil
+	Target	Target
+	Font size presets	Preset ukuran font
+	Leading presets	Preset leading
+	Tracking presets	Preset tracking
+
+	The GPU compositor is still being prepared	The GPU compositor is still being prepared
+	Invalid numeric entry. An integer between {min}% and {max}% is required. Previous value was inserted.	Entri numerik tidak valid. Diperlukan bilangan bulat antara {min}% dan {max}%. Nilai sebelumnya telah disisipkan.
+	Clear Selection	Hapus Seleksi
+	Color Aware	Berbasis Warna
+	Decontaminate Colors	Dekontaminasi Warna
+	Edge Detection	Deteksi Tepi
+	Global Refinements	Penyempurnaan Global
+	High Quality Preview	Pratinjau Kualitas Tinggi
+	Object Aware	Berbasis Objek
+	Real-Time Refinement	Penyempurnaan Waktu Nyata
+	Refine Edge Brush Tool	Alat Kuas Perhalus Tepi
+	Refine Hair	Perhalus Rambut
+	Refine Mode	Mode Penyempurnaan
+	Remember Settings	Ingat Pengaturan
+	View Mode	Mode Tampilan
+	Object Aware needs a segmentation model, which isn't available yet	Berbasis Objek memerlukan model segmentasi, yang belum tersedia
+	Refine Hair needs hair detection, which isn't available yet	Perhalus Rambut memerlukan deteksi rambut, yang belum tersedia
+	Select and Mask was closed: its document is no longer the active one	Seleksi dan Mask ditutup: dokumennya tidak lagi aktif
+	Select and Mask was closed: another layer was selected	Seleksi dan Mask ditutup: layer lain dipilih
+	Select Layer Under Cursor	Pilih Lapisan di Bawah Kursor
+
+# Shape Fill/Stroke popover and colour swatches opening the Color Picker
+	Color Picker	Pemilih Warna
+	Recently Used Colors	Warna yang Baru Digunakan
+	Stop Color	Warna Titik
+	Shapes can't use patterns yet	Bentuk belum dapat memakai pola
+	Solid Color	Warna Solid
+	Tint Color	Warna Tint
+	Edit Brush…	Edit Kuas…
+
+# Action Stop message (#8386)
+	Message	Pesan
+# Playback Options (#5212)
+	Playback Options…	Opsi pemutaran…
+	Playback Options	Opsi pemutaran
+	Accelerated	Dipercepat
+	Step by Step	Langkah demi langkah
+	Pause For:	Jeda selama:
+	Pause For	Jeda selama
+	seconds	detik
+	Create a single history state	Buat satu status riwayat
+	Generator enabled	Generator aktif
+	Move Up	Pindah ke atas
+	Move Down	Pindah ke bawah
+	Grid view	Tampilan kisi
+	List view	Tampilan daftar
+	On your computer	Di komputer Anda
+	New file	File baru
+	Learn	Pelajari
+	No recent files	Tidak ada file terbaru
+	Website	Situs web
+
+# Frame Tool and other branch translations.
+	A frame supports affine transforms; select its image for perspective transforms	Bingkai mendukung transformasi afin; pilih gambarnya untuk transformasi perspektif
+	A frame supports affine transforms; select its image to warp it	Bingkai mendukung transformasi afin; pilih gambarnya untuk dilengkungkan
+	Convert to Frame…	Konversi ke Bingkai…
+	Create a new custom frame	Buat bingkai kustom baru
+	Create a new polygonal frame	Buat bingkai poligon baru
+	Create a new triangular frame	Buat bingkai segitiga baru
+	Fit Content to Frame	Sesuaikan Konten ke Bingkai
+	Fit Frame to Content	Sesuaikan Bingkai ke Konten
+	Frame coordinates must be finite and within 600000 pixels	Koordinat bingkai harus berhingga dan berada dalam batas 600000 piksel
+	Import Image…	Impor Gambar…
+	Invalid frame transform	Transformasi bingkai tidak valid
+	Invalid nested file drop	Penjatuhan berkas bersarang tidak valid
+	New Frame	Bingkai Baru
+	Replace Image…	Ganti Gambar…
+	The frame is locked	Bingkai terkunci
+	The frame is unavailable	Bingkai tidak tersedia
+	Frame	Bingkai
+
+# Channels panel menu (#11451)
+	New Channel…	Channel Baru…
+	Duplicate Channel	Duplikat Channel
+	Delete Channel	Hapus Channel
+	New Spot Channel…	Spot Channel Baru…
+	Merge Spot Channel	Gabungkan Spot Channel
+	Channel Options…	Opsi Channel…
+	Split Channels	Pisahkan Channel
+	Merge Channels…	Gabungkan Channel…
+	Specify Channels:	Tentukan Channel:
+	Not enough grayscale documents for this mode.	Dokumen grayscale tidak cukup untuk mode ini.
+	Pick a different document for each channel.	Pilih dokumen yang berbeda untuk setiap channel.
+	A picked document is no longer open.	Salah satu dokumen yang dipilih sudah tidak terbuka.
+	A picked document is no longer a grayscale document of the same size.	Salah satu dokumen yang dipilih bukan lagi dokumen grayscale dengan ukuran yang sama.
+	Netscape Gray	Abu-abu Netscape
+# Move tool options bar (#11381)
+	Align top edges	Ratakan tepi atas
+	Align vertical centers	Ratakan pusat vertikal
+	Align bottom edges	Ratakan tepi bawah
+	Distribute vertically	Distribusikan secara vertikal
+	Distribute horizontally	Distribusikan secara horizontal
+	Show layer bounds on hover	Tampilkan batas layer saat kursor di atasnya
+	Expand layer group on click	Perluas grup layer saat diklik
+	Show hover bounds from Layers	Tampilkan batas saat kursor di atas dari Layer
+	Saved RAW Develop settings to {file}	Pengaturan Pengembangan RAW disimpan ke {file}
+	Save the settings to each raw's sidecar without opening it	Simpan pengaturan ke file sidecar setiap raw tanpa membukanya
+	No settings saved: these raws can't keep a sidecar here	Tidak ada yang disimpan: raw ini tidak dapat memiliki file sidecar di sini
+	Some settings could not be saved; the raws stay open	Beberapa pengaturan tidak dapat disimpan; raw tetap terbuka
+	Nothing to save: these raws are at their default settings	Tidak ada yang perlu disimpan: raw ini memakai pengaturan default
+# Artboard tool options bar (#11385)
+	Distribute Widths	Distribusi lebar
+	Distribute Heights	Distribusi tinggi
+	Auto-nest Layers	Sarangkan layer secara otomatis
+	Auto-size Canvas	Ubah ukuran kanvas otomatis
+	Keep Relative Position During Layer Reordering	Pertahankan posisi relatif saat mengurutkan ulang layer
+	Shrinkwrap Canvas on Save	Kecilkan kanvas sesuai konten saat menyimpan
+
+# RAW Develop feature labels
+	RAW Develop	Pengembangan RAW
+	RAW Develop Filter	Filter Pengembangan RAW
