@@ -131,3 +131,22 @@ fn ui_fonts_draw_the_menu_check_mark() {
         assert!(ctx.fonts_mut(|f| f.has_glyphs(&id, mark)), "{id:?} lacks {mark}");
     }
 }
+
+/// The HAP build embeds craft-i18n with the HarmonyOS overlay (`scripts/prepare_craft_i18n.py`).
+/// Host-only strings must then translate; without `CRAFT_I18N_DIR` the build is English only and
+/// this test has nothing to check.
+#[test]
+fn hmos_overlay_strings_are_translated_when_catalogs_are_embedded() {
+    use photocraft_ui_egui::i18n;
+    if !i18n::catalogs_embedded() {
+        eprintln!("skipped: built without CRAFT_I18N_DIR (English-only UI)");
+        return;
+    }
+    let zh = i18n::lang_from_tag("zh-Hans").expect("zh-hans is a registered language");
+    assert_eq!(i18n::tr(zh, "Stylus Debug"), "手写笔调试");
+    assert_eq!(i18n::tr(zh, "Enter Full Screen"), "进入全屏");
+    let ja = i18n::lang_from_tag("ja").expect("ja is a registered language");
+    assert_ne!(i18n::tr(ja, "Stylus Debug"), "Stylus Debug");
+    // Upstream rows still come from craft-i18n itself.
+    assert_ne!(i18n::tr(zh, "Open"), "Open");
+}

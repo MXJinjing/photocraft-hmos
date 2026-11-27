@@ -1,0 +1,192 @@
+# HarmonyOS host additions retained during upstream sync
+	Stylus	手寫筆
+	Block finger input	停用手指輸入
+	Stylus hover preview	手寫筆懸停預覽
+	Double-tap pen body	雙擊筆身
+	Current tool and Eraser	目前工具與橡皮擦
+	Previous tool	上一個工具
+	Squeeze pen body	輕捏筆身
+	Show or hide context menu	顯示或隱藏右鍵選單
+	Choose printer, copies and duplex in the system print dialog.	在系統列印面板中選擇印表機、份數和雙面。
+	System print preview opened	已開啟系統列印預覽
+	Only show canvas	只顯示畫布
+	Right sidebar	右側面板
+	Connected pen	已連接的筆
+	No pen connected	未連接筆
+
+# Window full screen (HarmonyOS host)
+	Enter Full Screen	進入全螢幕
+	Exit Full Screen	結束全螢幕
+
+# Stylus diagnostics
+	Hovering	正在懸停
+	Connected	已連線
+	Stylus Debug…	手寫筆偵錯…
+	Stylus Debug	手寫筆偵錯
+	Use a real Pad and a pen that supports tilt, double-tap and squeeze.	請使用真實平板及支援傾斜、雙擊與輕捏的手寫筆。
+	No connection reported	系統未報告連線
+	Latest pen sample	最近一次手寫筆資料
+	Tilt from vertical	偏離垂直角度
+	Screen bearing	螢幕朝向
+	Waiting for pen input	等待手寫筆輸入
+	Samples	取樣次數
+	Pen contact	正在落筆
+	No pen contact — values are retained	未落筆（保留最近讀數）
+	Arrow: screen-projected tilt direction, not barrel rotation. Upright: no direction.	箭頭表示傾斜在螢幕上的投影方向，並非筆桿旋轉；垂直握筆時無方向。
+	Zero tilt may mean an upright pen or unavailable hardware data.	傾斜為零可能表示垂直握筆，也可能是硬體未提供資料。
+	HarmonyOS contact input does not currently report barrel rotation.	目前鴻蒙觸點輸入未上報筆桿旋轉。
+	Received	已觸發
+	Test gestures only (do not run shortcuts)	僅測試手勢（不執行快捷動作）
+	No indicator means no event received, not necessarily unsupported hardware.	未亮燈表示未收到事件，不代表硬體一定不支援。
+	Test area — does not change the document	試寫區（不會修改文件）
+	Draw here with the pen	請用手寫筆在此試寫
+	Reset test	重設測試
+	Readings are before the pressure curve and remain available with tablet pressure off.	顯示套用壓感曲線之前的資料；關閉數位板壓感仍可查看。
+	Eraser end	橡皮端
+	Pen tip	筆尖
+# Icon-only toolbar controls
+	Show tools in one column	將工具列切換為單欄
+	Show tools in two columns	將工具列切換為雙欄
+	Open the Color Picker	開啟檢色器
+	Scroll All Windows	捲動所有視窗
+	The path was kept as the Work Path	路徑已保留為工作路徑
+	The path was discarded	路徑已捨棄
+# Art History Brush (#213).
+	Art History Brush	藝術歷史畫筆
+	Art History Brush Tool	藝術歷史畫筆工具
+	Tight Short	緊密短
+	Tight Medium	緊密中
+	Tight Long	緊密長
+	Loose Medium	寬鬆中
+	Loose Long	寬鬆長
+	Dab	點塗
+	Tight Curl	緊密捲曲
+	Loose Curl	寬鬆捲曲
+	Area	區域
+	Stylized dabs from a history state	從歷史狀態繪製風格化點塗
+	Aspect Ratio	外觀比例
+	Category	類別
+	Color Table	色彩表
+	Gamma	Gamma
+	Interpolation	內插
+	Profile	描述檔
+	Target	目標
+	Units	單位
+	Font size presets	字體大小預設
+	Leading presets	行距預設
+	Tracking presets	字距調整預設
+
+	The GPU compositor is still being prepared	The GPU compositor is still being prepared
+	Invalid numeric entry. An integer between {min}% and {max}% is required. Previous value was inserted.	數值輸入無效。需要介於 {min}% 和 {max}% 之間的整數。已插入先前的值。
+	Clear Selection	清除選取範圍
+	Color Aware	顏色感知
+	Decontaminate Colors	淨化顏色
+	Edge Detection	邊緣偵測
+	Global Refinements	整體調整
+	High Quality Preview	高品質預視
+	Object Aware	物件感知
+	Real-Time Refinement	即時調整
+	Refine Edge Brush Tool	調整邊緣筆刷工具
+	Refine Hair	調整毛髮
+	Refine Mode	調整模式
+	Remember Settings	記住設定
+	View Mode	檢視模式
+	Object Aware needs a segmentation model, which isn't available yet	物件感知需要分割模型，目前尚無法使用
+	Refine Hair needs hair detection, which isn't available yet	調整毛髮需要毛髮偵測，目前尚無法使用
+	Select and Mask was closed: its document is no longer the active one	已關閉「選取並遮住」：其文件已不是使用中的文件
+	Select and Mask was closed: another layer was selected	已關閉「選取並遮住」：已選取另一個圖層
+	Drag to move the selected path	拖曳以移動選取的路徑
+
+# Shape Fill/Stroke popover and colour swatches opening the Color Picker
+	Color Picker	檢色器
+	Recently Used Colors	最近使用的顏色
+	Stop Color	色標顏色
+	Shapes can't use patterns yet	形狀尚不支援圖樣
+	Solid Color	純色
+	Tint Color	色調顏色
+	Edit Brush…	編輯筆刷…
+
+# Action Stop message (#8386)
+	Message	訊息
+# Playback Options (#5212)
+	Playback Options…	回放選項…
+	Playback Options	回放選項
+	Accelerated	加速
+	Step by Step	逐步
+	Pause For:	暫停：
+	Pause For	暫停
+	seconds	秒
+	Create a single history state	建立單一步驟記錄狀態
+	Drag to move the active shape's path or the Work Path	拖曳以移動作用中形狀的路徑或工作路徑
+	Generator enabled	啟用 Generator
+	Move Up	上移
+	Move Down	下移
+	Grid view	格線檢視
+	List view	清單檢視
+	On your computer	在您的電腦上
+	New file	新增檔案
+	Learn	學習
+	No recent files	沒有最近使用的檔案
+	Website	網站
+
+# Frame Tool and other branch translations.
+	A frame supports affine transforms; select its image for perspective transforms	框架支援仿射變形；若要進行透視變形，請選取框架中的影像
+	A frame supports affine transforms; select its image to warp it	框架支援仿射變形；若要進行彎曲變形，請選取框架中的影像
+	Convert to Frame…	轉換為框架…
+	Create a new custom frame	建立新的自訂框架
+	Create a new polygonal frame	建立新的多邊形框架
+	Create a new triangular frame	建立新的三角形框架
+	Fit Content to Frame	使內容符合框架
+	Fit Frame to Content	使框架符合內容
+	Frame coordinates must be finite and within 600000 pixels	框架座標必須為有限值，且在 600000 像素範圍內
+	Import Image…	讀入影像…
+	Invalid frame transform	無效的框架變形
+	Invalid nested file drop	無效的巢狀檔案拖放
+	New Frame	新增框架
+	Replace Image…	取代影像…
+	The frame is locked	框架已鎖定
+	The frame is unavailable	框架無法使用
+	Frame	框架
+	X	X
+	Y	Y
+
+# Channels panel menu (#11451)
+	New Channel…	新增色版…
+	Duplicate Channel	複製色版
+	Delete Channel	刪除色版
+	New Spot Channel…	新增特別色色版…
+	Merge Spot Channel	合併特別色色版
+	Channel Options…	色版選項…
+	Split Channels	分離色版
+	Merge Channels…	合併色版…
+	Specify Channels:	指定色版:
+	Not enough grayscale documents for this mode.	灰階文件不足，無法使用此模式。
+	Pick a different document for each channel.	請為每個色版選擇不同的文件。
+	A picked document is no longer open.	所選的一個文件已不再開啟。
+	A picked document is no longer a grayscale document of the same size.	所選的一個文件已不再是相同大小的灰階文件。
+	Netscape Gray	Netscape 灰色
+# Move tool options bar (#11381)
+	Align top edges	對齊頂端
+	Align vertical centers	垂直置中對齊
+	Align bottom edges	對齊底端
+	Distribute vertically	垂直分佈
+	Distribute horizontally	水平分佈
+	Show layer bounds on hover	滑過時顯示圖層邊界
+	Expand layer group on click	按一下時展開圖層群組
+	Show hover bounds from Layers	顯示來自圖層面板的滑過邊界
+	Saved RAW Develop settings to {file}	已將 RAW 顯影 設定儲存到 {file}
+	Save the settings to each raw's sidecar without opening it	將設定儲存到每個 Raw 的附屬檔案，不開啟它
+	No settings saved: these raws can't keep a sidecar here	未儲存任何內容：這些 Raw 在此處無法擁有附屬檔案
+	Some settings could not be saved; the raws stay open	部分設定無法儲存；Raw 保持開啟
+	Nothing to save: these raws are at their default settings	無需儲存：這些 Raw 均為預設設定
+# Artboard tool options bar (#11385)
+	Distribute Widths	均分寬度
+	Distribute Heights	均分高度
+	Auto-nest Layers	自動巢狀圖層
+	Auto-size Canvas	自動調整版面尺寸
+	Keep Relative Position During Layer Reordering	重新排列圖層時保持相對位置
+	Shrinkwrap Canvas on Save	儲存時將版面縮至內容大小
+
+# RAW Develop feature labels
+	RAW Develop	RAW 顯影
+	RAW Develop Filter	RAW 顯影濾鏡

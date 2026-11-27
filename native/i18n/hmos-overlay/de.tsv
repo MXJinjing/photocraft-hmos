@@ -1,0 +1,189 @@
+# HarmonyOS host additions retained during upstream sync
+	Stylus	Stift
+	Block finger input	Fingereingabe blockieren
+	Stylus hover preview	Stiftvorschau beim Schweben
+	Double-tap pen body	Stiftgehäuse doppeltippen
+	Current tool and Eraser	Aktuelles Werkzeug und Radierer
+	Previous tool	Vorheriges Werkzeug
+	Squeeze pen body	Stiftgehäuse zusammendrücken
+
+# Stylus diagnostics
+	Hovering	Stift in Reichweite
+	Stylus Debug…	Stiftdiagnose…
+	Stylus Debug	Stiftdiagnose
+	Use a real Pad and a pen that supports tilt, double-tap and squeeze.	Ein echtes Tablet und einen Stift mit Neigung, Doppeltippen und Drückgeste verwenden.
+	No connection reported	Keine Verbindung gemeldet
+	Latest pen sample	Letzter Stiftmesswert
+	Tilt from vertical	Neigung zur Senkrechten
+	Screen bearing	Bildschirmrichtung
+	Waiting for pen input	Warten auf Stifteingabe
+	Samples	Messwerte
+	Pen contact	Stiftkontakt
+	No pen contact — values are retained	Kein Stiftkontakt — Werte bleiben erhalten
+	Arrow: screen-projected tilt direction, not barrel rotation. Upright: no direction.	Pfeil: projizierte Neigungsrichtung, keine Stiftdrehung. Senkrecht: keine Richtung.
+	Zero tilt may mean an upright pen or unavailable hardware data.	Null Neigung kann einen senkrechten Stift oder fehlende Hardwaredaten bedeuten.
+	HarmonyOS contact input does not currently report barrel rotation.	HarmonyOS-Kontakteingaben melden derzeit keine Stiftdrehung.
+	Received	Empfangen
+	Test gestures only (do not run shortcuts)	Nur Gesten testen (keine Kurzbefehle ausführen)
+	No indicator means no event received, not necessarily unsupported hardware.	Keine Anzeige bedeutet kein empfangenes Ereignis, nicht unbedingt fehlende Hardwareunterstützung.
+	Test area — does not change the document	Testfläche — verändert das Dokument nicht
+	Draw here with the pen	Hier mit dem Stift zeichnen
+	Reset test	Test zurücksetzen
+	Readings are before the pressure curve and remain available with tablet pressure off.	Werte vor der Druckkurve, auch bei ausgeschaltetem Tablettdruck verfügbar.
+	Eraser end	Radiererende
+	Pen tip	Stiftspitze
+	Connected	Verbunden
+	Show or hide context menu	Kontextmenü ein- oder ausblenden
+	Choose printer, copies and duplex in the system print dialog.	Drucker, Kopien und Duplex im Systemdruckdialog auswählen.
+	System print preview opened	Systemdruckvorschau geöffnet
+	Only show canvas	Nur Leinwand anzeigen
+	Right sidebar	Rechte Seitenleiste
+	Connected pen	Verbundener Stift
+	No pen connected	Kein Stift verbunden
+
+# Window full screen (HarmonyOS host)
+	Enter Full Screen	Vollbild aktivieren
+	Exit Full Screen	Vollbild beenden
+	Choose…	Auswählen…
+	Import…	Importieren…
+
+# Icon-only toolbar controls
+	Show tools in one column	Werkzeuge in einer Spalte anzeigen
+	Show tools in two columns	Werkzeuge in zwei Spalten anzeigen
+	Open the Color Picker	Farbwähler öffnen
+	Scroll All Windows	Alle Fenster verschieben
+	The path was kept as the Work Path	Der Pfad wurde als Arbeitspfad beibehalten
+	The path was discarded	Der Pfad wurde verworfen
+# Art History Brush (#213).
+	Art History Brush	Künstlerischer Protokollpinsel
+	Art History Brush Tool	Künstlerischer-Protokollpinsel-Werkzeug
+	Tight Short	Eng kurz
+	Tight Medium	Eng mittel
+	Tight Long	Eng lang
+	Loose Medium	Locker mittel
+	Loose Long	Locker lang
+	Dab	Tupfer
+	Tight Curl	Eng gewellt
+	Loose Curl	Locker gewellt
+	Stylized dabs from a history state	Stilisierte Tupfer aus einem Protokollzustand
+	Aspect Ratio	Seitenverhältnis
+	Category	Kategorie
+	Color Table	Farbtabelle
+	Gamma	Gamma
+	Interpolation	Interpolation
+	Target	Ziel
+	Units	Einheiten
+	Font size presets	Schriftgrößen-Vorgaben
+	Leading presets	Zeilenabstand-Vorgaben
+	Tracking presets	Laufweiten-Vorgaben
+
+	The GPU compositor is still being prepared	The GPU compositor is still being prepared
+	Invalid numeric entry. An integer between {min}% and {max}% is required. Previous value was inserted.	Ungültige Zahleneingabe. Es ist eine ganze Zahl zwischen {min}% und {max}% erforderlich. Der vorherige Wert wurde eingesetzt.
+	Clear Selection	Auswahl löschen
+	Color Aware	Farbbezogen
+	Decontaminate Colors	Farben dekontaminieren
+	Edge Detection	Kantenerkennung
+	Global Refinements	Globale Verbesserungen
+	High Quality Preview	Hochwertige Vorschau
+	Object Aware	Objektbezogen
+	Real-Time Refinement	Verbesserung in Echtzeit
+	Refine Edge Brush Tool	Kante-verbessern-Pinsel-Werkzeug
+	Refine Hair	Haare verbessern
+	Refine Mode	Verbesserungsmodus
+	Remember Settings	Einstellungen merken
+	View Mode	Ansichtsmodus
+	Object Aware needs a segmentation model, which isn't available yet	Objektbezogen benötigt ein Segmentierungsmodell, das noch nicht verfügbar ist
+	Refine Hair needs hair detection, which isn't available yet	Haare verbessern benötigt eine Haarerkennung, die noch nicht verfügbar ist
+	Select and Mask was closed: its document is no longer the active one	Auswählen und maskieren wurde geschlossen: Das zugehörige Dokument ist nicht mehr aktiv
+	Select and Mask was closed: another layer was selected	Auswählen und maskieren wurde geschlossen: Es wurde eine andere Ebene ausgewählt
+
+# Shape Fill/Stroke popover and colour swatches opening the Color Picker
+	Color Picker	Farbwähler
+	Recently Used Colors	Zuletzt verwendete Farben
+	Stop Color	Farbe der Farbunterbrechung
+	Shapes can't use patterns yet	Formen können noch keine Muster verwenden
+	Solid Color	Volltonfarbe
+	Tint Color	Tönungsfarbe
+	Edit Brush…	Pinsel bearbeiten…
+
+# Action Stop message (#8386)
+	Message	Meldung
+# Playback Options (#5212)
+	Playback Options…	Wiedergabeoptionen…
+	Playback Options	Wiedergabeoptionen
+	Accelerated	Beschleunigt
+	Step by Step	Schrittweise
+	Pause For:	Pause für:
+	Pause For	Pause für
+	seconds	Sekunden
+	Create a single history state	Einen einzigen Protokollobjekt-Status erstellen
+	Generator enabled	Generator aktiviert
+	This Layer:	Diese Ebene:
+	Move Up	Nach oben
+	Move Down	Nach unten
+	On your computer	Auf Ihrem Computer
+	New file	Neue Datei
+	Learn	Lernen
+	No recent files	Keine zuletzt verwendeten Dateien
+	Website	Website
+
+# Frame Tool and other branch translations.
+	A frame supports affine transforms; select its image for perspective transforms	Ein Rahmen unterstützt affine Transformationen; für perspektivische Transformationen sein Bild auswählen
+	A frame supports affine transforms; select its image to warp it	Ein Rahmen unterstützt affine Transformationen; zum Verformen sein Bild auswählen
+	Convert to Frame…	In Rahmen konvertieren…
+	Create a new custom frame	Neuen benutzerdefinierten Rahmen erstellen
+	Create a new polygonal frame	Neuen polygonalen Rahmen erstellen
+	Create a new triangular frame	Neuen dreieckigen Rahmen erstellen
+	Fit Content to Frame	Inhalt an Rahmen anpassen
+	Fit Frame to Content	Rahmen an Inhalt anpassen
+	Frame coordinates must be finite and within 600000 pixels	Rahmenkoordinaten müssen endlich sein und innerhalb von 600000 Pixeln liegen
+	Import Image…	Bild importieren…
+	Invalid frame transform	Ungültige Rahmentransformation
+	Invalid nested file drop	Ungültiges verschachteltes Ablegen einer Datei
+	New Frame	Neuer Rahmen
+	Replace Image…	Bild ersetzen…
+	The frame is locked	Der Rahmen ist gesperrt
+	The frame is unavailable	Der Rahmen ist nicht verfügbar
+	X	X
+	Y	Y
+
+# Channels panel menu (#11451)
+	New Channel…	Neuer Kanal…
+	Duplicate Channel	Kanal duplizieren
+	Delete Channel	Kanal löschen
+	New Spot Channel…	Neuer Schmuckfarbenkanal…
+	Merge Spot Channel	Schmuckfarbenkanal zusammenfügen
+	Channel Options…	Kanaloptionen…
+	Split Channels	Kanäle teilen
+	Merge Channels…	Kanäle zusammenfügen…
+	Specify Channels:	Kanäle angeben:
+	Not enough grayscale documents for this mode.	Nicht genug Graustufen-Dokumente für diesen Modus.
+	Pick a different document for each channel.	Wählen Sie für jeden Kanal ein anderes Dokument.
+	A picked document is no longer open.	Ein ausgewähltes Dokument ist nicht mehr geöffnet.
+	A picked document is no longer a grayscale document of the same size.	Ein ausgewähltes Dokument ist kein Graustufen-Dokument derselben Größe mehr.
+	Netscape Gray	Netscape-Grau
+# Move tool options bar (#11381)
+	Align top edges	Obere Kanten ausrichten
+	Align vertical centers	Vertikale Mitten ausrichten
+	Align bottom edges	Untere Kanten ausrichten
+	Distribute vertically	Vertikal verteilen
+	Distribute horizontally	Horizontal verteilen
+	Show layer bounds on hover	Ebenenbegrenzung beim Darüberfahren anzeigen
+	Expand layer group on click	Ebenengruppe per Klick erweitern
+	Show hover bounds from Layers	Begrenzung beim Darüberfahren aus Ebenen anzeigen
+	Saved RAW Develop settings to {file}	RAW-Entwicklung-Einstellungen in {file} gespeichert
+	Save the settings to each raw's sidecar without opening it	Die Einstellungen in der Filialdatei jeder Raw-Datei speichern, ohne sie zu öffnen
+	No settings saved: these raws can't keep a sidecar here	Nichts gespeichert: Diese Raw-Dateien können hier keine Filialdatei haben
+	Some settings could not be saved; the raws stay open	Einige Einstellungen konnten nicht gespeichert werden; die Raw-Dateien bleiben geöffnet
+	Nothing to save: these raws are at their default settings	Nichts zu speichern: Diese Raw-Dateien haben ihre Standardeinstellungen
+# Artboard tool options bar (#11385)
+	Distribute Widths	Breiten verteilen
+	Distribute Heights	Höhen verteilen
+	Auto-nest Layers	Ebenen automatisch verschachteln
+	Auto-size Canvas	Zeichenflächengröße automatisch anpassen
+	Keep Relative Position During Layer Reordering	Relative Position beim Neuanordnen von Ebenen beibehalten
+	Shrinkwrap Canvas on Save	Zeichenfläche beim Speichern auf den Inhalt verkleinern
+
+# RAW Develop feature labels
+	RAW Develop	RAW-Entwicklung
+	RAW Develop Filter	RAW-Entwicklungsfilter

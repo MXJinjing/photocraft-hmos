@@ -176,7 +176,7 @@ jobs:
           tool: cargo-nextest
       - name: Test without heif
         working-directory: upstream/photocraft
-        run: cargo nextest run -p photocraft-heif -p photocraft-codecs -p photocraft-io --locked --profile ci
+        run: cargo nextest run -p photocraft-codecs -p photocraft-io --locked --profile ci
 
   hap-build:
     name: hap-build

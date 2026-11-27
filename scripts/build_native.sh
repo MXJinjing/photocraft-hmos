@@ -22,6 +22,18 @@ with open(sys.argv[1], encoding="utf-8") as f:
 PYVERSION
 )}"
 [[ "$HAP_VERSION" =~ ^[0-9]+(\.[0-9]+){1,3}$ ]] || { echo "Invalid HAP version: $HAP_VERSION" >&2; exit 2; }
+# Interface translations: upstream ui-egui/build.rs embeds craft-i18n from CRAFT_I18N_DIR (the
+# commit in upstream/photocraft/craft-i18n.rev); without it the UI is English only. Prepare that
+# checkout with the HarmonyOS overlay rows merged in, and require it so a HAP never ships
+# English-only by accident. PHOTOCRAFT_I18N=off builds English only (offline experiments).
+if [[ "${PHOTOCRAFT_I18N:-on}" == off ]]; then
+  unset CRAFT_I18N_DIR CRAFT_I18N_REQUIRED
+  echo 'Warning: PHOTOCRAFT_I18N=off, building an English-only UI' >&2
+else
+  CRAFT_I18N_DIR="$(python3 "$ROOT/scripts/prepare_craft_i18n.py")" || {
+    echo 'craft-i18n preparation failed; set PHOTOCRAFT_CRAFT_I18N_SRC to a craft-i18n checkout, or PHOTOCRAFT_I18N=off' >&2; exit 1; }
+  export CRAFT_I18N_DIR CRAFT_I18N_REQUIRED=1
+fi
 ARGS=()
 # Explicit dev profile also avoids expanding an empty array under macOS Bash 3's nounset.
 case "$PROFILE" in release) ARGS+=(--release);; debug) ARGS+=(--profile dev);; *) echo 'Profile must be release or debug' >&2; exit 2;; esac

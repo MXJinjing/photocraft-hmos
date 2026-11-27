@@ -1,0 +1,162 @@
+# HarmonyOS host additions retained during upstream sync
+	Stylus	Стилус
+	Block finger input	Блокировать ввод пальцем
+	Stylus hover preview	Предпросмотр пера при наведении
+	Double-tap pen body	Двойное нажатие на корпус пера
+	Current tool and Eraser	Текущий инструмент и ластик
+	Previous tool	Предыдущий инструмент
+	Squeeze pen body	Сжатие корпуса пера
+
+# Stylus diagnostics
+	Hovering	Наведение
+	Stylus Debug…	Диагностика пера…
+	Stylus Debug	Диагностика пера
+	Use a real Pad and a pen that supports tilt, double-tap and squeeze.	Используйте настоящий планшет и перо с наклоном, двойным касанием и сжатием.
+	No connection reported	Подключение не сообщено
+	Latest pen sample	Последние данные пера
+	Tilt from vertical	Наклон от вертикали
+	Screen bearing	Направление на экране
+	Waiting for pen input	Ожидание ввода пером
+	Samples	Отсчёты
+	Pen contact	Перо касается экрана
+	No pen contact — values are retained	Нет контакта — значения сохранены
+	Arrow: screen-projected tilt direction, not barrel rotation. Upright: no direction.	Стрелка: проекция наклона на экран, не вращение пера. Вертикально: направления нет.
+	Zero tilt may mean an upright pen or unavailable hardware data.	Нулевой наклон означает вертикальное перо или отсутствие данных оборудования.
+	HarmonyOS contact input does not currently report barrel rotation.	Контактный ввод HarmonyOS пока не сообщает вращение пера.
+	Received	Получено
+	Test gestures only (do not run shortcuts)	Только проверка жестов (без выполнения быстрых команд)
+	No indicator means no event received, not necessarily unsupported hardware.	Нет индикатора — событие не получено; это не обязательно означает несовместимое оборудование.
+	Test area — does not change the document	Область проверки — не изменяет документ
+	Draw here with the pen	Рисуйте здесь пером
+	Reset test	Сбросить проверку
+	Readings are before the pressure curve and remain available with tablet pressure off.	Данные до кривой нажима, доступны и при отключённом нажиме планшета.
+	Eraser end	Конец с ластиком
+	Pen tip	Кончик пера
+	Connected	Подключено
+	Show or hide context menu	Показать или скрыть контекстное меню
+	Choose printer, copies and duplex in the system print dialog.	Выберите принтер, копии и двустороннюю печать в системном диалоге.
+	System print preview opened	Открыт системный предпросмотр печати
+	Only show canvas	Показать только холст
+	Right sidebar	Правая боковая панель
+	Connected pen	Подключённое перо
+	No pen connected	Перо не подключено
+
+# Window full screen (HarmonyOS host)
+	Enter Full Screen	Полноэкранный режим
+	Exit Full Screen	Выйти из полноэкранного режима
+
+# Icon-only toolbar controls
+	Show tools in one column	Показать инструменты в один столбец
+	Show tools in two columns	Показать инструменты в два столбца
+	Open the Color Picker	Открыть палитру цветов
+	Scroll All Windows	Прокручивать все окна
+	The path was kept as the Work Path	Контур сохранён как рабочий контур
+	The path was discarded	Контур удалён
+# Art History Brush (#213).
+	Art History Brush Tool	Инструмент «Кисть истории искусств»
+	Tight Short	Плотный короткий
+	Tight Medium	Плотный средний
+	Tight Long	Плотный длинный
+	Loose Medium	Свободный средний
+	Loose Long	Свободный длинный
+	Dab	Мазок
+	Tight Curl	Плотный завиток
+	Loose Curl	Свободный завиток
+	Stylized dabs from a history state	Стилизованные мазки из состояния истории
+	Font size presets	Наборы размеров шрифта
+	Leading presets	Наборы интерлиньяжа
+	Tracking presets	Наборы трекинга
+
+	The GPU compositor is still being prepared	The GPU compositor is still being prepared
+	Invalid numeric entry. An integer between {min}% and {max}% is required. Previous value was inserted.	Недопустимое числовое значение. Требуется целое число от {min}% до {max}%. Вставлено предыдущее значение.
+	Color Aware	С учетом цвета
+	Decontaminate Colors	Очистить цвета
+	Edge Detection	Обнаружение краев
+	Global Refinements	Глобальное уточнение
+	High Quality Preview	Высококачественный просмотр
+	Object Aware	С учетом объектов
+	Real-Time Refinement	Уточнение в реальном времени
+	Refine Edge Brush Tool	Инструмент «Кисть уточнения края»
+	Refine Hair	Уточнить волосы
+	Refine Mode	Режим уточнения
+	Remember Settings	Запомнить параметры
+	View Mode	Режим просмотра
+	Object Aware needs a segmentation model, which isn't available yet	Для режима «С учетом объектов» нужна модель сегментации, которая пока недоступна
+	Refine Hair needs hair detection, which isn't available yet	Для уточнения волос нужно распознавание волос, которое пока недоступно
+	Select and Mask was closed: its document is no longer the active one	Окно «Выделение и маска» закрыто: его документ больше не активен
+	Select and Mask was closed: another layer was selected	Окно «Выделение и маска» закрыто: выбран другой слой
+
+# Shape Fill/Stroke popover and colour swatches opening the Color Picker
+	Recently Used Colors	Недавно использованные цвета
+	Stop Color	Цвет контрольной точки
+	Shapes can't use patterns yet	Фигуры пока не могут использовать узоры
+	Edit Brush…	Изменить кисть…
+
+# Action Stop message (#8386)
+	Message	Сообщение
+# Playback Options (#5212)
+	Playback Options…	Параметры воспроизведения…
+	Playback Options	Параметры воспроизведения
+	Accelerated	Ускоренное
+	Step by Step	Пошаговое
+	Pause For:	Пауза на:
+	Pause For	Пауза на
+	seconds	с
+	Create a single history state	Создавать одно состояние истории
+	Drag to move the active shape's path or the Work Path	Перетащите, чтобы переместить контур активной фигуры или рабочий контур
+	Generator enabled	Генератор включён
+	Hidden	Скрыто
+	Move Up	Переместить вверх
+	Move Down	Переместить вниз
+	On your computer	На вашем компьютере
+	New file	Новый файл
+	Learn	Обучение
+	Website	Сайт
+
+# Frame Tool and other branch translations.
+	A frame supports affine transforms; select its image for perspective transforms	Рамка поддерживает аффинные преобразования; для перспективных преобразований выберите её изображение
+	A frame supports affine transforms; select its image to warp it	Рамка поддерживает аффинные преобразования; для деформации выберите её изображение
+	Convert to Frame…	Преобразовать в рамку…
+	Create a new custom frame	Создать новую произвольную рамку
+	Create a new polygonal frame	Создать новую многоугольную рамку
+	Create a new triangular frame	Создать новую треугольную рамку
+	Fit Content to Frame	Подогнать содержимое под рамку
+	Fit Frame to Content	Подогнать рамку под содержимое
+	Frame coordinates must be finite and within 600000 pixels	Координаты рамки должны быть конечными и находиться в пределах 600000 пикселей
+	Import Image…	Импортировать изображение…
+	Invalid frame transform	Недопустимое преобразование рамки
+	Invalid nested file drop	Недопустимое вложенное перетаскивание файла
+	New Frame	Новая рамка
+	Replace Image…	Заменить изображение…
+	The frame is locked	Рамка заблокирована
+	The frame is unavailable	Рамка недоступна
+
+# Channels panel menu (#11451)
+	Channel Options…	Параметры канала…
+	Specify Channels:	Указать каналы:
+	Not enough grayscale documents for this mode.	Недостаточно документов в градациях серого для этого режима.
+	Pick a different document for each channel.	Выберите отдельный документ для каждого канала.
+	A picked document is no longer open.	Один из выбранных документов больше не открыт.
+	A picked document is no longer a grayscale document of the same size.	Один из выбранных документов больше не является документом в градациях серого того же размера.
+	Netscape Gray	Серый Netscape
+# Move tool options bar (#11381)
+	Align top edges	Выровнять верхние края
+	Align vertical centers	Выровнять центры по вертикали
+	Align bottom edges	Выровнять нижние края
+	Distribute vertically	Распределить по вертикали
+	Distribute horizontally	Распределить по горизонтали
+	Show layer bounds on hover	Показывать границы слоя при наведении
+	Expand layer group on click	Раскрывать группу слоёв по щелчку
+	Show hover bounds from Layers	Показывать границы при наведении из панели «Слои»
+	Saved RAW Develop settings to {file}	Настройки Обработка RAW сохранены в {file}
+	Save the settings to each raw's sidecar without opening it	Сохранить настройки в сопроводительный файл каждого raw, не открывая его
+	No settings saved: these raws can't keep a sidecar here	Ничего не сохранено: у этих raw здесь не может быть сопроводительного файла
+	Some settings could not be saved; the raws stay open	Не удалось сохранить некоторые настройки; raw остаются открытыми
+	Nothing to save: these raws are at their default settings	Нечего сохранять: у этих raw настройки по умолчанию
+# Artboard tool options bar (#11385)
+	Distribute Widths	Распределить ширину
+	Distribute Heights	Распределить высоту
+	Auto-nest Layers	Автоматически вкладывать слои
+	Auto-size Canvas	Автоматически менять размер холста
+	Keep Relative Position During Layer Reordering	Сохранять относительное положение при изменении порядка слоев
+	Shrinkwrap Canvas on Save	Уменьшать холст до содержимого при сохранении
